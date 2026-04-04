@@ -1,0 +1,7 @@
+[package]
+name = "pebble-privacy"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+pebble-core = { path = "../pebble-core" }

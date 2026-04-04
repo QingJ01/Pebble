@@ -1,0 +1,22 @@
+[package]
+name = "pebble"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "pebble_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+tauri = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { workspace = true }
+pebble-core = { path = "../crates/pebble-core" }
+pebble-store = { path = "../crates/pebble-store" }
+pebble-privacy = { path = "../crates/pebble-privacy" }
+
+[build-dependencies]
+tauri-build = { workspace = true }
