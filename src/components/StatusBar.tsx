@@ -102,7 +102,7 @@ export default function StatusBar() {
           <button
             onClick={handleSync}
             disabled={!activeAccountId}
-            title={syncStatus === "syncing" ? "Stop sync" : "Sync now"}
+            title={syncStatus === "syncing" ? t("status.stopSync") : t("status.syncNow")}
             style={{
               background: "none",
               border: "none",

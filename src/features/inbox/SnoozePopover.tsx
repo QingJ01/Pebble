@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { snoozeMessage } from "@/lib/api";
 
 interface Props {
@@ -46,6 +47,7 @@ function getPresets(): { label: string; getTimestamp: () => number }[] {
 }
 
 export default function SnoozePopover({ messageId, onClose, onSnoozed }: Props) {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
 
@@ -127,7 +129,7 @@ export default function SnoozePopover({ messageId, onClose, onSnoozed }: Props) 
           color: "#ef4444",
           textAlign: "center",
         }}>
-          Snooze failed
+          {t("snooze.failed", "Snooze failed")}
         </div>
       )}
     </div>

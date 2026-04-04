@@ -88,7 +88,9 @@
     "offline": "离线",
     "reconnecting": "正在重连...",
     "retrying": "正在重试...",
-    "pendingActions": "{{count}} 个待处理"
+    "pendingActions": "{{count}} 个待处理",
+    "syncNow": "立即同步",
+    "stopSync": "停止同步"
   },
   "attachments": {
     "title": "附件",
@@ -142,6 +144,12 @@
     "archive": "归档",
     "delete": "删除",
     "addToKanban": "加入看板"
+  },
+  "snooze": {
+    "failed": "稍后提醒失败"
+  },
+  "kanban": {
+    "removeFromBoard": "从看板移除"
   },
   "commands": {
     "openSearch": "打开搜索",

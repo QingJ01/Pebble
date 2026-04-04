@@ -88,7 +88,9 @@
     "offline": "Offline",
     "reconnecting": "Reconnecting...",
     "retrying": "Retrying...",
-    "pendingActions": "{{count}} pending"
+    "pendingActions": "{{count}} pending",
+    "syncNow": "Sync now",
+    "stopSync": "Stop sync"
   },
   "attachments": {
     "title": "Attachments",
@@ -142,6 +144,12 @@
     "archive": "Archive",
     "delete": "Delete",
     "addToKanban": "Add to Kanban"
+  },
+  "snooze": {
+    "failed": "Snooze failed"
+  },
+  "kanban": {
+    "removeFromBoard": "Remove from board"
   },
   "commands": {
     "openSearch": "Open Search",
