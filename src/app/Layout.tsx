@@ -2,6 +2,7 @@ import TitleBar from "../components/TitleBar";
 import Sidebar from "../components/Sidebar";
 import StatusBar from "../components/StatusBar";
 import InboxView from "../features/inbox/InboxView";
+import SettingsView from "@/features/settings/SettingsView";
 import { useUIStore } from "../stores/ui.store";
 
 export default function Layout() {
@@ -21,13 +22,7 @@ export default function Layout() {
               </p>
             </div>
           )}
-          {activeView === "settings" && (
-            <div className="flex items-center justify-center h-full">
-              <p style={{ color: "var(--color-text-secondary)" }}>
-                Settings - coming soon
-              </p>
-            </div>
-          )}
+          {activeView === "settings" && <SettingsView />}
         </main>
       </div>
       <StatusBar />
