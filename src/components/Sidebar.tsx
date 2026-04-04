@@ -145,6 +145,36 @@ export default function Sidebar() {
         </div>
       )}
 
+      {/* Account switcher */}
+      {!sidebarCollapsed && accounts.length > 1 && (
+        <div style={{ padding: "0 6px 4px" }}>
+          <select
+            value={activeAccountId || ""}
+            onChange={(e) => {
+              setActiveAccountId(e.target.value);
+              setActiveFolderId(null);
+            }}
+            style={{
+              width: "100%",
+              padding: "4px 6px",
+              fontSize: "12px",
+              borderRadius: "4px",
+              border: "1px solid var(--color-border)",
+              backgroundColor: "var(--color-bg)",
+              color: "var(--color-text-primary)",
+              cursor: "pointer",
+              outline: "none",
+            }}
+          >
+            {accounts.map((acc) => (
+              <option key={acc.id} value={acc.id}>
+                {acc.email}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* Folders section */}
       <nav
         style={{
