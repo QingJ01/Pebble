@@ -14,8 +14,20 @@ impl RuleEngine {
         let mut parsed: Vec<(i32, RuleConditionSet, Vec<RuleAction>)> = rules.iter()
             .filter(|r| r.is_enabled)
             .filter_map(|r| {
-                let conditions: RuleConditionSet = serde_json::from_str(&r.conditions).ok()?;
-                let actions: Vec<RuleAction> = serde_json::from_str(&r.actions).ok()?;
+                let conditions: RuleConditionSet = match serde_json::from_str(&r.conditions) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::warn!(rule_name = %r.name, error = %e, "skipping rule: invalid conditions JSON");
+                        return None;
+                    }
+                };
+                let actions: Vec<RuleAction> = match serde_json::from_str(&r.actions) {
+                    Ok(a) => a,
+                    Err(e) => {
+                        tracing::warn!(rule_name = %r.name, error = %e, "skipping rule: invalid actions JSON");
+                        return None;
+                    }
+                };
                 Some((r.priority, conditions, actions))
             })
             .collect();

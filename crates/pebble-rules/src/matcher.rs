@@ -5,14 +5,18 @@ pub fn evaluate_condition(msg: &Message, condition: &RuleCondition) -> bool {
     let field_value = match condition.field {
         ConditionField::From => &msg.from_address,
         ConditionField::To => {
-            let joined = msg.to_list.iter().map(|a| a.address.as_str()).collect::<Vec<_>>().join(" ");
-            return match_op(&joined, &condition.op, &condition.value);
+            let matches_any = msg.to_list.iter().any(|a| match_op(&a.address, &condition.op, &condition.value));
+            // For NotContains, we want ALL addresses to not contain (none contain)
+            if matches!(condition.op, ConditionOp::NotContains) {
+                return msg.to_list.iter().all(|a| match_op(&a.address, &condition.op, &condition.value));
+            }
+            return matches_any;
         }
         ConditionField::Subject => &msg.subject,
         ConditionField::Body => &msg.body_text,
         ConditionField::HasAttachment => {
-            let has = msg.has_attachments.to_string();
-            return match_op(&has, &condition.op, &condition.value);
+            let expected = condition.value.to_lowercase() == "true";
+            return msg.has_attachments == expected;
         }
         ConditionField::Domain => {
             let domain = msg.from_address.split('@').nth(1).unwrap_or("");
