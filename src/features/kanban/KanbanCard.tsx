@@ -6,9 +6,10 @@ interface Props {
   id: string;
   message: Message | null;
   onRemove: (id: string) => void;
+  onOpen: (messageId: string) => void;
 }
 
-export default function KanbanCard({ id, message, onRemove }: Props) {
+export default function KanbanCard({ id, message, onRemove, onOpen }: Props) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
 
   const style = {
@@ -33,7 +34,7 @@ export default function KanbanCard({ id, message, onRemove }: Props) {
   }
 
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners} onDoubleClick={() => { if (message) onOpen(id); }}>
       <div style={{ fontWeight: 600, color: "var(--color-text-primary)", marginBottom: "4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {message.subject || "(No subject)"}
       </div>

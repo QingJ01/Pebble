@@ -3,7 +3,10 @@ import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors } from "
 import type { KanbanColumnType, Message } from "@/lib/api";
 import { getMessage } from "@/lib/api";
 import { useKanbanStore } from "@/stores/kanban.store";
+import { useUIStore } from "@/stores/ui.store";
+import { useMailStore } from "@/stores/mail.store";
 import KanbanColumn from "./KanbanColumn";
+import { KanbanSkeleton } from "@/components/Skeleton";
 
 const COLUMNS: { id: KanbanColumnType; title: string }[] = [
   { id: "todo", title: "To Do" },
@@ -47,6 +50,11 @@ export default function KanbanView() {
     loadMessages();
   }, [cards]);
 
+  function handleOpenMessage(messageId: string) {
+    useMailStore.getState().setSelectedMessage(messageId);
+    useUIStore.getState().setActiveView("inbox");
+  }
+
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over) return;
@@ -73,11 +81,7 @@ export default function KanbanView() {
   }
 
   if (loading && cards.length === 0) {
-    return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--color-text-secondary)" }}>
-        Loading...
-      </div>
-    );
+    return <KanbanSkeleton />;
   }
 
   return (
@@ -91,6 +95,7 @@ export default function KanbanView() {
             cardIds={cards.filter((c) => c.column === col.id).map((c) => c.message_id)}
             messages={messages}
             onRemove={removeCard}
+            onOpen={handleOpenMessage}
           />
         ))}
       </DndContext>
