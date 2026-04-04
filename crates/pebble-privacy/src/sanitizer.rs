@@ -199,7 +199,7 @@ fn extract_attr(tag: &str, name: &str) -> Option<String> {
         // Unquoted attribute value — ends at space or >
         let start = value_start;
         let end = tag[start..]
-            .find(|c: char| c == ' ' || c == '>' || c == '/')
+            .find([' ', '>', '/'])
             .map(|p| p + start)
             .unwrap_or(tag.len());
         Some(tag[start..end].to_string())
