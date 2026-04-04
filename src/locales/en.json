@@ -125,6 +125,8 @@
     "openSearch": "Open search",
     "backupToCloud": "Backup to cloud",
     "toggleNotifications": "Toggle notifications",
+    "composeNew": "Compose new message",
+    "reply": "Reply to message",
     "edit": "Click to change",
     "recording": "Press keys...",
     "conflict": "Already assigned to: {{action}}",

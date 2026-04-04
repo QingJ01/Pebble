@@ -125,6 +125,8 @@
     "openSearch": "打开搜索",
     "backupToCloud": "备份到云端",
     "toggleNotifications": "切换通知",
+    "composeNew": "撰写新邮件",
+    "reply": "回复邮件",
     "edit": "点击修改",
     "recording": "按下快捷键...",
     "conflict": "已分配给: {{action}}",
