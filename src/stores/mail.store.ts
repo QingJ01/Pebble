@@ -3,20 +3,38 @@ import {
   listAccounts,
   listFolders,
   listMessages,
+  listThreads,
+  listThreadMessages,
   startSync,
 } from "@/lib/api";
-import type { Account, Folder, Message } from "@/lib/api";
+import type { Account, Folder, Message, ThreadSummary } from "@/lib/api";
 
 interface MailState {
+  // ─── UI State ──────────────────────────────────────────────────────────────
+  activeAccountId: string | null;
+  activeFolderId: string | null;
+  selectedMessageId: string | null;
+  selectedThreadId: string | null;
+  threadView: boolean;
+
+  setActiveAccountId: (accountId: string | null) => void;
+  setActiveFolderId: (folderId: string | null) => void;
+  setSelectedMessage: (messageId: string | null) => void;
+  setSelectedThreadId: (threadId: string | null) => void;
+  toggleThreadView: () => void;
+  setMessages: (messages: Message[]) => void;
+
+  // ─── Convenience cache (kept for backward compatibility) ───────────────────
   accounts: Account[];
   folders: Folder[];
   messages: Message[];
-  selectedMessageId: string | null;
-  activeAccountId: string | null;
-  activeFolderId: string | null;
+  threads: ThreadSummary[];
+  threadMessages: Message[];
   loadingMessages: boolean;
   loadingFolders: boolean;
+  loadingThreadMessages: boolean;
 
+  // ─── Legacy fetch methods (kept for non-refactored consumers) ─────────────
   fetchAccounts: () => Promise<void>;
   fetchFolders: (accountId: string) => Promise<void>;
   fetchMessages: (
@@ -26,20 +44,74 @@ interface MailState {
   ) => Promise<void>;
   setActiveAccount: (accountId: string) => Promise<void>;
   setActiveFolder: (folderId: string) => Promise<void>;
-  setSelectedMessage: (messageId: string | null) => void;
   syncAccount: (accountId: string) => Promise<void>;
+  fetchThreads: (folderId: string, limit?: number, offset?: number) => Promise<void>;
+  selectThread: (threadId: string) => Promise<void>;
+  clearThread: () => void;
 }
 
 export const useMailStore = create<MailState>((set, get) => ({
+  // ─── UI State ──────────────────────────────────────────────────────────────
+  activeAccountId: null,
+  activeFolderId: null,
+  selectedMessageId: null,
+  selectedThreadId: null,
+  threadView: false,
+
+  setActiveAccountId: (accountId) => {
+    set({
+      activeAccountId: accountId,
+      activeFolderId: null,
+      selectedMessageId: null,
+      selectedThreadId: null,
+      folders: [],
+      messages: [],
+      threads: [],
+    });
+  },
+
+  setActiveFolderId: (folderId) => {
+    set({
+      activeFolderId: folderId,
+      selectedMessageId: null,
+      selectedThreadId: null,
+      messages: [],
+      threads: [],
+    });
+  },
+
+  setSelectedMessage: (messageId) => {
+    set({ selectedMessageId: messageId });
+  },
+
+  setSelectedThreadId: (threadId) => {
+    set({ selectedThreadId: threadId });
+  },
+
+  toggleThreadView: () => {
+    const current = get().threadView;
+    set({ threadView: !current, selectedThreadId: null, threadMessages: [] });
+    const folderId = get().activeFolderId;
+    if (folderId) {
+      if (!current) {
+        get().fetchThreads(folderId);
+      } else {
+        get().fetchMessages(folderId);
+      }
+    }
+  },
+
+  // ─── Convenience cache ────────────────────────────────────────────────────
   accounts: [],
   folders: [],
   messages: [],
-  selectedMessageId: null,
-  activeAccountId: null,
-  activeFolderId: null,
+  threads: [],
+  threadMessages: [],
   loadingMessages: false,
   loadingFolders: false,
+  loadingThreadMessages: false,
 
+  // ─── Legacy fetch methods ─────────────────────────────────────────────────
   fetchAccounts: async () => {
     const accounts = await listAccounts();
     set({ accounts });
@@ -75,7 +147,6 @@ export const useMailStore = create<MailState>((set, get) => ({
       activeFolderId: null,
     });
     await get().fetchFolders(accountId);
-    // Auto-select inbox folder
     const inbox = get().folders.find((f) => f.role === "inbox");
     if (inbox) {
       await get().setActiveFolder(inbox.id);
@@ -91,10 +162,6 @@ export const useMailStore = create<MailState>((set, get) => ({
     await get().fetchMessages(folderId);
   },
 
-  setSelectedMessage: (messageId: string | null) => {
-    set({ selectedMessageId: messageId });
-  },
-
   syncAccount: async (accountId: string) => {
     await startSync(accountId);
     const { activeFolderId } = get();
@@ -103,4 +170,30 @@ export const useMailStore = create<MailState>((set, get) => ({
       await get().fetchMessages(activeFolderId);
     }
   },
+
+  fetchThreads: async (folderId: string, limit = 50, offset = 0) => {
+    set({ loadingMessages: true });
+    try {
+      const threads = await listThreads(folderId, limit, offset);
+      set({ threads });
+    } finally {
+      set({ loadingMessages: false });
+    }
+  },
+
+  selectThread: async (threadId: string) => {
+    set({ selectedThreadId: threadId, loadingThreadMessages: true });
+    try {
+      const threadMessages = await listThreadMessages(threadId);
+      set({ threadMessages });
+    } finally {
+      set({ loadingThreadMessages: false });
+    }
+  },
+
+  clearThread: () => {
+    set({ selectedThreadId: null, threadMessages: [] });
+  },
+
+  setMessages: (messages) => set({ messages }),
 }));
