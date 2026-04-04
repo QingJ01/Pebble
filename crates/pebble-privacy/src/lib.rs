@@ -1,1 +1,4 @@
-// Stub — full implementation in Task 4
+pub mod sanitizer;
+pub mod tracker;
+
+pub use sanitizer::PrivacyGuard;
