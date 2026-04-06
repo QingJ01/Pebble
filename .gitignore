@@ -3,7 +3,6 @@ node_modules/
 
 # Build output
 target/
-docs/
 dist/
 
 # Environment / secrets
