@@ -6,6 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { addAccount, startSync, testImapConnection, completeOAuthFlow } from "@/lib/api";
 import type { AddAccountRequest } from "@/lib/api";
 import { accountsQueryKey } from "@/hooks/queries";
+import { extractErrorMessage } from "@/lib/extractErrorMessage";
 
 const PRESETS: Record<
   string,
@@ -131,7 +132,7 @@ export default function AccountSetup({ onClose }: Props) {
       );
       setTestResult({ ok: true, message: report });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : typeof err === "object" && err !== null && "message" in err ? (err as { message: string }).message : String(err);
+      const msg = extractErrorMessage(err);
       setTestResult({ ok: false, message: msg });
     } finally {
       setTestLoading(false);
@@ -149,7 +150,7 @@ export default function AccountSetup({ onClose }: Props) {
       await startSync(account.id);
       onClose();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : typeof err === "object" && err !== null && "message" in err ? (err as { message: string }).message : String(err);
+      const msg = extractErrorMessage(err);
       setError(msg);
     } finally {
       setOauthLoading(false);
@@ -196,7 +197,7 @@ export default function AccountSetup({ onClose }: Props) {
       };
       pollFolders(5);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(extractErrorMessage(err));
     } finally {
       setLoading(false);
     }

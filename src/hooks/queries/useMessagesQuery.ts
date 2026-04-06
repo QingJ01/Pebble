@@ -18,5 +18,6 @@ export function useMessagesQuery(
     queryKey: messagesQueryKey(folderId ?? "", limit, offset, folderIds),
     queryFn: () => listMessages(folderId!, limit, offset, folderIds),
     enabled: !!folderId,
+    staleTime: 60_000, // Messages rarely change mid-session; avoid unnecessary refetches
   });
 }

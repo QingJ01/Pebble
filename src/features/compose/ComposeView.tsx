@@ -22,6 +22,43 @@ type EditorMode = "rich" | "markdown" | "html";
 
 const turndown = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced" });
 
+const DRAFT_STORAGE_KEY = "pebble-compose-draft";
+
+interface DraftData {
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  rawSource: string;
+  richTextHtml: string;
+  editorMode: EditorMode;
+  savedAt: number;
+}
+
+function saveDraftToStorage(draft: Omit<DraftData, "savedAt">) {
+  try {
+    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify({ ...draft, savedAt: Date.now() }));
+  } catch { /* quota exceeded — silently skip */ }
+}
+
+function loadDraftFromStorage(): DraftData | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+    if (!raw) return null;
+    const draft = JSON.parse(raw) as DraftData;
+    // Discard drafts older than 24 hours
+    if (Date.now() - draft.savedAt > 24 * 60 * 60 * 1000) {
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+      return null;
+    }
+    return draft;
+  } catch { return null; }
+}
+
+function clearDraftStorage() {
+  localStorage.removeItem(DRAFT_STORAGE_KEY);
+}
+
 export default function ComposeView() {
   const { t } = useTranslation();
   const composeMode = useUIStore((s) => s.composeMode);
@@ -35,8 +72,10 @@ export default function ComposeView() {
   const myEmail = currentAccount?.email || "";
 
   const isReply = composeMode === "reply" || composeMode === "reply-all";
+  const restoredDraft = useRef<DraftData | null>(composeMode === "new" ? loadDraftFromStorage() : null);
 
   const [to, setTo] = useState<string[]>(() => {
+    if (restoredDraft.current) return restoredDraft.current.to;
     if (!composeReplyTo) return [];
     if (composeMode === "reply") return [composeReplyTo.from_address];
     if (composeMode === "reply-all") {
@@ -47,13 +86,14 @@ export default function ComposeView() {
   });
 
   const [cc, setCc] = useState<string[]>(() => {
+    if (restoredDraft.current) return restoredDraft.current.cc;
     if (composeMode === "reply-all" && composeReplyTo) {
       return composeReplyTo.cc_list.map((a) => a.address).filter((addr) => addr !== myEmail);
     }
     return [];
   });
 
-  const [bcc, setBcc] = useState<string[]>([]);
+  const [bcc, setBcc] = useState<string[]>(restoredDraft.current?.bcc ?? []);
   const [showCc, setShowCc] = useState(() => cc.length > 0);
   const [showBcc, setShowBcc] = useState(false);
 
@@ -76,6 +116,7 @@ export default function ComposeView() {
   }, [accounts]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [subject, setSubject] = useState(() => {
+    if (restoredDraft.current) return restoredDraft.current.subject;
     if (!composeReplyTo) return "";
     if (isReply) return `Re: ${composeReplyTo.subject.replace(/^(Re:\s*|Fwd:\s*)+/i, "")}`;
     if (composeMode === "forward") return `Fwd: ${composeReplyTo.subject.replace(/^(Re:\s*|Fwd:\s*)+/i, "")}`;
@@ -85,8 +126,8 @@ export default function ComposeView() {
   const sendMutation = useSendEmailMutation();
 
   // Editor mode: rich (WYSIWYG), markdown (raw text), html (source)
-  const [editorMode, setEditorMode] = useState<EditorMode>("rich");
-  const [rawSource, setRawSource] = useState("");
+  const [editorMode, setEditorMode] = useState<EditorMode>(restoredDraft.current?.editorMode ?? "rich");
+  const [rawSource, setRawSource] = useState(restoredDraft.current?.rawSource ?? "");
   const [richTextHtml, setRichTextHtml] = useState("");
   const [htmlPreview, setHtmlPreview] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -117,6 +158,18 @@ export default function ComposeView() {
       hasComposeDraft({ to: [], cc: [], bcc: [], subject: "", rawSource, richTextHtml });
     useUIStore.getState().setComposeDirty(userChanged);
   }, [arraysEqual, bcc, cc, rawSource, richTextHtml, subject, to]);
+
+  // Auto-save draft to localStorage (debounced 1s)
+  useEffect(() => {
+    if (!composeMode || composeMode !== "new") return;
+    const timer = setTimeout(() => {
+      const hasDraft = to.length > 0 || cc.length > 0 || bcc.length > 0 || subject.trim() || rawSource.trim() || richTextHtml.trim();
+      if (hasDraft) {
+        saveDraftToStorage({ to, cc, bcc, subject, rawSource, richTextHtml, editorMode });
+      }
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [to, cc, bcc, subject, rawSource, richTextHtml, editorMode, composeMode]);
 
   useEffect(() => {
     if (!sendError) return;
@@ -272,6 +325,7 @@ export default function ComposeView() {
       },
       {
         onSuccess: () => {
+          clearDraftStorage();
           useUIStore.getState().setComposeDirty(false);
           closeCompose();
         },

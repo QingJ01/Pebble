@@ -16,5 +16,6 @@ export function useThreadsQuery(
     queryKey: threadsQueryKey(folderId ?? "", limit, offset),
     queryFn: () => listThreads(folderId!, limit, offset),
     enabled: !!folderId,
+    staleTime: 60_000,
   });
 }

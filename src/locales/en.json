@@ -17,7 +17,8 @@
     "testing": "Testing...",
     "copied": "Copied",
     "copy": "Copy",
-    "remove": "Remove"
+    "remove": "Remove",
+    "loadMore": "Load more"
   },
   "sidebar": {
     "inbox": "Inbox",

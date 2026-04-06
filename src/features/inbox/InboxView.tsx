@@ -7,12 +7,12 @@ import MessageDetail from "@/components/MessageDetail";
 import ThreadView from "./ThreadView";
 import ThreadItem from "@/components/ThreadItem";
 import SearchBar from "@/components/SearchBar";
-import { useRef, useState } from "react";
+import { useRef, useState, useCallback } from "react";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { List, MessageSquare, Mail, Trash2 } from "lucide-react";
+import { List, MessageSquare, Mail, Trash2, Inbox } from "lucide-react";
 import { MessageListSkeleton } from "@/components/Skeleton";
 import { emptyTrash } from "@/lib/api";
 import type { MessageSummary, ThreadSummary } from "@/lib/api";
@@ -46,14 +46,16 @@ export default function InboxView() {
     return ids.length > 1 ? ids : undefined;
   })();
 
+  const [messageLimit, setMessageLimit] = useState(50);
   const { data: messages = EMPTY_MESSAGES, isLoading: loadingMessages } = useMessagesQuery(
     threadView ? null : activeFolderId,
-    50, 0,
+    messageLimit, 0,
     threadView ? undefined : siblingFolderIds,
   );
   const { data: threads = EMPTY_THREADS, isLoading: loadingThreads } = useThreadsQuery(
     threadView ? activeFolderId : null,
   );
+  const handleLoadMore = useCallback(() => setMessageLimit((prev) => prev + 50), []);
 
   const detailOpen = threadView ? selectedThreadId !== null : selectedMessageId !== null;
 
@@ -163,6 +165,7 @@ export default function InboxView() {
               selectedMessageId={selectedMessageId}
               onSelectMessage={(id) => setSelectedMessage(id)}
               loading={loadingMessages}
+              onLoadMore={handleLoadMore}
               onToggleStar={(messageId, newStarred) => {
                 queryClient.setQueriesData<MessageSummary[]>(
                   { queryKey: ["messages"] },
@@ -217,7 +220,8 @@ function ThreadList({ threads, selectedThreadId, onSelectThread, loading }: {
 
   if (threads.length === 0) {
     return (
-      <div className="fade-in" style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--color-text-secondary)", fontSize: "14px" }}>
+      <div className="fade-in" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--color-text-secondary)", fontSize: "14px", gap: "8px" }}>
+        <Inbox size={32} strokeWidth={1.2} />
         {t("common.noThreads")}
       </div>
     );

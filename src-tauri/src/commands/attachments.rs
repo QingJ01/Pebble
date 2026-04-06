@@ -134,7 +134,12 @@ pub async fn download_attachment(
     let source = att
         .local_path
         .ok_or_else(|| PebbleError::Internal("Attachment file not available".to_string()))?;
-    std::fs::copy(&source, &save_to)
-        .map_err(|e| PebbleError::Internal(format!("Failed to copy attachment: {e}")))?;
-    Ok(())
+    // Use spawn_blocking to avoid blocking the async executor on large files
+    tokio::task::spawn_blocking(move || {
+        std::fs::copy(&source, &save_to)
+            .map_err(|e| PebbleError::Internal(format!("Failed to copy attachment: {e}")))?;
+        Ok::<(), PebbleError>(())
+    })
+    .await
+    .map_err(|e| PebbleError::Internal(format!("Copy task failed: {e}")))?
 }

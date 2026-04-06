@@ -84,8 +84,21 @@ export default function SearchView() {
     }
   }, [filters]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Debounced type-ahead search (300ms after last keystroke)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    const trimmed = query.trim();
+    if (!trimmed && !hasActiveFilters(filters)) return;
+    debounceRef.current = setTimeout(() => {
+      doSearch();
+    }, 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [query]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (debounceRef.current) clearTimeout(debounceRef.current);
     doSearch();
   }
 
@@ -205,13 +218,16 @@ export default function SearchView() {
             <div
               style={{
                 display: "flex",
+                flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
                 padding: "40px",
                 color: "var(--color-text-secondary)",
                 fontSize: "14px",
+                gap: "8px",
               }}
             >
+              <Search size={28} strokeWidth={1.2} />
               {t("search.noResults")}
             </div>
           )}
@@ -241,6 +257,7 @@ export default function SearchView() {
                 hit={hit}
                 isSelected={hit.message_id === selectedId}
                 onClick={() => setSelectedId(hit.message_id)}
+                query={query}
               />
             ))}
         </div>

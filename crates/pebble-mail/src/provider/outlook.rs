@@ -206,7 +206,7 @@ impl OutlookProvider {
         *self.access_token.write().unwrap_or_else(|e| e.into_inner()) = token;
     }
 
-    fn token(&self) -> String {
+    pub fn token(&self) -> String {
         self.access_token.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 

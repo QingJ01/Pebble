@@ -1,14 +1,31 @@
 import { useTranslation } from "react-i18next";
 import type { SearchHit, Message } from "@/lib/api";
 
+/** Highlight all occurrences of `terms` in `text` by wrapping in <mark>. */
+function highlightTerms(text: string, query: string): React.ReactNode {
+  if (!query.trim()) return text;
+  const terms = query.trim().split(/\s+/).filter(Boolean).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  if (terms.length === 0) return text;
+  const regex = new RegExp(`(${terms.join("|")})`, "gi");
+  const parts = text.split(regex);
+  return parts.map((part, i) =>
+    regex.test(part) ? (
+      <mark key={i} style={{ background: "var(--color-accent)", color: "#fff", borderRadius: "2px", padding: "0 1px" }}>{part}</mark>
+    ) : (
+      part
+    ),
+  );
+}
+
 interface Props {
   hit: SearchHit;
   message?: Message | null;
   isSelected: boolean;
   onClick: () => void;
+  query?: string;
 }
 
-export default function SearchResultItem({ hit, message, isSelected, onClick }: Props) {
+export default function SearchResultItem({ hit, message, isSelected, onClick, query = "" }: Props) {
   const { t } = useTranslation();
   const subject = hit.subject || message?.subject || hit.snippet || t("common.noSubject");
   const from = hit.from_address || message?.from_address || "";
@@ -45,7 +62,7 @@ export default function SearchResultItem({ hit, message, isSelected, onClick }: 
           whiteSpace: "nowrap",
         }}
       >
-        {subject}
+        {highlightTerms(subject, query)}
       </div>
       <div
         style={{
@@ -57,7 +74,7 @@ export default function SearchResultItem({ hit, message, isSelected, onClick }: 
           whiteSpace: "nowrap",
         }}
       >
-        {from}
+        {highlightTerms(from, query)}
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div
@@ -71,7 +88,7 @@ export default function SearchResultItem({ hit, message, isSelected, onClick }: 
             marginRight: "8px",
           }}
         >
-          {hit.snippet}
+          {highlightTerms(hit.snippet, query)}
         </div>
         {date && (
           <div style={{ fontSize: "11px", color: "var(--color-text-tertiary)", flexShrink: 0 }}>

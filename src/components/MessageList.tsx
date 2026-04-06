@@ -2,6 +2,7 @@ import { useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQuery } from "@tanstack/react-query";
+import { Inbox } from "lucide-react";
 import type { MessageSummary } from "@/lib/api";
 import { getMessageLabelsBatch } from "@/lib/api";
 import MessageItem from "./MessageItem";
@@ -13,6 +14,7 @@ interface Props {
   onSelectMessage: (id: string) => void;
   loading: boolean;
   onToggleStar?: (messageId: string, newStarred: boolean) => void;
+  onLoadMore?: () => void;
 }
 
 export default function MessageList({
@@ -21,6 +23,7 @@ export default function MessageList({
   onSelectMessage,
   loading,
   onToggleStar,
+  onLoadMore,
 }: Props) {
   const { t } = useTranslation();
   const parentRef = useRef<HTMLDivElement>(null);
@@ -50,13 +53,16 @@ export default function MessageList({
         className="fade-in"
         style={{
           display: "flex",
+          flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
           height: "100%",
           color: "var(--color-text-secondary)",
           fontSize: "14px",
+          gap: "8px",
         }}
       >
+        <Inbox size={32} strokeWidth={1.2} />
         {t("common.noMessages")}
       </div>
     );
@@ -104,6 +110,24 @@ export default function MessageList({
           );
         })}
       </div>
+      {onLoadMore && messages.length > 0 && messages.length % 50 === 0 && (
+        <div style={{ padding: "12px", textAlign: "center" }}>
+          <button
+            onClick={onLoadMore}
+            style={{
+              padding: "6px 20px",
+              fontSize: "13px",
+              border: "1px solid var(--color-border)",
+              borderRadius: "6px",
+              background: "transparent",
+              color: "var(--color-text-secondary)",
+              cursor: "pointer",
+            }}
+          >
+            {t("common.loadMore", "Load more")}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -8,6 +8,7 @@ import type { Account, ConnectionSecurity } from "@/lib/api";
 import { useAccountsQuery, accountsQueryKey } from "@/hooks/queries";
 import { useMailStore } from "@/stores/mail.store";
 import AccountSetup from "@/components/AccountSetup";
+import { extractErrorMessage } from "@/lib/extractErrorMessage";
 
 export default function AccountsTab() {
   const { t } = useTranslation();
@@ -26,7 +27,7 @@ export default function AccountsTab() {
       const report = await testAccountConnection(accountId);
       setTestResult({ id: accountId, ok: true, message: report });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : typeof err === "object" && err !== null && "message" in err ? (err as { message: string }).message : String(err);
+      const msg = extractErrorMessage(err);
       setTestResult({ id: accountId, ok: false, message: msg });
     } finally {
       setTestingId(null);
@@ -366,7 +367,7 @@ function EditAccountModal({ account, onClose, onSaved }: {
       );
       onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(extractErrorMessage(err));
     } finally {
       setLoading(false);
     }
