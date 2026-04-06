@@ -29,13 +29,26 @@ pub async fn send_email(
     body_text: String,
     body_html: Option<String>,
     in_reply_to: Option<String>,
+    attachment_paths: Option<Vec<String>>,
 ) -> std::result::Result<(), PebbleError> {
+    let attachment_paths = attachment_paths.unwrap_or_default();
     let account = state
         .store
         .get_account(&account_id)?
         .ok_or_else(|| PebbleError::Internal(format!("Account not found: {account_id}")))?;
 
     if matches!(account.provider, ProviderType::Gmail | ProviderType::Outlook) {
+        if !attachment_paths.is_empty() {
+            tracing::warn!(
+                "Attachments are not yet supported for {} provider, {} attachment(s) will be ignored",
+                match account.provider {
+                    ProviderType::Gmail => "Gmail",
+                    ProviderType::Outlook => "Outlook",
+                    _ => "unknown",
+                },
+                attachment_paths.len(),
+            );
+        }
         let provider_name = match account.provider {
             ProviderType::Gmail => "gmail",
             ProviderType::Outlook => "outlook",
@@ -102,6 +115,7 @@ pub async fn send_email(
             &body_text,
             body_html.as_deref(),
             in_reply_to.as_deref(),
+            &attachment_paths,
         )
     })
     .await

@@ -8,6 +8,7 @@ import {
   ArrowLeft, Send, Bold, Italic, Strikethrough, Heading1, Heading2,
   List, ListOrdered, Quote, Code, Minus, Undo2, Redo2, X, AlertCircle,
   Type, FileCode2, Hash, Link, Image, Eye, EyeOff,
+  Paperclip, FileText, Trash2, BookTemplate,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useUIStore } from "@/stores/ui.store";
@@ -16,6 +17,9 @@ import { useAccountsQuery } from "@/hooks/queries";
 import { useSendEmailMutation } from "@/hooks/mutations";
 import ContactAutocomplete from "@/components/ContactAutocomplete";
 import { hasComposeDraft } from "./compose-draft";
+import { getSignature } from "@/lib/signatures";
+import { listTemplates, saveTemplate, deleteTemplate } from "@/lib/templates";
+import type { EmailTemplate } from "@/lib/templates";
 import type { Editor } from "@tiptap/react";
 
 type EditorMode = "rich" | "markdown" | "html";
@@ -131,6 +135,14 @@ export default function ComposeView() {
   const [richTextHtml, setRichTextHtml] = useState("");
   const [htmlPreview, setHtmlPreview] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // ─── Attachments ─────────────────────────────────────────────────────────────
+  const [attachments, setAttachments] = useState<{ name: string; path: string; size: number }[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  // ─── Templates ───────────────────────────────────────────────────────────────
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [templates, setTemplates] = useState<EmailTemplate[]>(() => listTemplates());
+  const [showSaveTemplate, setShowSaveTemplate] = useState(false);
+  const [templateName, setTemplateName] = useState("");
 
   // Snapshot the initial compose state so pre-populated reply/forward
   // fields don't immediately trigger the "unsaved draft" guard.
@@ -177,6 +189,15 @@ export default function ComposeView() {
     return () => clearTimeout(timer);
   }, [sendError]);
 
+  // Build signature HTML block
+  const signatureHtml = useMemo(() => {
+    const sig = getSignature(fromAccountId);
+    if (!sig) return "";
+    const esc = (s: string) =>
+      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br/>");
+    return `<br/><br/><div style="color:var(--color-text-secondary);font-size:13px">--<br/>${esc(sig)}</div>`;
+  }, [fromAccountId]);
+
   const editorContent = useMemo(() => {
     try {
       const esc = (s: string) =>
@@ -198,7 +219,7 @@ export default function ComposeView() {
           ? extractBody(composeReplyTo.body_html_raw)
           : `<p>${esc(composeReplyTo.body_text || "")}</p>`;
         const attribution = t("compose.quoteAttribution", { date: dateStr, sender });
-        return `<br/><br/><blockquote><p>${esc(attribution)}</p>${body}</blockquote>`;
+        return `${signatureHtml}<br/><br/><blockquote><p>${esc(attribution)}</p>${body}</blockquote>`;
       }
       if (composeMode === "forward" && composeReplyTo) {
         const sender = esc(composeReplyTo.from_name || composeReplyTo.from_address || "");
@@ -206,14 +227,14 @@ export default function ComposeView() {
         const body = composeReplyTo.body_html_raw
           ? extractBody(composeReplyTo.body_html_raw)
           : `<p>${esc(composeReplyTo.body_text || "")}</p>`;
-        return `<br/><br/><p>${esc(t("compose.forwardedHeader"))}</p><p>${esc(t("compose.forwardedFrom", { sender }))}</p><p>${esc(t("compose.forwardedSubject", { subject: fwdSubject }))}</p>${body}`;
+        return `${signatureHtml}<br/><br/><p>${esc(t("compose.forwardedHeader"))}</p><p>${esc(t("compose.forwardedFrom", { sender }))}</p><p>${esc(t("compose.forwardedSubject", { subject: fwdSubject }))}</p>${body}`;
       }
-      return "";
+      return signatureHtml;
     } catch (err) {
       console.error("[ComposeView] Failed to build editor content:", err);
       return "";
     }
-  }, [composeMode, composeReplyTo, isReply, t]);
+  }, [composeMode, composeReplyTo, isReply, t, signatureHtml]);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -322,6 +343,7 @@ export default function ComposeView() {
         bodyText,
         bodyHtml: bodyHtml || undefined,
         inReplyTo: inReplyTo || undefined,
+        attachmentPaths: attachments.length > 0 ? attachments.map((a) => a.path) : undefined,
       },
       {
         onSuccess: () => {
@@ -475,6 +497,107 @@ export default function ComposeView() {
             display: "flex", alignItems: "center", gap: "0",
             borderBottom: "1px solid var(--color-border)",
           }}>
+            {/* Attach + Template buttons */}
+            <div style={{ display: "flex", alignItems: "center", gap: "2px", padding: "4px 8px" }}>
+              <label
+                title={t("compose.attach", "Attach file")}
+                style={{
+                  display: "flex", alignItems: "center", gap: "4px",
+                  padding: "4px 8px", borderRadius: "4px",
+                  border: "none", cursor: "pointer", fontSize: "11px",
+                  backgroundColor: "transparent", color: "var(--color-text-secondary)",
+                }}
+              >
+                <Paperclip size={13} />
+                <input
+                  type="file"
+                  multiple
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const files = e.target.files;
+                    if (!files) return;
+                    const newAttachments = Array.from(files).map((file) => ({
+                      name: file.name,
+                      path: (file as unknown as { path?: string }).path || file.name,
+                      size: file.size,
+                    }));
+                    setAttachments((prev) => [...prev, ...newAttachments]);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              <div style={{ position: "relative" }}>
+                <button
+                  onClick={() => { setTemplates(listTemplates()); setShowTemplates((v) => !v); }}
+                  title={t("compose.templates", "Templates")}
+                  style={{
+                    display: "flex", alignItems: "center", gap: "4px",
+                    padding: "4px 8px", borderRadius: "4px",
+                    border: "none", cursor: "pointer", fontSize: "11px",
+                    backgroundColor: showTemplates ? "var(--color-bg-secondary)" : "transparent",
+                    color: showTemplates ? "var(--color-accent)" : "var(--color-text-secondary)",
+                  }}
+                >
+                  <BookTemplate size={13} />
+                </button>
+                {showTemplates && (
+                  <div style={{
+                    position: "absolute", top: "100%", left: 0, zIndex: 100,
+                    backgroundColor: "var(--color-bg)", border: "1px solid var(--color-border)",
+                    borderRadius: "8px", boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                    minWidth: "220px", maxHeight: "300px", overflowY: "auto",
+                  }}>
+                    <div style={{ padding: "8px", borderBottom: "1px solid var(--color-border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontSize: "12px", fontWeight: 600 }}>{t("compose.templates", "Templates")}</span>
+                      <button
+                        onClick={() => { setShowSaveTemplate(true); setShowTemplates(false); }}
+                        style={{ fontSize: "11px", border: "none", background: "none", cursor: "pointer", color: "var(--color-accent)" }}
+                      >
+                        {t("compose.saveAsTemplate", "Save current")}
+                      </button>
+                    </div>
+                    {templates.length === 0 ? (
+                      <div style={{ padding: "16px", textAlign: "center", fontSize: "12px", color: "var(--color-text-secondary)" }}>
+                        {t("compose.noTemplates", "No templates saved")}
+                      </div>
+                    ) : templates.map((tpl) => (
+                      <div
+                        key={tpl.id}
+                        style={{
+                          display: "flex", alignItems: "center", padding: "8px",
+                          borderBottom: "1px solid var(--color-border)", cursor: "pointer",
+                          fontSize: "12px",
+                        }}
+                      >
+                        <div
+                          style={{ flex: 1, overflow: "hidden" }}
+                          onClick={() => {
+                            setSubject(tpl.subject);
+                            setRawSource(tpl.body);
+                            if (editor) editor.commands.setContent(tpl.body);
+                            setShowTemplates(false);
+                          }}
+                        >
+                          <div style={{ fontWeight: 500 }}>{tpl.name}</div>
+                          <div style={{ color: "var(--color-text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tpl.subject}</div>
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); deleteTemplate(tpl.id); setTemplates(listTemplates()); }}
+                          style={{ border: "none", background: "none", cursor: "pointer", color: "var(--color-text-secondary)", padding: "2px" }}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          <div style={{
+            display: "flex", alignItems: "center", gap: "0",
+            borderBottom: "1px solid var(--color-border)",
+          }}>
             {/* Formatting toolbar */}
             {editorMode === "rich" && editor && (
               <div style={{ flex: 1 }}>
@@ -513,8 +636,121 @@ export default function ComposeView() {
             </div>
           </div>
 
+          {/* Attachment list */}
+          {attachments.length > 0 && (
+            <div style={{ padding: "8px 60px", borderBottom: "1px solid var(--color-border)", display: "flex", flexWrap: "wrap", gap: "6px" }}>
+              {attachments.map((att, i) => (
+                <div key={i} style={{
+                  display: "flex", alignItems: "center", gap: "4px",
+                  padding: "4px 8px", borderRadius: "4px",
+                  backgroundColor: "var(--color-bg-hover)", fontSize: "12px",
+                }}>
+                  <FileText size={12} />
+                  <span style={{ maxWidth: "150px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{att.name}</span>
+                  <span style={{ color: "var(--color-text-secondary)", fontSize: "11px" }}>
+                    {att.size < 1024 * 1024 ? `${(att.size / 1024).toFixed(0)} KB` : `${(att.size / (1024 * 1024)).toFixed(1)} MB`}
+                  </span>
+                  <button
+                    onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
+                    style={{ border: "none", background: "none", cursor: "pointer", padding: "0 2px", color: "var(--color-text-secondary)" }}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Save template dialog */}
+          {showSaveTemplate && (
+            <div style={{
+              padding: "8px 60px", borderBottom: "1px solid var(--color-border)",
+              display: "flex", alignItems: "center", gap: "8px",
+            }}>
+              <input
+                type="text" value={templateName} onChange={(e) => setTemplateName(e.target.value)}
+                placeholder={t("compose.templateName", "Template name")}
+                autoFocus
+                style={{
+                  flex: 1, padding: "6px 8px", fontSize: "12px",
+                  border: "1px solid var(--color-border)", borderRadius: "4px",
+                  backgroundColor: "var(--color-bg)", color: "var(--color-text-primary)",
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && templateName.trim()) {
+                    const bodyContent = editorMode === "rich" && editor ? editor.getHTML() : rawSource;
+                    saveTemplate({ name: templateName.trim(), subject, body: bodyContent });
+                    setTemplateName("");
+                    setShowSaveTemplate(false);
+                    setTemplates(listTemplates());
+                  }
+                  if (e.key === "Escape") setShowSaveTemplate(false);
+                }}
+              />
+              <button
+                onClick={() => {
+                  if (!templateName.trim()) return;
+                  const bodyContent = editorMode === "rich" && editor ? editor.getHTML() : rawSource;
+                  saveTemplate({ name: templateName.trim(), subject, body: bodyContent });
+                  setTemplateName("");
+                  setShowSaveTemplate(false);
+                  setTemplates(listTemplates());
+                }}
+                style={{
+                  padding: "5px 12px", fontSize: "12px", border: "none",
+                  borderRadius: "4px", backgroundColor: "var(--color-accent)",
+                  color: "#fff", cursor: "pointer",
+                }}
+              >
+                {t("common.save")}
+              </button>
+              <button
+                onClick={() => setShowSaveTemplate(false)}
+                style={{
+                  padding: "5px 8px", fontSize: "12px", border: "1px solid var(--color-border)",
+                  borderRadius: "4px", backgroundColor: "transparent",
+                  color: "var(--color-text-secondary)", cursor: "pointer",
+                }}
+              >
+                {t("common.cancel")}
+              </button>
+            </div>
+          )}
+
           {/* Editor area */}
-          <div style={{ flex: 1, minHeight: "300px" }}>
+          <div
+            style={{ flex: 1, minHeight: "300px", position: "relative" }}
+            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={async (e) => {
+              e.preventDefault();
+              setIsDragging(false);
+              const files = e.dataTransfer.files;
+              if (!files.length) return;
+              const newAttachments: { name: string; path: string; size: number }[] = [];
+              for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                // In Tauri, dropped files expose path via webkitRelativePath or we can use the name
+                // Tauri's drag events provide file paths through the data transfer
+                const path = (file as unknown as { path?: string }).path || file.name;
+                newAttachments.push({ name: file.name, path, size: file.size });
+              }
+              setAttachments((prev) => [...prev, ...newAttachments]);
+            }}
+          >
+            {isDragging && (
+              <div style={{
+                position: "absolute", inset: 0, zIndex: 10,
+                backgroundColor: "rgba(37, 99, 235, 0.08)",
+                border: "2px dashed var(--color-accent)",
+                borderRadius: "8px",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                color: "var(--color-accent)", fontSize: "14px", fontWeight: 500,
+              }}>
+                <Paperclip size={20} style={{ marginRight: "8px" }} />
+                {t("compose.dropFiles", "Drop files to attach")}
+              </div>
+            )}
             {editorMode === "rich" ? (
               <EditorContent
                 editor={editor}

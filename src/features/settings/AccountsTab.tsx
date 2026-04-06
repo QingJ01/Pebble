@@ -9,6 +9,7 @@ import { useAccountsQuery, accountsQueryKey } from "@/hooks/queries";
 import { useMailStore } from "@/stores/mail.store";
 import AccountSetup from "@/components/AccountSetup";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
+import { getSignature, setSignature } from "@/lib/signatures";
 
 export default function AccountsTab() {
   const { t } = useTranslation();
@@ -322,6 +323,7 @@ function EditAccountModal({ account, onClose, onSaved }: {
   const [smtpSecurity, setSmtpSecurity] = useState<ConnectionSecurity | "">("");
   const [proxyHost, setProxyHost] = useState("");
   const [proxyPort, setProxyPort] = useState("");
+  const [signature, setSignatureValue] = useState(() => getSignature(account.id));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -365,6 +367,7 @@ function EditAccountModal({ account, onClose, onSaved }: {
         proxyHost || undefined,
         proxyPort ? parseInt(proxyPort, 10) : undefined,
       );
+      setSignature(account.id, signature);
       onSaved();
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -510,6 +513,17 @@ function EditAccountModal({ account, onClose, onSaved }: {
                 <label style={labelStyle}>{t("accountSetup.proxyPort", "Port")}</label>
                 <input style={{ ...inputStyle, width: "80px" }} type="number" value={proxyPort} onChange={(e) => setProxyPort(e.target.value)} placeholder="7890" />
               </div>
+            </div>
+
+            {/* Signature */}
+            <div style={fieldStyle}>
+              <label style={labelStyle}>{t("settings.signature", "Signature")} <span style={{ color: "var(--color-text-secondary)", fontWeight: 400 }}>({t("settings.optional", "optional")})</span></label>
+              <textarea
+                style={{ ...inputStyle, minHeight: "80px", resize: "vertical", fontFamily: "inherit" }}
+                value={signature}
+                onChange={(e) => setSignatureValue(e.target.value)}
+                placeholder={t("settings.signaturePlaceholder", "Your email signature...")}
+              />
             </div>
 
             {error && (

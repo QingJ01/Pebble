@@ -13,6 +13,9 @@ interface Props {
   isSelected: boolean;
   onClick: () => void;
   onToggleStar?: (messageId: string, newStarred: boolean) => void;
+  batchMode?: boolean;
+  batchSelected?: boolean;
+  onToggleBatchSelect?: (messageId: string) => void;
 }
 
 function formatDate(timestamp: number): string {
@@ -30,7 +33,7 @@ function formatDate(timestamp: number): string {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar }: Props) {
+function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, batchMode, batchSelected, onToggleBatchSelect }: Props) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [showActions, setShowActions] = useState(false);
@@ -83,6 +86,18 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar }
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2px" }}>
+        {batchMode && (
+          <input
+            type="checkbox"
+            checked={batchSelected}
+            onChange={(e) => {
+              e.stopPropagation();
+              onToggleBatchSelect?.(message.id);
+            }}
+            onClick={(e) => e.stopPropagation()}
+            style={{ marginRight: "8px", flexShrink: 0, cursor: "pointer", accentColor: "var(--color-accent)" }}
+          />
+        )}
         <span
           style={{
             fontSize: "13px",

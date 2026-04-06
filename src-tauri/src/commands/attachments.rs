@@ -1,7 +1,7 @@
 use crate::state::AppState;
 use pebble_core::{Attachment, PebbleError};
 use std::path::Path;
-use tauri::State;
+use tauri::{Emitter, State};
 
 fn is_windows_reserved_name(name: &str) -> bool {
     matches!(
@@ -121,6 +121,7 @@ pub async fn get_attachment_path(
 #[tauri::command]
 pub async fn download_attachment(
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
     attachment_id: String,
     save_to: String,
 ) -> std::result::Result<(), PebbleError> {
@@ -134,10 +135,48 @@ pub async fn download_attachment(
     let source = att
         .local_path
         .ok_or_else(|| PebbleError::Internal("Attachment file not available".to_string()))?;
+
+    let att_id = attachment_id.clone();
     // Use spawn_blocking to avoid blocking the async executor on large files
     tokio::task::spawn_blocking(move || {
-        std::fs::copy(&source, &save_to)
-            .map_err(|e| PebbleError::Internal(format!("Failed to copy attachment: {e}")))?;
+        use std::io::{Read, Write};
+
+        let mut src_file = std::fs::File::open(&source)
+            .map_err(|e| PebbleError::Internal(format!("Failed to open source: {e}")))?;
+        let total_bytes = src_file
+            .metadata()
+            .map_err(|e| PebbleError::Internal(format!("Failed to read file metadata: {e}")))?
+            .len();
+
+        let mut dst_file = std::fs::File::create(&save_to)
+            .map_err(|e| PebbleError::Internal(format!("Failed to create destination: {e}")))?;
+
+        let mut buf = [0u8; 8192];
+        let mut bytes_copied: u64 = 0;
+
+        loop {
+            let n = src_file
+                .read(&mut buf)
+                .map_err(|e| PebbleError::Internal(format!("Read error: {e}")))?;
+            if n == 0 {
+                break;
+            }
+            dst_file
+                .write_all(&buf[..n])
+                .map_err(|e| PebbleError::Internal(format!("Write error: {e}")))?;
+            bytes_copied += n as u64;
+
+            // Emit progress event
+            let _ = app.emit(
+                "attachment:download-progress",
+                serde_json::json!({
+                    "attachment_id": att_id,
+                    "bytes_copied": bytes_copied,
+                    "total_bytes": total_bytes,
+                }),
+            );
+        }
+
         Ok::<(), PebbleError>(())
     })
     .await

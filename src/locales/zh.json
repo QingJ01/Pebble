@@ -66,6 +66,12 @@
     "forwardedHeader": "---------- 转发邮件 ----------",
     "forwardedFrom": "发件人：{{sender}}",
     "forwardedSubject": "主题：{{subject}}",
+    "attach": "添加附件",
+    "dropFiles": "拖放文件以添加附件",
+    "templates": "模板",
+    "saveAsTemplate": "保存为模板",
+    "noTemplates": "暂无模板",
+    "templateName": "模板名称",
     "toolbar": {
       "bold": "粗体",
       "italic": "斜体",
@@ -123,6 +129,8 @@
     "removeAccount": "移除账户",
     "editAccount": "编辑账户",
     "leaveEmptyKeep": "留空保持不变",
+    "signature": "签名",
+    "signaturePlaceholder": "输入邮件签名...",
     "optional": "可选"
   },
   "cloudSync": {
@@ -167,6 +175,7 @@
     "syncing": "同步中...",
     "syncError": "同步错误",
     "offline": "离线",
+    "offlineHint": "操作将被排队，连接恢复后自动重试",
     "reconnecting": "正在重连...",
     "retrying": "正在重试...",
     "pendingActions": "{{count}} 个待处理",
@@ -447,5 +456,14 @@
     "french": "法语",
     "german": "德语",
     "spanish": "西班牙语"
+  },
+  "batch": {
+    "toggle": "批量选择",
+    "selectAll": "全选",
+    "selected": "已选 {{count}} 项",
+    "markRead": "标记为已读",
+    "markUnread": "标记为未读",
+    "success": "{{count}} 条消息已更新",
+    "failed": "批量操作失败"
   }
 }

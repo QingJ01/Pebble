@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useUIStore } from "@/stores/ui.store";
 import { healthCheck } from "@/lib/api";
+import { retryQueue } from "@/lib/retry-queue";
 
 // Only poll when browser reports offline to detect recovery.
 // When online, trust browser events — no unnecessary polling.
@@ -13,10 +14,12 @@ export function useNetworkStatus() {
   useEffect(() => {
     const handleOnline = () => {
       setNetworkStatus("online");
+      retryQueue.resume();
       stopPolling();
     };
     const handleOffline = () => {
       setNetworkStatus("offline");
+      retryQueue.pause();
       startPolling();
     };
 
@@ -33,6 +36,7 @@ export function useNetworkStatus() {
         try {
           await healthCheck();
           setNetworkStatus("online");
+          retryQueue.resume();
           stopPolling();
         } catch {
           // Still offline
@@ -44,8 +48,10 @@ export function useNetworkStatus() {
     window.addEventListener("offline", handleOffline);
 
     // Set initial status from browser
-    setNetworkStatus(navigator.onLine ? "online" : "offline");
-    if (!navigator.onLine) {
+    const isOnline = navigator.onLine;
+    setNetworkStatus(isOnline ? "online" : "offline");
+    if (!isOnline) {
+      retryQueue.pause();
       startPolling();
     }
 

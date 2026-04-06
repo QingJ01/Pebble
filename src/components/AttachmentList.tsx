@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { listen } from "@tauri-apps/api/event";
 import { File, FileText, Image, FileArchive, Film, Music, Download, Loader, Check } from "lucide-react";
 import { listAttachments, downloadAttachment } from "@/lib/api";
 import type { Attachment } from "@/lib/api";
@@ -31,6 +32,20 @@ export default function AttachmentList({ messageId }: Props) {
   const [loading, setLoading] = useState(true);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [downloadedPaths, setDownloadedPaths] = useState<Record<string, string>>({});
+  const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
+
+  // Listen for download progress events
+  useEffect(() => {
+    const unlisten = listen<{ attachment_id: string; bytes_copied: number; total_bytes: number }>(
+      "attachment:download-progress",
+      (event) => {
+        const { attachment_id, bytes_copied, total_bytes } = event.payload;
+        const pct = total_bytes > 0 ? Math.round((bytes_copied / total_bytes) * 100) : 0;
+        setDownloadProgress((prev) => ({ ...prev, [attachment_id]: pct }));
+      },
+    );
+    return () => { unlisten.then((fn) => fn()); };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -63,6 +78,7 @@ export default function AttachmentList({ messageId }: Props) {
       const savePath = `${dir}/${safeName}`;
       await downloadAttachment(attachment.id, savePath);
       setDownloadedPaths((prev) => ({ ...prev, [attachment.id]: savePath }));
+      setDownloadProgress((prev) => { const next = { ...prev }; delete next[attachment.id]; return next; });
     } catch (err) {
       console.error("Failed to download attachment:", err);
       useToastStore.getState().addToast({ message: t("attachments.downloadFailed", "Failed to download attachment"), type: "error" });
@@ -133,31 +149,37 @@ export default function AttachmentList({ messageId }: Props) {
               >
                 {formatFileSize(attachment.size)}
               </span>
-              <button
-                onClick={() => handleDownload(attachment)}
-                disabled={isDownloading}
-                title={isDownloading ? t("attachments.downloading") : downloadedPaths[attachment.id] ? downloadedPaths[attachment.id] : t("attachments.download")}
-                style={{
-                  background: "none",
-                  border: "none",
-                  cursor: isDownloading ? "default" : "pointer",
-                  padding: "2px",
-                  borderRadius: "4px",
-                  color: "var(--color-text-secondary)",
-                  display: "flex",
-                  alignItems: "center",
-                  flexShrink: 0,
-                  opacity: isDownloading ? 0.5 : 1,
-                }}
-              >
-                {isDownloading ? (
-                  <Loader size={14} className="spinner" />
-                ) : downloadedPaths[attachment.id] ? (
-                  <Check size={14} style={{ color: "var(--color-accent)" }} />
-                ) : (
-                  <Download size={14} />
+              <div style={{ display: "flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
+                {isDownloading && downloadProgress[attachment.id] != null && (
+                  <span style={{ fontSize: "10px", color: "var(--color-accent)", minWidth: "28px", textAlign: "right" }}>
+                    {downloadProgress[attachment.id]}%
+                  </span>
                 )}
-              </button>
+                <button
+                  onClick={() => handleDownload(attachment)}
+                  disabled={isDownloading}
+                  title={isDownloading ? t("attachments.downloading") : downloadedPaths[attachment.id] ? downloadedPaths[attachment.id] : t("attachments.download")}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    cursor: isDownloading ? "default" : "pointer",
+                    padding: "2px",
+                    borderRadius: "4px",
+                    color: "var(--color-text-secondary)",
+                    display: "flex",
+                    alignItems: "center",
+                    opacity: isDownloading ? 0.5 : 1,
+                  }}
+                >
+                  {isDownloading ? (
+                    <Loader size={14} className="spinner" />
+                  ) : downloadedPaths[attachment.id] ? (
+                    <Check size={14} style={{ color: "var(--color-accent)" }} />
+                  ) : (
+                    <Download size={14} />
+                  )}
+                </button>
+              </div>
             </div>
           );
         })}

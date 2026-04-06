@@ -66,6 +66,12 @@
     "forwardedHeader": "---------- Forwarded message ----------",
     "forwardedFrom": "From: {{sender}}",
     "forwardedSubject": "Subject: {{subject}}",
+    "attach": "Attach file",
+    "dropFiles": "Drop files to attach",
+    "templates": "Templates",
+    "saveAsTemplate": "Save current",
+    "noTemplates": "No templates saved",
+    "templateName": "Template name",
     "toolbar": {
       "bold": "Bold",
       "italic": "Italic",
@@ -123,7 +129,9 @@
     "removeAccount": "Remove account",
     "editAccount": "Edit Account",
     "leaveEmptyKeep": "leave empty to keep current",
-    "optional": "optional"
+    "optional": "optional",
+    "signature": "Signature",
+    "signaturePlaceholder": "Your email signature..."
   },
   "cloudSync": {
     "title": "Settings Backup",
@@ -167,6 +175,7 @@
     "syncing": "Syncing...",
     "syncError": "Sync error",
     "offline": "Offline",
+    "offlineHint": "Actions will be queued and retried when connection is restored",
     "reconnecting": "Reconnecting...",
     "retrying": "Retrying...",
     "pendingActions": "{{count}} pending",
@@ -447,5 +456,14 @@
     "french": "French",
     "german": "German",
     "spanish": "Spanish"
+  },
+  "batch": {
+    "toggle": "Batch select",
+    "selectAll": "Select all",
+    "selected": "{{count}} selected",
+    "markRead": "Mark as read",
+    "markUnread": "Mark as unread",
+    "success": "{{count}} messages updated",
+    "failed": "Batch operation failed"
   }
 }

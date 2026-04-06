@@ -7,12 +7,19 @@ interface MailState {
   selectedMessageId: string | null;
   selectedThreadId: string | null;
   threadView: boolean;
+  // ─── Batch Selection ───────────────────────────────────────────────────────
+  selectedMessageIds: Set<string>;
+  batchMode: boolean;
 
   setActiveAccountId: (accountId: string | null) => void;
   setActiveFolderId: (folderId: string | null) => void;
   setSelectedMessage: (messageId: string | null) => void;
   setSelectedThreadId: (threadId: string | null) => void;
   toggleThreadView: () => void;
+  toggleBatchMode: () => void;
+  toggleMessageSelection: (messageId: string) => void;
+  selectAllMessages: (messageIds: string[]) => void;
+  clearSelection: () => void;
 }
 
 export const useMailStore = create<MailState>((set, get) => ({
@@ -21,6 +28,8 @@ export const useMailStore = create<MailState>((set, get) => ({
   selectedMessageId: null,
   selectedThreadId: null,
   threadView: false,
+  selectedMessageIds: new Set<string>(),
+  batchMode: false,
 
   setActiveAccountId: (accountId) => {
     set({
@@ -28,6 +37,8 @@ export const useMailStore = create<MailState>((set, get) => ({
       activeFolderId: null,
       selectedMessageId: null,
       selectedThreadId: null,
+      selectedMessageIds: new Set(),
+      batchMode: false,
     });
   },
 
@@ -36,6 +47,8 @@ export const useMailStore = create<MailState>((set, get) => ({
       activeFolderId: folderId,
       selectedMessageId: null,
       selectedThreadId: null,
+      selectedMessageIds: new Set(),
+      batchMode: false,
     });
   },
 
@@ -52,6 +65,31 @@ export const useMailStore = create<MailState>((set, get) => ({
       threadView: !get().threadView,
       selectedThreadId: null,
       selectedMessageId: null,
+      selectedMessageIds: new Set(),
+      batchMode: false,
     });
+  },
+
+  toggleBatchMode: () => {
+    const current = get().batchMode;
+    set({
+      batchMode: !current,
+      selectedMessageIds: new Set(),
+    });
+  },
+
+  toggleMessageSelection: (messageId) => {
+    const ids = new Set(get().selectedMessageIds);
+    if (ids.has(messageId)) ids.delete(messageId);
+    else ids.add(messageId);
+    set({ selectedMessageIds: ids });
+  },
+
+  selectAllMessages: (messageIds) => {
+    set({ selectedMessageIds: new Set(messageIds) });
+  },
+
+  clearSelection: () => {
+    set({ selectedMessageIds: new Set() });
   },
 }));

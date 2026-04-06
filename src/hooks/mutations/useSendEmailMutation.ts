@@ -10,6 +10,7 @@ interface SendEmailParams {
   bodyText: string;
   bodyHtml?: string;
   inReplyTo?: string;
+  attachmentPaths?: string[];
 }
 
 export function useSendEmailMutation() {
@@ -26,6 +27,7 @@ export function useSendEmailMutation() {
         params.bodyText,
         params.bodyHtml,
         params.inReplyTo,
+        params.attachmentPaths,
       ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["messages"] });

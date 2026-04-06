@@ -12,7 +12,7 @@ import ConfirmDialog from "@/components/ConfirmDialog";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { List, MessageSquare, Mail, Trash2, Inbox } from "lucide-react";
+import { List, MessageSquare, Mail, Trash2, Inbox, CheckSquare } from "lucide-react";
 import { MessageListSkeleton } from "@/components/Skeleton";
 import { emptyTrash } from "@/lib/api";
 import type { MessageSummary, ThreadSummary } from "@/lib/api";
@@ -127,6 +127,19 @@ export default function InboxView() {
               />
             )}
           </>
+        )}
+        {!threadView && (
+          <button
+            onClick={() => useMailStore.getState().toggleBatchMode()}
+            style={{
+              background: "none", border: "none", cursor: "pointer", padding: "6px 10px",
+              color: "var(--color-text-secondary)", display: "flex", alignItems: "center",
+              fontSize: "12px",
+            }}
+            title={t("batch.toggle", "Batch select")}
+          >
+            <CheckSquare size={16} />
+          </button>
         )}
         <button
           onClick={toggleThreadView}

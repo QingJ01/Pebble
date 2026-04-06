@@ -20,6 +20,7 @@ import SnoozedView from "../features/snoozed/SnoozedView";
 import StarredView from "../features/starred/StarredView";
 import { useTranslation } from "react-i18next";
 import i18next from "i18next";
+import { WifiOff } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useQueryClient } from "@tanstack/react-query";
@@ -81,6 +82,7 @@ export default function Layout() {
       <div className="flex flex-1 min-h-0">
         <Sidebar />
         <main className="flex-1 min-w-0 overflow-auto" style={{ position: "relative" }}>
+          <OfflineBanner />
           <ViewErrorBoundary key={activeView}>
               {activeView === "inbox" && <InboxView />}
               {activeView === "kanban" && <KanbanView />}
@@ -141,4 +143,21 @@ class ViewErrorBoundary extends Component<
     }
     return this.props.children;
   }
+}
+
+function OfflineBanner() {
+  const networkStatus = useUIStore((s) => s.networkStatus);
+  if (networkStatus === "online") return null;
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: "8px",
+      padding: "6px 16px",
+      backgroundColor: "rgba(239,68,68,0.1)",
+      borderBottom: "1px solid rgba(239,68,68,0.2)",
+      color: "#ef4444", fontSize: "12px",
+    }}>
+      <WifiOff size={14} />
+      {i18next.t("status.offline", "Offline")} — {i18next.t("status.offlineHint", "Actions will be queued and retried when connection is restored")}
+    </div>
+  );
 }

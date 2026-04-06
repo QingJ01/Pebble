@@ -418,10 +418,25 @@ export async function sendEmail(
   bodyText: string,
   bodyHtml?: string,
   inReplyTo?: string,
+  attachmentPaths?: string[],
 ): Promise<void> {
   return invoke<void>("send_email", {
-    accountId, to, cc, bcc, subject, bodyText, bodyHtml, inReplyTo,
+    accountId, to, cc, bcc, subject, bodyText, bodyHtml, inReplyTo, attachmentPaths,
   });
+}
+
+// ─── Batch Operations ────────────────────────────────────────────────────────
+
+export async function batchArchive(messageIds: string[]): Promise<number> {
+  return invoke<number>("batch_archive", { messageIds });
+}
+
+export async function batchDelete(messageIds: string[]): Promise<number> {
+  return invoke<number>("batch_delete", { messageIds });
+}
+
+export async function batchMarkRead(messageIds: string[], isRead: boolean): Promise<number> {
+  return invoke<number>("batch_mark_read", { messageIds, isRead });
 }
 
 // ─── Trusted Senders API ─────────────────────────────────────────────────────
