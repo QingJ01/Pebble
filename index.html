@@ -6,6 +6,115 @@
     <title>Pebble</title>
   </head>
   <body>
+    <style id="splash-style">
+      @keyframes splash-fade-in {
+        from { opacity: 0; transform: translateY(8px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes splash-draw {
+        to { stroke-dashoffset: 0; }
+      }
+      @keyframes splash-fill {
+        from { fill-opacity: 0; }
+        to   { fill-opacity: 1; }
+      }
+      @keyframes splash-fade-out {
+        from { opacity: 1; }
+        to   { opacity: 0; }
+      }
+      #splash {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: #1a1a1a;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+        user-select: none;
+        overflow: hidden;
+        transition: opacity .5s ease-out;
+      }
+      @media (prefers-color-scheme: light) {
+        #splash {
+          background: #f5f5f5;
+        }
+        #splash .app-name {
+          color: #333;
+        }
+        #splash .loading-bar {
+          background: rgba(0,0,0,.08);
+        }
+      }
+      #splash.fade-out {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #splash svg {
+        width: 64px;
+        height: 64px;
+        margin-bottom: 20px;
+      }
+      #splash .pebble-outline {
+        fill: none;
+        stroke: #d4714e;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-dasharray: 200;
+        stroke-dashoffset: 200;
+        animation: splash-draw 1.2s ease-out forwards;
+      }
+      #splash .pebble-fill {
+        fill: #d4714e;
+        fill-opacity: 0;
+        animation: splash-fill .6s ease-out .8s forwards;
+      }
+      #splash .app-name {
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: 3px;
+        color: #e0e0e0;
+        text-transform: uppercase;
+        opacity: 0;
+        animation: splash-fade-in .6s ease-out .6s forwards;
+      }
+      #splash .loading-bar {
+        margin-top: 24px;
+        width: 120px;
+        height: 2px;
+        border-radius: 1px;
+        background: rgba(255,255,255,.08);
+        overflow: hidden;
+        opacity: 0;
+        animation: splash-fade-in .4s ease-out 1s forwards;
+      }
+      #splash .loading-bar::after {
+        content: '';
+        display: block;
+        width: 40%;
+        height: 100%;
+        border-radius: 1px;
+        background: #d4714e;
+        animation: splash-slide 1.2s ease-in-out .8s infinite;
+      }
+      @keyframes splash-slide {
+        0%   { transform: translateX(-100%); }
+        100% { transform: translateX(350%); }
+      }
+    </style>
+    <script>window.__splashStart=Date.now();</script>
+    <div id="splash">
+      <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+        <path class="pebble-fill" d="M32 8C18 8 8 20 10 34c2 12 12 22 22 22s20-10 22-22C56 20 46 8 32 8z"/>
+        <path class="pebble-outline" d="M32 8C18 8 8 20 10 34c2 12 12 22 22 22s20-10 22-22C56 20 46 8 32 8z"/>
+        <ellipse cx="24" cy="22" rx="8" ry="5" fill="rgba(255,255,255,.15)" transform="rotate(-20 24 22)"
+          style="opacity:0; animation: splash-fill .4s ease-out 1.2s forwards;"/>
+      </svg>
+      <div class="app-name">Pebble</div>
+      <div class="loading-bar"></div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
