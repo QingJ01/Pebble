@@ -1,60 +1,24 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { useMailStore } from "../../src/stores/mail.store";
-
-// Mock Tauri invoke
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn(),
-}));
-
-import { invoke } from "@tauri-apps/api/core";
-const mockInvoke = vi.mocked(invoke);
-
-const defaultState = {
-  accounts: [],
-  folders: [],
-  messages: [],
-  selectedMessageId: null,
-  activeAccountId: null,
-  activeFolderId: null,
-  loadingMessages: false,
-  loadingFolders: false,
-};
 
 describe("MailStore", () => {
   beforeEach(() => {
-    useMailStore.setState(defaultState);
-    vi.clearAllMocks();
+    useMailStore.setState({
+      activeAccountId: null,
+      activeFolderId: null,
+      selectedMessageId: null,
+      selectedThreadId: null,
+      threadView: false,
+    });
   });
 
   it("should have correct initial state", () => {
     const state = useMailStore.getState();
-    expect(state.accounts).toEqual([]);
-    expect(state.folders).toEqual([]);
-    expect(state.messages).toEqual([]);
-    expect(state.selectedMessageId).toBeNull();
     expect(state.activeAccountId).toBeNull();
     expect(state.activeFolderId).toBeNull();
-    expect(state.loadingMessages).toBe(false);
-    expect(state.loadingFolders).toBe(false);
-  });
-
-  it("should fetch and set accounts", async () => {
-    const mockAccounts = [
-      {
-        id: "a1",
-        email: "test@example.com",
-        display_name: "Test User",
-        provider: "imap" as const,
-        created_at: 1000,
-        updated_at: 1000,
-      },
-    ];
-    mockInvoke.mockResolvedValueOnce(mockAccounts);
-
-    await useMailStore.getState().fetchAccounts();
-
-    expect(useMailStore.getState().accounts).toEqual(mockAccounts);
-    expect(mockInvoke).toHaveBeenCalledWith("list_accounts");
+    expect(state.selectedMessageId).toBeNull();
+    expect(state.selectedThreadId).toBeNull();
+    expect(state.threadView).toBe(false);
   });
 
   it("should set selected message", () => {
@@ -65,55 +29,55 @@ describe("MailStore", () => {
     expect(useMailStore.getState().selectedMessageId).toBeNull();
   });
 
-  it("should fetch folders sorted by sort_order", async () => {
-    const unsortedFolders = [
-      {
-        id: "f3",
-        account_id: "a1",
-        remote_id: "r3",
-        name: "Trash",
-        folder_type: "folder" as const,
-        role: "trash" as const,
-        parent_id: null,
-        color: null,
-        is_system: true,
-        sort_order: 3,
-      },
-      {
-        id: "f1",
-        account_id: "a1",
-        remote_id: "r1",
-        name: "Inbox",
-        folder_type: "folder" as const,
-        role: "inbox" as const,
-        parent_id: null,
-        color: null,
-        is_system: true,
-        sort_order: 1,
-      },
-      {
-        id: "f2",
-        account_id: "a1",
-        remote_id: "r2",
-        name: "Sent",
-        folder_type: "folder" as const,
-        role: "sent" as const,
-        parent_id: null,
-        color: null,
-        is_system: true,
-        sort_order: 2,
-      },
-    ];
-    mockInvoke.mockResolvedValueOnce(unsortedFolders);
-
-    await useMailStore.getState().fetchFolders("a1");
-
-    const folders = useMailStore.getState().folders;
-    expect(folders[0].id).toBe("f1");
-    expect(folders[1].id).toBe("f2");
-    expect(folders[2].id).toBe("f3");
-    expect(mockInvoke).toHaveBeenCalledWith("list_folders", {
-      accountId: "a1",
+  it("should set active account and reset dependent state", () => {
+    useMailStore.setState({
+      activeFolderId: "f1",
+      selectedMessageId: "m1",
+      selectedThreadId: "t1",
     });
+
+    useMailStore.getState().setActiveAccountId("a1");
+
+    const state = useMailStore.getState();
+    expect(state.activeAccountId).toBe("a1");
+    expect(state.activeFolderId).toBeNull();
+    expect(state.selectedMessageId).toBeNull();
+    expect(state.selectedThreadId).toBeNull();
+  });
+
+  it("should set active folder and reset message/thread selection", () => {
+    useMailStore.setState({
+      activeAccountId: "a1",
+      selectedMessageId: "m1",
+      selectedThreadId: "t1",
+    });
+
+    useMailStore.getState().setActiveFolderId("f2");
+
+    const state = useMailStore.getState();
+    expect(state.activeFolderId).toBe("f2");
+    expect(state.selectedMessageId).toBeNull();
+    expect(state.selectedThreadId).toBeNull();
+    expect(state.activeAccountId).toBe("a1");
+  });
+
+  it("should set selected thread", () => {
+    useMailStore.getState().setSelectedThreadId("t1");
+    expect(useMailStore.getState().selectedThreadId).toBe("t1");
+  });
+
+  it("should toggle thread view and reset selections", () => {
+    useMailStore.setState({
+      threadView: false,
+      selectedMessageId: "m1",
+      selectedThreadId: "t1",
+    });
+
+    useMailStore.getState().toggleThreadView();
+
+    const state = useMailStore.getState();
+    expect(state.threadView).toBe(true);
+    expect(state.selectedMessageId).toBeNull();
+    expect(state.selectedThreadId).toBeNull();
   });
 });

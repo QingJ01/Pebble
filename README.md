@@ -7,7 +7,7 @@
 <p align="center">
   A privacy-first desktop email client built with Rust and React.
   <br>
-  Your data stays on your device — no cloud, no telemetry, no compromise.
+  Your data stays on your device — no telemetry, no compromise. Optional WebDAV backup for settings.
 </p>
 
 <p align="center">
@@ -24,7 +24,7 @@
 **Privacy & Security**
 - 100% local storage — SQLite database, search index, attachments all on your device
 - AES-256 encrypted OAuth tokens and credentials with per-device key
-- No cloud sync, no telemetry, no third-party data access
+- No telemetry, no third-party data access; optional user-initiated settings backup via WebDAV
 - Open source under AGPL-3.0
 
 **Email Management**
@@ -98,8 +98,7 @@ To use Gmail or Outlook, you need OAuth credentials:
 
 | Variable | Description |
 |----------|-------------|
-| `GOOGLE_CLIENT_ID` | Google OAuth 2.0 Client ID |
-| `GOOGLE_CLIENT_SECRET` | Google OAuth 2.0 Client Secret |
+| `GOOGLE_CLIENT_ID` | Google OAuth 2.0 Client ID (Desktop app type, no secret needed — uses PKCE) |
 | `MICROSOFT_CLIENT_ID` | Microsoft Azure App Client ID |
 | `MICROSOFT_CLIENT_SECRET` | Microsoft Azure App Client Secret |
 
