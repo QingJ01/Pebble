@@ -73,7 +73,9 @@ export default function ContactAutocomplete({
 
   const addRawAddress = (text: string) => {
     const trimmed = text.trim();
-    if (trimmed && !value.includes(trimmed)) {
+    // Basic email format validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (trimmed && emailRegex.test(trimmed) && !value.includes(trimmed)) {
       onChange([...value, trimmed]);
     }
     setInputValue("");

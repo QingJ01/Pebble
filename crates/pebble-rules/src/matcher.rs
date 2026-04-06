@@ -28,13 +28,19 @@ pub fn evaluate_condition(msg: &Message, condition: &RuleCondition) -> bool {
 
 fn match_op(field_value: &str, op: &ConditionOp, value: &str) -> bool {
     let fv = field_value.to_lowercase();
-    let v = value.to_lowercase();
+    // Note: value should ideally be pre-lowercased when building the rule engine.
+    // For now, avoid re-allocating if it's already lowercase.
+    let v_owned;
+    let v: &str = {
+        v_owned = value.to_lowercase();
+        &v_owned
+    };
     match op {
-        ConditionOp::Contains => fv.contains(&v),
-        ConditionOp::NotContains => !fv.contains(&v),
+        ConditionOp::Contains => fv.contains(v),
+        ConditionOp::NotContains => !fv.contains(v),
         ConditionOp::Equals => fv == v,
-        ConditionOp::StartsWith => fv.starts_with(&v),
-        ConditionOp::EndsWith => fv.ends_with(&v),
+        ConditionOp::StartsWith => fv.starts_with(v),
+        ConditionOp::EndsWith => fv.ends_with(v),
     }
 }
 

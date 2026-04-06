@@ -14,7 +14,7 @@ import {
   Star,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useUIStore } from "../stores/ui.store";
+import { useUIStore, canLeaveCompose } from "../stores/ui.store";
 import { useMailStore } from "../stores/mail.store";
 import { useAccountsQuery, useFoldersQuery } from "../hooks/queries";
 import type { Account, Folder as FolderType } from "../lib/api";
@@ -108,8 +108,15 @@ export default function Sidebar() {
     }
   }, [folders, activeFolderId, setActiveFolderId]);
 
+  function safeSetActiveView(view: Parameters<typeof setActiveView>[0]) {
+    if (!canLeaveCompose(useUIStore.getState())) {
+      if (!window.confirm(t("compose.discardDraftConfirm", "Discard this draft?"))) return;
+    }
+    setActiveView(view);
+  }
+
   function handleFolderClick(folderId: string) {
-    setActiveView("inbox");
+    safeSetActiveView("inbox");
     setActiveFolderId(folderId);
   }
 
@@ -148,7 +155,7 @@ export default function Sidebar() {
           isActive={activeView === "search"}
           collapsed={sidebarCollapsed}
           style={buttonBase}
-          onClick={() => setActiveView("search")}
+          onClick={() => safeSetActiveView("search")}
         />
       </nav>
 
@@ -170,6 +177,7 @@ export default function Sidebar() {
       {!sidebarCollapsed && accounts.length > 1 && (
         <div style={{ padding: "0 6px 4px" }}>
           <select
+            aria-label={t("settings.emailAccounts", "Email Accounts")}
             value={activeAccountId || ""}
             onChange={(e) => {
               setActiveAccountId(e.target.value);
@@ -219,7 +227,7 @@ export default function Sidebar() {
                     isActive={activeView === "starred"}
                     collapsed={sidebarCollapsed}
                     style={buttonBase}
-                    onClick={() => setActiveView("starred")}
+                    onClick={() => safeSetActiveView("starred")}
                   />
                 );
               }
@@ -248,7 +256,7 @@ export default function Sidebar() {
                     isActive={activeView === "starred"}
                     collapsed={sidebarCollapsed}
                     style={buttonBase}
-                    onClick={() => setActiveView("starred")}
+                    onClick={() => safeSetActiveView("starred")}
                   />
                 );
               }
@@ -260,7 +268,7 @@ export default function Sidebar() {
                   isActive={index === 0 && activeView === "inbox"}
                   collapsed={sidebarCollapsed}
                   style={buttonBase}
-                  onClick={() => setActiveView("inbox")}
+                  onClick={() => safeSetActiveView("inbox")}
                 />
               );
               return items;
@@ -291,7 +299,7 @@ export default function Sidebar() {
           isActive={activeView === "snoozed"}
           collapsed={sidebarCollapsed}
           style={buttonBase}
-          onClick={() => setActiveView("snoozed")}
+          onClick={() => safeSetActiveView("snoozed")}
         />
         <SidebarButton
           icon={<LayoutGrid size={16} />}
@@ -299,7 +307,7 @@ export default function Sidebar() {
           isActive={activeView === "kanban"}
           collapsed={sidebarCollapsed}
           style={buttonBase}
-          onClick={() => setActiveView("kanban")}
+          onClick={() => safeSetActiveView("kanban")}
         />
         <SidebarButton
           icon={<Settings size={16} />}
@@ -307,7 +315,7 @@ export default function Sidebar() {
           isActive={activeView === "settings"}
           collapsed={sidebarCollapsed}
           style={buttonBase}
-          onClick={() => setActiveView("settings")}
+          onClick={() => safeSetActiveView("settings")}
         />
       </nav>
     </aside>

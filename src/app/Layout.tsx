@@ -19,6 +19,7 @@ import SearchView from "../features/search/SearchView";
 import SnoozedView from "../features/snoozed/SnoozedView";
 import StarredView from "../features/starred/StarredView";
 import { useTranslation } from "react-i18next";
+import i18next from "i18next";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useQueryClient } from "@tanstack/react-query";
@@ -121,9 +122,9 @@ class ViewErrorBoundary extends Component<
           justifyContent: "center", height: "100%", gap: 12, padding: 24,
           color: "var(--color-text-secondary)",
         }}>
-          <p style={{ fontSize: 14, margin: 0 }}>Something went wrong</p>
+          <p style={{ fontSize: 14, margin: 0 }}>{i18next.t("errorBoundary.title", "Something went wrong")}</p>
           <p style={{ fontSize: 12, margin: 0, color: "var(--color-text-secondary)" }}>
-            Please try again or refresh the application.
+            {i18next.t("errorBoundary.description", "Please try again or refresh the application.")}
           </p>
           <button
             onClick={() => this.setState({ error: null })}
@@ -133,7 +134,7 @@ class ViewErrorBoundary extends Component<
               border: "none", borderRadius: 6, fontSize: 13,
             }}
           >
-            Retry
+            {i18next.t("errorBoundary.retry", "Retry")}
           </button>
         </div>
       );

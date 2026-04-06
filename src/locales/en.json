@@ -46,6 +46,7 @@
     "newMessage": "New Message",
     "reply": "Reply",
     "forward": "Forward",
+    "discardDraftConfirm": "Discard this draft?",
     "to": "To",
     "cc": "Cc",
     "subject": "Subject",
@@ -175,7 +176,8 @@
     "title": "Attachments",
     "download": "Download",
     "downloading": "Downloading...",
-    "noAttachments": "No attachments"
+    "noAttachments": "No attachments",
+    "downloadFailed": "Failed to download attachment"
   },
   "search": {
     "title": "Search",
@@ -236,6 +238,7 @@
     "unarchive": "Unarchive",
     "unarchiveSuccess": "Message moved to inbox",
     "unarchiveFailed": "Failed to unarchive",
+    "deleteConfirm": "Move this message to trash?",
     "deleteSuccess": "Message deleted",
     "deleteFailed": "Failed to delete message",
     "restoreSuccess": "Message restored to inbox",
@@ -294,6 +297,7 @@
     "proxyHost": "SOCKS5 Proxy",
     "proxyPort": "Port",
     "signInGoogle": "Sign in with Google",
+    "signInOutlook": "Sign in with Outlook",
     "orManual": "or add account manually",
     "adding": "Adding account\u2026",
     "submit": "Add Account & Sync",
@@ -324,8 +328,10 @@
     "restoreFromCloud": "Restore from Cloud"
   },
   "commandPalette": {
+    "title": "Command Palette",
     "placeholder": "Type a command...",
-    "noResults": "No commands found"
+    "noResults": "No commands found",
+    "results": "{{count}} results"
   },
   "privacy": {
     "blocked": "Blocked {{items}}",
@@ -426,6 +432,11 @@
   "thread": {
     "title": "Thread",
     "to": "To:"
+  },
+  "errorBoundary": {
+    "title": "Something went wrong",
+    "description": "Please try again or refresh the application.",
+    "retry": "Retry"
   },
   "languages": {
     "chinese": "Chinese",

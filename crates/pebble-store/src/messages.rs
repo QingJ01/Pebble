@@ -810,15 +810,21 @@ impl Store {
                 .map_err(|e| PebbleError::Storage(e.to_string()))?;
 
             let result = (|| -> Result<()> {
-                for id in ids {
-                    conn.execute(
-                        "DELETE FROM message_folders WHERE message_id = ?1",
-                        params![id],
-                    ).map_err(|e| PebbleError::Storage(e.to_string()))?;
-                    conn.execute(
-                        "DELETE FROM messages WHERE id = ?1",
-                        params![id],
-                    ).map_err(|e| PebbleError::Storage(e.to_string()))?;
+                // Batch delete using IN clause for better performance
+                for chunk in ids.chunks(100) {
+                    let placeholders: String = chunk.iter().enumerate()
+                        .map(|(i, _)| format!("?{}", i + 1))
+                        .collect::<Vec<_>>().join(",");
+
+                    let sql_folders = format!("DELETE FROM message_folders WHERE message_id IN ({})", placeholders);
+                    let sql_messages = format!("DELETE FROM messages WHERE id IN ({})", placeholders);
+
+                    let params: Vec<&dyn rusqlite::types::ToSql> = chunk.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+
+                    conn.execute(&sql_folders, params.as_slice())
+                        .map_err(|e| PebbleError::Storage(e.to_string()))?;
+                    conn.execute(&sql_messages, params.as_slice())
+                        .map_err(|e| PebbleError::Storage(e.to_string()))?;
                 }
                 Ok(())
             })();

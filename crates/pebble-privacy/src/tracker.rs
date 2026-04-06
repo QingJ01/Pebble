@@ -38,9 +38,19 @@ pub fn is_known_tracker(domain: &str) -> bool {
 }
 
 pub fn is_tracking_pixel(width: Option<&str>, height: Option<&str>) -> bool {
-    let w = width.and_then(|v| v.parse::<u32>().ok()).unwrap_or(u32::MAX);
-    let h = height.and_then(|v| v.parse::<u32>().ok()).unwrap_or(u32::MAX);
-    w <= 1 && h <= 1
+    match (width, height) {
+        // Both dimensions explicitly set to <= 1 — classic tracking pixel
+        (Some(w), Some(h)) => {
+            let w = w.parse::<u32>().unwrap_or(0);
+            let h = h.parse::<u32>().unwrap_or(0);
+            w <= 1 && h <= 1
+        }
+        // One dimension present and <= 1, other absent — likely a pixel
+        (Some(v), None) | (None, Some(v)) => v.parse::<u32>().unwrap_or(0) <= 1,
+        // Both absent — cannot determine from dimensions alone; don't flag here.
+        // The caller should use additional heuristics (URL pattern, known domains).
+        (None, None) => false,
+    }
 }
 
 #[cfg(test)]
@@ -61,6 +71,8 @@ mod tests {
         assert!(is_tracking_pixel(Some("1"), Some("1")));
         assert!(is_tracking_pixel(Some("0"), Some("0")));
         assert!(!is_tracking_pixel(Some("100"), Some("50")));
-        assert!(!is_tracking_pixel(None, None));
+        assert!(!is_tracking_pixel(None, None)); // missing both dimensions — inconclusive, checked by other heuristics
+        assert!(is_tracking_pixel(Some("1"), None)); // one dimension <= 1, other absent
+        assert!(is_tracking_pixel(None, Some("0"))); // one dimension <= 1, other absent
     }
 }

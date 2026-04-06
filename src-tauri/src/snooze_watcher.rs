@@ -22,10 +22,13 @@ pub async fn run_snooze_watcher(
     const TOMBSTONE_MAX_AGE_SECS: i64 = 30 * 24 * 3600; // 30 days
 
     loop {
-        // Check for stop signal (non-blocking)
-        if stop_rx.try_recv().is_ok() {
-            debug!("Snooze watcher stopping");
-            break;
+        // Check for stop signal (non-blocking) — also stop on channel disconnect
+        match stop_rx.try_recv() {
+            Ok(()) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                debug!("Snooze watcher stopping");
+                break;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
         }
 
         tokio::time::sleep(interval).await;

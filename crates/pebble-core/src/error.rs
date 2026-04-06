@@ -31,4 +31,11 @@ pub enum PebbleError {
     Validation(String),
 }
 
+#[cfg(feature = "rusqlite")]
+impl From<rusqlite::Error> for PebbleError {
+    fn from(e: rusqlite::Error) -> Self {
+        PebbleError::Storage(e.to_string())
+    }
+}
+
 pub type Result<T> = std::result::Result<T, PebbleError>;

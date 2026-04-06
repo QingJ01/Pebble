@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Star, Paperclip } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ThreadSummary } from "@/lib/api";
@@ -21,7 +22,7 @@ function formatDate(timestamp: number): string {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-export default function ThreadItem({ thread, isSelected, onClick }: Props) {
+function ThreadItem({ thread, isSelected, onClick }: Props) {
   const { t } = useTranslation();
   const hasUnread = thread.unread_count > 0;
   const fontWeight = hasUnread ? "600" : "normal";
@@ -89,3 +90,5 @@ export default function ThreadItem({ thread, isSelected, onClick }: Props) {
     </div>
   );
 }
+
+export default memo(ThreadItem);

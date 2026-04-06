@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQuery } from "@tanstack/react-query";
@@ -24,7 +24,7 @@ export default function MessageList({
 }: Props) {
   const { t } = useTranslation();
   const parentRef = useRef<HTMLDivElement>(null);
-  const messageIds = messages.map((message) => message.id);
+  const messageIds = useMemo(() => messages.map((m) => m.id), [messages]);
   const { data: labelsByMessage = {} } = useQuery({
     queryKey: ["message-labels", messageIds],
     queryFn: () => getMessageLabelsBatch(messageIds),

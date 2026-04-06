@@ -25,7 +25,7 @@
   --color-statusbar-bg: #1e1e1e;
   --color-border: #2e2e2e;
   --color-text-primary: #e0e0e0;
-  --color-text-secondary: #888888;
+  --color-text-secondary: #aaaaaa;
   --color-accent: #d4714e;
   --color-bg: #1a1a1a;
   --color-bg-hover: rgba(255,255,255,0.06);
@@ -96,6 +96,15 @@ html, body, #root {
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(12px) scale(0.95); }
   to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Respect reduced-motion preferences (WCAG 2.1 AA — SC 2.3.3) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* Tiptap editor */

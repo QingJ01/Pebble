@@ -203,11 +203,11 @@ impl OutlookProvider {
     }
 
     pub fn set_access_token(&self, token: String) {
-        *self.access_token.write().unwrap() = token;
+        *self.access_token.write().unwrap_or_else(|e| e.into_inner()) = token;
     }
 
     fn token(&self) -> String {
-        self.access_token.read().unwrap().clone()
+        self.access_token.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     async fn get(&self, url: &str) -> Result<reqwest::Response> {

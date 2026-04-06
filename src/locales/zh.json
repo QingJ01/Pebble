@@ -46,6 +46,7 @@
     "newMessage": "新邮件",
     "reply": "回复",
     "forward": "转发",
+    "discardDraftConfirm": "确定丢弃此草稿？",
     "to": "收件人",
     "cc": "抄送",
     "subject": "主题",
@@ -175,7 +176,8 @@
     "title": "附件",
     "download": "下载",
     "downloading": "下载中...",
-    "noAttachments": "无附件"
+    "noAttachments": "无附件",
+    "downloadFailed": "下载附件失败"
   },
   "search": {
     "title": "搜索",
@@ -236,6 +238,7 @@
     "unarchive": "取消归档",
     "unarchiveSuccess": "邮件已移至收件箱",
     "unarchiveFailed": "取消归档失败",
+    "deleteConfirm": "将此邮件移至废纸篓？",
     "deleteSuccess": "邮件已删除",
     "deleteFailed": "删除失败",
     "restoreSuccess": "邮件已恢复到收件箱",
@@ -294,6 +297,7 @@
     "proxyHost": "SOCKS5 代理",
     "proxyPort": "端口",
     "signInGoogle": "使用 Google 账号登录",
+    "signInOutlook": "使用 Outlook 账号登录",
     "orManual": "或手动添加账户",
     "adding": "正在添加账户…",
     "submit": "添加账户并同步",
@@ -324,8 +328,10 @@
     "restoreFromCloud": "从云端恢复"
   },
   "commandPalette": {
+    "title": "命令面板",
     "placeholder": "输入命令...",
-    "noResults": "未找到命令"
+    "noResults": "未找到命令",
+    "results": "{{count}} 个结果"
   },
   "privacy": {
     "blocked": "已拦截 {{items}}",
@@ -426,6 +432,11 @@
   "thread": {
     "title": "会话",
     "to": "收件人："
+  },
+  "errorBoundary": {
+    "title": "出了点问题",
+    "description": "请重试或刷新应用。",
+    "retry": "重试"
   },
   "languages": {
     "chinese": "中文",

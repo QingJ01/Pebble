@@ -13,6 +13,7 @@ import { MessageDetailSkeleton } from "./Skeleton";
 import PrivacyBanner from "./PrivacyBanner";
 import AttachmentList from "./AttachmentList";
 import SnoozePopover from "../features/inbox/SnoozePopover";
+import ConfirmDialog from "./ConfirmDialog";
 import { ShadowDomEmail } from "./ShadowDomEmail";
 
 import TranslatePopover from "../features/translate/TranslatePopover";
@@ -50,7 +51,7 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
     const saved = localStorage.getItem("pebble-privacy-mode");
     if (saved === "off") return "Off";
     if (saved === "strict") return "Strict";
-    // Default to relaxed (LoadOnce)
+    if (saved === "relaxed") return "LoadOnce";
     return "LoadOnce";
   });
   const [showSnooze, setShowSnooze] = useState(false);
@@ -59,6 +60,7 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
   const [bilingualResult, setBilingualResult] = useState<TranslateResult | null>(null);
   const [bilingualLoading, setBilingualLoading] = useState(false);
   const [showKanbanPicker, setShowKanbanPicker] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const inKanban = useKanbanStore((s) => s.cardIdSet.has(messageId));
 
   // Load message when messageId changes
@@ -460,25 +462,7 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
             {
               icon: Trash2,
               label: t("messageActions.delete"),
-              action: async () => {
-                queryClient.setQueriesData<MessageSummary[]>({ queryKey: ["messages"] }, (old) => old?.filter((m) => m.id !== message.id));
-                onBack();
-                try {
-                  await deleteMessage(message.id);
-                  queryClient.invalidateQueries({ queryKey: ["messages"] });
-                  queryClient.invalidateQueries({ queryKey: ["threads"] });
-                  useToastStore.getState().addToast({
-                    message: t("messageActions.deleteSuccess", "Message deleted"),
-                    type: "success",
-                  });
-                } catch {
-                  queryClient.invalidateQueries({ queryKey: ["messages"] });
-                  useToastStore.getState().addToast({
-                    message: t("messageActions.deleteFailed", "Failed to delete message"),
-                    type: "error",
-                  });
-                }
-              },
+              action: () => setShowDeleteConfirm(true),
             },
           ] as Array<{ icon: React.ComponentType<{ size?: number }>; label: string; action: () => void; active?: boolean; disabled?: boolean }>).map(({ icon: Icon, label, action, active, disabled }, i) => (
             <button
@@ -649,6 +633,36 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
           text={showTranslate.text}
           position={showTranslate.position}
           onClose={() => setShowTranslate(null)}
+        />
+      )}
+
+      {showDeleteConfirm && (
+        <ConfirmDialog
+          title={t("messageActions.delete", "Delete")}
+          message={t("messageActions.deleteConfirm", "Move this message to trash?")}
+          confirmLabel={t("common.delete", "Delete")}
+          destructive
+          onCancel={() => setShowDeleteConfirm(false)}
+          onConfirm={async () => {
+            setShowDeleteConfirm(false);
+            queryClient.setQueriesData<MessageSummary[]>({ queryKey: ["messages"] }, (old) => old?.filter((m) => m.id !== message.id));
+            onBack();
+            try {
+              await deleteMessage(message.id);
+              queryClient.invalidateQueries({ queryKey: ["messages"] });
+              queryClient.invalidateQueries({ queryKey: ["threads"] });
+              useToastStore.getState().addToast({
+                message: t("messageActions.deleteSuccess", "Message deleted"),
+                type: "success",
+              });
+            } catch {
+              queryClient.invalidateQueries({ queryKey: ["messages"] });
+              useToastStore.getState().addToast({
+                message: t("messageActions.deleteFailed", "Failed to delete message"),
+                type: "error",
+              });
+            }
+          }}
         />
       )}
     </div>

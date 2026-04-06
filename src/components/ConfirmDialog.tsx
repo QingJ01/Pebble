@@ -35,12 +35,18 @@ export default function ConfirmDialog({
   const { t } = useTranslation();
   const dialogRef = useRef<HTMLDivElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const previousFocus =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
-    confirmRef.current?.focus();
+    // For destructive actions, focus Cancel by default to prevent accidental confirmation
+    if (destructive) {
+      cancelRef.current?.focus();
+    } else {
+      confirmRef.current?.focus();
+    }
 
     function handleKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
@@ -121,6 +127,7 @@ export default function ConfirmDialog({
         </p>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
           <button
+            ref={cancelRef}
             onClick={onCancel}
             style={{
               padding: "7px 16px",

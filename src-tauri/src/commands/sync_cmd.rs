@@ -261,6 +261,7 @@ async fn start_sync_inner(
             tokio::spawn(async move {
                 use pebble_core::traits::{FetchQuery, FolderProvider, MailTransport};
                 let mut stop_rx = stop_rx;
+                let mut current_expires_at = expires_at;
 
                 let _ = app_for_progress.emit(
                     events::MAIL_SYNC_PROGRESS,
@@ -274,15 +275,17 @@ async fn start_sync_inner(
                         break;
                     }
 
-                    // Refresh token if needed
+                    // Refresh token if needed — update expires_at after successful refresh
                     if let Some(ref refresher_fn) = refresher {
-                        let should_refresh = expires_at
+                        let should_refresh = current_expires_at
                             .map(|exp| pebble_core::now_timestamp() >= exp - 60)
                             .unwrap_or(false);
                         if should_refresh {
                             match refresher_fn().await {
                                 Ok(new_token) => {
                                     provider_for_task.set_access_token(new_token);
+                                    // Update expires_at so we don't refresh again until next expiry
+                                    current_expires_at = Some(pebble_core::now_timestamp() + 3600);
                                 }
                                 Err(e) => {
                                     let _ = error_tx.send(pebble_mail::SyncError {
@@ -319,7 +322,14 @@ async fn start_sync_inner(
                         };
                         match provider_for_task.fetch_messages(&query).await {
                             Ok(result) => {
+                                // Deduplicate: only insert messages not already in the store
+                                let remote_ids: Vec<String> = result.messages.iter().map(|m| m.remote_id.clone()).collect();
+                                let existing = store.get_existing_remote_ids(&account_id_clone, &remote_ids)
+                                    .unwrap_or_default();
                                 for msg in &result.messages {
+                                    if existing.contains(&msg.remote_id) {
+                                        continue;
+                                    }
                                     let folder_ids = vec![folder.id.clone()];
                                     if let Err(e) = store.insert_message(msg, &folder_ids) {
                                         warn!("Failed to store Outlook message: {e}");

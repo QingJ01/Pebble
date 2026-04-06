@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-pebble-core = { path = "../pebble-core" }
+pebble-core = { path = "../pebble-core", features = ["rusqlite"] }
 rusqlite = { workspace = true }
 r2d2 = "0.8"
 r2d2_sqlite = "0.33"

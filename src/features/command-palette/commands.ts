@@ -140,9 +140,16 @@ export function buildCommands(t: (key: string, defaultValue: string) => string):
       id: "settings:toggle-notifications",
       name: t("commands.toggleNotifications", "Toggle Notifications"),
       category: t("commands.settings", "Settings"),
-      execute: () => {
+      execute: async () => {
         const current = localStorage.getItem(NOTIFICATIONS_KEY) === "true";
-        localStorage.setItem(NOTIFICATIONS_KEY, String(!current));
+        const next = !current;
+        localStorage.setItem(NOTIFICATIONS_KEY, String(next));
+        try {
+          const { invoke } = await import("@tauri-apps/api/core");
+          await invoke("set_notifications_enabled", { enabled: next });
+        } catch {
+          // backend may not have this command yet — localStorage is the source of truth
+        }
       },
     },
   ];

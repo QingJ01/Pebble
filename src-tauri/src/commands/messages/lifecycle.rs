@@ -59,9 +59,13 @@ pub async fn archive_message(
                             .map_err(|_| PebbleError::Internal("Invalid remote_id (not a UID)".to_string()))?;
                         match connect_imap(&state, &msg.account_id).await {
                             Ok(imap) => {
-                                imap.move_message(&source_folder.remote_id, uid, &archive_folder.remote_id).await?;
-                                imap.disconnect().await?;
-                                info!("Archived message {} (UID {}) from {} to {}", message_id, uid, source_folder.name, archive_folder.name);
+                                let result = imap.move_message(&source_folder.remote_id, uid, &archive_folder.remote_id).await;
+                                let _ = imap.disconnect().await;
+                                if let Err(e) = result {
+                                    tracing::warn!("IMAP move to archive failed: {e}");
+                                } else {
+                                    info!("Archived message {} (UID {}) from {} to {}", message_id, uid, source_folder.name, archive_folder.name);
+                                }
                             }
                             Err(e) => {
                                 tracing::warn!("IMAP connect failed for archive: {e}");

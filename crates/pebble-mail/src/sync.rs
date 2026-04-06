@@ -56,9 +56,16 @@ pub(crate) fn sanitize_filename(name: &str) -> String {
         .rsplit(|c: char| c == '/' || c == '\\')
         .next()
         .unwrap_or(name);
-    // Remove `..`, Windows-unsafe characters, and control characters.
-    let sanitized: String = base
-        .replace("..", "")
+    // Reject if the component is exactly ".."
+    if base == ".." || base == "." {
+        return "unnamed_attachment".to_string();
+    }
+    // Remove `..` sequences repeatedly until none remain, then strip unsafe chars.
+    let mut cleaned = base.to_string();
+    while cleaned.contains("..") {
+        cleaned = cleaned.replace("..", ".");
+    }
+    let sanitized: String = cleaned
         .chars()
         .map(|c| match c {
             '<' | '>' | ':' | '"' | '|' | '?' | '*' => '_',

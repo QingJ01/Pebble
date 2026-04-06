@@ -122,7 +122,7 @@ impl GmailSyncWorker {
 
     pub fn with_token_refresher(mut self, refresher: TokenRefresher, expires_at: Option<i64>) -> Self {
         self.token_refresher = Some(Arc::new(refresher));
-        *self.token_expires_at.lock().unwrap() = expires_at;
+        *self.token_expires_at.lock().unwrap_or_else(|e| e.into_inner()) = expires_at;
         self
     }
 
@@ -156,6 +156,7 @@ impl GmailSyncWorker {
         fetched: GmailFetchedMessage,
         fallback_folder_id: &str,
         thread_mappings: &mut Vec<(String, String)>,
+        folders_by_remote: &HashMap<String, String>,
     ) -> Result<bool> {
         let GmailFetchedMessage {
             mut message,
@@ -166,13 +167,7 @@ impl GmailSyncWorker {
         let thread_id = compute_thread_id(&message, thread_mappings);
         message.thread_id = Some(thread_id);
 
-        let folders_by_remote: HashMap<String, String> = self
-            .store
-            .list_folders(&self.account_id)?
-            .into_iter()
-            .map(|folder| (folder.remote_id, folder.id))
-            .collect();
-        let folder_ids = resolve_folder_ids(&folders_by_remote, &visible_label_ids, fallback_folder_id);
+        let folder_ids = resolve_folder_ids(folders_by_remote, &visible_label_ids, fallback_folder_id);
 
         self.store.insert_message(&message, &folder_ids)?;
         persist_message_attachments(
@@ -199,7 +194,7 @@ impl GmailSyncWorker {
     async fn ensure_valid_token(&self) -> Result<()> {
         let now = now_timestamp();
         let needs_refresh = {
-            let expires = self.token_expires_at.lock().unwrap();
+            let expires = self.token_expires_at.lock().unwrap_or_else(|e| e.into_inner());
             match *expires {
                 Some(exp) => now >= exp - 300, // 5 minute buffer
                 None => false,                 // No expiry info — assume valid
@@ -213,7 +208,7 @@ impl GmailSyncWorker {
                     Ok(new_token) => {
                         self.provider.set_access_token(new_token);
                         // Assume the new token is valid for 1 hour
-                        let mut expires = self.token_expires_at.lock().unwrap();
+                        let mut expires = self.token_expires_at.lock().unwrap_or_else(|e| e.into_inner());
                         *expires = Some(now + 3600);
                         info!("Gmail OAuth token refreshed for account {}", self.account_id);
                     }
@@ -278,11 +273,16 @@ impl GmailSyncWorker {
         let (_email, profile_history_id) = self.provider.get_profile().await?;
 
         // Sync every visible remote label, prioritizing system folders first.
-        let labels_to_sync = build_sync_label_ids(&self.store.list_folders(&self.account_id)?);
+        let all_folders = self.store.list_folders(&self.account_id)?;
+        let labels_to_sync = build_sync_label_ids(&all_folders);
+        let folders_by_remote: HashMap<String, String> = all_folders
+            .into_iter()
+            .map(|f| (f.remote_id, f.id))
+            .collect();
         let limit = if stored_cursor.is_some() { 50 } else { 200 };
 
         for label_id in &labels_to_sync {
-            if let Err(e) = self.sync_label(label_id, limit).await {
+            if let Err(e) = self.sync_label(label_id, limit, &folders_by_remote).await {
                 warn!("Gmail sync label {} failed: {}", label_id, e);
             }
         }
@@ -297,14 +297,9 @@ impl GmailSyncWorker {
     }
 
     /// Sync messages for a specific Gmail label.
-    async fn sync_label(&self, label_id: &str, limit: u32) -> Result<u32> {
-        let folder = self
-            .store
-            .list_folders(&self.account_id)?
-            .into_iter()
-            .find(|f| f.remote_id == label_id);
-        let folder_id = match &folder {
-            Some(f) => f.id.clone(),
+    async fn sync_label(&self, label_id: &str, limit: u32, folders_by_remote: &HashMap<String, String>) -> Result<u32> {
+        let folder_id = match folders_by_remote.get(label_id) {
+            Some(id) => id.clone(),
             None => {
                 debug!("No local folder found for label {}, skipping", label_id);
                 return Ok(0);
@@ -350,7 +345,7 @@ impl GmailSyncWorker {
                 .await
             {
                 Ok(fetched) => match self
-                    .store_fetched_message(fetched, &folder_id, &mut thread_mappings)
+                    .store_fetched_message(fetched, &folder_id, &mut thread_mappings, folders_by_remote)
                     .await
                 {
                     Ok(true) => stored_count += 1,
@@ -529,7 +524,7 @@ impl GmailSyncWorker {
                 {
                     Ok(fetched) => {
                         if let Err(e) = self
-                            .store_fetched_message(fetched, &inbox_folder_id, &mut thread_mappings)
+                            .store_fetched_message(fetched, &inbox_folder_id, &mut thread_mappings, &folders_by_remote)
                             .await
                         {
                             warn!("Failed to store history message {}: {}", gmail_id, e);

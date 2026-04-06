@@ -1,5 +1,5 @@
 use pebble_core::{Folder, FolderRole, FolderType, PebbleError, Result};
-use rusqlite::OptionalExtension;
+use rusqlite::{params, OptionalExtension};
 
 use crate::Store;
 
@@ -93,8 +93,35 @@ impl Store {
     }
 
     pub fn find_folder_by_role(&self, account_id: &str, role: FolderRole) -> Result<Option<Folder>> {
-        let folders = self.list_folders(account_id)?;
-        Ok(folders.into_iter().find(|f| f.role == Some(role.clone())))
+        let role_str = folder_role_to_str(&role);
+        self.with_read(|conn| {
+            let mut stmt = conn
+                .prepare_cached(
+                    "SELECT id, account_id, remote_id, name, folder_type, role, parent_id, color, is_system, sort_order
+                     FROM folders WHERE account_id = ?1 AND role = ?2 LIMIT 1",
+                )
+                .map_err(|e| PebbleError::Storage(e.to_string()))?;
+            let result = stmt
+                .query_row(params![account_id, role_str], |row| {
+                    let role_val: Option<String> = row.get(5)?;
+                    let is_system: i32 = row.get(8)?;
+                    Ok(Folder {
+                        id: row.get(0)?,
+                        account_id: row.get(1)?,
+                        remote_id: row.get(2)?,
+                        name: row.get(3)?,
+                        folder_type: str_to_folder_type(&row.get::<_, String>(4)?),
+                        role: role_val.and_then(|s| str_to_folder_role(&s)),
+                        parent_id: row.get(6)?,
+                        color: row.get(7)?,
+                        is_system: is_system != 0,
+                        sort_order: row.get(9)?,
+                    })
+                })
+                .optional()
+                .map_err(|e| PebbleError::Storage(e.to_string()))?;
+            Ok(result)
+        })
     }
 
     pub fn find_folder_by_name(&self, account_id: &str, name: &str) -> Result<Option<Folder>> {

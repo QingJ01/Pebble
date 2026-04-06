@@ -60,12 +60,15 @@ export default function ComposeView() {
   // Re-calculate from/to/cc once accounts data loads (fixes reply-all with async data)
   useEffect(() => {
     if (accounts.length === 0) return;
-    // Fix fromAccountId if it was empty or points to a non-existent account
-    if (!fromAccountId || !accounts.find((a) => a.id === fromAccountId)) {
-      setFromAccountId(activeAccountId || accounts[0]?.id || "");
+    // Determine the correct account ID using local variable (not stale state)
+    const newAccountId = (!fromAccountId || !accounts.find((a) => a.id === fromAccountId))
+      ? (activeAccountId || accounts[0]?.id || "")
+      : fromAccountId;
+    if (newAccountId !== fromAccountId) {
+      setFromAccountId(newAccountId);
     }
-    // Re-filter to/cc to remove own email address
-    const resolvedEmail = accounts.find((a) => a.id === fromAccountId)?.email || "";
+    // Re-filter to/cc to remove own email address using the resolved account
+    const resolvedEmail = accounts.find((a) => a.id === newAccountId)?.email || "";
     if (composeMode === "reply-all" && composeReplyTo && resolvedEmail) {
       setTo((prev) => prev.filter((addr) => addr !== resolvedEmail));
       setCc((prev) => prev.filter((addr) => addr !== resolvedEmail));
@@ -74,8 +77,8 @@ export default function ComposeView() {
 
   const [subject, setSubject] = useState(() => {
     if (!composeReplyTo) return "";
-    if (isReply) return `Re: ${composeReplyTo.subject.replace(/^Re:\s*/i, "")}`;
-    if (composeMode === "forward") return `Fwd: ${composeReplyTo.subject.replace(/^Fwd:\s*/i, "")}`;
+    if (isReply) return `Re: ${composeReplyTo.subject.replace(/^(Re:\s*|Fwd:\s*)+/i, "")}`;
+    if (composeMode === "forward") return `Fwd: ${composeReplyTo.subject.replace(/^(Re:\s*|Fwd:\s*)+/i, "")}`;
     return "";
   });
   const [sendError, setSendError] = useState<string | null>(null);

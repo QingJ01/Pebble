@@ -4,6 +4,7 @@ import { File, FileText, Image, FileArchive, Film, Music, Download, Loader, Chec
 import { listAttachments, downloadAttachment } from "@/lib/api";
 import type { Attachment } from "@/lib/api";
 import { sanitizeFilename } from "@/lib/sanitizeFilename";
+import { useToastStore } from "@/stores/toast.store";
 
 interface Props {
   messageId: string;
@@ -64,6 +65,7 @@ export default function AttachmentList({ messageId }: Props) {
       setDownloadedPaths((prev) => ({ ...prev, [attachment.id]: savePath }));
     } catch (err) {
       console.error("Failed to download attachment:", err);
+      useToastStore.getState().addToast({ message: t("attachments.downloadFailed", "Failed to download attachment"), type: "error" });
     } finally {
       setDownloadingId(null);
     }
