@@ -1,5 +1,6 @@
 use pebble_core::{new_id, PebbleError, Result};
 use rusqlite::OptionalExtension;
+use std::collections::HashMap;
 
 use crate::Store;
 
@@ -95,6 +96,62 @@ impl Store {
                 labels.push(row.map_err(|e| PebbleError::Storage(e.to_string()))?);
             }
             Ok(labels)
+        })
+    }
+
+    /// Get labels for multiple messages in one query.
+    pub fn get_message_labels_batch(&self, message_ids: &[String]) -> Result<HashMap<String, Vec<Label>>> {
+        if message_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        self.with_read(|conn| {
+            let placeholders: Vec<String> = (1..=message_ids.len()).map(|i| format!("?{i}")).collect();
+            let sql = format!(
+                "SELECT ml.message_id, l.id, l.name, l.color, l.is_system, l.rule_id
+                 FROM message_labels ml
+                 INNER JOIN labels l ON l.id = ml.label_id
+                 WHERE ml.message_id IN ({})
+                 ORDER BY ml.message_id, l.name",
+                placeholders.join(", ")
+            );
+            let mut stmt = conn
+                .prepare(&sql)
+                .map_err(|e| PebbleError::Storage(e.to_string()))?;
+
+            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
+                Vec::with_capacity(message_ids.len());
+            for message_id in message_ids {
+                param_values.push(Box::new(message_id.clone()));
+            }
+            let params: Vec<&dyn rusqlite::types::ToSql> =
+                param_values.iter().map(|v| v.as_ref()).collect();
+
+            let rows = stmt
+                .query_map(params.as_slice(), |row| {
+                    let is_system: i32 = row.get(4)?;
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        Label {
+                            id: row.get(1)?,
+                            name: row.get(2)?,
+                            color: row.get(3)?,
+                            is_system: is_system != 0,
+                            rule_id: row.get(5)?,
+                        },
+                    ))
+                })
+                .map_err(|e| PebbleError::Storage(e.to_string()))?;
+
+            let mut result: HashMap<String, Vec<Label>> = HashMap::new();
+            for message_id in message_ids {
+                result.entry(message_id.clone()).or_default();
+            }
+            for row in rows {
+                let (message_id, label) = row.map_err(|e| PebbleError::Storage(e.to_string()))?;
+                result.entry(message_id).or_default().push(label);
+            }
+            Ok(result)
         })
     }
 

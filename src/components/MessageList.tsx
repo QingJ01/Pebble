@@ -1,7 +1,9 @@
 import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { useQuery } from "@tanstack/react-query";
 import type { MessageSummary } from "@/lib/api";
+import { getMessageLabelsBatch } from "@/lib/api";
 import MessageItem from "./MessageItem";
 import { MessageListSkeleton } from "./Skeleton";
 
@@ -22,6 +24,13 @@ export default function MessageList({
 }: Props) {
   const { t } = useTranslation();
   const parentRef = useRef<HTMLDivElement>(null);
+  const messageIds = messages.map((message) => message.id);
+  const { data: labelsByMessage = {} } = useQuery({
+    queryKey: ["message-labels", messageIds],
+    queryFn: () => getMessageLabelsBatch(messageIds),
+    staleTime: 60_000,
+    enabled: messageIds.length > 0,
+  });
 
   const virtualizer = useVirtualizer({
     count: messages.length,
@@ -82,6 +91,7 @@ export default function MessageList({
             >
               <MessageItem
                 message={message}
+                labels={labelsByMessage[message.id] ?? []}
                 isSelected={message.id === selectedMessageId}
                 onClick={() => onSelectMessage(message.id)}
                 onToggleStar={onToggleStar}

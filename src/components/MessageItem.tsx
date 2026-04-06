@@ -1,14 +1,15 @@
 import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { Star, Paperclip, Archive, LayoutGrid } from "lucide-react";
-import type { MessageSummary } from "@/lib/api";
-import { updateMessageFlags, archiveMessage, getMessageLabels } from "@/lib/api";
+import type { Label, MessageSummary } from "@/lib/api";
+import { updateMessageFlags, archiveMessage } from "@/lib/api";
 import { useKanbanStore } from "@/stores/kanban.store";
 import { useToastStore } from "@/stores/toast.store";
 
 interface Props {
   message: MessageSummary;
+  labels?: Label[];
   isSelected: boolean;
   onClick: () => void;
   onToggleStar?: (messageId: string, newStarred: boolean) => void;
@@ -29,17 +30,12 @@ function formatDate(timestamp: number): string {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-function MessageItem({ message, isSelected, onClick, onToggleStar }: Props) {
+function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar }: Props) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [showActions, setShowActions] = useState(false);
   const fontWeight = message.is_read ? "normal" : "600";
   const inKanban = useKanbanStore((s) => s.cardIdSet.has(message.id));
-  const { data: labels = [] } = useQuery({
-    queryKey: ["labels", message.id],
-    queryFn: () => getMessageLabels(message.id),
-    staleTime: 60_000,
-  });
 
   return (
     <div

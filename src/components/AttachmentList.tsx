@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { File, FileText, Image, FileArchive, Film, Music, Download, Loader, Check } from "lucide-react";
 import { listAttachments, downloadAttachment } from "@/lib/api";
 import type { Attachment } from "@/lib/api";
+import { sanitizeFilename } from "@/lib/sanitizeFilename";
 
 interface Props {
   messageId: string;
@@ -57,12 +58,7 @@ export default function AttachmentList({ messageId }: Props) {
     try {
       const { downloadDir } = await import("@tauri-apps/api/path");
       const dir = await downloadDir();
-      // Sanitize filename to prevent path traversal
-      const safeName = attachment.filename
-        .replace(/[/\\]/g, "_")
-        .replace(/\.\./g, "")
-        .replace(/^\.+/, "")
-        .trim() || "download";
+      const safeName = sanitizeFilename(attachment.filename);
       const savePath = `${dir}/${safeName}`;
       await downloadAttachment(attachment.id, savePath);
       setDownloadedPaths((prev) => ({ ...prev, [attachment.id]: savePath }));

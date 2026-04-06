@@ -6,6 +6,19 @@ export type Theme = "light" | "dark" | "system";
 export type Language = "en" | "zh";
 export type NetworkStatus = "online" | "offline";
 
+/** Resolve "system" theme to an actual "dark" | "light" value. */
+function resolveTheme(theme: Theme): "dark" | "light" {
+  if (theme === "system") {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  return theme;
+}
+
+/** Apply the resolved theme to the DOM immediately (no React effect needed). */
+export function applyThemeToDom(theme: Theme) {
+  document.documentElement.setAttribute("data-theme", resolveTheme(theme));
+}
+
 function getComposeResetState() {
   return {
     composeMode: null,
@@ -84,6 +97,7 @@ export const useUIStore = create<UIState>((set) => ({
   },
   setTheme: (theme) => {
     localStorage.setItem("pebble-theme", theme);
+    applyThemeToDom(theme);
     set({ theme });
   },
   setLanguage: (lang) => {

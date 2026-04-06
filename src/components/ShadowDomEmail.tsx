@@ -38,9 +38,17 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
 
     shadow.innerHTML = `
       <style>
-        :host { all: initial; display: block; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px; color: #1a1a1a; word-break: break-word; }
+        :host {
+          all: initial;
+          display: block;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          font-size: 14px;
+          color: var(--color-text-primary);
+          background: transparent;
+          word-break: break-word;
+        }
         img { max-width: 100%; height: auto; }
-        a { color: #2563eb; }
+        a { color: var(--color-accent); }
         pre { white-space: pre-wrap; overflow-x: auto; }
         table { max-width: 100%; border-collapse: collapse; }
         body, div { word-wrap: break-word; overflow-wrap: break-word; }

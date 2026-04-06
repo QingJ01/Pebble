@@ -11,7 +11,7 @@ import SearchView from "../features/search/SearchView";
 import SnoozedView from "../features/snoozed/SnoozedView";
 import StarredView from "../features/starred/StarredView";
 import ToastContainer from "../components/ToastContainer";
-import { useUIStore } from "../stores/ui.store";
+import { useUIStore, applyThemeToDom } from "../stores/ui.store";
 import { useCommandStore } from "../stores/command.store";
 import { useKanbanStore } from "../stores/kanban.store";
 import { useKeyboard } from "../hooks/useKeyboard";
@@ -65,17 +65,12 @@ export default function Layout() {
   }, [queryClient, setActiveView]);
 
   useEffect(() => {
-    const root = document.documentElement;
+    applyThemeToDom(theme);
     if (theme === "system") {
       const mql = window.matchMedia("(prefers-color-scheme: dark)");
-      root.setAttribute("data-theme", mql.matches ? "dark" : "light");
-      const listener = (e: MediaQueryListEvent) => {
-        root.setAttribute("data-theme", e.matches ? "dark" : "light");
-      };
+      const listener = () => applyThemeToDom("system");
       mql.addEventListener("change", listener);
       return () => mql.removeEventListener("change", listener);
-    } else {
-      root.setAttribute("data-theme", theme);
     }
   }, [theme]);
 

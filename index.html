@@ -104,7 +104,11 @@
         100% { transform: translateX(350%); }
       }
     </style>
-    <script>window.__splashStart=Date.now();</script>
+    <script>
+      window.__splashStart=Date.now();
+      // Apply saved theme immediately to avoid flash of wrong theme
+      try{var t=localStorage.getItem('pebble-theme')||'light';var d=t==='system'?matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light':t;document.documentElement.setAttribute('data-theme',d)}catch(e){}
+    </script>
     <div id="splash">
       <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
         <path class="pebble-fill" d="M32 8C18 8 8 20 10 34c2 12 12 22 22 22s20-10 22-22C56 20 46 8 32 8z"/>

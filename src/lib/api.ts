@@ -501,6 +501,10 @@ export async function getMessageLabels(messageId: string): Promise<Label[]> {
   return invoke<Label[]>("get_message_labels", { messageId });
 }
 
+export async function getMessageLabelsBatch(messageIds: string[]): Promise<Record<string, Label[]>> {
+  return invoke<Record<string, Label[]>>("get_message_labels_batch", { messageIds });
+}
+
 export async function addMessageLabel(messageId: string, labelName: string): Promise<void> {
   return invoke<void>("add_message_label", { messageId, labelName });
 }

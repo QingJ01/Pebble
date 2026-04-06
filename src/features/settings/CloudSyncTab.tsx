@@ -26,7 +26,6 @@ const inputStyle: React.CSSProperties = {
   borderRadius: "6px",
   background: "var(--color-bg-secondary)",
   color: "var(--color-text-primary)",
-  outline: "none",
   boxSizing: "border-box",
 };
 
@@ -132,37 +131,63 @@ export default function CloudSyncTab() {
           marginBottom: "20px",
         }}
       >
-        {t("cloudSync.title")}
+        {t("cloudSync.title", "Settings Backup")}
       </h2>
 
+      <p
+        style={{
+          marginTop: "-8px",
+          marginBottom: "18px",
+          fontSize: "13px",
+          lineHeight: 1.5,
+          color: "var(--color-text-secondary)",
+          maxWidth: "640px",
+        }}
+      >
+        {t(
+          "cloudSync.description",
+          "Back up rules, cards, and account metadata to WebDAV. This does not sync mail data, attachments, or OAuth secrets.",
+        )}
+      </p>
+
       <div style={fieldGroupStyle}>
-        <label style={labelStyle}>{t("cloudSync.webdavUrl")}</label>
+        <label htmlFor="settings-backup-webdav-url" style={labelStyle}>{t("cloudSync.webdavUrl")}</label>
         <input
+          id="settings-backup-webdav-url"
+          name="webdav_url"
+          type="url"
           style={inputStyle}
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="https://dav.example.com/remote.php/dav/files/user/"
+          autoComplete="url"
         />
       </div>
 
       <div style={fieldGroupStyle}>
-        <label style={labelStyle}>{t("cloudSync.username")}</label>
+        <label htmlFor="settings-backup-username" style={labelStyle}>{t("cloudSync.username")}</label>
         <input
+          id="settings-backup-username"
+          name="webdav_username"
           style={inputStyle}
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           placeholder={t("cloudSync.username")}
+          autoComplete="username"
         />
       </div>
 
       <div style={fieldGroupStyle}>
-        <label style={labelStyle}>{t("cloudSync.password")}</label>
+        <label htmlFor="settings-backup-password" style={labelStyle}>{t("cloudSync.password")}</label>
         <input
+          id="settings-backup-password"
+          name="webdav_password"
           style={inputStyle}
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder={t("cloudSync.password")}
+          autoComplete="current-password"
         />
       </div>
 
@@ -190,7 +215,7 @@ export default function CloudSyncTab() {
           onClick={handleBackup}
           disabled={anyLoading}
         >
-          {backing ? t("common.saving") : t("cloudSync.backup")}
+          {backing ? t("common.saving") : t("cloudSync.backup", "Backup Settings")}
         </button>
         <button
           style={{
@@ -202,15 +227,33 @@ export default function CloudSyncTab() {
           onClick={() => setShowRestoreConfirm(true)}
           disabled={anyLoading}
         >
-          {restoring ? t("common.loading") : t("cloudSync.restore")}
+          {restoring ? t("common.loading") : t("cloudSync.restore", "Restore Settings Backup")}
         </button>
+      </div>
+
+      <div
+        style={{
+          marginTop: "12px",
+          fontSize: "12px",
+          lineHeight: 1.5,
+          color: "var(--color-text-secondary)",
+          maxWidth: "640px",
+        }}
+      >
+        {t(
+          "cloudSync.restoreNotice",
+          "Restoring is partial: email accounts will be recreated without passwords or OAuth tokens, and translation providers may need to be reconnected.",
+        )}
       </div>
 
       {/* Restore confirmation */}
       {showRestoreConfirm && (
         <ConfirmDialog
-          title={t("cloudSync.restore")}
-          message={t("cloudSync.restoreConfirm", "This will overwrite your local data with the cloud backup. Continue?")}
+          title={t("cloudSync.restore", "Restore Settings Backup")}
+          message={t(
+            "cloudSync.restoreConfirm",
+            "This will replace your local rules, cards, and saved account metadata with the backup. Reauthentication will still be required. Continue?",
+          )}
           destructive
           onCancel={() => setShowRestoreConfirm(false)}
           onConfirm={() => {
@@ -236,6 +279,8 @@ export default function CloudSyncTab() {
       {/* Status message */}
       {statusMsg && (
         <div
+          role={statusType === "error" ? "alert" : "status"}
+          aria-live="polite"
           style={{
             marginTop: "14px",
             padding: "10px 14px",

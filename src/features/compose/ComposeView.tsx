@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useEditor, useEditorState, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -88,19 +88,32 @@ export default function ComposeView() {
   const [htmlPreview, setHtmlPreview] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Snapshot the initial compose state so pre-populated reply/forward
+  // fields don't immediately trigger the "unsaved draft" guard.
+  const initialSnapshot = useRef<{
+    to: string[]; cc: string[]; bcc: string[]; subject: string;
+  } | null>(null);
+  if (!initialSnapshot.current) {
+    initialSnapshot.current = { to: [...to], cc: [...cc], bcc: [...bcc], subject };
+  }
+
+  const arraysEqual = useCallback(
+    (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]),
+    [],
+  );
+
   // Track dirty state for leave-protection
   useEffect(() => {
-    useUIStore.getState().setComposeDirty(
-      hasComposeDraft({
-        to,
-        cc,
-        bcc,
-        subject,
-        rawSource,
-        richTextHtml,
-      }),
-    );
-  }, [bcc, cc, rawSource, richTextHtml, subject, to]);
+    const init = initialSnapshot.current!;
+    const userChanged =
+      !arraysEqual(to, init.to) ||
+      !arraysEqual(cc, init.cc) ||
+      !arraysEqual(bcc, init.bcc) ||
+      subject !== init.subject ||
+      rawSource.trim().length > 0 ||
+      hasComposeDraft({ to: [], cc: [], bcc: [], subject: "", rawSource, richTextHtml });
+    useUIStore.getState().setComposeDirty(userChanged);
+  }, [arraysEqual, bcc, cc, rawSource, richTextHtml, subject, to]);
 
   useEffect(() => {
     if (!sendError) return;

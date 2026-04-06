@@ -29,7 +29,6 @@ export default function SearchFilters({ filters, onChange, onClear }: Props) {
     borderRadius: "4px",
     backgroundColor: "var(--color-bg)",
     color: "var(--color-text-primary)",
-    outline: "none",
     boxSizing: "border-box",
   };
 
@@ -47,35 +46,46 @@ export default function SearchFilters({ filters, onChange, onClear }: Props) {
     >
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
         <div style={fieldStyle}>
-          <label style={labelStyle}>{t("search.from")}</label>
+          <label htmlFor="search-filter-from" style={labelStyle}>{t("search.from")}</label>
           <input
+            id="search-filter-from"
+            name="from"
             type="text"
             value={filters.from || ""}
             onChange={(e) => update({ from: e.target.value || undefined })}
+            autoComplete="off"
             style={inputStyle}
           />
         </div>
         <div style={fieldStyle}>
-          <label style={labelStyle}>{t("search.to")}</label>
+          <label htmlFor="search-filter-to" style={labelStyle}>{t("search.to")}</label>
           <input
+            id="search-filter-to"
+            name="to"
             type="text"
             value={filters.to || ""}
             onChange={(e) => update({ to: e.target.value || undefined })}
+            autoComplete="off"
             style={inputStyle}
           />
         </div>
         <div style={fieldStyle}>
-          <label style={labelStyle}>{t("search.subject")}</label>
+          <label htmlFor="search-filter-subject" style={labelStyle}>{t("search.subject")}</label>
           <input
+            id="search-filter-subject"
+            name="subject"
             type="text"
             value={filters.subject || ""}
             onChange={(e) => update({ subject: e.target.value || undefined })}
+            autoComplete="off"
             style={inputStyle}
           />
         </div>
         <div style={fieldStyle}>
-          <label style={labelStyle}>{t("search.dateFrom")}</label>
+          <label htmlFor="search-filter-date-from" style={labelStyle}>{t("search.dateFrom")}</label>
           <input
+            id="search-filter-date-from"
+            name="date_from"
             type="date"
             value={
               filters.dateFrom
@@ -90,8 +100,10 @@ export default function SearchFilters({ filters, onChange, onClear }: Props) {
           />
         </div>
         <div style={fieldStyle}>
-          <label style={labelStyle}>{t("search.dateTo")}</label>
+          <label htmlFor="search-filter-date-to" style={labelStyle}>{t("search.dateTo")}</label>
           <input
+            id="search-filter-date-to"
+            name="date_to"
             type="date"
             value={
               filters.dateTo

@@ -31,7 +31,6 @@ const inputStyle: React.CSSProperties = {
   borderRadius: "6px",
   background: "var(--color-bg-secondary)",
   color: "var(--color-text-primary)",
-  outline: "none",
   boxSizing: "border-box",
 };
 
@@ -187,12 +186,16 @@ export default function TranslateTab() {
       case "deeplx":
         return (
           <div style={fieldGroupStyle}>
-            <label style={labelStyle}>{t("translate.endpointUrl")}</label>
+            <label htmlFor="translate-deeplx-endpoint" style={labelStyle}>{t("translate.endpointUrl")}</label>
             <input
+              id="translate-deeplx-endpoint"
+              name="deeplx_endpoint"
+              type="url"
               style={inputStyle}
               value={deeplxEndpoint}
               onChange={(e) => setDeeplxEndpoint(e.target.value)}
               placeholder="http://localhost:1188/translate"
+              autoComplete="off"
             />
           </div>
         );
@@ -201,13 +204,16 @@ export default function TranslateTab() {
         return (
           <>
             <div style={fieldGroupStyle}>
-              <label style={labelStyle}>{t("translate.apiKey")}</label>
+              <label htmlFor="translate-deepl-api-key" style={labelStyle}>{t("translate.apiKey")}</label>
               <input
+                id="translate-deepl-api-key"
+                name="deepl_api_key"
                 style={inputStyle}
                 type="password"
                 value={deeplApiKey}
                 onChange={(e) => setDeeplApiKey(e.target.value)}
                 placeholder="your-deepl-api-key"
+                autoComplete="current-password"
               />
             </div>
             <div style={{ ...fieldGroupStyle, display: "flex", alignItems: "center", gap: "8px" }}>
@@ -228,54 +234,73 @@ export default function TranslateTab() {
         return (
           <>
             <div style={fieldGroupStyle}>
-              <label style={labelStyle}>{t("translate.endpoint")}</label>
+              <label htmlFor="translate-generic-endpoint" style={labelStyle}>{t("translate.endpoint")}</label>
               <input
+                id="translate-generic-endpoint"
+                name="generic_endpoint"
+                type="url"
                 style={inputStyle}
                 value={genericEndpoint}
                 onChange={(e) => setGenericEndpoint(e.target.value)}
                 placeholder="https://api.example.com/translate"
+                autoComplete="off"
               />
             </div>
             <div style={fieldGroupStyle}>
-              <label style={labelStyle}>{t("translate.apiKeyOptional")}</label>
+              <label htmlFor="translate-generic-api-key" style={labelStyle}>{t("translate.apiKeyOptional")}</label>
               <input
+                id="translate-generic-api-key"
+                name="generic_api_key"
                 style={inputStyle}
                 type="password"
                 value={genericApiKey}
                 onChange={(e) => setGenericApiKey(e.target.value)}
                 placeholder={t("translate.apiKeyOptional")}
+                autoComplete="current-password"
               />
             </div>
             <div style={fieldGroupStyle}>
-              <label style={labelStyle}>{t("translate.sourceLangParam")}</label>
+              <label htmlFor="translate-generic-source-param" style={labelStyle}>{t("translate.sourceLangParam")}</label>
               <input
+                id="translate-generic-source-param"
+                name="generic_source_lang_param"
                 style={inputStyle}
                 value={genericSourceLangParam}
                 onChange={(e) => setGenericSourceLangParam(e.target.value)}
+                autoComplete="off"
               />
             </div>
             <div style={fieldGroupStyle}>
-              <label style={labelStyle}>{t("translate.targetLangParam")}</label>
+              <label htmlFor="translate-generic-target-param" style={labelStyle}>{t("translate.targetLangParam")}</label>
               <input
+                id="translate-generic-target-param"
+                name="generic_target_lang_param"
                 style={inputStyle}
                 value={genericTargetLangParam}
                 onChange={(e) => setGenericTargetLangParam(e.target.value)}
+                autoComplete="off"
               />
             </div>
             <div style={fieldGroupStyle}>
-              <label style={labelStyle}>{t("translate.textParam")}</label>
+              <label htmlFor="translate-generic-text-param" style={labelStyle}>{t("translate.textParam")}</label>
               <input
+                id="translate-generic-text-param"
+                name="generic_text_param"
                 style={inputStyle}
                 value={genericTextParam}
                 onChange={(e) => setGenericTextParam(e.target.value)}
+                autoComplete="off"
               />
             </div>
             <div style={fieldGroupStyle}>
-              <label style={labelStyle}>{t("translate.resultPath")}</label>
+              <label htmlFor="translate-generic-result-path" style={labelStyle}>{t("translate.resultPath")}</label>
               <input
+                id="translate-generic-result-path"
+                name="generic_result_path"
                 style={inputStyle}
                 value={genericResultPath}
                 onChange={(e) => setGenericResultPath(e.target.value)}
+                autoComplete="off"
               />
             </div>
           </>
@@ -285,36 +310,48 @@ export default function TranslateTab() {
         return (
           <>
             <div style={fieldGroupStyle}>
-              <label style={labelStyle}>{t("translate.endpoint")}</label>
+              <label htmlFor="translate-llm-endpoint" style={labelStyle}>{t("translate.endpoint")}</label>
               <input
+                id="translate-llm-endpoint"
+                name="llm_endpoint"
+                type="url"
                 style={inputStyle}
                 value={llmEndpoint}
                 onChange={(e) => setLlmEndpoint(e.target.value)}
                 placeholder="https://api.openai.com/v1"
+                autoComplete="off"
               />
             </div>
             <div style={fieldGroupStyle}>
-              <label style={labelStyle}>{t("translate.apiKey")}</label>
+              <label htmlFor="translate-llm-api-key" style={labelStyle}>{t("translate.apiKey")}</label>
               <input
+                id="translate-llm-api-key"
+                name="llm_api_key"
                 style={inputStyle}
                 type="password"
                 value={llmApiKey}
                 onChange={(e) => setLlmApiKey(e.target.value)}
                 placeholder="your-api-key"
+                autoComplete="current-password"
               />
             </div>
             <div style={fieldGroupStyle}>
-              <label style={labelStyle}>{t("translate.model")}</label>
+              <label htmlFor="translate-llm-model" style={labelStyle}>{t("translate.model")}</label>
               <input
+                id="translate-llm-model"
+                name="llm_model"
                 style={inputStyle}
                 value={llmModel}
                 onChange={(e) => setLlmModel(e.target.value)}
                 placeholder="gpt-4o-mini"
+                autoComplete="off"
               />
             </div>
             <div style={fieldGroupStyle}>
-              <label style={labelStyle}>{t("translate.mode")}</label>
+              <label htmlFor="translate-llm-mode" style={labelStyle}>{t("translate.mode")}</label>
               <select
+                id="translate-llm-mode"
+                name="llm_mode"
                 style={inputStyle}
                 value={llmMode}
                 onChange={(e) => setLlmMode(e.target.value as "completions" | "responses")}
@@ -349,8 +386,10 @@ export default function TranslateTab() {
 
       {/* Provider selector */}
       <div style={fieldGroupStyle}>
-        <label style={labelStyle}>{t("translate.provider")}</label>
+        <label htmlFor="translate-provider" style={labelStyle}>{t("translate.provider")}</label>
         <select
+          id="translate-provider"
+          name="translate_provider"
           style={inputStyle}
           value={providerType}
           onChange={(e) => setProviderType(e.target.value as ProviderType)}
@@ -397,6 +436,8 @@ export default function TranslateTab() {
       {/* Status message */}
       {statusMsg && (
         <div
+          role={statusType === "error" ? "alert" : "status"}
+          aria-live="polite"
           style={{
             marginTop: "14px",
             padding: "10px 14px",
