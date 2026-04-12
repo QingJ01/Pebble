@@ -21,6 +21,8 @@ export default function ToastContainer() {
 
   return (
     <div
+      role="region"
+      aria-label="Notifications"
       style={{
         position: "fixed",
         bottom: "56px",
@@ -38,6 +40,8 @@ export default function ToastContainer() {
         return (
           <div
             key={toast.id}
+            role={toast.type === "error" ? "alert" : "status"}
+            aria-live={toast.type === "error" ? "assertive" : "polite"}
             style={{
               display: "flex",
               alignItems: "center",
@@ -86,6 +90,7 @@ export default function ToastContainer() {
               </button>
             )}
             <button
+              aria-label="Close notification"
               onClick={() => removeToast(toast.id)}
               style={{
                 background: "none",
