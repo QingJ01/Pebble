@@ -3,12 +3,69 @@ use serde::{Deserialize, Serialize};
 
 use crate::Store;
 
+/// Maximum accepted size for a settings backup download.
+/// Settings backups (accounts metadata, rules, kanban cards, translate config)
+/// fit comfortably under this limit; anything larger is almost certainly
+/// corrupted, malicious, or not a settings backup at all.
+pub const MAX_BACKUP_SIZE_BYTES: usize = 16 * 1024 * 1024;
+
+/// Highest backup schema version this build understands.
+pub const BACKUP_SCHEMA_VERSION: u32 = 1;
+
 fn provider_slug(provider: &pebble_core::ProviderType) -> &'static str {
     match provider {
         pebble_core::ProviderType::Imap => "imap",
         pebble_core::ProviderType::Gmail => "gmail",
         pebble_core::ProviderType::Outlook => "outlook",
     }
+}
+
+/// Lightweight summary of a backup for user confirmation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupPreview {
+    pub version: u32,
+    pub exported_at: i64,
+    pub account_count: usize,
+    pub rule_count: usize,
+    pub kanban_card_count: usize,
+    pub has_translate_config: bool,
+    pub size_bytes: usize,
+}
+
+/// Validate a downloaded backup payload and return a preview summary.
+/// Enforces size limit, JSON validity, and schema version compatibility.
+pub fn preview_backup(data: &[u8]) -> Result<BackupPreview> {
+    if data.len() > MAX_BACKUP_SIZE_BYTES {
+        return Err(PebbleError::Validation(format!(
+            "Backup file is too large ({} bytes, max {})",
+            data.len(),
+            MAX_BACKUP_SIZE_BYTES
+        )));
+    }
+    let backup: SettingsBackup = serde_json::from_slice(data).map_err(|e| {
+        PebbleError::Validation(format!(
+            "Backup file is not a valid settings backup: {e}"
+        ))
+    })?;
+    if backup.version == 0 || backup.version > BACKUP_SCHEMA_VERSION {
+        return Err(PebbleError::Validation(format!(
+            "Unsupported backup version {} (this build supports up to {})",
+            backup.version, BACKUP_SCHEMA_VERSION
+        )));
+    }
+    Ok(BackupPreview {
+        version: backup.version,
+        exported_at: backup.exported_at,
+        account_count: backup.accounts.len(),
+        rule_count: backup.rules.len(),
+        kanban_card_count: backup.kanban_cards.len(),
+        has_translate_config: backup
+            .translate_config
+            .as_ref()
+            .map(|tc| !tc.config.is_empty())
+            .unwrap_or(false),
+        size_bytes: data.len(),
+    })
 }
 
 /// Portable settings backup payload.
@@ -109,9 +166,12 @@ impl WebDavClient {
     }
 
     /// Download data from a path relative to the WebDAV root.
+    /// Rejects responses larger than `MAX_BACKUP_SIZE_BYTES` without buffering
+    /// the full body into memory — important for defending against malicious
+    /// or corrupt files on the remote server.
     pub async fn download(&self, path: &str) -> Result<Vec<u8>> {
         let url = format!("{}/{}", self.url, path.trim_start_matches('/'));
-        let resp = self
+        let mut resp = self
             .client
             .get(&url)
             .basic_auth(&self.username, Some(&self.password))
@@ -120,17 +180,39 @@ impl WebDavClient {
             .map_err(|e| PebbleError::Network(format!("WebDAV GET failed: {e}")))?;
 
         let status = resp.status().as_u16();
-        if (200..300).contains(&status) {
-            let bytes = resp
-                .bytes()
-                .await
-                .map_err(|e| PebbleError::Network(format!("Failed to read response body: {e}")))?;
-            Ok(bytes.to_vec())
-        } else {
-            Err(PebbleError::Network(format!(
+        if !(200..300).contains(&status) {
+            return Err(PebbleError::Network(format!(
                 "WebDAV GET returned {status}"
-            )))
+            )));
         }
+
+        // Reject immediately if server advertises a size over the limit.
+        if let Some(len) = resp.content_length() {
+            if len as usize > MAX_BACKUP_SIZE_BYTES {
+                return Err(PebbleError::Validation(format!(
+                    "Backup file is too large ({} bytes, max {})",
+                    len, MAX_BACKUP_SIZE_BYTES
+                )));
+            }
+        }
+
+        // Stream the body chunk-by-chunk with a hard cap so a lying or missing
+        // Content-Length cannot blow up memory.
+        let mut buf: Vec<u8> = Vec::with_capacity(8 * 1024);
+        while let Some(chunk) = resp
+            .chunk()
+            .await
+            .map_err(|e| PebbleError::Network(format!("Failed to read response body: {e}")))?
+        {
+            if buf.len() + chunk.len() > MAX_BACKUP_SIZE_BYTES {
+                return Err(PebbleError::Validation(format!(
+                    "Backup file exceeds maximum size ({} bytes)",
+                    MAX_BACKUP_SIZE_BYTES
+                )));
+            }
+            buf.extend_from_slice(&chunk);
+        }
+        Ok(buf)
     }
 }
 
@@ -174,9 +256,23 @@ impl Store {
     ///
     /// The entire import runs inside a single transaction so that a crash
     /// mid-import cannot leave the store in a partially-deleted state.
+    /// Validates size and schema version before touching the database.
     pub fn import_settings(&self, data: &[u8]) -> Result<()> {
+        if data.len() > MAX_BACKUP_SIZE_BYTES {
+            return Err(PebbleError::Validation(format!(
+                "Backup file is too large ({} bytes, max {})",
+                data.len(),
+                MAX_BACKUP_SIZE_BYTES
+            )));
+        }
         let backup: SettingsBackup = serde_json::from_slice(data)
-            .map_err(|e| PebbleError::Internal(format!("Failed to deserialize settings: {e}")))?;
+            .map_err(|e| PebbleError::Validation(format!("Failed to deserialize settings: {e}")))?;
+        if backup.version == 0 || backup.version > BACKUP_SCHEMA_VERSION {
+            return Err(PebbleError::Validation(format!(
+                "Unsupported backup version {} (this build supports up to {})",
+                backup.version, BACKUP_SCHEMA_VERSION
+            )));
+        }
 
         self.with_write(|conn| {
             conn.execute_batch("BEGIN")
@@ -194,15 +290,25 @@ impl Store {
                         .map_err(|e| PebbleError::Storage(e.to_string()))?;
                     if !exists {
                         let now = pebble_core::now_timestamp();
-                        let sync_state = serde_json::json!({
-                            "provider": provider_slug(&ab.provider),
-                            "needs_reauth": true,
-                            "restore_is_partial": true,
-                            "restored_from_backup_at": now,
-                        });
+                        let mut sync_state = crate::accounts::SyncState {
+                            provider: Some(provider_slug(&ab.provider).to_string()),
+                            ..Default::default()
+                        };
+                        sync_state
+                            .extra
+                            .insert("needs_reauth".into(), serde_json::Value::Bool(true));
+                        sync_state.extra.insert(
+                            "restore_is_partial".into(),
+                            serde_json::Value::Bool(true),
+                        );
+                        sync_state.extra.insert(
+                            "restored_from_backup_at".into(),
+                            serde_json::Value::Number(now.into()),
+                        );
+                        let sync_state_json = sync_state.to_json()?;
                         conn.execute(
                             "INSERT INTO accounts (id, email, display_name, provider, sync_state, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                            rusqlite::params![&ab.id, &ab.email, &ab.display_name, provider_slug(&ab.provider), sync_state.to_string(), now, now],
+                            rusqlite::params![&ab.id, &ab.email, &ab.display_name, provider_slug(&ab.provider), sync_state_json, now, now],
                         ).map_err(|e| PebbleError::Storage(e.to_string()))?;
                     }
                 }
@@ -219,13 +325,13 @@ impl Store {
 
                 // Upsert kanban cards
                 for card in &backup.kanban_cards {
-                    self.upsert_kanban_card(card)?;
+                    Self::upsert_kanban_card_with_conn(conn, card)?;
                 }
 
                 // Upsert translate config — skip if config field is empty (redacted export)
                 if let Some(tc) = &backup.translate_config {
                     if !tc.config.is_empty() {
-                        self.save_translate_config(tc)?;
+                        Self::save_translate_config_with_conn(conn, tc)?;
                     }
                 }
 
@@ -411,12 +517,17 @@ mod tests {
         store.import_settings(&data).unwrap();
 
         let sync_state = store
-            .get_account_sync_state("gmail-account")
+            .get_sync_state("gmail-account")
             .unwrap()
             .expect("expected sync_state metadata");
-        let value: serde_json::Value = serde_json::from_str(&sync_state).unwrap();
-        assert_eq!(value["provider"], "gmail");
-        assert_eq!(value["needs_reauth"], true);
-        assert_eq!(value["restore_is_partial"], true);
+        assert_eq!(sync_state.provider.as_deref(), Some("gmail"));
+        assert_eq!(
+            sync_state.extra.get("needs_reauth"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        assert_eq!(
+            sync_state.extra.get("restore_is_partial"),
+            Some(&serde_json::Value::Bool(true))
+        );
     }
 }

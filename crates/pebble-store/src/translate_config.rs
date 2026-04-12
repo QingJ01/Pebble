@@ -3,20 +3,22 @@ use rusqlite::params;
 use crate::Store;
 
 impl Store {
+    pub(crate) fn save_translate_config_with_conn(conn: &rusqlite::Connection, config: &TranslateConfig) -> Result<()> {
+        conn.execute(
+            "INSERT INTO translate_config (id, provider_type, config, is_enabled, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(id) DO UPDATE SET
+                 provider_type = excluded.provider_type,
+                 config = excluded.config,
+                 is_enabled = excluded.is_enabled,
+                 updated_at = excluded.updated_at",
+            params![config.id, config.provider_type, config.config, config.is_enabled as i32, config.created_at, config.updated_at],
+        )?;
+        Ok(())
+    }
+
     pub fn save_translate_config(&self, config: &TranslateConfig) -> Result<()> {
-        self.with_write(|conn| {
-            conn.execute(
-                "INSERT INTO translate_config (id, provider_type, config, is_enabled, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                 ON CONFLICT(id) DO UPDATE SET
-                     provider_type = excluded.provider_type,
-                     config = excluded.config,
-                     is_enabled = excluded.is_enabled,
-                     updated_at = excluded.updated_at",
-                params![config.id, config.provider_type, config.config, config.is_enabled as i32, config.created_at, config.updated_at],
-            )?;
-            Ok(())
-        })
+        self.with_write(|conn| Self::save_translate_config_with_conn(conn, config))
     }
 
     pub fn get_translate_config(&self) -> Result<Option<TranslateConfig>> {

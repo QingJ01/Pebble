@@ -30,25 +30,27 @@ fn row_to_kanban_card(row: &rusqlite::Row) -> rusqlite::Result<KanbanCard> {
 }
 
 impl Store {
+    pub(crate) fn upsert_kanban_card_with_conn(conn: &rusqlite::Connection, card: &KanbanCard) -> Result<()> {
+        conn.execute(
+            "INSERT INTO kanban_cards (message_id, column_name, position, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(message_id) DO UPDATE SET
+               column_name = excluded.column_name,
+               position = excluded.position,
+               updated_at = excluded.updated_at",
+            params![
+                card.message_id,
+                column_to_str(&card.column),
+                card.position,
+                card.created_at,
+                card.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
     pub fn upsert_kanban_card(&self, card: &KanbanCard) -> Result<()> {
-        self.with_write(|conn| {
-            conn.execute(
-                "INSERT INTO kanban_cards (message_id, column_name, position, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)
-                 ON CONFLICT(message_id) DO UPDATE SET
-                   column_name = excluded.column_name,
-                   position = excluded.position,
-                   updated_at = excluded.updated_at",
-                params![
-                    card.message_id,
-                    column_to_str(&card.column),
-                    card.position,
-                    card.created_at,
-                    card.updated_at,
-                ],
-            )?;
-            Ok(())
-        })
+        self.with_write(|conn| Self::upsert_kanban_card_with_conn(conn, card))
     }
 
     pub fn list_kanban_cards(&self, column: Option<&KanbanColumn>) -> Result<Vec<KanbanCard>> {
