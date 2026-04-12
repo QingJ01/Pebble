@@ -22,7 +22,7 @@ const EMPTY_THREADS: ThreadSummary[] = [];
 
 export default function InboxView() {
   const { t } = useTranslation();
-  const { setActiveView } = useUIStore();
+  const setActiveView = useUIStore((s) => s.setActiveView);
   const activeFolderId = useMailStore((s) => s.activeFolderId);
   const activeAccountId = useMailStore((s) => s.activeAccountId);
   const selectedMessageId = useMailStore((s) => s.selectedMessageId);
