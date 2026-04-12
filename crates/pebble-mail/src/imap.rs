@@ -44,6 +44,7 @@ pub struct ImapConfig {
     pub host: String,
     pub port: u16,
     pub username: String,
+    #[serde(skip_serializing)]
     pub password: String,
     pub security: ConnectionSecurity,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -106,6 +107,7 @@ pub struct SmtpConfig {
     pub host: String,
     pub port: u16,
     pub username: String,
+    #[serde(skip_serializing)]
     pub password: String,
     pub security: ConnectionSecurity,
 }
@@ -166,10 +168,6 @@ struct PrefixedStream<T> {
 }
 
 impl<T> PrefixedStream<T> {
-    fn new(inner: T) -> Self {
-        Self { prefix: Vec::new(), pos: 0, inner }
-    }
-
     fn with_prefix(prefix: Vec<u8>, inner: T) -> Self {
         Self { prefix, pos: 0, inner }
     }
@@ -206,16 +204,67 @@ impl<T: AsyncWrite + Unpin> AsyncWrite for PrefixedStream<T> {
     }
 }
 
-/// Type alias for a TLS-wrapped IMAP session using Tokio.
-type TlsSession = async_imap::Session<PrefixedStream<TlsStream<TcpStream>>>;
-/// Type alias for a plain-TCP IMAP session using Tokio.
-type PlainSession = async_imap::Session<PrefixedStream<TcpStream>>;
-
-/// The underlying session, either TLS or plain.
-enum ImapSession {
-    Tls(Box<TlsSession>),
-    Plain(Box<PlainSession>),
+/// A stream that is either wrapped in TLS or raw TCP. Implementing the
+/// tokio async I/O traits on this enum means `async_imap::Session` is
+/// generic over a single type, so every operation site can drop the old
+/// `match self.session { Tls(_) => ..., Plain(_) => ... }` duplication.
+enum InnerStream {
+    Tls(TlsStream<TcpStream>),
+    Plain(TcpStream),
 }
+
+impl std::fmt::Debug for InnerStream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InnerStream::Tls(_) => f.debug_struct("InnerStream::Tls").finish(),
+            InnerStream::Plain(_) => f.debug_struct("InnerStream::Plain").finish(),
+        }
+    }
+}
+
+impl AsyncRead for InnerStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        match self.get_mut() {
+            InnerStream::Tls(s) => Pin::new(s).poll_read(cx, buf),
+            InnerStream::Plain(s) => Pin::new(s).poll_read(cx, buf),
+        }
+    }
+}
+
+impl AsyncWrite for InnerStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        match self.get_mut() {
+            InnerStream::Tls(s) => Pin::new(s).poll_write(cx, buf),
+            InnerStream::Plain(s) => Pin::new(s).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match self.get_mut() {
+            InnerStream::Tls(s) => Pin::new(s).poll_flush(cx),
+            InnerStream::Plain(s) => Pin::new(s).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match self.get_mut() {
+            InnerStream::Tls(s) => Pin::new(s).poll_shutdown(cx),
+            InnerStream::Plain(s) => Pin::new(s).poll_shutdown(cx),
+        }
+    }
+}
+
+/// Unified IMAP session type — a single `async_imap::Session` regardless
+/// of whether the underlying transport is TLS or plain TCP.
+type ImapSession = async_imap::Session<PrefixedStream<InnerStream>>;
 
 /// An IMAP provider that manages a connection and session.
 pub struct ImapProvider {
@@ -396,25 +445,24 @@ impl ImapProvider {
 
         let needs_id = self.needs_id_command();
 
-        let session = match self.config.security {
+        let session: ImapSession = match self.config.security {
             ConnectionSecurity::Tls => {
                 // Implicit TLS — wrap immediately
                 debug!("Starting TLS handshake (rustls) with SNI={}", self.config.host);
                 let mut tls_stream = tls_connect(&self.config.host, tcp).await?;
 
-                let stream = if needs_id {
-                    let greeting = Self::send_id_before_login(&mut tls_stream).await?;
-                    PrefixedStream::with_prefix(greeting, tls_stream)
+                let prefix = if needs_id {
+                    Self::send_id_before_login(&mut tls_stream).await?
                 } else {
-                    PrefixedStream::new(tls_stream)
+                    Vec::new()
                 };
+                let stream = PrefixedStream::with_prefix(prefix, InnerStream::Tls(tls_stream));
 
                 let client = Client::new(stream);
-                let sess = client
+                client
                     .login(&self.config.username, &self.config.password)
                     .await
-                    .map_err(|(e, _)| PebbleError::Auth(format!("IMAP login failed: {e}")))?;
-                ImapSession::Tls(Box::new(sess))
+                    .map_err(|(e, _)| PebbleError::Auth(format!("IMAP login failed: {e}")))?
             }
             ConnectionSecurity::StartTls => {
                 // Connect plain, read greeting, optionally send ID, then STARTTLS upgrade
@@ -461,30 +509,28 @@ impl ImapProvider {
                     Self::starttls_upgrade(&self.config.host, tcp, greeting).await?;
 
                 // Replay the original greeting so Client::new() is happy
-                let stream = PrefixedStream::with_prefix(greeting, tls_stream);
+                let stream = PrefixedStream::with_prefix(greeting, InnerStream::Tls(tls_stream));
                 let client = Client::new(stream);
-                let sess = client
+                client
                     .login(&self.config.username, &self.config.password)
                     .await
-                    .map_err(|(e, _)| PebbleError::Auth(format!("IMAP login failed: {e}")))?;
-                ImapSession::Tls(Box::new(sess))
+                    .map_err(|(e, _)| PebbleError::Auth(format!("IMAP login failed: {e}")))?
             }
             ConnectionSecurity::Plain => {
                 // Plain TCP — no encryption
                 let mut tcp = tcp;
-                let stream = if needs_id {
-                    let greeting = Self::send_id_before_login(&mut tcp).await?;
-                    PrefixedStream::with_prefix(greeting, tcp)
+                let prefix = if needs_id {
+                    Self::send_id_before_login(&mut tcp).await?
                 } else {
-                    PrefixedStream::new(tcp)
+                    Vec::new()
                 };
+                let stream = PrefixedStream::with_prefix(prefix, InnerStream::Plain(tcp));
 
                 let client = Client::new(stream);
-                let sess = client
+                client
                     .login(&self.config.username, &self.config.password)
                     .await
-                    .map_err(|(e, _)| PebbleError::Auth(format!("IMAP login failed: {e}")))?;
-                ImapSession::Plain(Box::new(sess))
+                    .map_err(|(e, _)| PebbleError::Auth(format!("IMAP login failed: {e}")))?
             }
         };
 
@@ -649,29 +695,16 @@ impl ImapProvider {
             .as_mut()
             .ok_or_else(|| PebbleError::Network("Not connected".to_string()))?;
 
-        let names: Vec<String> = match sess {
-            ImapSession::Tls(s) => {
-                let stream = s
-                    .list(None, Some("*"))
-                    .await
-                    .map_err(|e| PebbleError::Network(format!("LIST failed: {e}")))?;
-                stream
-                    .map_ok(|n| n.name().to_string())
-                    .try_collect()
-                    .await
-                    .map_err(|e| PebbleError::Network(format!("LIST collect: {e}")))?
-            }
-            ImapSession::Plain(s) => {
-                let stream = s
-                    .list(None, Some("*"))
-                    .await
-                    .map_err(|e| PebbleError::Network(format!("LIST failed: {e}")))?;
-                stream
-                    .map_ok(|n| n.name().to_string())
-                    .try_collect()
-                    .await
-                    .map_err(|e| PebbleError::Network(format!("LIST collect: {e}")))?
-            }
+        let names: Vec<String> = {
+            let stream = sess
+                .list(None, Some("*"))
+                .await
+                .map_err(|e| PebbleError::Network(format!("LIST failed: {e}")))?;
+            stream
+                .map_ok(|n| n.name().to_string())
+                .try_collect()
+                .await
+                .map_err(|e| PebbleError::Network(format!("LIST collect: {e}")))?
         };
 
         let mut folders: Vec<Folder> = names
@@ -775,10 +808,7 @@ impl ImapProvider {
             }};
         }
 
-        let results = match sess {
-            ImapSession::Tls(s) => do_fetch!(s),
-            ImapSession::Plain(s) => do_fetch!(s),
-        };
+        let results = do_fetch!(sess);
 
         Ok(results)
     }
@@ -832,11 +862,7 @@ impl ImapProvider {
             }};
         }
 
-        let results = match sess {
-            ImapSession::Tls(s) => do_flags!(s),
-            ImapSession::Plain(s) => do_flags!(s),
-        };
-
+        let results = do_flags!(sess);
         Ok(results)
     }
 
@@ -901,10 +927,7 @@ impl ImapProvider {
             }};
         }
 
-        match sess {
-            ImapSession::Tls(s) => do_store!(s),
-            ImapSession::Plain(s) => do_store!(s),
-        }
+        do_store!(sess);
 
         Ok(())
     }
@@ -971,10 +994,7 @@ impl ImapProvider {
             }};
         }
 
-        match sess {
-            ImapSession::Tls(s) => do_move!(s),
-            ImapSession::Plain(s) => do_move!(s),
-        }
+        do_move!(sess);
 
         Ok(())
     }
@@ -1014,10 +1034,7 @@ impl ImapProvider {
             }};
         }
 
-        match sess {
-            ImapSession::Tls(s) => do_delete!(s),
-            ImapSession::Plain(s) => do_delete!(s),
-        }
+        do_delete!(sess);
 
         Ok(())
     }
@@ -1045,10 +1062,7 @@ impl ImapProvider {
             }};
         }
 
-        let results = match sess {
-            ImapSession::Tls(s) => do_search!(s),
-            ImapSession::Plain(s) => do_search!(s),
-        };
+        let results = do_search!(sess);
 
         Ok(results)
     }
@@ -1061,18 +1075,9 @@ impl ImapProvider {
             None => return false,
         };
 
-        macro_rules! check_caps {
-            ($s:expr) => {{
-                match $s.capabilities().await {
-                    Ok(caps) => caps.has_str("CONDSTORE"),
-                    Err(_) => false,
-                }
-            }};
-        }
-
-        match sess {
-            ImapSession::Tls(s) => check_caps!(s),
-            ImapSession::Plain(s) => check_caps!(s),
+        match sess.capabilities().await {
+            Ok(caps) => caps.has_str("CONDSTORE"),
+            Err(_) => false,
         }
     }
 
@@ -1094,10 +1099,7 @@ impl ImapProvider {
             }};
         }
 
-        let result = match sess {
-            ImapSession::Tls(s) => do_select!(s),
-            ImapSession::Plain(s) => do_select!(s),
-        };
+        let result = do_select!(sess);
 
         Ok(result)
     }
@@ -1165,10 +1167,7 @@ impl ImapProvider {
             }};
         }
 
-        let results = match sess {
-            ImapSession::Tls(s) => do_flags_modseq!(s),
-            ImapSession::Plain(s) => do_flags_modseq!(s),
-        };
+        let results = do_flags_modseq!(sess);
 
         Ok(results)
     }
@@ -1181,18 +1180,9 @@ impl ImapProvider {
             None => return false,
         };
 
-        macro_rules! check_caps {
-            ($s:expr) => {{
-                match $s.capabilities().await {
-                    Ok(caps) => caps.has_str("IDLE"),
-                    Err(_) => false,
-                }
-            }};
-        }
-
-        match sess {
-            ImapSession::Tls(s) => check_caps!(s),
-            ImapSession::Plain(s) => check_caps!(s),
+        match sess.capabilities().await {
+            Ok(caps) => caps.has_str("IDLE"),
+            Err(_) => false,
         }
     }
 
@@ -1214,82 +1204,66 @@ impl ImapProvider {
                 .ok_or_else(|| PebbleError::Network("Not connected".to_string()))?
         };
 
-        macro_rules! do_idle {
-            ($s:expr, $variant:ident) => {{
-                // Select the mailbox first.
-                let mut session = $s;
-                if let Err(e) = session.select(mailbox).await {
-                    // Restore session before returning error.
+        // Select the mailbox first.
+        let mut session = sess;
+        if let Err(e) = session.select(mailbox).await {
+            // Restore session before returning error.
+            let mut guard = self.session.lock().await;
+            *guard = Some(session);
+            return Err(PebbleError::Network(format!("SELECT failed: {e}")));
+        }
+
+        let mut idle_handle = session.idle();
+        if let Err(e) = idle_handle.init().await {
+            // init() failed; the handle still owns the session.
+            // Call done() to recover the session.
+            match idle_handle.done().await {
+                Ok(recovered) => {
                     let mut guard = self.session.lock().await;
-                    *guard = Some(ImapSession::$variant(Box::new(session)));
-                    return Err(PebbleError::Network(format!("SELECT failed: {e}")));
+                    *guard = Some(recovered);
                 }
-
-                let mut idle_handle = session.idle();
-                if let Err(e) = idle_handle.init().await {
-                    // init() failed; the handle still owns the session.
-                    // Call done() to recover the session.
-                    match idle_handle.done().await {
-                        Ok(recovered) => {
-                            let mut guard = self.session.lock().await;
-                            *guard = Some(ImapSession::$variant(Box::new(recovered)));
-                        }
-                        Err(_) => {
-                            // Session is lost; caller will need to reconnect.
-                        }
-                    }
-                    return Err(PebbleError::Network(format!("IDLE init failed: {e}")));
+                Err(_) => {
+                    // Session is lost; caller will need to reconnect.
                 }
-
-                let (wait_fut, _stop_source) = idle_handle.wait_with_timeout(timeout_dur);
-                let idle_result = wait_fut.await;
-
-                // Recover the session by sending DONE.
-                let event = match idle_result {
-                    Ok(resp) => {
-                        use async_imap::extensions::idle::IdleResponse;
-                        match resp {
-                            IdleResponse::NewData(_) => super::idle::IdleEvent::NewMail,
-                            IdleResponse::Timeout => super::idle::IdleEvent::Timeout,
-                            IdleResponse::ManualInterrupt => super::idle::IdleEvent::Timeout,
-                        }
-                    }
-                    Err(e) => super::idle::IdleEvent::Error(format!("IDLE wait error: {e}")),
-                };
-
-                match idle_handle.done().await {
-                    Ok(recovered) => {
-                        let mut guard = self.session.lock().await;
-                        *guard = Some(ImapSession::$variant(Box::new(recovered)));
-                    }
-                    Err(_) => {
-                        // Session is lost; caller will need to reconnect.
-                        tracing::warn!("Failed to recover session after IDLE DONE");
-                    }
-                }
-
-                Ok(event)
-            }};
+            }
+            return Err(PebbleError::Network(format!("IDLE init failed: {e}")));
         }
 
-        match sess {
-            ImapSession::Tls(s) => do_idle!(*s, Tls),
-            ImapSession::Plain(s) => do_idle!(*s, Plain),
+        let (wait_fut, _stop_source) = idle_handle.wait_with_timeout(timeout_dur);
+        let idle_result = wait_fut.await;
+
+        // Recover the session by sending DONE.
+        let event = match idle_result {
+            Ok(resp) => {
+                use async_imap::extensions::idle::IdleResponse;
+                match resp {
+                    IdleResponse::NewData(_) => super::idle::IdleEvent::NewMail,
+                    IdleResponse::Timeout => super::idle::IdleEvent::Timeout,
+                    IdleResponse::ManualInterrupt => super::idle::IdleEvent::Timeout,
+                }
+            }
+            Err(e) => super::idle::IdleEvent::Error(format!("IDLE wait error: {e}")),
+        };
+
+        match idle_handle.done().await {
+            Ok(recovered) => {
+                let mut guard = self.session.lock().await;
+                *guard = Some(recovered);
+            }
+            Err(_) => {
+                // Session is lost; caller will need to reconnect.
+                tracing::warn!("Failed to recover session after IDLE DONE");
+            }
         }
+
+        Ok(event)
     }
 
     /// Disconnect from the IMAP server.
     pub async fn disconnect(&self) -> Result<()> {
         let mut guard = self.session.lock().await;
         if let Some(sess) = guard.as_mut() {
-            match sess {
-                ImapSession::Tls(s) => {
-                    let _ = s.logout().await;
-                }
-                ImapSession::Plain(s) => {
-                    let _ = s.logout().await;
-                }
-            }
+            let _ = sess.logout().await;
             *guard = None;
         }
         Ok(())
