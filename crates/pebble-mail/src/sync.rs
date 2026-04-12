@@ -227,15 +227,40 @@ pub struct StoredMessage {
     pub folder_ids: Vec<String>,
 }
 
+/// Common fields shared by all sync workers.
+pub(crate) struct SyncWorkerBase {
+    pub(crate) account_id: String,
+    pub(crate) store: Arc<Store>,
+    pub(crate) attachments_dir: PathBuf,
+    pub(crate) error_tx: Option<mpsc::UnboundedSender<SyncError>>,
+    pub(crate) message_tx: Option<mpsc::UnboundedSender<StoredMessage>>,
+}
+
+impl SyncWorkerBase {
+    /// Emit a structured error through the error channel.
+    pub(crate) fn emit_error(&self, error_type: &str, message: &str) {
+        if let Some(tx) = &self.error_tx {
+            let _ = tx.send(SyncError {
+                error_type: error_type.to_string(),
+                message: message.to_string(),
+                timestamp: now_timestamp() as u64,
+            });
+        }
+    }
+
+    /// Emit a newly stored message through the message channel.
+    pub(crate) fn emit_message(&self, message: StoredMessage) {
+        if let Some(tx) = &self.message_tx {
+            let _ = tx.send(message);
+        }
+    }
+}
+
 /// A worker that syncs mail for one account.
 pub struct SyncWorker {
-    account_id: String,
+    pub(crate) base: SyncWorkerBase,
     provider: Arc<ImapMailProvider>,
-    store: Arc<Store>,
     stop_rx: watch::Receiver<bool>,
-    attachments_dir: PathBuf,
-    error_tx: Option<mpsc::UnboundedSender<SyncError>>,
-    message_tx: Option<mpsc::UnboundedSender<StoredMessage>>,
 }
 
 impl SyncWorker {
@@ -248,49 +273,40 @@ impl SyncWorker {
         attachments_dir: impl Into<PathBuf>,
     ) -> Self {
         Self {
-            account_id: account_id.into(),
+            base: SyncWorkerBase {
+                account_id: account_id.into(),
+                store,
+                attachments_dir: attachments_dir.into(),
+                error_tx: None,
+                message_tx: None,
+            },
             provider,
-            store,
             stop_rx,
-            attachments_dir: attachments_dir.into(),
-            error_tx: None,
-            message_tx: None,
         }
     }
 
     /// Set the error channel for emitting structured sync errors.
     pub fn with_error_tx(mut self, tx: mpsc::UnboundedSender<SyncError>) -> Self {
-        self.error_tx = Some(tx);
+        self.base.error_tx = Some(tx);
         self
     }
 
     /// Set the channel for emitting newly stored messages (used for search indexing).
     pub fn with_message_tx(mut self, tx: mpsc::UnboundedSender<StoredMessage>) -> Self {
-        self.message_tx = Some(tx);
+        self.base.message_tx = Some(tx);
         self
-    }
-
-    /// Emit a structured error through the error channel.
-    fn emit_error(&self, error_type: &str, message: &str) {
-        if let Some(tx) = &self.error_tx {
-            let _ = tx.send(SyncError {
-                error_type: error_type.to_string(),
-                message: message.to_string(),
-                timestamp: now_timestamp() as u64,
-            });
-        }
     }
 
     /// Perform the initial full sync: list folders and fetch all of them.
     pub async fn initial_sync(&self) -> Result<()> {
-        info!("Starting initial sync for account {}", self.account_id);
+        info!("Starting initial sync for account {}", self.base.account_id);
 
-        let folders = self.provider.inner().list_folders(&self.account_id).await?;
+        let folders = self.provider.inner().list_folders(&self.base.account_id).await?;
 
         for folder in &folders {
             // Upsert folder into store
             // Ignore "already exists" errors
-            let _ = self.store.insert_folder(folder);
+            let _ = self.base.store.insert_folder(folder);
         }
 
         // Ensure an Archive folder exists locally (even if the IMAP server doesn't have one)
@@ -298,7 +314,7 @@ impl SyncWorker {
         if !has_archive {
             let archive = pebble_core::Folder {
                 id: new_id(),
-                account_id: self.account_id.clone(),
+                account_id: self.base.account_id.clone(),
                 remote_id: "__local_archive__".to_string(),
                 name: "Archive".to_string(),
                 folder_type: pebble_core::FolderType::Folder,
@@ -308,8 +324,8 @@ impl SyncWorker {
                 is_system: true,
                 sort_order: 3,
             };
-            let _ = self.store.insert_folder(&archive);
-            info!("Created local archive folder for account {}", self.account_id);
+            let _ = self.base.store.insert_folder(&archive);
+            info!("Created local archive folder for account {}", self.base.account_id);
         }
 
         // Sync all folders, prioritising Inbox first
@@ -325,8 +341,8 @@ impl SyncWorker {
 
         // Use persisted cursor (inbox-level) for the inbox; other folders use their own max UID
         let cursor = self
-            .store
-            .get_sync_cursor(&self.account_id)
+            .base.store
+            .get_sync_cursor(&self.base.account_id)
             .ok()
             .flatten();
         let (inbox_since_uid, prev_modseq) = cursor
@@ -341,8 +357,8 @@ impl SyncWorker {
                 inbox_since_uid
             } else {
                 // For non-inbox folders, resume from the last known UID
-                self.store
-                    .get_max_remote_id(&self.account_id, &folder.id)
+                self.base.store
+                    .get_max_remote_id(&self.base.account_id, &folder.id)
                     .ok()
                     .flatten()
                     .and_then(|s| s.parse::<u32>().ok())
@@ -357,11 +373,11 @@ impl SyncWorker {
                     // Update inbox cursor
                     if is_inbox && count > 0 {
                         if let Ok(Some(max_uid_str)) =
-                            self.store.get_max_remote_id(&self.account_id, &folder.id)
+                            self.base.store.get_max_remote_id(&self.base.account_id, &folder.id)
                         {
                             if let Ok(max_uid) = max_uid_str.parse::<u32>() {
                                 let new_cursor = build_cursor(max_uid, prev_modseq);
-                                let _ = self.store.set_sync_cursor(&self.account_id, &new_cursor);
+                                let _ = self.base.store.set_sync_cursor(&self.base.account_id, &new_cursor);
                             }
                         }
                     }
@@ -405,15 +421,15 @@ impl SyncWorker {
         // This is mutable so we can extend it as we store new messages within the batch,
         // ensuring intra-batch replies find their parent's thread.
         let mut thread_mappings = self
-            .store
-            .get_thread_mappings(&self.account_id)
+            .base.store
+            .get_thread_mappings(&self.base.account_id)
             .unwrap_or_default();
 
         // Bulk-check which UIDs already exist to avoid N+1 queries
         let all_remote_ids: Vec<String> = raw_messages.iter().map(|(uid, _)| uid.to_string()).collect();
         let existing_ids = self
-            .store
-            .get_existing_remote_ids(&self.account_id, &all_remote_ids)
+            .base.store
+            .get_existing_remote_ids(&self.base.account_id, &all_remote_ids)
             .unwrap_or_default();
 
         let mut stored_count = 0u32;
@@ -440,7 +456,7 @@ impl SyncWorker {
             // Build a temporary message to compute thread_id
             let mut msg = Message {
                 id: new_id(),
-                account_id: self.account_id.clone(),
+                account_id: self.base.account_id.clone(),
                 remote_id: remote_id.clone(),
                 message_id_header: parsed.message_id_header.clone(),
                 in_reply_to: parsed.in_reply_to.clone(),
@@ -471,7 +487,7 @@ impl SyncWorker {
             msg.thread_id = Some(thread_id);
 
             match self
-                .store
+                .base.store
                 .insert_message(&msg, std::slice::from_ref(&folder.id))
             {
                 Ok(()) => {
@@ -483,16 +499,14 @@ impl SyncWorker {
                     }
 
                     // Notify listeners (e.g. search indexer) about the new message
-                    if let Some(tx) = &self.message_tx {
-                        let _ = tx.send(StoredMessage {
-                            message: msg.clone(),
-                            folder_ids: vec![folder.id.clone()],
-                        });
-                    }
+                    self.base.emit_message(StoredMessage {
+                        message: msg.clone(),
+                        folder_ids: vec![folder.id.clone()],
+                    });
 
                     persist_message_attachments(
-                        &self.store,
-                        &self.attachments_dir,
+                        &self.base.store,
+                        &self.base.attachments_dir,
                         &msg.id,
                         parsed.attachments,
                     );
@@ -508,44 +522,44 @@ impl SyncWorker {
 
     /// Poll all folders for new messages since the highest known UID.
     pub async fn poll_new_messages(&self) -> Result<()> {
-        let folders = self.store.list_folders(&self.account_id)?;
+        let folders = self.base.store.list_folders(&self.base.account_id)?;
         if folders.is_empty() {
             return Ok(());
         }
 
         // Preserve existing modseq value when updating the cursor
         let prev_modseq = self
-            .store
-            .get_sync_cursor(&self.account_id)
+            .base.store
+            .get_sync_cursor(&self.base.account_id)
             .ok()
             .flatten()
             .and_then(|s| extract_modseq(&s));
 
         for folder in &folders {
             let since_uid = self
-                .store
-                .get_max_remote_id(&self.account_id, &folder.id)
+                .base.store
+                .get_max_remote_id(&self.base.account_id, &folder.id)
                 .ok()
                 .flatten()
                 .and_then(|s| s.parse::<u32>().ok());
 
             match self.sync_folder(folder, since_uid, 50).await {
                 Ok(count) if count > 0 => {
-                    info!("Polled {} new messages from {} for account {}", count, folder.name, self.account_id);
+                    info!("Polled {} new messages from {} for account {}", count, folder.name, self.base.account_id);
                     // Update inbox cursor
                     if folder.role == Some(pebble_core::FolderRole::Inbox) {
                         if let Ok(Some(max_uid_str)) =
-                            self.store.get_max_remote_id(&self.account_id, &folder.id)
+                            self.base.store.get_max_remote_id(&self.base.account_id, &folder.id)
                         {
                             if let Ok(max_uid) = max_uid_str.parse::<u32>() {
                                 let new_cursor = build_cursor(max_uid, prev_modseq);
-                                let _ = self.store.set_sync_cursor(&self.account_id, &new_cursor);
+                                let _ = self.base.store.set_sync_cursor(&self.base.account_id, &new_cursor);
                             }
                         }
                     }
                 }
                 Ok(_) => {}
-                Err(e) => warn!("Poll failed for folder {} account {}: {}", folder.name, self.account_id, e),
+                Err(e) => warn!("Poll failed for folder {} account {}: {}", folder.name, self.base.account_id, e),
             }
         }
 
@@ -567,16 +581,16 @@ impl SyncWorker {
 
         // Step 1: Get local state
         let local_state = self
-            .store
-            .list_remote_ids_by_folder(&self.account_id, &folder.id)?;
+            .base.store
+            .list_remote_ids_by_folder(&self.base.account_id, &folder.id)?;
         if local_state.is_empty() {
             return Ok(());
         }
 
         // Read stored MODSEQ from cursor
         let stored_modseq = self
-            .store
-            .get_sync_cursor(&self.account_id)
+            .base.store
+            .get_sync_cursor(&self.base.account_id)
             .ok()
             .flatten()
             .and_then(|s| extract_modseq(&s))
@@ -649,7 +663,7 @@ impl SyncWorker {
                     flag_changes.len(),
                     folder.name
                 );
-                self.store.bulk_update_flags(&flag_changes)?;
+                self.base.store.bulk_update_flags(&flag_changes)?;
             }
 
             // Step 5: Persist new MODSEQ in cursor if we got one
@@ -675,7 +689,7 @@ impl SyncWorker {
                 deleted.len(),
                 folder.name
             );
-            self.store.bulk_soft_delete(&deleted)?;
+            self.base.store.bulk_soft_delete(&deleted)?;
         }
 
         Ok(())
@@ -684,8 +698,8 @@ impl SyncWorker {
     /// Update the MODSEQ portion of the sync cursor without changing the UID part.
     fn update_cursor_modseq(&self, new_modseq: u64) {
         let cursor = self
-            .store
-            .get_sync_cursor(&self.account_id)
+            .base.store
+            .get_sync_cursor(&self.base.account_id)
             .ok()
             .flatten();
         let (uid, _old_modseq) = cursor
@@ -694,7 +708,7 @@ impl SyncWorker {
             .unwrap_or((None, None));
         if let Some(uid_val) = uid {
             let new_cursor = build_cursor(uid_val, Some(new_modseq));
-            let _ = self.store.set_sync_cursor(&self.account_id, &new_cursor);
+            let _ = self.base.store.set_sync_cursor(&self.base.account_id, &new_cursor);
         }
     }
 
@@ -709,28 +723,28 @@ impl SyncWorker {
 
         // Connect and do initial sync
         if let Err(e) = self.provider.connect().await {
-            error!("Failed to connect for account {}: {}", self.account_id, e);
-            self.emit_error("connection", &format!("Failed to connect: {}", e));
+            error!("Failed to connect for account {}: {}", self.base.account_id, e);
+            self.base.emit_error("connection", &format!("Failed to connect: {}", e));
             return;
         }
 
         if let Err(e) = self.initial_sync().await {
-            error!("Initial sync failed for account {}: {}", self.account_id, e);
-            self.emit_error("sync", &format!("Initial sync failed: {}", e));
+            error!("Initial sync failed for account {}: {}", self.base.account_id, e);
+            self.base.emit_error("sync", &format!("Initial sync failed: {}", e));
         }
 
         let supports_idle = self.provider.inner().supports_idle().await;
         if supports_idle {
-            info!("IMAP IDLE supported for account {}", self.account_id);
+            info!("IMAP IDLE supported for account {}", self.base.account_id);
         } else {
-            info!("IMAP IDLE not supported for account {}, using polling", self.account_id);
+            info!("IMAP IDLE not supported for account {}, using polling", self.base.account_id);
         }
 
         let supports_condstore = self.provider.inner().supports_condstore().await;
         if supports_condstore {
-            info!("CONDSTORE supported for account {}", self.account_id);
+            info!("CONDSTORE supported for account {}", self.base.account_id);
         } else {
-            debug!("CONDSTORE not supported for account {}", self.account_id);
+            debug!("CONDSTORE not supported for account {}", self.base.account_id);
         }
 
         let mut stop_rx = self.stop_rx.clone();
@@ -744,7 +758,7 @@ impl SyncWorker {
                         let delay = backoff.current_delay();
                         warn!(
                             "Circuit open for account {} ({} consecutive failures), waiting {:?}",
-                            self.account_id, backoff.failure_count(), delay
+                            self.base.account_id, backoff.failure_count(), delay
                         );
                         match tokio::time::timeout(delay, stop_rx.changed()).await {
                             Ok(Ok(())) if *stop_rx.borrow() => break,
@@ -753,7 +767,7 @@ impl SyncWorker {
                     }
 
                     // Quick check if mailbox has changes before doing full poll
-                    let folders = match self.store.list_folders(&self.account_id) {
+                    let folders = match self.base.store.list_folders(&self.base.account_id) {
                         Ok(f) => f,
                         Err(_) => {
                             backoff.record_failure();
@@ -764,32 +778,32 @@ impl SyncWorker {
                         match crate::idle::check_for_changes_with_idle(self.provider.inner(), &inbox.remote_id, &mut last_exists, supports_idle).await {
                             Ok(crate::idle::IdleEvent::NewMail) => {
                                 if let Err(e) = self.poll_new_messages().await {
-                                    warn!("Poll error for account {}: {}", self.account_id, e);
-                                    self.emit_error("poll", &format!("Poll error: {}", e));
+                                    warn!("Poll error for account {}: {}", self.base.account_id, e);
+                                    self.base.emit_error("poll", &format!("Poll error: {}", e));
                                     backoff.record_failure();
                                 } else {
                                     backoff.record_success();
                                 }
                             }
                             Ok(crate::idle::IdleEvent::Timeout) => {
-                                debug!("No changes detected for account {}", self.account_id);
+                                debug!("No changes detected for account {}", self.base.account_id);
                                 backoff.record_success();
                             }
                             Ok(crate::idle::IdleEvent::Error(e)) => {
-                                warn!("IDLE check error for account {}: {}", self.account_id, e);
-                                self.emit_error("idle", &format!("IDLE check error: {}", e));
+                                warn!("IDLE check error for account {}: {}", self.base.account_id, e);
+                                self.base.emit_error("idle", &format!("IDLE check error: {}", e));
                                 // Fall back to regular poll on error
                                 if let Err(e) = self.poll_new_messages().await {
-                                    warn!("Poll error for account {}: {}", self.account_id, e);
-                                    self.emit_error("poll", &format!("Poll error: {}", e));
+                                    warn!("Poll error for account {}: {}", self.base.account_id, e);
+                                    self.base.emit_error("poll", &format!("Poll error: {}", e));
                                     backoff.record_failure();
                                 } else {
                                     backoff.record_success();
                                 }
                             }
                             Err(e) => {
-                                warn!("IDLE check failed for account {}: {}", self.account_id, e);
-                                self.emit_error("idle", &format!("IDLE check failed: {}", e));
+                                warn!("IDLE check failed for account {}: {}", self.base.account_id, e);
+                                self.base.emit_error("idle", &format!("IDLE check failed: {}", e));
                                 backoff.record_failure();
                             }
                         }
@@ -798,31 +812,31 @@ impl SyncWorker {
                 _ = reconcile_ticker.tick() => {
                     // Full reconcile: poll new messages + flag diff + deletion detection
                     if let Err(e) = self.poll_new_messages().await {
-                        warn!("Reconcile poll error for account {}: {}", self.account_id, e);
-                        self.emit_error("reconcile", &format!("Reconcile poll error: {}", e));
+                        warn!("Reconcile poll error for account {}: {}", self.base.account_id, e);
+                        self.base.emit_error("reconcile", &format!("Reconcile poll error: {}", e));
                         backoff.record_failure();
                         continue;
                     } else {
                         backoff.record_success();
                     }
-                    let folders = match self.store.list_folders(&self.account_id) {
+                    let folders = match self.base.store.list_folders(&self.base.account_id) {
                         Ok(f) => f,
                         Err(e) => {
                             warn!("Reconcile list folders error: {}", e);
-                            self.emit_error("reconcile", &format!("List folders error: {}", e));
+                            self.base.emit_error("reconcile", &format!("List folders error: {}", e));
                             continue;
                         }
                     };
                     for folder in &folders {
                         if let Err(e) = self.reconcile_folder(folder).await {
                             warn!("Reconcile folder {} error: {}", folder.name, e);
-                            self.emit_error("reconcile", &format!("Reconcile {} error: {}", folder.name, e));
+                            self.base.emit_error("reconcile", &format!("Reconcile {} error: {}", folder.name, e));
                         }
                     }
                 }
                 Ok(()) = stop_rx.changed() => {
                     if *stop_rx.borrow() {
-                        info!("Sync worker stopping for account {}", self.account_id);
+                        info!("Sync worker stopping for account {}", self.base.account_id);
                         let _ = self.provider.disconnect().await;
                         break;
                     }
