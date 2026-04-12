@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use pebble_core::traits::FolderProvider;
-use pebble_core::{new_id, now_timestamp, Folder, FolderRole, Result};
+use pebble_core::{new_id, now_timestamp, Folder, FolderRole, PebbleError, Result};
 use pebble_store::Store;
 use std::sync::Mutex as StdMutex;
 use tokio::sync::{mpsc, watch};
@@ -201,6 +201,7 @@ impl GmailSyncWorker {
                     Err(e) => {
                         warn!("Failed to refresh OAuth token: {}", e);
                         self.base.emit_error("auth", &format!("Token refresh failed: {e}"));
+                        return Err(PebbleError::Auth(format!("Token refresh failed: {e}")));
                     }
                 }
             }

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 
 use pebble_core::traits::{FetchQuery, FolderProvider, MailTransport};
-use pebble_core::{now_timestamp, Result};
+use pebble_core::{now_timestamp, PebbleError, Result};
 use pebble_store::Store;
 use tokio::sync::{mpsc, watch};
 use tracing::{info, warn};
@@ -87,6 +87,7 @@ impl OutlookSyncWorker {
                     Err(e) => {
                         warn!("Failed to refresh Outlook OAuth token: {}", e);
                         self.base.emit_error("token_refresh", &format!("Outlook token refresh failed: {e}"));
+                        return Err(PebbleError::Auth(format!("Outlook token refresh failed: {e}")));
                     }
                 }
             }
