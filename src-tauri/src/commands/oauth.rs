@@ -1,6 +1,10 @@
 use crate::state::AppState;
 use pebble_core::{Account, OAuthTokens, PebbleError, ProviderType, new_id, now_timestamp};
+use pebble_crypto::CryptoService;
+use pebble_mail::gmail_sync::TokenRefresher;
 use pebble_oauth::{OAuthConfig, OAuthManager};
+use pebble_store::Store;
+use std::sync::Arc;
 use tauri::State;
 use tracing::debug;
 
@@ -119,11 +123,121 @@ fn persist_oauth_tokens(
     account_id: &str,
     tokens: &OAuthTokens,
 ) -> Result<(), PebbleError> {
+    persist_oauth_tokens_raw(&state.crypto, &state.store, account_id, tokens)
+}
+
+/// Encrypt and persist OAuth tokens without needing a full `AppState`.
+/// Used inside async refresher closures where only `crypto` and `store` are
+/// cloned in.
+fn persist_oauth_tokens_raw(
+    crypto: &CryptoService,
+    store: &Store,
+    account_id: &str,
+    tokens: &OAuthTokens,
+) -> Result<(), PebbleError> {
     let config_bytes = serde_json::to_vec(tokens)
         .map_err(|e| PebbleError::Internal(format!("Failed to serialize tokens: {e}")))?;
-    let encrypted = state.crypto.encrypt(&config_bytes)?;
-    state.store.set_auth_data(account_id, &encrypted)?;
+    let encrypted = crypto.encrypt(&config_bytes)?;
+    store.set_auth_data(account_id, &encrypted)?;
     Ok(())
+}
+
+/// Decoded view of an account's stored OAuth token blob.
+pub(crate) struct DecodedOAuthTokens {
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub expires_at: Option<i64>,
+}
+
+/// Read and decrypt an account's OAuth token blob into its components.
+///
+/// Replaces the hand-written decryption that used to be inlined inside each
+/// provider branch of `start_sync` — keeping every OAuth-backed provider on
+/// the same code path.
+pub(crate) fn decode_oauth_account_tokens(
+    state: &AppState,
+    account_id: &str,
+) -> Result<DecodedOAuthTokens, PebbleError> {
+    let encrypted = state
+        .store
+        .get_auth_data(account_id)?
+        .ok_or_else(|| PebbleError::Internal(format!("No auth data for account {account_id}")))?;
+    let decrypted = state.crypto.decrypt(&encrypted)?;
+    let token_data: serde_json::Value = serde_json::from_slice(&decrypted)
+        .map_err(|e| PebbleError::Internal(format!("Failed to parse token data: {e}")))?;
+    Ok(DecodedOAuthTokens {
+        access_token: token_data["access_token"]
+            .as_str()
+            .unwrap_or("")
+            .to_string(),
+        refresh_token: token_data["refresh_token"].as_str().map(|s| s.to_string()),
+        expires_at: token_data["expires_at"].as_i64(),
+    })
+}
+
+/// Build a [`TokenRefresher`] closure for a provider that can refresh its
+/// access token via the shared `OAuthManager`.
+///
+/// If `refresh_token` is `None` the returned closure simply returns the last
+/// known access token (used for accounts imported without a refresh token).
+/// Otherwise it runs a full refresh + persist cycle on every call so the
+/// encrypted auth blob stays in sync with the live token.
+pub(crate) fn build_oauth_token_refresher(
+    oauth_config: OAuthConfig,
+    refresh_token: Option<String>,
+    fallback_access_token: String,
+    crypto: Arc<CryptoService>,
+    store: Arc<Store>,
+    account_id: String,
+) -> TokenRefresher {
+    match refresh_token {
+        Some(initial_rt) => {
+            Box::new(move || {
+                let config = oauth_config.clone();
+                let crypto = Arc::clone(&crypto);
+                let store = Arc::clone(&store);
+                let account_id = account_id.clone();
+                let initial_rt = initial_rt.clone();
+                Box::pin(async move {
+                    // Read the latest refresh token from the encrypted store.
+                    // OAuth providers (especially Microsoft) may rotate refresh tokens
+                    // on each use, so the initially captured token may be stale.
+                    let rt = match store.get_auth_data(&account_id)? {
+                        Some(encrypted) => {
+                            let decrypted = crypto.decrypt(&encrypted)?;
+                            let token_data: serde_json::Value = serde_json::from_slice(&decrypted)
+                                .map_err(|e| PebbleError::Internal(
+                                    format!("Failed to parse token data: {e}")
+                                ))?;
+                            token_data["refresh_token"]
+                                .as_str()
+                                .map(|s| s.to_string())
+                                .unwrap_or(initial_rt)
+                        }
+                        None => initial_rt,
+                    };
+
+                    let manager = OAuthManager::new(config);
+                    let token_pair = manager
+                        .refresh_token(&rt)
+                        .await
+                        .map_err(|e| PebbleError::OAuth(format!("Token refresh failed: {e}")))?;
+                    let tokens = OAuthTokens {
+                        access_token: token_pair.access_token.clone(),
+                        refresh_token: token_pair.refresh_token.clone().or(Some(rt)),
+                        expires_at: token_pair.expires_at,
+                        scopes: token_pair.scopes.clone(),
+                    };
+                    persist_oauth_tokens_raw(&crypto, &store, &account_id, &tokens)?;
+                    Ok(token_pair.access_token)
+                })
+            })
+        },
+        None => Box::new(move || {
+            let token = fallback_access_token.clone();
+            Box::pin(async move { Ok(token) })
+        }),
+    }
 }
 
 pub(crate) async fn ensure_account_oauth_tokens(
@@ -236,12 +350,10 @@ pub async fn complete_oauth_flow(
     persist_oauth_tokens(&state, &account.id, &tokens)?;
 
     // Store provider metadata in sync_state
-    let metadata = serde_json::json!({ "provider": provider_slug(&account.provider) });
-    let metadata_json = serde_json::to_string(&metadata)
-        .map_err(|e| PebbleError::Internal(format!("Failed to serialize metadata: {e}")))?;
-    state
-        .store
-        .update_account_sync_state(&account.id, &metadata_json)?;
+    let slug = provider_slug(&account.provider).to_string();
+    state.store.update_sync_state(&account.id, |s| {
+        s.provider = Some(slug);
+    })?;
 
     Ok(account)
 }
