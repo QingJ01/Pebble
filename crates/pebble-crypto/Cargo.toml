@@ -9,3 +9,4 @@ aes-gcm = { workspace = true }
 rand = { workspace = true }
 keyring = { workspace = true }
 tracing = { workspace = true }
+zeroize = { version = "1", features = ["zeroize_derive"] }

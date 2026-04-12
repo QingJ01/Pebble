@@ -2,10 +2,11 @@ pub mod aes;
 pub mod keystore;
 
 use pebble_core::Result;
+use zeroize::Zeroizing;
 
 /// Service that manages encryption/decryption using a DEK from the OS keystore.
 pub struct CryptoService {
-    dek: [u8; 32],
+    dek: Zeroizing<[u8; 32]>,
 }
 
 impl CryptoService {
@@ -17,12 +18,12 @@ impl CryptoService {
 
     /// Encrypt plaintext bytes.
     pub fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>> {
-        aes::encrypt(&self.dek, plaintext)
+        aes::encrypt(&*self.dek, plaintext)
     }
 
     /// Decrypt ciphertext bytes.
     pub fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>> {
-        aes::decrypt(&self.dek, ciphertext)
+        aes::decrypt(&*self.dek, ciphertext)
     }
 }
 
