@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode, useEffect } from "react";
+import i18next from "i18next";
 import Layout from "./app/Layout";
 
 class ErrorBoundary extends Component<
@@ -25,9 +26,9 @@ class ErrorBoundary extends Component<
           color: "var(--color-text-primary, #333)",
           backgroundColor: "var(--color-bg, #fff)",
         }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Something went wrong</h2>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>{i18next.t("errorBoundary.title", "Something went wrong")}</h2>
           <p style={{ margin: 0, fontSize: 14, color: "var(--color-text-secondary, #666)" }}>
-            Please try refreshing the application.
+            {i18next.t("errorBoundary.description", "Please try refreshing the application.")}
           </p>
           <button
             onClick={() => window.location.reload()}
@@ -37,7 +38,7 @@ class ErrorBoundary extends Component<
               border: "none", borderRadius: 6, fontSize: 14, fontWeight: 600,
             }}
           >
-            Refresh
+            {i18next.t("errorBoundary.refresh", "Refresh")}
           </button>
         </div>
       );

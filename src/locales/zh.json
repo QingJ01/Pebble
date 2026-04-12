@@ -72,6 +72,10 @@
     "saveAsTemplate": "保存为模板",
     "noTemplates": "暂无模板",
     "templateName": "模板名称",
+    "leaveTitle": "丢弃草稿？",
+    "leaveMessage": "您有未保存的更改，确定要离开吗？",
+    "leaveCancel": "继续编辑",
+    "leaveConfirm": "丢弃",
     "toolbar": {
       "bold": "粗体",
       "italic": "斜体",
@@ -326,7 +330,9 @@
     "testConnection": "测试连接",
     "testing": "测试中...",
     "testSuccess": "连接测试通过",
-    "testFailed": "连接测试失败"
+    "testFailed": "连接测试失败",
+    "emailPlaceholder": "you@example.com",
+    "namePlaceholder": "您的姓名"
   },
   "commands": {
     "navigation": "导航",
@@ -444,7 +450,9 @@
     "configSaved": "配置已保存。",
     "saveFailed": "保存失败: {{error}}",
     "connectionOk": "连接正常: {{result}}",
-    "testFailed": "测试失败: {{error}}"
+    "testFailed": "测试失败: {{error}}",
+    "privacyNotice": "翻译功能将把选中的文本发送给第三方翻译服务，您的邮件内容将离开本设备。",
+    "acceptAndContinue": "我已了解，继续"
   },
   "titleBar": {
     "minimize": "最小化",
@@ -458,7 +466,8 @@
   "errorBoundary": {
     "title": "出了点问题",
     "description": "请重试或刷新应用。",
-    "retry": "重试"
+    "retry": "重试",
+    "refresh": "刷新"
   },
   "languages": {
     "chinese": "中文",

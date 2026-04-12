@@ -72,6 +72,10 @@
     "saveAsTemplate": "Save current",
     "noTemplates": "No templates saved",
     "templateName": "Template name",
+    "leaveTitle": "Discard draft?",
+    "leaveMessage": "You have unsaved changes. Are you sure you want to leave?",
+    "leaveCancel": "Keep editing",
+    "leaveConfirm": "Discard",
     "toolbar": {
       "bold": "Bold",
       "italic": "Italic",
@@ -326,7 +330,9 @@
     "testConnection": "Test Connection",
     "testing": "Testing...",
     "testSuccess": "Connection test passed",
-    "testFailed": "Connection test failed"
+    "testFailed": "Connection test failed",
+    "emailPlaceholder": "you@example.com",
+    "namePlaceholder": "Your Name"
   },
   "commands": {
     "navigation": "Navigation",
@@ -444,7 +450,9 @@
     "configSaved": "Configuration saved.",
     "saveFailed": "Save failed: {{error}}",
     "connectionOk": "Connection OK: {{result}}",
-    "testFailed": "Test failed: {{error}}"
+    "testFailed": "Test failed: {{error}}",
+    "privacyNotice": "Translation will send the selected text to a third-party translation service. Your email content will leave this device.",
+    "acceptAndContinue": "I understand, continue"
   },
   "titleBar": {
     "minimize": "Minimize",
@@ -458,7 +466,8 @@
   "errorBoundary": {
     "title": "Something went wrong",
     "description": "Please try again or refresh the application.",
-    "retry": "Retry"
+    "retry": "Retry",
+    "refresh": "Refresh"
   },
   "languages": {
     "chinese": "Chinese",

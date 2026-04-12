@@ -400,7 +400,7 @@ export default function AccountSetup({ onClose }: Props) {
                 required
                 value={form.email}
                 onChange={(e) => handleChange("email", e.target.value)}
-                placeholder="you@example.com"
+                placeholder={t("accountSetup.emailPlaceholder", "you@example.com")}
               />
             </div>
 
@@ -416,7 +416,7 @@ export default function AccountSetup({ onClose }: Props) {
                 required
                 value={form.display_name}
                 onChange={(e) => handleChange("display_name", e.target.value)}
-                placeholder="Your Name"
+                placeholder={t("accountSetup.namePlaceholder", "Your Name")}
               />
             </div>
 
