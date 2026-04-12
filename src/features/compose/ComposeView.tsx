@@ -68,6 +68,9 @@ export default function ComposeView() {
   const composeMode = useUIStore((s) => s.composeMode);
   const composeReplyTo = useUIStore((s) => s.composeReplyTo);
   const closeCompose = useUIStore((s) => s.closeCompose);
+  const showComposeLeaveConfirm = useUIStore((s) => s.showComposeLeaveConfirm);
+  const confirmCloseCompose = useUIStore((s) => s.confirmCloseCompose);
+  const cancelCloseCompose = useUIStore((s) => s.cancelCloseCompose);
   const activeAccountId = useMailStore((s) => s.activeAccountId);
   const { data: accounts = [] } = useAccountsQuery();
 
@@ -113,7 +116,7 @@ export default function ComposeView() {
     }
     // Re-filter to/cc to remove own email address using the resolved account
     const resolvedEmail = accounts.find((a) => a.id === newAccountId)?.email || "";
-    if (composeMode === "reply-all" && composeReplyTo && resolvedEmail) {
+    if (composeReplyTo && resolvedEmail) {
       setTo((prev) => prev.filter((addr) => addr !== resolvedEmail));
       setCc((prev) => prev.filter((addr) => addr !== resolvedEmail));
     }
@@ -135,6 +138,7 @@ export default function ComposeView() {
   const [richTextHtml, setRichTextHtml] = useState("");
   const [htmlPreview, setHtmlPreview] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const attachInputRef = useRef<HTMLInputElement>(null);
   // ─── Attachments ─────────────────────────────────────────────────────────────
   const [attachments, setAttachments] = useState<{ name: string; path: string; size: number }[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -499,8 +503,11 @@ export default function ComposeView() {
           }}>
             {/* Attach + Template buttons */}
             <div style={{ display: "flex", alignItems: "center", gap: "2px", padding: "4px 8px" }}>
-              <label
+              <button
+                type="button"
+                onClick={() => attachInputRef.current?.click()}
                 title={t("compose.attach", "Attach file")}
+                aria-label={t("compose.attach", "Attach file")}
                 style={{
                   display: "flex", alignItems: "center", gap: "4px",
                   padding: "4px 8px", borderRadius: "4px",
@@ -509,23 +516,26 @@ export default function ComposeView() {
                 }}
               >
                 <Paperclip size={13} />
-                <input
-                  type="file"
-                  multiple
-                  style={{ display: "none" }}
-                  onChange={(e) => {
-                    const files = e.target.files;
-                    if (!files) return;
-                    const newAttachments = Array.from(files).map((file) => ({
-                      name: file.name,
-                      path: (file as unknown as { path?: string }).path || file.name,
-                      size: file.size,
-                    }));
-                    setAttachments((prev) => [...prev, ...newAttachments]);
-                    e.target.value = "";
-                  }}
-                />
-              </label>
+              </button>
+              <input
+                ref={attachInputRef}
+                type="file"
+                multiple
+                style={{ position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clip: "rect(0,0,0,0)", border: 0 }}
+                tabIndex={-1}
+                aria-hidden="true"
+                onChange={(e) => {
+                  const files = e.target.files;
+                  if (!files) return;
+                  const newAttachments = Array.from(files).map((file) => ({
+                    name: file.name,
+                    path: (file as unknown as { path?: string }).path || file.name,
+                    size: file.size,
+                  }));
+                  setAttachments((prev) => [...prev, ...newAttachments]);
+                  e.target.value = "";
+                }}
+              />
               <div style={{ position: "relative" }}>
                 <button
                   onClick={() => { setTemplates(listTemplates()); setShowTemplates((v) => !v); }}
@@ -809,6 +819,56 @@ export default function ComposeView() {
           </div>
         </div>
       </div>
+
+      {/* Compose leave confirmation dialog */}
+      {showComposeLeaveConfirm && (
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 9999,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            backgroundColor: "rgba(0,0,0,0.4)",
+          }}
+          onClick={cancelCloseCompose}
+        >
+          <div
+            style={{
+              backgroundColor: "var(--color-bg-primary, #fff)",
+              borderRadius: "8px", padding: "24px", minWidth: "320px",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ margin: "0 0 8px", fontSize: "15px", fontWeight: 600 }}>
+              {t("compose.leaveTitle", "Discard draft?")}
+            </h3>
+            <p style={{ margin: "0 0 20px", fontSize: "13px", color: "var(--color-text-secondary)" }}>
+              {t("compose.leaveMessage", "You have unsaved changes. Are you sure you want to leave?")}
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+              <button
+                onClick={cancelCloseCompose}
+                style={{
+                  padding: "6px 16px", borderRadius: "6px", fontSize: "13px",
+                  border: "1px solid var(--color-border)", cursor: "pointer",
+                  backgroundColor: "transparent", color: "var(--color-text-primary)",
+                }}
+              >
+                {t("compose.leaveCancel", "Keep editing")}
+              </button>
+              <button
+                onClick={confirmCloseCompose}
+                style={{
+                  padding: "6px 16px", borderRadius: "6px", fontSize: "13px",
+                  border: "none", cursor: "pointer",
+                  backgroundColor: "var(--color-danger, #ef4444)", color: "#fff",
+                }}
+              >
+                {t("compose.leaveConfirm", "Discard")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
