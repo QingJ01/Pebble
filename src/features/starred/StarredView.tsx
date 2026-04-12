@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTranslation } from "react-i18next";
 import { Star } from "lucide-react";
 import type { MessageSummary } from "@/lib/api";
@@ -15,6 +16,15 @@ export default function StarredView() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const activeAccountId = useMailStore((s) => s.activeAccountId);
+
+  const parentRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: messages.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 76,
+    measureElement: (el) => el.getBoundingClientRect().height,
+    overscan: 5,
+  });
 
   const loadStarred = useCallback(async () => {
     if (!activeAccountId) return;
@@ -116,21 +126,38 @@ export default function StarredView() {
           </span>
         </div>
 
-        <div style={{ flex: 1, overflowY: "auto" }}>
-          {messages.map((msg) => (
-            <MessageItem
-              key={msg.id}
-              message={msg}
-              isSelected={msg.id === selectedId}
-              onClick={() => handleOpen(msg.id)}
-              onToggleStar={(id, newStarred) => {
-                if (!newStarred) {
-                  setMessages((prev) => prev.filter((m) => m.id !== id));
-                  if (selectedId === id) setSelectedId(null);
-                }
-              }}
-            />
-          ))}
+        <div ref={parentRef} style={{ flex: 1, overflow: "auto" }}>
+          <div style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
+            {virtualizer.getVirtualItems().map((virtualItem) => {
+              const msg = messages[virtualItem.index];
+              return (
+                <div
+                  key={msg.id}
+                  ref={virtualizer.measureElement}
+                  data-index={virtualItem.index}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${virtualItem.start}px)`,
+                  }}
+                >
+                  <MessageItem
+                    message={msg}
+                    isSelected={msg.id === selectedId}
+                    onClick={() => handleOpen(msg.id)}
+                    onToggleStar={(id, newStarred) => {
+                      if (!newStarred) {
+                        setMessages((prev) => prev.filter((m) => m.id !== id));
+                        if (selectedId === id) setSelectedId(null);
+                      }
+                    }}
+                  />
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 

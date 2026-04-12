@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTranslation } from "react-i18next";
 import { Search, SlidersHorizontal, Loader } from "lucide-react";
 import type { AdvancedSearchQuery, SearchHit } from "@/lib/api";
@@ -35,6 +36,15 @@ export default function SearchView() {
   const [error, setError] = useState<string | null>(null);
   const initialQueryRef = useRef<string | null>(null);
   const requestIdRef = useRef(0);
+
+  const resultsParentRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: results.length,
+    getScrollElement: () => resultsParentRef.current,
+    estimateSize: () => 76,
+    measureElement: (el) => el.getBoundingClientRect().height,
+    overscan: 5,
+  });
 
   const doSearch = useCallback(async () => {
     const trimmed = query.trim();
@@ -202,6 +212,7 @@ export default function SearchView() {
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         {/* Results list */}
         <div
+          ref={resultsParentRef}
           style={{
             width: selectedId ? "360px" : "100%",
             flexShrink: 0,
@@ -301,16 +312,34 @@ export default function SearchView() {
             </div>
           )}
 
-          {!loading &&
-            results.map((hit) => (
-              <SearchResultItem
-                key={hit.message_id}
-                hit={hit}
-                isSelected={hit.message_id === selectedId}
-                onClick={() => setSelectedId(hit.message_id)}
-                query={query}
-              />
-            ))}
+          {!loading && results.length > 0 && (
+            <div style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
+              {virtualizer.getVirtualItems().map((virtualItem) => {
+                const hit = results[virtualItem.index];
+                return (
+                  <div
+                    key={hit.message_id}
+                    ref={virtualizer.measureElement}
+                    data-index={virtualItem.index}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${virtualItem.start}px)`,
+                    }}
+                  >
+                    <SearchResultItem
+                      hit={hit}
+                      isSelected={hit.message_id === selectedId}
+                      onClick={() => setSelectedId(hit.message_id)}
+                      query={query}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Detail panel */}
