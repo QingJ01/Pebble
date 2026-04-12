@@ -4,6 +4,7 @@ import { Search, SlidersHorizontal, Loader } from "lucide-react";
 import type { AdvancedSearchQuery, SearchHit } from "@/lib/api";
 import { advancedSearch, searchMessages } from "@/lib/api";
 import { useUIStore } from "@/stores/ui.store";
+import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import SearchFilters from "./SearchFilters";
 import SearchResultItem from "./SearchResultItem";
 import MessageDetail from "@/components/MessageDetail";
@@ -31,6 +32,7 @@ export default function SearchView() {
   const [loading, setLoading] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const initialQueryRef = useRef<string | null>(null);
   const requestIdRef = useRef(0);
 
@@ -48,6 +50,7 @@ export default function SearchView() {
 
     const myId = ++requestIdRef.current;
     setLoading(true);
+    setError(null);
     setHasSearched(true);
     try {
       let hits: SearchHit[];
@@ -60,6 +63,11 @@ export default function SearchView() {
       if (myId !== requestIdRef.current) return;
       setResults(hits);
       setSelectedId(null);
+    } catch (err) {
+      if (myId === requestIdRef.current) {
+        setError(extractErrorMessage(err));
+        setResults([]);
+      }
     } finally {
       if (myId === requestIdRef.current) {
         setLoading(false);
@@ -221,7 +229,43 @@ export default function SearchView() {
             </div>
           )}
 
-          {!loading && hasSearched && results.length === 0 && (
+          {!loading && error && (
+            <div
+              className="fade-in"
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "40px",
+                color: "var(--color-text-secondary)",
+                fontSize: "14px",
+                gap: "8px",
+              }}
+            >
+              <p style={{ color: "var(--color-error, #e53e3e)", margin: 0 }}>
+                {t("search.error", "Search failed")}
+              </p>
+              <p style={{ fontSize: "13px", margin: 0 }}>{error}</p>
+              <button
+                onClick={doSearch}
+                style={{
+                  marginTop: "8px",
+                  padding: "6px 16px",
+                  borderRadius: "4px",
+                  border: "1px solid var(--color-border)",
+                  backgroundColor: "transparent",
+                  color: "var(--color-accent)",
+                  fontSize: "13px",
+                  cursor: "pointer",
+                }}
+              >
+                {t("common.retry", "Retry")}
+              </button>
+            </div>
+          )}
+
+          {!loading && !error && hasSearched && results.length === 0 && (
             <div
               style={{
                 display: "flex",
