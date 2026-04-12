@@ -117,7 +117,20 @@ pub(crate) fn persist_message_attachments(
             continue;
         }
 
-        let file_path = att_dir.join(&safe_filename);
+        let mut file_path = att_dir.join(&safe_filename);
+        let mut counter = 1u32;
+        while file_path.exists() {
+            let stem = std::path::Path::new(&safe_filename)
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy();
+            let ext = std::path::Path::new(&safe_filename)
+                .extension()
+                .map(|e| format!(".{}", e.to_string_lossy()))
+                .unwrap_or_default();
+            file_path = att_dir.join(format!("{stem}_{counter}{ext}"));
+            counter += 1;
+        }
         let file = match std::fs::File::create(&file_path) {
             Ok(f) => f,
             Err(e) => {
