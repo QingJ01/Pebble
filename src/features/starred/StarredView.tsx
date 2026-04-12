@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Star } from "lucide-react";
 import type { MessageSummary } from "@/lib/api";
 import { listStarredMessages } from "@/lib/api";
 import { useMailStore } from "@/stores/mail.store";
+import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import MessageItem from "@/components/MessageItem";
 import MessageDetail from "@/components/MessageDetail";
 
@@ -12,15 +13,27 @@ export default function StarredView() {
   const [messages, setMessages] = useState<MessageSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const activeAccountId = useMailStore((s) => s.activeAccountId);
 
-  useEffect(() => {
+  const loadStarred = useCallback(async () => {
     if (!activeAccountId) return;
     setLoading(true);
-    listStarredMessages(activeAccountId, 100, 0)
-      .then(setMessages)
-      .finally(() => setLoading(false));
+    setError(null);
+    try {
+      const starred = await listStarredMessages(activeAccountId, 100, 0);
+      setMessages(starred);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+      setMessages([]);
+    } finally {
+      setLoading(false);
+    }
   }, [activeAccountId]);
+
+  useEffect(() => {
+    loadStarred();
+  }, [loadStarred]);
 
   function handleOpen(messageId: string) {
     setSelectedId(messageId);
@@ -31,6 +44,36 @@ export default function StarredView() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--color-text-secondary)" }}>
         <Star size={20} className="spinner" style={{ marginRight: "8px" }} />
         {t("common.loading", "Loading...")}
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="fade-in" style={{
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        height: "100%", gap: "12px", color: "var(--color-text-secondary)",
+      }}>
+        <Star size={40} strokeWidth={1.2} />
+        <p style={{ color: "var(--color-error, #e53e3e)", fontSize: "14px", margin: 0 }}>
+          {t("starred.loadError", "Failed to load starred messages")}
+        </p>
+        <p style={{ fontSize: "13px", margin: 0 }}>{error}</p>
+        <button
+          onClick={loadStarred}
+          style={{
+            marginTop: "4px",
+            padding: "6px 16px",
+            borderRadius: "4px",
+            border: "1px solid var(--color-border)",
+            backgroundColor: "transparent",
+            color: "var(--color-accent)",
+            fontSize: "13px",
+            cursor: "pointer",
+          }}
+        >
+          {t("common.retry", "Retry")}
+        </button>
       </div>
     );
   }
