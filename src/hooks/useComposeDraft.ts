@@ -91,7 +91,7 @@ export function useComposeDraft({
 
   // Auto-save draft to localStorage and backend (debounced 3s)
   useEffect(() => {
-    if (!composeMode || composeMode !== "new") return;
+    if (!composeMode) return;
     const timer = setTimeout(() => {
       const hasDraft = to.length > 0 || cc.length > 0 || bcc.length > 0 || subject.trim() || rawSource.trim() || richTextHtml.trim();
       if (hasDraft) {
