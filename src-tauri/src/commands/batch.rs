@@ -147,21 +147,26 @@ pub async fn batch_delete(
     .await
     .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))??;
 
+    // Track which messages were successfully deleted remotely
+    let mut deleted_ids: Vec<String> = Vec::new();
+
     // Remote sync — connect once per account, operate, disconnect
     for (account_id, (provider_type, messages)) in &groups {
         if let Ok(conn) = ConnectedProvider::connect(&state, account_id, provider_type).await {
             match &conn {
                 ConnectedProvider::Gmail(provider) => {
                     for msg in messages {
-                        if let Err(e) = provider.trash_message(&msg.remote_id).await {
-                            warn!("Gmail batch delete failed for {}: {e}", msg.id);
+                        match provider.trash_message(&msg.remote_id).await {
+                            Ok(_) => deleted_ids.push(msg.id.clone()),
+                            Err(e) => warn!("Gmail batch delete failed for {}: {e}", msg.id),
                         }
                     }
                 }
                 ConnectedProvider::Outlook(provider) => {
                     for msg in messages {
-                        if let Err(e) = provider.trash_message(&msg.remote_id).await {
-                            warn!("Outlook batch delete failed for {}: {e}", msg.id);
+                        match provider.trash_message(&msg.remote_id).await {
+                            Ok(_) => deleted_ids.push(msg.id.clone()),
+                            Err(e) => warn!("Outlook batch delete failed for {}: {e}", msg.id),
                         }
                     }
                 }
@@ -171,8 +176,9 @@ pub async fn batch_delete(
                             if let Ok(uid) = parse_imap_uid(&msg.remote_id) {
                                 if let Ok(src) = find_message_folder(&state, &msg.id, account_id) {
                                     if src.id != trash_folder.id {
-                                        if let Err(e) = imap.move_message(&src.remote_id, uid, &trash_folder.remote_id).await {
-                                            warn!("IMAP batch delete failed for {}: {e}", msg.id);
+                                        match imap.move_message(&src.remote_id, uid, &trash_folder.remote_id).await {
+                                            Ok(_) => deleted_ids.push(msg.id.clone()),
+                                            Err(e) => warn!("IMAP batch delete failed for {}: {e}", msg.id),
                                         }
                                     }
                                 }
@@ -185,12 +191,12 @@ pub async fn batch_delete(
         }
     }
 
-    // Local bulk soft-delete
-    state.store.bulk_soft_delete(&message_ids)?;
-    let success_count = message_ids.len() as u32;
+    // Local bulk soft-delete — only messages that were successfully deleted remotely
+    state.store.bulk_soft_delete(&deleted_ids)?;
+    let success_count = deleted_ids.len() as u32;
 
     // Update search index — remove deleted messages
-    for id in &message_ids {
+    for id in &deleted_ids {
         if let Err(e) = state.search.remove_message(id) {
             warn!("Failed to remove deleted message {id} from search index: {e}");
         }
