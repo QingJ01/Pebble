@@ -101,7 +101,7 @@ export default function SearchFilters({ filters, onChange, onClear }: Props) {
             type="date"
             value={
               filters.dateFrom
-                ? new Date(filters.dateFrom * 1000).toISOString().split("T")[0]
+                ? (() => { const d = new Date(filters.dateFrom * 1000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })()
                 : ""
             }
             onChange={(e) => {
@@ -119,7 +119,7 @@ export default function SearchFilters({ filters, onChange, onClear }: Props) {
             type="date"
             value={
               filters.dateTo
-                ? new Date(filters.dateTo * 1000).toISOString().split("T")[0]
+                ? (() => { const d = new Date(filters.dateTo * 1000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })()
                 : ""
             }
             onChange={(e) => {

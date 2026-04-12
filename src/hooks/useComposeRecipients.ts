@@ -64,7 +64,7 @@ export function useComposeRecipients({
       setTo((prev) => prev.filter((addr) => addr !== resolvedEmail));
       setCc((prev) => prev.filter((addr) => addr !== resolvedEmail));
     }
-  }, [accounts]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [accounts, activeAccountId, composeReplyTo]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
     fromAccountId, setFromAccountId,

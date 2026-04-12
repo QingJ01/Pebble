@@ -41,7 +41,7 @@ export function useMessageLoader(messageId: string | null, privacyMode: PrivacyM
 
     load();
     return () => { cancelled = true; };
-  }, [messageId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [messageId, privacyMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Re-render HTML when privacy mode changes (without reloading message)
   useEffect(() => {
@@ -54,7 +54,7 @@ export function useMessageLoader(messageId: string | null, privacyMode: PrivacyM
     });
 
     return () => { cancelled = true; };
-  }, [privacyMode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [privacyMode, messageId, message]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { message, setMessage, rendered, loading };
 }
