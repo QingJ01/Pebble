@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Clock, Bell } from "lucide-react";
+import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import type { SnoozedMessage, Message } from "@/lib/api";
 import { listSnoozed, unsnoozeMessage, getMessagesBatch } from "@/lib/api";
 import { useMailStore } from "@/stores/mail.store";
@@ -16,6 +17,7 @@ export default function SnoozedView() {
   const { t } = useTranslation();
   const [entries, setEntries] = useState<SnoozedEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadSnoozed();
@@ -23,6 +25,7 @@ export default function SnoozedView() {
 
   async function loadSnoozed() {
     setLoading(true);
+    setError(null);
     try {
       const snoozed = await listSnoozed();
       const ids = snoozed.map((s) => s.message_id);
@@ -33,6 +36,9 @@ export default function SnoozedView() {
         message: messageMap.get(s.message_id) ?? null,
       }));
       setEntries(withMessages);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+      setEntries([]);
     } finally {
       setLoading(false);
     }
@@ -63,6 +69,36 @@ export default function SnoozedView() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--color-text-secondary)" }}>
         <Clock size={20} className="spin" style={{ marginRight: "8px" }} />
         {t("common.loading", "Loading...")}
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="fade-in" style={{
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        height: "100%", gap: "12px", color: "var(--color-text-secondary)",
+      }}>
+        <Clock size={40} strokeWidth={1.2} />
+        <p style={{ color: "var(--color-error, #e53e3e)", fontSize: "14px", margin: 0 }}>
+          {t("snoozed.loadError", "Failed to load snoozed messages")}
+        </p>
+        <p style={{ fontSize: "13px", margin: 0 }}>{error}</p>
+        <button
+          onClick={loadSnoozed}
+          style={{
+            marginTop: "4px",
+            padding: "6px 16px",
+            borderRadius: "4px",
+            border: "1px solid var(--color-border)",
+            backgroundColor: "transparent",
+            color: "var(--color-accent)",
+            fontSize: "13px",
+            cursor: "pointer",
+          }}
+        >
+          {t("common.retry", "Retry")}
+        </button>
       </div>
     );
   }
