@@ -32,7 +32,7 @@ export function useMessageLoader(messageId: string | null, privacyMode: PrivacyM
         setMessage(msg);
         setRendered({ ...html, html: sanitizeHtml(html.html) });
 
-        if (!msg.is_read) {
+        if (!cancelled && !msg.is_read) {
           flagsMutation.mutate({ messageId: messageId!, isRead: true });
         }
       } finally {
