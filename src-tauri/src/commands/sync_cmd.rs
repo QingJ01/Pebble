@@ -107,10 +107,60 @@ async fn start_sync_inner(
     let account_id_for_progress = account_id.clone();
     let account_id_clone = account_id.clone();
 
+    // Build the provider-specific task. If this fails (e.g. token decode error,
+    // IMAP config parse error), remove the placeholder so the account can retry.
+    let task = match build_sync_task(
+        state,
+        store,
+        attachments_dir,
+        stop_rx,
+        error_tx,
+        message_tx,
+        app_for_progress,
+        account_id_for_progress,
+        account_id_clone,
+        poll_interval_secs,
+        account,
+    ) {
+        Ok(task) => task,
+        Err(e) => {
+            let mut handles = state.sync_handles.lock().await;
+            handles.remove(&account_id);
+            return Err(e);
+        }
+    };
+
+    // Replace the placeholder with the real sync handle.
+    {
+        let mut handles = state.sync_handles.lock().await;
+        handles.insert(account_id, SyncHandle { stop_tx, task });
+    }
+
+    Ok(())
+}
+
+/// Build and spawn the provider-specific sync task.
+///
+/// Extracted so that any `?` propagation (token decode, config parse, etc.)
+/// returns `Err` to the caller, which can then remove the placeholder entry
+/// from `sync_handles` before propagating the error.
+fn build_sync_task(
+    state: &AppState,
+    store: Arc<Store>,
+    attachments_dir: std::path::PathBuf,
+    stop_rx: watch::Receiver<bool>,
+    error_tx: mpsc::UnboundedSender<pebble_mail::SyncError>,
+    message_tx: mpsc::UnboundedSender<pebble_mail::StoredMessage>,
+    app_for_progress: tauri::AppHandle,
+    account_id_for_progress: String,
+    account_id_clone: String,
+    poll_interval_secs: Option<u64>,
+    account: pebble_core::Account,
+) -> std::result::Result<tokio::task::JoinHandle<()>, PebbleError> {
     let task = match account.provider {
         ProviderType::Gmail => {
             // --- Gmail: REST API over HTTPS ---
-            let tokens = decode_oauth_account_tokens(state, &account_id)?;
+            let tokens = decode_oauth_account_tokens(state, &account_id_clone)?;
             let expires_at = tokens.expires_at;
             let provider = Arc::new(GmailProvider::new(tokens.access_token.clone()));
             let refresher = build_oauth_token_refresher(
@@ -119,7 +169,7 @@ async fn start_sync_inner(
                 tokens.access_token,
                 Arc::clone(&state.crypto),
                 Arc::clone(&state.store),
-                account_id.clone(),
+                account_id_clone.clone(),
             );
 
             tokio::spawn(async move {
@@ -151,11 +201,11 @@ async fn start_sync_inner(
         }
         ProviderType::Outlook => {
             // --- Outlook: Graph API over HTTPS ---
-            let tokens = decode_oauth_account_tokens(state, &account_id)?;
+            let tokens = decode_oauth_account_tokens(state, &account_id_clone)?;
             let expires_at = tokens.expires_at;
             let provider = Arc::new(OutlookProvider::new(
                 tokens.access_token.clone(),
-                account_id.clone(),
+                account_id_clone.clone(),
             ));
             let refresher = build_oauth_token_refresher(
                 outlook_oauth_config(),
@@ -163,7 +213,7 @@ async fn start_sync_inner(
                 tokens.access_token,
                 Arc::clone(&state.crypto),
                 Arc::clone(&state.store),
-                account_id.clone(),
+                account_id_clone.clone(),
             );
 
             tokio::spawn(async move {
@@ -194,7 +244,7 @@ async fn start_sync_inner(
         }
         ProviderType::Imap => {
             // --- IMAP path ---
-            let imap_config: ImapConfig = if let Some(encrypted) = state.store.get_auth_data(&account_id)? {
+            let imap_config: ImapConfig = if let Some(encrypted) = state.store.get_auth_data(&account_id_clone)? {
                 let decrypted = state.crypto.decrypt(&encrypted)?;
                 let value: serde_json::Value = serde_json::from_slice(&decrypted)
                     .map_err(|e| PebbleError::Internal(format!("Failed to parse decrypted config: {e}")))?;
@@ -204,13 +254,13 @@ async fn start_sync_inner(
                 // Legacy path: IMAP config used to live inline in sync_state.
                 let sync_state = state
                     .store
-                    .get_sync_state(&account_id)?
+                    .get_sync_state(&account_id_clone)?
                     .ok_or_else(|| {
-                        PebbleError::Internal(format!("No config found for account {account_id}"))
+                        PebbleError::Internal(format!("No config found for account {account_id_clone}"))
                     })?;
                 let imap_value = sync_state.imap.clone().ok_or_else(|| {
                     PebbleError::Internal(format!(
-                        "No IMAP config found for account {account_id}"
+                        "No IMAP config found for account {account_id_clone}"
                     ))
                 })?;
                 serde_json::from_value(imap_value).map_err(|e| {
@@ -241,13 +291,7 @@ async fn start_sync_inner(
         }
     };
 
-    // Replace the placeholder with the real sync handle.
-    {
-        let mut handles = state.sync_handles.lock().await;
-        handles.insert(account_id, SyncHandle { stop_tx, task });
-    }
-
-    Ok(())
+    Ok(task)
 }
 
 #[tauri::command]
