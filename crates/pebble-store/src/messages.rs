@@ -880,7 +880,14 @@ impl Store {
                         COUNT(*) as message_count,
                         SUM(CASE WHEN m.is_read = 0 THEN 1 ELSE 0 END) as unread_count,
                         MAX(m.is_starred) as is_starred,
-                        GROUP_CONCAT(DISTINCT m.from_address, '||') as participants,
+                        (SELECT GROUP_CONCAT(fa, '||') FROM (
+                            SELECT DISTINCT m3.from_address AS fa
+                            FROM messages m3
+                            JOIN message_folders mf3 ON m3.id = mf3.message_id
+                            WHERE mf3.folder_id = ?1
+                              AND m3.thread_id = m.thread_id
+                              AND m3.is_deleted = 0
+                        )) as participants,
                         MAX(m.has_attachments) as has_attachments
                      FROM messages m
                      JOIN message_folders mf ON m.id = mf.message_id
@@ -1133,5 +1140,96 @@ mod tombstone_tests {
         assert_eq!(purged, 0);
         let fetched = store.get_message(&msg_id).unwrap();
         assert!(fetched.is_some());
+    }
+}
+
+#[cfg(test)]
+mod thread_listing_tests {
+    use crate::Store;
+    use pebble_core::*;
+
+    fn seed_account_and_folder(store: &Store) -> (String, String) {
+        let now = now_timestamp();
+        let account = Account {
+            id: new_id(),
+            email: "test@example.com".to_string(),
+            display_name: "Test".to_string(),
+            provider: ProviderType::Imap,
+            created_at: now,
+            updated_at: now,
+        };
+        store.insert_account(&account).unwrap();
+        let folder = Folder {
+            id: new_id(),
+            account_id: account.id.clone(),
+            remote_id: "INBOX".to_string(),
+            name: "Inbox".to_string(),
+            folder_type: FolderType::Folder,
+            role: Some(FolderRole::Inbox),
+            parent_id: None,
+            color: None,
+            is_system: true,
+            sort_order: 0,
+        };
+        store.insert_folder(&folder).unwrap();
+        (account.id, folder.id)
+    }
+
+    fn make_msg(account_id: &str, thread_id: &str, from: &str, date: i64) -> Message {
+        Message {
+            id: new_id(),
+            account_id: account_id.to_string(),
+            remote_id: new_id(),
+            message_id_header: None,
+            in_reply_to: None,
+            references_header: None,
+            thread_id: Some(thread_id.to_string()),
+            subject: "Thread subject".to_string(),
+            snippet: format!("snippet-{date}"),
+            from_address: from.to_string(),
+            from_name: String::new(),
+            to_list: vec![],
+            cc_list: vec![],
+            bcc_list: vec![],
+            body_text: "body".to_string(),
+            body_html_raw: String::new(),
+            has_attachments: false,
+            is_read: false,
+            is_starred: false,
+            is_draft: false,
+            date,
+            remote_version: None,
+            is_deleted: false,
+            deleted_at: None,
+            created_at: date,
+            updated_at: date,
+        }
+    }
+
+    #[test]
+    fn list_threads_aggregates_distinct_participants() {
+        let store = Store::open_in_memory().unwrap();
+        let (account_id, folder_id) = seed_account_and_folder(&store);
+        let thread_id = new_id();
+
+        let base = now_timestamp();
+        // Three messages in same thread, two distinct senders (alice appears twice).
+        let m1 = make_msg(&account_id, &thread_id, "alice@example.com", base - 200);
+        let m2 = make_msg(&account_id, &thread_id, "bob@example.com", base - 100);
+        let m3 = make_msg(&account_id, &thread_id, "alice@example.com", base);
+        store.insert_message(&m1, &[folder_id.clone()]).unwrap();
+        store.insert_message(&m2, &[folder_id.clone()]).unwrap();
+        store.insert_message(&m3, &[folder_id.clone()]).unwrap();
+
+        let threads = store
+            .list_threads_by_folder(&folder_id, 50, 0)
+            .expect("list_threads_by_folder should succeed with distinct participants");
+        assert_eq!(threads.len(), 1);
+        let t = &threads[0];
+        assert_eq!(t.message_count, 3);
+        assert_eq!(t.unread_count, 3);
+        let mut parts = t.participants.clone();
+        parts.sort();
+        assert_eq!(parts, vec!["alice@example.com".to_string(), "bob@example.com".to_string()]);
     }
 }
