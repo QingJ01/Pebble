@@ -1,5 +1,5 @@
 use crate::state::AppState;
-use super::messages::{refresh_search_document, find_folder_by_role, find_message_folder};
+use super::messages::{refresh_search_documents, find_folder_by_role, find_message_folder};
 use super::messages::provider_dispatch::{ConnectedProvider, parse_imap_uid};
 use pebble_core::traits::{FolderProvider, LabelProvider};
 use pebble_core::{FolderRole, Message, PebbleError, ProviderType};
@@ -134,11 +134,9 @@ pub async fn batch_archive(
         }
     }
 
-    // Update search index for archived messages (refresh, not remove)
-    for id in &archived_ids {
-        if let Err(e) = refresh_search_document(&state, id) {
-            warn!("Failed to refresh search document for archived message {id}: {e}");
-        }
+    // Update search index for archived messages in a single commit
+    if let Err(e) = refresh_search_documents(&state, &archived_ids) {
+        warn!("Failed to refresh search documents after batch archive: {e}");
     }
 
     info!(

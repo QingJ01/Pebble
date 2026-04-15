@@ -62,6 +62,36 @@ pub(super) fn remove_search_documents(
     Ok(())
 }
 
+/// Refresh multiple search documents with a single index commit at the end.
+/// Use this instead of calling `refresh_search_document` in a loop: one commit
+/// for N messages is dramatically cheaper than N commits (segment flush +
+/// reader reload per doc).
+pub(super) fn refresh_search_documents(
+    state: &AppState,
+    message_ids: &[String],
+) -> std::result::Result<(), PebbleError> {
+    if message_ids.is_empty() {
+        return Ok(());
+    }
+    for message_id in message_ids {
+        match state.store.get_message(message_id)? {
+            Some(message) if !message.is_deleted => {
+                let folder_ids = state.store.get_message_folder_ids(message_id)?;
+                if folder_ids.is_empty() {
+                    state.search.remove_message(message_id)?;
+                } else {
+                    state.search.index_message(&message, &folder_ids)?;
+                }
+            }
+            Some(_) | None => {
+                state.search.remove_message(message_id)?;
+            }
+        }
+    }
+    state.search.commit()?;
+    Ok(())
+}
+
 /// Extract the IMAP config for an account (without connecting).
 pub(super) fn get_imap_config(state: &AppState, account_id: &str) -> std::result::Result<ImapConfig, PebbleError> {
     if let Some(encrypted) = state.store.get_auth_data(account_id)? {
