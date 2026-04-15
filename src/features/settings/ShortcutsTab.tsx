@@ -106,16 +106,33 @@ function ShortcutRow({ actionId }: { actionId: string }) {
           backgroundColor: "var(--color-bg)",
         }}
       >
-        <span style={{ fontSize: "13px", color: "var(--color-text-primary)" }}>
+        <span
+          id={`shortcut-label-${actionId}`}
+          style={{ fontSize: "13px", color: "var(--color-text-primary)" }}
+        >
           {t(ACTION_I18N_MAP[actionId] ?? actionId)}
         </span>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          {conflict && (
-            <span style={{ fontSize: "11px", color: "var(--color-error, #e53e3e)" }}>
-              {t("shortcuts.conflict", { action: conflict })}
-            </span>
-          )}
-          <kbd
+          <span
+            role="status"
+            aria-live="polite"
+            style={{
+              fontSize: "11px",
+              color: "var(--color-error, #e53e3e)",
+              minWidth: conflict ? undefined : 0,
+            }}
+          >
+            {conflict ? t("shortcuts.conflict", { action: conflict }) : ""}
+          </span>
+          <button
+            type="button"
+            aria-pressed={isRecording}
+            aria-labelledby={`shortcut-label-${actionId}`}
+            aria-label={
+              isRecording
+                ? t("shortcuts.recording")
+                : t("shortcuts.editBinding", { keys: currentKeys || t("shortcuts.unbound", "Unbound") })
+            }
             onClick={() => {
               if (isRecording) {
                 stopRecording();
@@ -147,7 +164,7 @@ function ShortcutRow({ actionId }: { actionId: string }) {
             }}
           >
             {isRecording ? t("shortcuts.recording") : currentKeys}
-          </kbd>
+          </button>
         </div>
       </div>
     </div>
@@ -201,20 +218,22 @@ export default function ShortcutsTab() {
         </button>
       </div>
 
-      {resetMessage && (
-        <div
-          style={{
-            padding: "8px 12px",
-            marginBottom: "16px",
-            borderRadius: "6px",
-            backgroundColor: "var(--color-accent-bg, rgba(59,130,246,0.1))",
-            color: "var(--color-accent, #3b82f6)",
-            fontSize: "12px",
-          }}
-        >
-          {t("shortcuts.resetConfirm")}
-        </div>
-      )}
+      <div role="status" aria-live="polite">
+        {resetMessage && (
+          <div
+            style={{
+              padding: "8px 12px",
+              marginBottom: "16px",
+              borderRadius: "6px",
+              backgroundColor: "var(--color-accent-bg, rgba(59,130,246,0.1))",
+              color: "var(--color-accent, #3b82f6)",
+              fontSize: "12px",
+            }}
+          >
+            {t("shortcuts.resetConfirm")}
+          </div>
+        )}
+      </div>
 
       {SHORTCUT_GROUPS.map((group) => (
         <div key={group.categoryKey} style={{ marginBottom: "24px" }}>

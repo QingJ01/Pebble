@@ -657,6 +657,7 @@ export default function RulesTab() {
                     <button
                       onClick={() => startEdit(rule)}
                       disabled={editingId !== null}
+                      aria-label={t("rules.editRule")}
                       title={t("rules.editRule")}
                       style={{
                         display: "flex",
@@ -683,6 +684,7 @@ export default function RulesTab() {
                     </button>
                     <button
                       onClick={() => setDeleteTarget({ id: rule.id, name: rule.name })}
+                      aria-label={t("rules.deleteRule")}
                       title={t("rules.deleteRule")}
                       style={{
                         display: "flex",

@@ -485,8 +485,8 @@ function EditAccountModal({ account, onClose, onSaved }: {
                     <input aria-label={t("accountSetup.imapPort")} style={{ ...inputStyle, width: "70px" }} type="number" value={imapPort} onChange={(e) => setImapPort(e.target.value)} />
                   </div>
                   <div style={fieldStyle}>
-                    <label style={labelStyle}>{t("accountSetup.security", "Security")}</label>
-                    <select value={imapSecurity} onChange={(e) => setImapSecurity(e.target.value as ConnectionSecurity | "")} style={{ ...inputStyle, width: "110px" }}>
+                    <label htmlFor="accountsetup-imap-security" style={labelStyle}>{t("accountSetup.security", "Security")}</label>
+                    <select id="accountsetup-imap-security" value={imapSecurity} onChange={(e) => setImapSecurity(e.target.value as ConnectionSecurity | "")} style={{ ...inputStyle, width: "110px" }}>
                       <option value="">{t("settings.leaveEmptyKeep", "keep current")}</option>
                       <option value="tls">{t("accountSetup.securityTls", "SSL/TLS")}</option>
                       <option value="starttls">{t("accountSetup.securityStarttls", "STARTTLS")}</option>
@@ -505,8 +505,8 @@ function EditAccountModal({ account, onClose, onSaved }: {
                     <input aria-label={t("accountSetup.smtpPort")} style={{ ...inputStyle, width: "70px" }} type="number" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} />
                   </div>
                   <div style={fieldStyle}>
-                    <label style={labelStyle}>{t("accountSetup.security", "Security")}</label>
-                    <select value={smtpSecurity} onChange={(e) => setSmtpSecurity(e.target.value as ConnectionSecurity | "")} style={{ ...inputStyle, width: "110px" }}>
+                    <label htmlFor="accountsetup-smtp-security" style={labelStyle}>{t("accountSetup.security", "Security")}</label>
+                    <select id="accountsetup-smtp-security" value={smtpSecurity} onChange={(e) => setSmtpSecurity(e.target.value as ConnectionSecurity | "")} style={{ ...inputStyle, width: "110px" }}>
                       <option value="">{t("settings.leaveEmptyKeep", "keep current")}</option>
                       <option value="tls">{t("accountSetup.securityTls", "SSL/TLS")}</option>
                       <option value="starttls">{t("accountSetup.securityStarttls", "STARTTLS")}</option>

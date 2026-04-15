@@ -34,6 +34,7 @@ export default function ThreadView() {
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
           <button
             onClick={() => setSelectedThreadId(null)}
+            aria-label={t("thread.back", "Back")}
             style={{
               background: "none", border: "none", cursor: "pointer", padding: "4px",
               borderRadius: "4px", color: "var(--color-text-secondary)", display: "flex", alignItems: "center",

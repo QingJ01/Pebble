@@ -332,6 +332,9 @@ export default function ComposeView() {
               <div style={{ position: "relative" }}>
                 <button
                   onClick={() => { setTemplates(listTemplates()); setShowTemplates((v) => !v); }}
+                  aria-haspopup="listbox"
+                  aria-expanded={showTemplates}
+                  aria-label={t("compose.templates", "Templates")}
                   title={t("compose.templates", "Templates")}
                   style={{
                     display: "flex", alignItems: "center", gap: "4px",
@@ -351,7 +354,7 @@ export default function ComposeView() {
                     minWidth: "220px", maxHeight: "300px", overflowY: "auto",
                   }}>
                     <div style={{ padding: "8px", borderBottom: "1px solid var(--color-border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span style={{ fontSize: "12px", fontWeight: 600 }}>{t("compose.templates", "Templates")}</span>
+                      <span id="compose-templates-label" style={{ fontSize: "12px", fontWeight: 600 }}>{t("compose.templates", "Templates")}</span>
                       <button
                         onClick={() => { setShowSaveTemplate(true); setShowTemplates(false); }}
                         style={{ fontSize: "11px", border: "none", background: "none", cursor: "pointer", color: "var(--color-accent)" }}
@@ -363,35 +366,55 @@ export default function ComposeView() {
                       <div style={{ padding: "16px", textAlign: "center", fontSize: "12px", color: "var(--color-text-secondary)" }}>
                         {t("compose.noTemplates", "No templates saved")}
                       </div>
-                    ) : templates.map((tpl) => (
-                      <div
-                        key={tpl.id}
-                        style={{
-                          display: "flex", alignItems: "center", padding: "8px",
-                          borderBottom: "1px solid var(--color-border)", cursor: "pointer",
-                          fontSize: "12px",
-                        }}
+                    ) : (
+                      <ul
+                        role="listbox"
+                        aria-labelledby="compose-templates-label"
+                        style={{ listStyle: "none", margin: 0, padding: 0 }}
                       >
-                        <div
-                          style={{ flex: 1, overflow: "hidden" }}
-                          onClick={() => {
+                        {templates.map((tpl) => {
+                          const applyTemplate = () => {
                             setSubject(tpl.subject);
                             setRawSource(tpl.body);
                             if (editor) editor.commands.setContent(tpl.body);
                             setShowTemplates(false);
-                          }}
-                        >
-                          <div style={{ fontWeight: 500 }}>{tpl.name}</div>
-                          <div style={{ color: "var(--color-text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tpl.subject}</div>
-                        </div>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); deleteTemplate(tpl.id); setTemplates(listTemplates()); }}
-                          style={{ border: "none", background: "none", cursor: "pointer", color: "var(--color-text-secondary)", padding: "2px" }}
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    ))}
+                          };
+                          return (
+                            <li
+                              key={tpl.id}
+                              role="option"
+                              aria-selected={false}
+                              tabIndex={0}
+                              onClick={applyTemplate}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  applyTemplate();
+                                }
+                              }}
+                              style={{
+                                display: "flex", alignItems: "center", padding: "8px",
+                                borderBottom: "1px solid var(--color-border)", cursor: "pointer",
+                                fontSize: "12px",
+                              }}
+                            >
+                              <div style={{ flex: 1, overflow: "hidden" }}>
+                                <div style={{ fontWeight: 500 }}>{tpl.name}</div>
+                                <div style={{ color: "var(--color-text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tpl.subject}</div>
+                              </div>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); deleteTemplate(tpl.id); setTemplates(listTemplates()); }}
+                                aria-label={t("compose.deleteTemplate", "Delete template")}
+                                title={t("compose.deleteTemplate", "Delete template")}
+                                style={{ border: "none", background: "none", cursor: "pointer", color: "var(--color-text-secondary)", padding: "2px" }}
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
                   </div>
                 )}
               </div>
@@ -455,6 +478,8 @@ export default function ComposeView() {
                   </span>
                   <button
                     onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
+                    aria-label={t("compose.removeAttachment", "Remove attachment {{name}}", { name: att.name })}
+                    title={t("compose.removeAttachment", "Remove attachment {{name}}", { name: att.name })}
                     style={{ border: "none", background: "none", cursor: "pointer", padding: "0 2px", color: "var(--color-text-secondary)" }}
                   >
                     <X size={12} />

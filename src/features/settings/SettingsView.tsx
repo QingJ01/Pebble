@@ -40,6 +40,7 @@ export default function SettingsView() {
       {/* Tab sidebar */}
       <div
         role="tablist"
+        aria-orientation="vertical"
         aria-label={t("settings.tabs", "Settings tabs")}
         style={{
           width: "180px",
@@ -61,6 +62,8 @@ export default function SettingsView() {
               let nextIndex = index;
               if (e.key === "ArrowDown") { nextIndex = (index + 1) % TAB_IDS.length; }
               else if (e.key === "ArrowUp") { nextIndex = (index - 1 + TAB_IDS.length) % TAB_IDS.length; }
+              else if (e.key === "Home") { nextIndex = 0; }
+              else if (e.key === "End") { nextIndex = TAB_IDS.length - 1; }
               else { return; }
               e.preventDefault();
               handleTabChange(TAB_IDS[nextIndex]);

@@ -182,6 +182,7 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
           </div>
           <button
             onClick={handleBilingualToggle}
+            aria-pressed={bilingualMode}
             style={{
               background: bilingualMode ? "var(--color-bg-hover)" : "none",
               border: "none",
