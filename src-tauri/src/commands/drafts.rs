@@ -1,5 +1,5 @@
 use crate::state::AppState;
-use pebble_core::{traits::DraftProvider, DraftMessage, EmailAddress, PebbleError};
+use pebble_core::{traits::DraftProvider, DraftMessage, EmailAddress, FolderRole, PebbleError};
 use tauri::State;
 use tracing::warn;
 
@@ -99,7 +99,15 @@ fn save_draft_locally(
         created_at: pebble_core::now_timestamp(),
         updated_at: pebble_core::now_timestamp(),
     };
-    state.store.insert_message(&msg, &[])?;
+    // Attach the draft to the account's Drafts folder if one exists, so it
+    // shows up in the Drafts view. Falls back to no-folder for accounts
+    // without a Drafts folder (e.g. brand-new IMAP account that hasn't yet
+    // synced folder structure).
+    let folder_ids: Vec<String> = match state.store.find_folder_by_role(account_id, FolderRole::Drafts) {
+        Ok(Some(f)) => vec![f.id],
+        _ => Vec::new(),
+    };
+    state.store.insert_message(&msg, &folder_ids)?;
     Ok(id)
 }
 
