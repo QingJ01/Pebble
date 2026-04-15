@@ -1,6 +1,6 @@
 use crate::state::AppState;
 use pebble_core::traits::{FolderProvider, LabelProvider};
-use pebble_core::{FolderRole, PebbleError, ProviderType};
+use pebble_core::{FolderRole, Message, PebbleError, ProviderType};
 use tauri::State;
 use tracing::{info, warn};
 
@@ -10,19 +10,29 @@ use super::{
 };
 use super::provider_dispatch::{ConnectedProvider, parse_imap_uid};
 
-/// Returns "archived" or "unarchived" so the frontend can show the correct toast.
-#[tauri::command]
-pub async fn archive_message(
-    state: State<'_, AppState>,
-    message_id: String,
-) -> std::result::Result<String, PebbleError> {
-    let msg = state.store.get_message(&message_id)?
+/// Load a message and its account's provider type, surfacing a clear error
+/// if either is missing. Four lifecycle commands share this preamble.
+fn resolve_message_context(
+    state: &AppState,
+    message_id: &str,
+) -> std::result::Result<(Message, ProviderType), PebbleError> {
+    let msg = state.store.get_message(message_id)?
         .ok_or_else(|| PebbleError::Internal(format!("Message not found: {message_id}")))?;
     let provider_type = state
         .store
         .get_account(&msg.account_id)?
         .map(|account| account.provider)
         .ok_or_else(|| PebbleError::Internal(format!("Account not found: {}", msg.account_id)))?;
+    Ok((msg, provider_type))
+}
+
+/// Returns "archived" or "unarchived" so the frontend can show the correct toast.
+#[tauri::command]
+pub async fn archive_message(
+    state: State<'_, AppState>,
+    message_id: String,
+) -> std::result::Result<String, PebbleError> {
+    let (msg, provider_type) = resolve_message_context(&state, &message_id)?;
 
     let source_folder = find_message_folder(&state, &message_id, &msg.account_id)?;
     // If the message is already in an archive folder, unarchive it (move to inbox)
@@ -109,13 +119,7 @@ pub async fn delete_message(
     state: State<'_, AppState>,
     message_id: String,
 ) -> std::result::Result<(), PebbleError> {
-    let msg = state.store.get_message(&message_id)?
-        .ok_or_else(|| PebbleError::Internal(format!("Message not found: {message_id}")))?;
-    let provider_type = state
-        .store
-        .get_account(&msg.account_id)?
-        .map(|account| account.provider)
-        .ok_or_else(|| PebbleError::Internal(format!("Account not found: {}", msg.account_id)))?;
+    let (msg, provider_type) = resolve_message_context(&state, &message_id)?;
 
     let source_folder = find_message_folder(&state, &message_id, &msg.account_id)?;
 
@@ -201,13 +205,7 @@ pub async fn restore_message(
     state: State<'_, AppState>,
     message_id: String,
 ) -> std::result::Result<(), PebbleError> {
-    let msg = state.store.get_message(&message_id)?
-        .ok_or_else(|| PebbleError::Internal(format!("Message not found: {message_id}")))?;
-    let provider_type = state
-        .store
-        .get_account(&msg.account_id)?
-        .map(|account| account.provider)
-        .ok_or_else(|| PebbleError::Internal(format!("Account not found: {}", msg.account_id)))?;
+    let (msg, provider_type) = resolve_message_context(&state, &message_id)?;
 
     let inbox = find_folder_by_role(&state, &msg.account_id, FolderRole::Inbox)?;
 
@@ -266,19 +264,12 @@ pub async fn move_to_folder(
     message_id: String,
     target_folder_id: String,
 ) -> std::result::Result<(), PebbleError> {
-    let msg = state.store.get_message(&message_id)?
-        .ok_or_else(|| PebbleError::Internal(format!("Message not found: {message_id}")))?;
+    let (msg, provider_type) = resolve_message_context(&state, &message_id)?;
 
     let source_folder = find_message_folder(&state, &message_id, &msg.account_id)?;
     if source_folder.id == target_folder_id {
         return Ok(());
     }
-
-    let provider_type = state
-        .store
-        .get_account(&msg.account_id)?
-        .map(|account| account.provider)
-        .ok_or_else(|| PebbleError::Internal(format!("Account not found: {}", msg.account_id)))?;
 
     // Look up target folder to get its remote_id
     let target_folders = state.store.list_folders(&msg.account_id)?;

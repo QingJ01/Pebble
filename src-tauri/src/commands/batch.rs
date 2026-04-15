@@ -30,25 +30,34 @@ fn group_by_account(
     Ok(groups)
 }
 
+/// Shared preamble for every batch_* command: enforce the 1000-id cap, then
+/// resolve the provider groupings off the Tokio runtime. Returns `Ok(None)`
+/// for an empty input so the caller can short-circuit with a zero count.
+async fn prepare_batch(
+    store: std::sync::Arc<Store>,
+    message_ids: &[String],
+) -> std::result::Result<Option<HashMap<String, (ProviderType, Vec<Message>)>>, PebbleError> {
+    if message_ids.is_empty() {
+        return Ok(None);
+    }
+    if message_ids.len() > 1000 {
+        return Err(PebbleError::Internal("Batch size exceeds limit of 1000".into()));
+    }
+    let ids = message_ids.to_vec();
+    let groups = tokio::task::spawn_blocking(move || group_by_account(&store, &ids))
+        .await
+        .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))??;
+    Ok(Some(groups))
+}
+
 #[tauri::command]
 pub async fn batch_archive(
     state: State<'_, AppState>,
     message_ids: Vec<String>,
 ) -> std::result::Result<u32, PebbleError> {
-    if message_ids.is_empty() {
+    let Some(groups) = prepare_batch(state.store.clone(), &message_ids).await? else {
         return Ok(0);
-    }
-    if message_ids.len() > 1000 {
-        return Err(PebbleError::Internal("Batch size exceeds limit of 1000".into()));
-    }
-
-    let store = state.store.clone();
-    let ids = message_ids.clone();
-    let groups = tokio::task::spawn_blocking(move || {
-        group_by_account(&store, &ids)
-    })
-    .await
-    .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))??;
+    };
     let mut success_count: u32 = 0;
     let mut archived_ids = Vec::new();
 
@@ -152,20 +161,9 @@ pub async fn batch_delete(
     state: State<'_, AppState>,
     message_ids: Vec<String>,
 ) -> std::result::Result<u32, PebbleError> {
-    if message_ids.is_empty() {
+    let Some(groups) = prepare_batch(state.store.clone(), &message_ids).await? else {
         return Ok(0);
-    }
-    if message_ids.len() > 1000 {
-        return Err(PebbleError::Internal("Batch size exceeds limit of 1000".into()));
-    }
-
-    let store = state.store.clone();
-    let ids = message_ids.clone();
-    let groups = tokio::task::spawn_blocking(move || {
-        group_by_account(&store, &ids)
-    })
-    .await
-    .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))??;
+    };
 
     // Track which messages were successfully deleted remotely
     let mut deleted_ids: Vec<String> = Vec::new();
@@ -246,20 +244,9 @@ pub async fn batch_mark_read(
     message_ids: Vec<String>,
     is_read: bool,
 ) -> std::result::Result<u32, PebbleError> {
-    if message_ids.is_empty() {
+    let Some(groups) = prepare_batch(state.store.clone(), &message_ids).await? else {
         return Ok(0);
-    }
-    if message_ids.len() > 1000 {
-        return Err(PebbleError::Internal("Batch size exceeds limit of 1000".into()));
-    }
-
-    let store = state.store.clone();
-    let ids = message_ids.clone();
-    let groups = tokio::task::spawn_blocking(move || {
-        group_by_account(&store, &ids)
-    })
-    .await
-    .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))??;
+    };
 
     // Track which messages were successfully updated remotely
     let mut synced_ids: Vec<String> = Vec::new();
@@ -337,20 +324,9 @@ pub async fn batch_star(
     message_ids: Vec<String>,
     starred: bool,
 ) -> std::result::Result<u32, PebbleError> {
-    if message_ids.is_empty() {
+    let Some(groups) = prepare_batch(state.store.clone(), &message_ids).await? else {
         return Ok(0);
-    }
-    if message_ids.len() > 1000 {
-        return Err(PebbleError::Internal("batch_star: too many messages (max 1000)".to_string()));
-    }
-
-    let store = state.store.clone();
-    let ids = message_ids.clone();
-    let groups = tokio::task::spawn_blocking(move || {
-        group_by_account(&store, &ids)
-    })
-    .await
-    .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))??;
+    };
 
     // Track which messages were successfully updated remotely
     let mut synced_ids: Vec<String> = Vec::new();
