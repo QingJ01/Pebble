@@ -4,14 +4,60 @@ pub mod provider_dispatch;
 pub mod query;
 pub mod rendering;
 
-// ─── Shared helpers used by flags and lifecycle submodules ────────────────────
+// Shared helpers used by flags and lifecycle submodules.
 
 use crate::commands::oauth::ensure_account_oauth_tokens;
 use crate::state::AppState;
-use pebble_core::{FolderRole, PebbleError};
+use pebble_core::{FolderRole, Message, PebbleError};
 use pebble_crypto::CryptoService;
 use pebble_mail::{GmailProvider, ImapConfig, ImapProvider, OutlookProvider};
 use pebble_store::Store;
+use serde_json::json;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RemoteMutationOutcome {
+    Applied,
+    Queued,
+    LocalOnly,
+    #[allow(dead_code)]
+    Failed,
+}
+
+pub(super) fn remote_mutation_allows_local_commit(outcome: RemoteMutationOutcome) -> bool {
+    matches!(
+        outcome,
+        RemoteMutationOutcome::Applied | RemoteMutationOutcome::LocalOnly
+    )
+}
+
+pub(super) fn queue_pending_remote_op(
+    state: &AppState,
+    message: &Message,
+    op_type: &str,
+    payload: serde_json::Value,
+    error: &str,
+) -> std::result::Result<RemoteMutationOutcome, PebbleError> {
+    let payload = json!({
+        "provider_account_id": message.account_id,
+        "remote_id": message.remote_id,
+        "op": op_type,
+        "payload": payload,
+    });
+    let op_id = state.store.insert_pending_mail_op(
+        &message.account_id,
+        &message.id,
+        op_type,
+        &payload.to_string(),
+    )?;
+    state.store.mark_pending_mail_op_failed(&op_id, error)?;
+    Ok(RemoteMutationOutcome::Queued)
+}
+
+pub(super) fn queued_remote_error(op_type: &str, error: &str) -> PebbleError {
+    PebbleError::Network(format!(
+        "Remote {op_type} failed and was queued for retry: {error}"
+    ))
+}
 
 pub(super) async fn connect_gmail(
     state: &AppState,
@@ -26,7 +72,10 @@ pub(super) async fn connect_outlook(
     account_id: &str,
 ) -> std::result::Result<OutlookProvider, PebbleError> {
     let tokens = ensure_account_oauth_tokens(state, account_id, "outlook").await?;
-    Ok(OutlookProvider::new(tokens.access_token, account_id.to_string()))
+    Ok(OutlookProvider::new(
+        tokens.access_token,
+        account_id.to_string(),
+    ))
 }
 
 pub(super) fn refresh_search_document(
@@ -119,7 +168,8 @@ pub(super) fn load_imap_config(
             .map_err(|e| PebbleError::Internal(format!("Failed to deserialize IMAP config: {e}")))
     } else {
         // Legacy path: IMAP config used to live inline in sync_state.
-        let sync_state = store.get_sync_state(account_id)?
+        let sync_state = store
+            .get_sync_state(account_id)?
             .ok_or_else(|| PebbleError::Internal(format!("No config for account {account_id}")))?;
         let imap_value = sync_state.imap.ok_or_else(|| {
             PebbleError::Internal(format!("No IMAP config for account {account_id}"))
@@ -130,7 +180,10 @@ pub(super) fn load_imap_config(
 }
 
 /// Resolve an IMAP connection from the account's auth data.
-pub(super) async fn connect_imap(state: &AppState, account_id: &str) -> std::result::Result<ImapProvider, PebbleError> {
+pub(super) async fn connect_imap(
+    state: &AppState,
+    account_id: &str,
+) -> std::result::Result<ImapProvider, PebbleError> {
     let imap_config = load_imap_config(&state.store, &state.crypto, account_id)?;
     let provider = ImapProvider::new(imap_config);
     provider.connect().await?;
@@ -138,18 +191,29 @@ pub(super) async fn connect_imap(state: &AppState, account_id: &str) -> std::res
 }
 
 /// Find the folder with a given role for an account.
-pub(super) fn find_folder_by_role(state: &AppState, account_id: &str, role: FolderRole) -> std::result::Result<pebble_core::Folder, PebbleError> {
+pub(super) fn find_folder_by_role(
+    state: &AppState,
+    account_id: &str,
+    role: FolderRole,
+) -> std::result::Result<pebble_core::Folder, PebbleError> {
     let folders = state.store.list_folders(account_id)?;
-    folders.into_iter()
+    folders
+        .into_iter()
         .find(|f| f.role == Some(role.clone()))
         .ok_or_else(|| PebbleError::Internal(format!("No {:?} folder found", role)))
 }
 
 /// Find the folder containing a given message (via the message_folders junction table).
-pub(super) fn find_message_folder(state: &AppState, message_id: &str, account_id: &str) -> std::result::Result<pebble_core::Folder, PebbleError> {
+pub(super) fn find_message_folder(
+    state: &AppState,
+    message_id: &str,
+    account_id: &str,
+) -> std::result::Result<pebble_core::Folder, PebbleError> {
     let folder_ids = state.store.get_message_folder_ids(message_id)?;
     if folder_ids.is_empty() {
-        return Err(PebbleError::Internal("Message not found in any folder".to_string()));
+        return Err(PebbleError::Internal(
+            "Message not found in any folder".to_string(),
+        ));
     }
     let folders = state.store.list_folders(account_id)?;
     // Return the first matching folder (prefer inbox-like folders)
@@ -158,5 +222,7 @@ pub(super) fn find_message_folder(state: &AppState, message_id: &str, account_id
             return Ok(folder.clone());
         }
     }
-    Err(PebbleError::Internal("Message folder not found".to_string()))
+    Err(PebbleError::Internal(
+        "Message folder not found".to_string(),
+    ))
 }

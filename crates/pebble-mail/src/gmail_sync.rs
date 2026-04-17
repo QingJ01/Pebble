@@ -1,5 +1,5 @@
-use std::future::Future;
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -12,8 +12,10 @@ use tokio::sync::{mpsc, watch};
 use tracing::{debug, error, info, warn};
 
 use crate::backoff::SyncBackoff;
-use crate::provider::gmail::{GmailFetchedMessage, GmailProvider, visible_label_ids};
-use crate::sync::{StoredMessage, SyncConfig, SyncError, SyncWorkerBase, persist_message_attachments_async};
+use crate::provider::gmail::{visible_label_ids, GmailFetchedMessage, GmailProvider};
+use crate::sync::{
+    persist_message_attachments_async, StoredMessage, SyncConfig, SyncError, SyncWorkerBase,
+};
 use crate::thread::compute_thread_id;
 
 fn collect_ref_ids_from_messages(messages: &[GmailFetchedMessage]) -> Vec<String> {
@@ -67,6 +69,16 @@ fn build_sync_label_ids(folders: &[Folder]) -> Vec<String> {
         .collect()
 }
 
+fn can_advance_gmail_cursor(failure_count: usize) -> bool {
+    failure_count == 0
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct GmailLabelSyncOutcome {
+    stored_count: u32,
+    failure_count: usize,
+}
+
 fn resolve_folder_ids(
     folders_by_remote: &HashMap<String, String>,
     label_ids: &[String],
@@ -89,8 +101,9 @@ fn resolve_folder_ids(
 }
 
 /// Callback that refreshes the OAuth token and returns (new_access_token, expires_at).
-pub type TokenRefresher =
-    Box<dyn Fn() -> Pin<Box<dyn Future<Output = Result<(String, Option<i64>)>> + Send>> + Send + Sync>;
+pub type TokenRefresher = Box<
+    dyn Fn() -> Pin<Box<dyn Future<Output = Result<(String, Option<i64>)>> + Send>> + Send + Sync,
+>;
 
 /// A sync worker for Gmail accounts using the REST API (HTTPS on port 443).
 pub struct GmailSyncWorker {
@@ -135,9 +148,16 @@ impl GmailSyncWorker {
         self
     }
 
-    pub fn with_token_refresher(mut self, refresher: TokenRefresher, expires_at: Option<i64>) -> Self {
+    pub fn with_token_refresher(
+        mut self,
+        refresher: TokenRefresher,
+        expires_at: Option<i64>,
+    ) -> Self {
         self.token_refresher = Some(Arc::new(refresher));
-        *self.token_expires_at.lock().unwrap_or_else(|e| e.into_inner()) = expires_at;
+        *self
+            .token_expires_at
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = expires_at;
         self
     }
 
@@ -149,7 +169,11 @@ impl GmailSyncWorker {
         let Ok(Some(message)) = self.base.store.get_message(message_id) else {
             return;
         };
-        let folder_ids = self.base.store.get_message_folder_ids(message_id).unwrap_or_default();
+        let folder_ids = self
+            .base
+            .store
+            .get_message_folder_ids(message_id)
+            .unwrap_or_default();
         let _ = tx.send(StoredMessage {
             message,
             folder_ids,
@@ -172,7 +196,8 @@ impl GmailSyncWorker {
         let thread_id = compute_thread_id(&message, thread_mappings);
         message.thread_id = Some(thread_id);
 
-        let folder_ids = resolve_folder_ids(folders_by_remote, &visible_label_ids, fallback_folder_id);
+        let folder_ids =
+            resolve_folder_ids(folders_by_remote, &visible_label_ids, fallback_folder_id);
 
         self.base.store.insert_message(&message, &folder_ids)?;
         persist_message_attachments_async(
@@ -198,7 +223,10 @@ impl GmailSyncWorker {
     async fn ensure_valid_token(&self) -> Result<()> {
         let now = now_timestamp();
         let needs_refresh = {
-            let expires = self.token_expires_at.lock().unwrap_or_else(|e| e.into_inner());
+            let expires = self
+                .token_expires_at
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             match *expires {
                 Some(exp) => now >= exp - 300, // 5 minute buffer
                 None => false,                 // No expiry info — assume valid
@@ -207,17 +235,27 @@ impl GmailSyncWorker {
 
         if needs_refresh {
             if let Some(ref refresher) = self.token_refresher {
-                debug!("Refreshing Gmail OAuth token for account {}", self.base.account_id);
+                debug!(
+                    "Refreshing Gmail OAuth token for account {}",
+                    self.base.account_id
+                );
                 match refresher().await {
                     Ok((new_token, new_expires_at)) => {
                         self.provider.set_access_token(new_token);
-                        let mut expires = self.token_expires_at.lock().unwrap_or_else(|e| e.into_inner());
+                        let mut expires = self
+                            .token_expires_at
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner());
                         *expires = new_expires_at.or(Some(now + 3600));
-                        info!("Gmail OAuth token refreshed for account {}", self.base.account_id);
+                        info!(
+                            "Gmail OAuth token refreshed for account {}",
+                            self.base.account_id
+                        );
                     }
                     Err(e) => {
                         warn!("Failed to refresh OAuth token: {}", e);
-                        self.base.emit_error("auth", &format!("Token refresh failed: {e}"));
+                        self.base
+                            .emit_error("auth", &format!("Token refresh failed: {e}"));
                         return Err(PebbleError::Auth(format!("Token refresh failed: {e}")));
                     }
                 }
@@ -228,7 +266,10 @@ impl GmailSyncWorker {
 
     /// Perform initial sync: list folders, fetch messages for each label.
     async fn initial_sync(&self) -> Result<()> {
-        info!("Starting Gmail initial sync for account {}", self.base.account_id);
+        info!(
+            "Starting Gmail initial sync for account {}",
+            self.base.account_id
+        );
 
         // Sync folders (labels) — hidden labels are already filtered by the provider
         let folders = self.provider.list_folders().await?;
@@ -239,17 +280,28 @@ impl GmailSyncWorker {
 
         // Clean up any previously-synced hidden Gmail labels from the local store
         let hidden = [
-            "CHAT", "IMPORTANT", "STARRED", "UNREAD",
-            "CATEGORY_FORUMS", "CATEGORY_UPDATES", "CATEGORY_PERSONAL",
-            "CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL",
+            "CHAT",
+            "IMPORTANT",
+            "STARRED",
+            "UNREAD",
+            "CATEGORY_FORUMS",
+            "CATEGORY_UPDATES",
+            "CATEGORY_PERSONAL",
+            "CATEGORY_PROMOTIONS",
+            "CATEGORY_SOCIAL",
         ];
         for label_id in &hidden {
-            let _ = self.base.store.delete_folder_by_remote_id(&self.base.account_id, label_id);
+            let _ = self
+                .base
+                .store
+                .delete_folder_by_remote_id(&self.base.account_id, label_id);
         }
 
         // Ensure an Archive folder exists locally
         let local_folders = self.base.store.list_folders(&self.base.account_id)?;
-        let has_archive = local_folders.iter().any(|f| f.role == Some(pebble_core::FolderRole::Archive));
+        let has_archive = local_folders
+            .iter()
+            .any(|f| f.role == Some(pebble_core::FolderRole::Archive));
         if !has_archive {
             let archive = pebble_core::Folder {
                 id: new_id(),
@@ -268,7 +320,8 @@ impl GmailSyncWorker {
 
         // Get the stored sync cursor (historyId) if any
         let stored_cursor = self
-            .base.store
+            .base
+            .store
             .get_sync_cursor(&self.base.account_id)
             .ok()
             .flatten();
@@ -285,54 +338,87 @@ impl GmailSyncWorker {
             .collect();
         let limit = if stored_cursor.is_some() { 50 } else { 200 };
         let mut thread_mappings = self
-            .base.store
+            .base
+            .store
             .get_thread_mappings(&self.base.account_id)
             .unwrap_or_default();
+        let mut failure_count = 0usize;
 
         for label_id in &labels_to_sync {
-            if let Err(e) = self.sync_label(label_id, limit, &folders_by_remote, &mut thread_mappings).await {
-                warn!("Gmail sync label {} failed: {}", label_id, e);
+            match self
+                .sync_label(label_id, limit, &folders_by_remote, &mut thread_mappings)
+                .await
+            {
+                Ok(outcome) => {
+                    failure_count += outcome.failure_count;
+                }
+                Err(e) => {
+                    failure_count += 1;
+                    warn!("Gmail sync label {} failed: {}", label_id, e);
+                }
             }
         }
 
         // Store the historyId as sync cursor for future delta syncs
-        if !profile_history_id.is_empty() {
-            let _ = self.base.store.set_sync_cursor(&self.base.account_id, &profile_history_id);
+        if !profile_history_id.is_empty() && can_advance_gmail_cursor(failure_count) {
+            let _ = self
+                .base
+                .store
+                .set_sync_cursor(&self.base.account_id, &profile_history_id);
+        } else if failure_count > 0 {
+            warn!(
+                "Gmail initial sync had {} failures; keeping previous history cursor",
+                failure_count
+            );
         }
 
-        info!("Gmail initial sync completed for account {}", self.base.account_id);
+        info!(
+            "Gmail initial sync completed for account {}",
+            self.base.account_id
+        );
         Ok(())
     }
 
     /// Sync messages for a specific Gmail label.
-    async fn sync_label(&self, label_id: &str, limit: u32, folders_by_remote: &HashMap<String, String>, thread_mappings: &mut HashMap<String, String>) -> Result<u32> {
+    async fn sync_label(
+        &self,
+        label_id: &str,
+        limit: u32,
+        folders_by_remote: &HashMap<String, String>,
+        thread_mappings: &mut HashMap<String, String>,
+    ) -> Result<GmailLabelSyncOutcome> {
         let folder_id = match folders_by_remote.get(label_id) {
             Some(id) => id.clone(),
             None => {
                 debug!("No local folder found for label {}, skipping", label_id);
-                return Ok(0);
+                return Ok(GmailLabelSyncOutcome::default());
             }
         };
 
         // List message IDs from Gmail
-        let (msg_refs, _next_page) = self.provider.list_message_ids(label_id, limit, None).await?;
+        let (msg_refs, _next_page) = self
+            .provider
+            .list_message_ids(label_id, limit, None)
+            .await?;
         if msg_refs.is_empty() {
-            return Ok(0);
+            return Ok(GmailLabelSyncOutcome::default());
         }
 
         let remote_ids: Vec<String> = msg_refs.iter().map(|r| r.id.clone()).collect();
         let existing = self
-            .base.store
+            .base
+            .store
             .get_existing_message_map_by_remote_ids(&self.base.account_id, &remote_ids)
             .unwrap_or_default();
 
-        let mut stored_count = 0u32;
+        let mut outcome = GmailLabelSyncOutcome::default();
 
         // Separate already-existing messages (just add folder) from new ones to fetch
         let mut to_fetch = Vec::new();
         for msg_ref in msg_refs {
             if let Some(local_id) = existing.get(&msg_ref.id) {
                 if let Err(e) = self.base.store.add_message_to_folder(local_id, &folder_id) {
+                    outcome.failure_count += 1;
                     warn!(
                         "Failed to add Gmail label {} to existing message {}: {}",
                         label_id, msg_ref.id, e
@@ -365,28 +451,34 @@ impl GmailSyncWorker {
                     .store_fetched_message(fetched, &folder_id, thread_mappings, folders_by_remote)
                     .await
                 {
-                    Ok(true) => stored_count += 1,
+                    Ok(true) => outcome.stored_count += 1,
                     Ok(false) => {}
                     Err(e) => {
+                        outcome.failure_count += 1;
                         error!("Failed to store Gmail message {}: {}", gmail_id, e);
                     }
                 },
                 Err(e) => {
+                    outcome.failure_count += 1;
                     warn!("Failed to fetch Gmail message {}: {}", gmail_id, e);
                 }
             }
         }
 
-        if stored_count > 0 {
-            info!("Stored {} messages for label {}", stored_count, label_id);
+        if outcome.stored_count > 0 {
+            info!(
+                "Stored {} messages for label {}",
+                outcome.stored_count, label_id
+            );
         }
-        Ok(stored_count)
+        Ok(outcome)
     }
 
     /// Poll for new messages using the Gmail History API (delta sync).
     async fn poll_changes(&self) -> Result<()> {
         let cursor = self
-            .base.store
+            .base
+            .store
             .get_sync_cursor(&self.base.account_id)
             .ok()
             .flatten();
@@ -444,6 +536,7 @@ impl GmailSyncWorker {
         let mut deleted_ids = Vec::new();
         let mut labels_added = Vec::new();
         let mut labels_removed = Vec::new();
+        let mut failure_count = 0usize;
 
         if let Some(entries) = &history.history {
             for entry in entries {
@@ -471,7 +564,8 @@ impl GmailSyncWorker {
         }
 
         let folders_by_remote: HashMap<String, String> = self
-            .base.store
+            .base
+            .store
             .list_folders(&self.base.account_id)?
             .into_iter()
             .map(|folder| (folder.remote_id, folder.id))
@@ -480,44 +574,116 @@ impl GmailSyncWorker {
         // Handle deletions
         if !deleted_ids.is_empty() {
             for remote_id in &deleted_ids {
-                if let Ok(Some(local_id)) =
-                    self.base.store.find_message_id_by_remote(&self.base.account_id, remote_id)
+                match self
+                    .base
+                    .store
+                    .find_message_id_by_remote(&self.base.account_id, remote_id)
                 {
-                    let _ = self.base.store.soft_delete_message(&local_id);
-                    self.emit_message_refresh(&local_id);
+                    Ok(Some(local_id)) => match self.base.store.soft_delete_message(&local_id) {
+                        Ok(()) => self.emit_message_refresh(&local_id),
+                        Err(e) => {
+                            failure_count += 1;
+                            warn!(
+                                "Failed to soft-delete Gmail history message {}: {}",
+                                remote_id, e
+                            );
+                        }
+                    },
+                    Ok(None) => {}
+                    Err(e) => {
+                        failure_count += 1;
+                        warn!(
+                            "Failed to look up deleted Gmail message {}: {}",
+                            remote_id, e
+                        );
+                    }
                 }
             }
             info!("Deleted {} messages via history", deleted_ids.len());
         }
 
         for (remote_id, label_ids) in labels_removed {
-            if let Ok(Some(local_id)) = self.base.store.find_message_id_by_remote(&self.base.account_id, &remote_id) {
-                for label_id in visible_label_ids(&label_ids) {
-                    if let Some(folder_id) = folders_by_remote.get(&label_id) {
-                        let _ = self.base.store.remove_message_from_folder(&local_id, folder_id);
+            match self
+                .base
+                .store
+                .find_message_id_by_remote(&self.base.account_id, &remote_id)
+            {
+                Ok(Some(local_id)) => {
+                    for label_id in visible_label_ids(&label_ids) {
+                        if let Some(folder_id) = folders_by_remote.get(&label_id) {
+                            if let Err(e) = self
+                                .base
+                                .store
+                                .remove_message_from_folder(&local_id, folder_id)
+                            {
+                                failure_count += 1;
+                                warn!(
+                                    "Failed to remove Gmail label {} from message {}: {}",
+                                    label_id, remote_id, e
+                                );
+                            }
+                        }
                     }
+                    self.emit_message_refresh(&local_id);
                 }
-                self.emit_message_refresh(&local_id);
+                Ok(None) => {}
+                Err(e) => {
+                    failure_count += 1;
+                    warn!(
+                        "Failed to look up Gmail label removal message {}: {}",
+                        remote_id, e
+                    );
+                }
             }
         }
 
         for (remote_id, label_ids) in labels_added {
-            if let Ok(Some(local_id)) = self.base.store.find_message_id_by_remote(&self.base.account_id, &remote_id) {
-                for label_id in visible_label_ids(&label_ids) {
-                    if let Some(folder_id) = folders_by_remote.get(&label_id) {
-                        let _ = self.base.store.add_message_to_folder(&local_id, folder_id);
+            match self
+                .base
+                .store
+                .find_message_id_by_remote(&self.base.account_id, &remote_id)
+            {
+                Ok(Some(local_id)) => {
+                    for label_id in visible_label_ids(&label_ids) {
+                        if let Some(folder_id) = folders_by_remote.get(&label_id) {
+                            if let Err(e) =
+                                self.base.store.add_message_to_folder(&local_id, folder_id)
+                            {
+                                failure_count += 1;
+                                warn!(
+                                    "Failed to add Gmail label {} to message {}: {}",
+                                    label_id, remote_id, e
+                                );
+                            }
+                        }
                     }
+                    self.emit_message_refresh(&local_id);
                 }
-                self.emit_message_refresh(&local_id);
+                Ok(None) => {}
+                Err(e) => {
+                    failure_count += 1;
+                    warn!(
+                        "Failed to look up Gmail label addition message {}: {}",
+                        remote_id, e
+                    );
+                }
             }
         }
 
         // Fetch new messages concurrently, then collect refs and store.
         if !new_ids.is_empty() {
-            let existing = self
-                .base.store
+            let existing = match self
+                .base
+                .store
                 .get_existing_message_map_by_remote_ids(&self.base.account_id, &new_ids)
-                .unwrap_or_default();
+            {
+                Ok(existing) => existing,
+                Err(e) => {
+                    failure_count += 1;
+                    warn!("Failed to look up existing Gmail history messages: {}", e);
+                    HashMap::new()
+                }
+            };
 
             // Emit refresh for already-known messages; collect truly new IDs.
             let to_fetch: Vec<String> = new_ids
@@ -533,10 +699,7 @@ impl GmailSyncWorker {
                 .collect();
 
             if !to_fetch.is_empty() {
-                let inbox_folder_id = folders_by_remote
-                    .get("INBOX")
-                    .cloned()
-                    .unwrap_or_default();
+                let inbox_folder_id = folders_by_remote.get("INBOX").cloned().unwrap_or_default();
 
                 // Phase 1: fetch all messages concurrently.
                 use futures::stream::{self, StreamExt};
@@ -552,21 +715,22 @@ impl GmailSyncWorker {
                 .collect()
                 .await;
 
-                let fetched_messages: Vec<GmailFetchedMessage> = fetched_results
-                    .into_iter()
-                    .filter_map(|(gmail_id, result)| match result {
-                        Ok(fetched) => Some(fetched),
+                let mut fetched_messages = Vec::new();
+                for (gmail_id, result) in fetched_results {
+                    match result {
+                        Ok(fetched) => fetched_messages.push(fetched),
                         Err(e) => {
+                            failure_count += 1;
                             warn!("Failed to fetch history message {}: {}", gmail_id, e);
-                            None
                         }
-                    })
-                    .collect();
+                    }
+                }
 
                 // Phase 2: collect refs from fetched messages for targeted thread lookup.
                 let ref_ids = collect_ref_ids_from_messages(&fetched_messages);
                 let mut thread_mappings = self
-                    .base.store
+                    .base
+                    .store
                     .get_thread_mappings_for_refs(&self.base.account_id, &ref_ids)
                     .unwrap_or_default();
 
@@ -574,9 +738,15 @@ impl GmailSyncWorker {
                 for fetched in fetched_messages {
                     let gmail_id = fetched.message.remote_id.clone();
                     if let Err(e) = self
-                        .store_fetched_message(fetched, &inbox_folder_id, &mut thread_mappings, &folders_by_remote)
+                        .store_fetched_message(
+                            fetched,
+                            &inbox_folder_id,
+                            &mut thread_mappings,
+                            &folders_by_remote,
+                        )
                         .await
                     {
+                        failure_count += 1;
                         warn!("Failed to store history message {}: {}", gmail_id, e);
                     }
                 }
@@ -585,7 +755,17 @@ impl GmailSyncWorker {
 
         // Update cursor
         if let Some(new_hid) = history.history_id {
-            let _ = self.base.store.set_sync_cursor(&self.base.account_id, &new_hid);
+            if can_advance_gmail_cursor(failure_count) {
+                let _ = self
+                    .base
+                    .store
+                    .set_sync_cursor(&self.base.account_id, &new_hid);
+            } else {
+                warn!(
+                    "Gmail history sync had {} failures; keeping previous history cursor",
+                    failure_count
+                );
+            }
         }
 
         Ok(())
@@ -597,15 +777,23 @@ impl GmailSyncWorker {
 
         // Ensure token is valid before starting
         if let Err(e) = self.ensure_valid_token().await {
-            error!("Token validation failed for account {}: {}", self.base.account_id, e);
-            self.base.emit_error("auth", &format!("Token validation failed: {e}"));
+            error!(
+                "Token validation failed for account {}: {}",
+                self.base.account_id, e
+            );
+            self.base
+                .emit_error("auth", &format!("Token validation failed: {e}"));
             return;
         }
 
         // Initial sync
         if let Err(e) = self.initial_sync().await {
-            error!("Gmail initial sync failed for account {}: {}", self.base.account_id, e);
-            self.base.emit_error("sync", &format!("Initial sync failed: {e}"));
+            error!(
+                "Gmail initial sync failed for account {}: {}",
+                self.base.account_id, e
+            );
+            self.base
+                .emit_error("sync", &format!("Initial sync failed: {e}"));
             // Don't return — still enter poll loop so we can retry
         }
 
@@ -733,5 +921,15 @@ mod tests {
                 "Label_Projects".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn gmail_cursor_does_not_advance_with_failures() {
+        assert!(!can_advance_gmail_cursor(1));
+    }
+
+    #[test]
+    fn gmail_cursor_advances_without_failures() {
+        assert!(can_advance_gmail_cursor(0));
     }
 }

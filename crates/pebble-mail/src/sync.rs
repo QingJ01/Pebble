@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::backoff::SyncBackoff;
-use pebble_core::{Message, Result, new_id, now_timestamp};
+use pebble_core::{new_id, now_timestamp, Message, Result};
 use pebble_store::Store;
 use tokio::sync::{mpsc, watch};
 use tracing::{debug, error, info, warn};
@@ -15,7 +15,7 @@ pub struct SyncError {
     pub timestamp: u64,
 }
 
-use crate::parser::{AttachmentData, ParsedMessage, parse_raw_email};
+use crate::parser::{parse_raw_email, AttachmentData, ParsedMessage};
 use crate::provider::imap_provider::ImapMailProvider;
 use crate::reconcile;
 use crate::thread::compute_thread_id;
@@ -100,7 +100,9 @@ pub(crate) fn sanitize_filename(name: &str) -> String {
         .collect();
 
     // Windows disallows names ending with dots/spaces and hidden/path-like prefixes are unsafe.
-    let trimmed = sanitized.trim().trim_matches(|c: char| c == '.' || c == ' ');
+    let trimmed = sanitized
+        .trim()
+        .trim_matches(|c: char| c == '.' || c == ' ');
     if trimmed.is_empty() {
         return "unnamed_attachment".to_string();
     }
@@ -158,7 +160,11 @@ pub(crate) fn persist_message_attachments(
         let file = match std::fs::File::create(&file_path) {
             Ok(f) => f,
             Err(e) => {
-                warn!("Failed to create attachment file {}: {}", file_path.display(), e);
+                warn!(
+                    "Failed to create attachment file {}: {}",
+                    file_path.display(),
+                    e
+                );
                 continue;
             }
         };
@@ -168,7 +174,11 @@ pub(crate) fn persist_message_attachments(
         let mut write_ok = true;
         for chunk in data.chunks(CHUNK_SIZE) {
             if let Err(e) = writer.write_all(chunk) {
-                warn!("Failed to write attachment file {}: {}", file_path.display(), e);
+                warn!(
+                    "Failed to write attachment file {}: {}",
+                    file_path.display(),
+                    e
+                );
                 write_ok = false;
                 break;
             }
@@ -183,7 +193,11 @@ pub(crate) fn persist_message_attachments(
             continue;
         }
         if let Err(e) = writer.flush() {
-            warn!("Failed to flush attachment file {}: {}", file_path.display(), e);
+            warn!(
+                "Failed to flush attachment file {}: {}",
+                file_path.display(),
+                e
+            );
             let _ = std::fs::remove_file(&file_path);
             continue;
         }
@@ -220,35 +234,45 @@ pub(crate) async fn persist_message_attachments_async(
     .await;
 }
 
-// ---------------------------------------------------------------------------
-// Sync cursor helpers
-// ---------------------------------------------------------------------------
-
-/// Parse a sync cursor string into its components.
-/// Supports two formats:
-/// - `"12345"` (UID only, backward compatible) -> `(Some(12345), None)`
-/// - `"12345;modseq=67890"` -> `(Some(12345), Some(67890))`
-fn parse_cursor(cursor: &str) -> (Option<u32>, Option<u64>) {
-    let parts: Vec<&str> = cursor.splitn(2, ';').collect();
-    let uid = parts.first().and_then(|s| s.parse::<u32>().ok());
-    let modseq = parts.get(1).and_then(|s| {
-        s.strip_prefix("modseq=")
-            .and_then(|v| v.parse::<u64>().ok())
-    });
-    (uid, modseq)
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+struct ImapFolderCursor {
+    uidvalidity: Option<u64>,
+    last_uid: Option<u32>,
+    highest_modseq: Option<u64>,
 }
 
-/// Build a sync cursor string from UID and optional MODSEQ.
-fn build_cursor(uid: u32, modseq: Option<u64>) -> String {
-    match modseq {
-        Some(m) => format!("{};modseq={}", uid, m),
-        None => uid.to_string(),
+fn parse_imap_folder_cursor(state: Option<&str>) -> ImapFolderCursor {
+    match state {
+        Some(raw) => serde_json::from_str(raw).unwrap_or_default(),
+        None => ImapFolderCursor::default(),
     }
 }
 
-/// Extract the MODSEQ value from a cursor string, if present.
-fn extract_modseq(cursor: &str) -> Option<u64> {
-    parse_cursor(cursor).1
+fn prepare_imap_folder_cursor_for_status(
+    mut cursor: ImapFolderCursor,
+    uidvalidity: Option<u64>,
+    highest_modseq: Option<u64>,
+) -> ImapFolderCursor {
+    if let (Some(stored), Some(current)) = (cursor.uidvalidity, uidvalidity) {
+        if stored != current {
+            cursor.last_uid = None;
+        }
+    }
+    if uidvalidity.is_some() {
+        cursor.uidvalidity = uidvalidity;
+    }
+    if highest_modseq.is_some() {
+        cursor.highest_modseq = highest_modseq;
+    }
+    cursor
+}
+
+fn serialize_imap_folder_cursor(cursor: &ImapFolderCursor) -> Option<String> {
+    serde_json::to_string(cursor).ok()
+}
+
+fn can_advance_imap_folder_cursor(has_unresolved_failures: bool) -> bool {
+    !has_unresolved_failures
 }
 
 /// Configuration for the sync worker.
@@ -353,11 +377,96 @@ impl SyncWorker {
         self
     }
 
+    fn stored_imap_folder_cursor(&self, folder: &pebble_core::Folder) -> ImapFolderCursor {
+        let state = self
+            .base
+            .store
+            .get_folder_sync_state(&self.base.account_id, &folder.id)
+            .ok()
+            .flatten();
+        let mut cursor = parse_imap_folder_cursor(state.as_deref());
+        let has_failures = self
+            .base
+            .store
+            .has_sync_failures_for_folder(&self.base.account_id, &folder.id)
+            .unwrap_or(false);
+        if cursor.last_uid.is_none() && can_advance_imap_folder_cursor(has_failures) {
+            cursor.last_uid = self
+                .base
+                .store
+                .get_max_remote_id(&self.base.account_id, &folder.id)
+                .ok()
+                .flatten()
+                .and_then(|s| s.parse::<u32>().ok());
+        }
+        cursor
+    }
+
+    async fn imap_folder_cursor_for_sync(&self, folder: &pebble_core::Folder) -> ImapFolderCursor {
+        let cursor = self.stored_imap_folder_cursor(folder);
+        match self
+            .provider
+            .inner()
+            .get_mailbox_status(&folder.remote_id)
+            .await
+        {
+            Ok(status) => prepare_imap_folder_cursor_for_status(
+                cursor,
+                status.uid_validity.map(u64::from),
+                status.highest_modseq,
+            ),
+            Err(e) => {
+                warn!(
+                    "Failed to read IMAP mailbox status for {}: {}",
+                    folder.name, e
+                );
+                cursor
+            }
+        }
+    }
+
+    fn persist_imap_folder_cursor_after_sync(
+        &self,
+        folder: &pebble_core::Folder,
+        mut cursor: ImapFolderCursor,
+    ) -> Result<()> {
+        if !can_advance_imap_folder_cursor(
+            self.base
+                .store
+                .has_sync_failures_for_folder(&self.base.account_id, &folder.id)?,
+        ) {
+            debug!(
+                "Keeping previous IMAP cursor for {} because unresolved sync failures exist",
+                folder.name
+            );
+            return Ok(());
+        }
+
+        if let Some(max_uid) = self
+            .base
+            .store
+            .get_max_remote_id(&self.base.account_id, &folder.id)?
+            .and_then(|s| s.parse::<u32>().ok())
+        {
+            cursor.last_uid = Some(max_uid);
+        }
+        if let Some(state) = serialize_imap_folder_cursor(&cursor) {
+            self.base
+                .store
+                .set_folder_sync_state(&self.base.account_id, &folder.id, &state)?;
+        }
+        Ok(())
+    }
+
     /// Perform the initial full sync: list folders and fetch all of them.
     pub async fn initial_sync(&self) -> Result<()> {
         info!("Starting initial sync for account {}", self.base.account_id);
 
-        let remote_folders = self.provider.inner().list_folders(&self.base.account_id).await?;
+        let remote_folders = self
+            .provider
+            .inner()
+            .list_folders(&self.base.account_id)
+            .await?;
 
         for folder in &remote_folders {
             // Upsert folder into store
@@ -365,7 +474,9 @@ impl SyncWorker {
         }
 
         // Ensure an Archive folder exists locally (even if the IMAP server doesn't have one)
-        let has_archive = remote_folders.iter().any(|f| f.role == Some(pebble_core::FolderRole::Archive));
+        let has_archive = remote_folders
+            .iter()
+            .any(|f| f.role == Some(pebble_core::FolderRole::Archive));
         if !has_archive {
             let archive = pebble_core::Folder {
                 id: new_id(),
@@ -380,7 +491,10 @@ impl SyncWorker {
                 sort_order: 3,
             };
             let _ = self.base.store.insert_folder(&archive);
-            info!("Created local archive folder for account {}", self.base.account_id);
+            info!(
+                "Created local archive folder for account {}",
+                self.base.account_id
+            );
         }
 
         // Re-read folders from DB so we use the actual persisted IDs
@@ -389,7 +503,10 @@ impl SyncWorker {
 
         // Sync all folders, prioritising Inbox first
         let mut ordered: Vec<&pebble_core::Folder> = Vec::with_capacity(folders.len());
-        if let Some(inbox) = folders.iter().find(|f| f.role == Some(pebble_core::FolderRole::Inbox)) {
+        if let Some(inbox) = folders
+            .iter()
+            .find(|f| f.role == Some(pebble_core::FolderRole::Inbox))
+        {
             ordered.push(inbox);
         }
         for f in &folders {
@@ -398,47 +515,20 @@ impl SyncWorker {
             }
         }
 
-        // Use persisted cursor (inbox-level) for the inbox; other folders use their own max UID
-        let cursor = self
-            .base.store
-            .get_sync_cursor(&self.base.account_id)
-            .ok()
-            .flatten();
-        let (inbox_since_uid, prev_modseq) = cursor
-            .as_deref()
-            .map(parse_cursor)
-            .unwrap_or((None, None));
-
         for folder in &ordered {
-            let is_inbox = folder.role == Some(pebble_core::FolderRole::Inbox);
-
-            let since_uid = if is_inbox {
-                inbox_since_uid
-            } else {
-                // For non-inbox folders, resume from the last known UID
-                self.base.store
-                    .get_max_remote_id(&self.base.account_id, &folder.id)
-                    .ok()
-                    .flatten()
-                    .and_then(|s| s.parse::<u32>().ok())
-            };
-
+            let cursor = self.imap_folder_cursor_for_sync(folder).await;
+            let since_uid = cursor.last_uid;
             let limit = if since_uid.is_some() { 50 } else { 200 };
             match self.sync_folder(folder, since_uid, limit).await {
                 Ok(count) => {
                     if count > 0 {
-                        info!("Initial sync: fetched {} messages from {}", count, folder.name);
+                        info!(
+                            "Initial sync: fetched {} messages from {}",
+                            count, folder.name
+                        );
                     }
-                    // Update inbox cursor
-                    if is_inbox && count > 0 {
-                        if let Ok(Some(max_uid_str)) =
-                            self.base.store.get_max_remote_id(&self.base.account_id, &folder.id)
-                        {
-                            if let Ok(max_uid) = max_uid_str.parse::<u32>() {
-                                let new_cursor = build_cursor(max_uid, prev_modseq);
-                                let _ = self.base.store.set_sync_cursor(&self.base.account_id, &new_cursor);
-                            }
-                        }
+                    if let Err(e) = self.persist_imap_folder_cursor_after_sync(folder, cursor) {
+                        warn!("Failed to persist IMAP cursor for {}: {}", folder.name, e);
                     }
                 }
                 Err(e) => warn!("Initial sync folder {} failed: {}", folder.name, e),
@@ -477,16 +567,37 @@ impl SyncWorker {
         }
 
         // Bulk-check which UIDs already exist to avoid N+1 queries
-        let all_remote_ids: Vec<String> = raw_messages.iter().map(|(uid, _)| uid.to_string()).collect();
+        let all_remote_ids: Vec<String> = raw_messages
+            .iter()
+            .map(|(uid, _)| uid.to_string())
+            .collect();
         let existing_ids = self
-            .base.store
-            .get_existing_remote_ids(&self.base.account_id, &all_remote_ids)
+            .base
+            .store
+            .get_existing_remote_ids_in_folder(&self.base.account_id, &folder.id, &all_remote_ids)
             .unwrap_or_default();
 
         // Parse all raw messages upfront so we can collect In-Reply-To / References
         // before querying thread mappings (avoids loading the full account mapping).
         let parsed_messages: Vec<(u32, Result<crate::parser::ParsedMessage>)> = raw_messages
             .into_iter()
+            .filter(|(uid, _)| {
+                let remote_id = uid.to_string();
+                if existing_ids.contains(&remote_id) {
+                    let _ = self.base.store.clear_sync_failure(
+                        &self.base.account_id,
+                        &folder.id,
+                        &remote_id,
+                    );
+                    debug!(
+                        "Message UID {} already stored in {}, skipping",
+                        uid, folder.name
+                    );
+                    false
+                } else {
+                    true
+                }
+            })
             .map(|(uid, raw)| {
                 let parsed = parse_raw_email(&raw);
                 (uid, parsed)
@@ -500,7 +611,8 @@ impl SyncWorker {
         // This is mutable so we can extend it as we store new messages within the batch,
         // ensuring intra-batch replies find their parent's thread.
         let mut thread_mappings = self
-            .base.store
+            .base
+            .store
             .get_thread_mappings_for_refs(&self.base.account_id, &ref_ids)
             .unwrap_or_default();
 
@@ -509,15 +621,17 @@ impl SyncWorker {
         for (uid, parse_result) in parsed_messages {
             let remote_id = uid.to_string();
 
-            // Skip if already stored (checked via bulk query above)
-            if existing_ids.contains(&remote_id) {
-                debug!("Message UID {} already stored, skipping", uid);
-                continue;
-            }
-
             let parsed = match parse_result {
                 Ok(p) => p,
                 Err(e) => {
+                    let reason = e.to_string();
+                    let _ = self.base.store.upsert_sync_failure(
+                        &self.base.account_id,
+                        &folder.id,
+                        &remote_id,
+                        "imap",
+                        &reason,
+                    );
                     warn!("Failed to parse message UID {}: {}", uid, e);
                     continue;
                 }
@@ -559,11 +673,17 @@ impl SyncWorker {
             msg.thread_id = Some(thread_id);
 
             match self
-                .base.store
+                .base
+                .store
                 .insert_message(&msg, std::slice::from_ref(&folder.id))
             {
                 Ok(()) => {
                     stored_count += 1;
+                    let _ = self.base.store.clear_sync_failure(
+                        &self.base.account_id,
+                        &folder.id,
+                        &remote_id,
+                    );
                     // Update in-memory thread mappings so later messages in this batch
                     // can find this message as a thread parent.
                     if let (Some(mid), Some(tid)) = (&msg.message_id_header, &msg.thread_id) {
@@ -585,6 +705,14 @@ impl SyncWorker {
                     .await;
                 }
                 Err(e) => {
+                    let reason = e.to_string();
+                    let _ = self.base.store.upsert_sync_failure(
+                        &self.base.account_id,
+                        &folder.id,
+                        &remote_id,
+                        "imap",
+                        &reason,
+                    );
                     error!("Failed to store message UID {}: {}", uid, e);
                 }
             }
@@ -600,39 +728,29 @@ impl SyncWorker {
             return Ok(());
         }
 
-        // Preserve existing modseq value when updating the cursor
-        let prev_modseq = self
-            .base.store
-            .get_sync_cursor(&self.base.account_id)
-            .ok()
-            .flatten()
-            .and_then(|s| extract_modseq(&s));
-
         for folder in &folders {
-            let since_uid = self
-                .base.store
-                .get_max_remote_id(&self.base.account_id, &folder.id)
-                .ok()
-                .flatten()
-                .and_then(|s| s.parse::<u32>().ok());
+            let cursor = self.imap_folder_cursor_for_sync(folder).await;
+            let since_uid = cursor.last_uid;
 
             match self.sync_folder(folder, since_uid, 50).await {
                 Ok(count) if count > 0 => {
-                    info!("Polled {} new messages from {} for account {}", count, folder.name, self.base.account_id);
-                    // Update inbox cursor
-                    if folder.role == Some(pebble_core::FolderRole::Inbox) {
-                        if let Ok(Some(max_uid_str)) =
-                            self.base.store.get_max_remote_id(&self.base.account_id, &folder.id)
-                        {
-                            if let Ok(max_uid) = max_uid_str.parse::<u32>() {
-                                let new_cursor = build_cursor(max_uid, prev_modseq);
-                                let _ = self.base.store.set_sync_cursor(&self.base.account_id, &new_cursor);
-                            }
-                        }
+                    info!(
+                        "Polled {} new messages from {} for account {}",
+                        count, folder.name, self.base.account_id
+                    );
+                    if let Err(e) = self.persist_imap_folder_cursor_after_sync(folder, cursor) {
+                        warn!("Failed to persist IMAP cursor for {}: {}", folder.name, e);
                     }
                 }
-                Ok(_) => {}
-                Err(e) => warn!("Poll failed for folder {} account {}: {}", folder.name, self.base.account_id, e),
+                Ok(_) => {
+                    if let Err(e) = self.persist_imap_folder_cursor_after_sync(folder, cursor) {
+                        warn!("Failed to persist IMAP cursor for {}: {}", folder.name, e);
+                    }
+                }
+                Err(e) => warn!(
+                    "Poll failed for folder {} account {}: {}",
+                    folder.name, self.base.account_id, e
+                ),
             }
         }
 
@@ -654,19 +772,17 @@ impl SyncWorker {
 
         // Step 1: Get local state
         let local_state = self
-            .base.store
+            .base
+            .store
             .list_remote_ids_by_folder(&self.base.account_id, &folder.id)?;
         if local_state.is_empty() {
             return Ok(());
         }
 
-        // Read stored MODSEQ from cursor
+        // Read stored MODSEQ from this folder's cursor.
         let stored_modseq = self
-            .base.store
-            .get_sync_cursor(&self.base.account_id)
-            .ok()
-            .flatten()
-            .and_then(|s| extract_modseq(&s))
+            .stored_imap_folder_cursor(folder)
+            .highest_modseq
             .unwrap_or(0);
 
         // Step 2: Try CONDSTORE optimisation — check HIGHESTMODSEQ
@@ -696,7 +812,10 @@ impl SyncWorker {
                 false
             }
             Err(e) => {
-                warn!("CONDSTORE HIGHESTMODSEQ check failed for {}: {}", folder.name, e);
+                warn!(
+                    "CONDSTORE HIGHESTMODSEQ check failed for {}: {}",
+                    folder.name, e
+                );
                 false
             }
         };
@@ -741,7 +860,7 @@ impl SyncWorker {
 
             // Step 5: Persist new MODSEQ in cursor if we got one
             if new_modseq > 0 {
-                self.update_cursor_modseq(new_modseq);
+                self.update_folder_cursor_modseq(folder, new_modseq);
             }
         }
 
@@ -778,61 +897,72 @@ impl SyncWorker {
         Ok(())
     }
 
-    /// Update the MODSEQ portion of the sync cursor without changing the UID part.
-    fn update_cursor_modseq(&self, new_modseq: u64) {
-        let cursor = self
-            .base.store
-            .get_sync_cursor(&self.base.account_id)
-            .ok()
-            .flatten();
-        let (uid, _old_modseq) = cursor
-            .as_deref()
-            .map(parse_cursor)
-            .unwrap_or((None, None));
-        if let Some(uid_val) = uid {
-            let new_cursor = build_cursor(uid_val, Some(new_modseq));
-            let _ = self.base.store.set_sync_cursor(&self.base.account_id, &new_cursor);
+    /// Update the MODSEQ portion of one folder cursor without changing its UID.
+    fn update_folder_cursor_modseq(&self, folder: &pebble_core::Folder, new_modseq: u64) {
+        let mut cursor = self.stored_imap_folder_cursor(folder);
+        cursor.highest_modseq = Some(new_modseq);
+        if let Some(state) = serialize_imap_folder_cursor(&cursor) {
+            let _ =
+                self.base
+                    .store
+                    .set_folder_sync_state(&self.base.account_id, &folder.id, &state);
         }
     }
 
     /// Run the sync worker loop until the stop signal is received.
     pub async fn run(&self, config: SyncConfig) {
         let poll_interval = tokio::time::Duration::from_secs(config.poll_interval_secs);
-        let reconcile_interval =
-            tokio::time::Duration::from_secs(config.reconcile_interval_secs);
+        let reconcile_interval = tokio::time::Duration::from_secs(config.reconcile_interval_secs);
 
         let mut poll_ticker = tokio::time::interval(poll_interval);
         let mut reconcile_ticker = tokio::time::interval(reconcile_interval);
 
         // Connect and do initial sync
         if let Err(e) = self.provider.connect().await {
-            error!("Failed to connect for account {}: {}", self.base.account_id, e);
-            self.base.emit_error("connection", &format!("Failed to connect: {}", e));
+            error!(
+                "Failed to connect for account {}: {}",
+                self.base.account_id, e
+            );
+            self.base
+                .emit_error("connection", &format!("Failed to connect: {}", e));
             return;
         }
 
         if let Err(e) = self.initial_sync().await {
-            error!("Initial sync failed for account {}: {}", self.base.account_id, e);
-            self.base.emit_error("sync", &format!("Initial sync failed: {}", e));
+            error!(
+                "Initial sync failed for account {}: {}",
+                self.base.account_id, e
+            );
+            self.base
+                .emit_error("sync", &format!("Initial sync failed: {}", e));
         }
 
         let supports_idle = self.provider.inner().supports_idle().await;
         if supports_idle {
             if let Err(e) = self.idle_provider.connect().await {
-                warn!("Failed to connect IDLE session for account {}: {}", self.base.account_id, e);
+                warn!(
+                    "Failed to connect IDLE session for account {}: {}",
+                    self.base.account_id, e
+                );
             }
         }
         if supports_idle {
             info!("IMAP IDLE supported for account {}", self.base.account_id);
         } else {
-            info!("IMAP IDLE not supported for account {}, using polling", self.base.account_id);
+            info!(
+                "IMAP IDLE not supported for account {}, using polling",
+                self.base.account_id
+            );
         }
 
         let supports_condstore = self.provider.inner().supports_condstore().await;
         if supports_condstore {
             info!("CONDSTORE supported for account {}", self.base.account_id);
         } else {
-            debug!("CONDSTORE not supported for account {}", self.base.account_id);
+            debug!(
+                "CONDSTORE not supported for account {}",
+                self.base.account_id
+            );
         }
 
         let mut stop_rx = self.stop_rx.clone();
@@ -942,34 +1072,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_cursor_uid_only() {
-        let (uid, modseq) = parse_cursor("12345");
-        assert_eq!(uid, Some(12345));
-        assert_eq!(modseq, None);
-    }
-
-    #[test]
-    fn test_parse_cursor_with_modseq() {
-        let (uid, modseq) = parse_cursor("12345;modseq=67890");
-        assert_eq!(uid, Some(12345));
-        assert_eq!(modseq, Some(67890));
-    }
-
-    #[test]
-    fn test_parse_cursor_invalid_uid() {
-        let (uid, modseq) = parse_cursor("abc");
-        assert_eq!(uid, None);
-        assert_eq!(modseq, None);
-    }
-
-    #[test]
-    fn test_parse_cursor_invalid_modseq() {
-        let (uid, modseq) = parse_cursor("123;modseq=abc");
-        assert_eq!(uid, Some(123));
-        assert_eq!(modseq, None);
-    }
-
-    #[test]
     fn test_sanitize_filename_rejects_windows_reserved_names() {
         assert_eq!(sanitize_filename("CON.txt"), "unnamed_attachment");
         assert_eq!(sanitize_filename("aux"), "unnamed_attachment");
@@ -986,30 +1088,56 @@ mod tests {
     }
 
     #[test]
-    fn test_build_cursor_without_modseq() {
-        assert_eq!(build_cursor(100, None), "100");
+    fn imap_folder_cursor_roundtrips() {
+        let cursor = ImapFolderCursor {
+            uidvalidity: Some(1234),
+            last_uid: Some(987),
+            highest_modseq: Some(4567),
+        };
+
+        let json = serde_json::to_string(&cursor).unwrap();
+        let decoded: ImapFolderCursor = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded, cursor);
     }
 
     #[test]
-    fn test_build_cursor_with_modseq() {
-        assert_eq!(build_cursor(100, Some(200)), "100;modseq=200");
+    fn imap_folder_cursor_resets_last_uid_when_uidvalidity_changes() {
+        let stored = ImapFolderCursor {
+            uidvalidity: Some(1234),
+            last_uid: Some(987),
+            highest_modseq: Some(4567),
+        };
+
+        let prepared = prepare_imap_folder_cursor_for_status(stored, Some(9999), Some(7000));
+
+        assert_eq!(prepared.uidvalidity, Some(9999));
+        assert_eq!(prepared.last_uid, None);
+        assert_eq!(prepared.highest_modseq, Some(7000));
     }
 
     #[test]
-    fn test_build_cursor_roundtrip() {
-        let cursor = build_cursor(999, Some(12345));
-        let (uid, modseq) = parse_cursor(&cursor);
-        assert_eq!(uid, Some(999));
-        assert_eq!(modseq, Some(12345));
+    fn imap_folder_cursor_preserves_last_uid_when_uidvalidity_matches() {
+        let stored = ImapFolderCursor {
+            uidvalidity: Some(1234),
+            last_uid: Some(987),
+            highest_modseq: Some(4567),
+        };
+
+        let prepared = prepare_imap_folder_cursor_for_status(stored, Some(1234), Some(7000));
+
+        assert_eq!(prepared.uidvalidity, Some(1234));
+        assert_eq!(prepared.last_uid, Some(987));
+        assert_eq!(prepared.highest_modseq, Some(7000));
     }
 
     #[test]
-    fn test_extract_modseq_present() {
-        assert_eq!(extract_modseq("100;modseq=500"), Some(500));
+    fn imap_folder_cursor_does_not_advance_with_unresolved_failures() {
+        assert!(!can_advance_imap_folder_cursor(true));
     }
 
     #[test]
-    fn test_extract_modseq_absent() {
-        assert_eq!(extract_modseq("100"), None);
+    fn imap_folder_cursor_advances_without_unresolved_failures() {
+        assert!(can_advance_imap_folder_cursor(false));
     }
 }

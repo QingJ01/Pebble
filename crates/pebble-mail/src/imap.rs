@@ -4,7 +4,7 @@ use std::task::{Context, Poll};
 
 use async_imap::Client;
 use futures::TryStreamExt;
-use pebble_core::{Folder, FolderRole, FolderType, PebbleError, Result, new_id};
+use pebble_core::{new_id, Folder, FolderRole, FolderType, PebbleError, Result};
 use serde::de::Deserializer;
 use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::TcpStream;
@@ -175,7 +175,11 @@ struct PrefixedStream<T> {
 
 impl<T> PrefixedStream<T> {
     fn with_prefix(prefix: Vec<u8>, inner: T) -> Self {
-        Self { prefix, pos: 0, inner }
+        Self {
+            prefix,
+            pos: 0,
+            inner,
+        }
     }
 }
 
@@ -199,7 +203,11 @@ impl<T: AsyncRead + Unpin> AsyncRead for PrefixedStream<T> {
 }
 
 impl<T: AsyncWrite + Unpin> AsyncWrite for PrefixedStream<T> {
-    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
         Pin::new(&mut self.get_mut().inner).poll_write(cx, buf)
     }
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
@@ -272,6 +280,12 @@ impl AsyncWrite for InnerStream {
 /// of whether the underlying transport is TLS or plain TCP.
 type ImapSession = async_imap::Session<PrefixedStream<InnerStream>>;
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ImapMailboxStatus {
+    pub uid_validity: Option<u32>,
+    pub highest_modseq: Option<u64>,
+}
+
 /// An IMAP provider that manages a connection and session.
 pub struct ImapProvider {
     config: ImapConfig,
@@ -297,7 +311,9 @@ async fn tls_connect(host: &str, tcp: TcpStream) -> Result<TlsStream<TcpStream>>
     let server_name = rustls::pki_types::ServerName::try_from(host)
         .map_err(|e| PebbleError::Network(format!("Invalid server name '{}': {}", host, e)))?
         .to_owned();
-    connector.connect(server_name, tcp).await
+    connector
+        .connect(server_name, tcp)
+        .await
         .map_err(|e| PebbleError::Network(format!("TLS handshake with {}: {}", host, e)))
 }
 
@@ -319,9 +335,13 @@ impl ImapProvider {
     /// (Netease/163/126/188 servers reject as "Unsafe Login" without it).
     fn needs_id_command(&self) -> bool {
         let h = self.config.host.to_lowercase();
-        h.contains("163.com") || h.contains("126.com") || h.contains("188.com")
-            || h.contains("yeah.net") || h.contains("netease.com")
-            || h.contains("sina.com") || h.contains("sina.cn")
+        h.contains("163.com")
+            || h.contains("126.com")
+            || h.contains("188.com")
+            || h.contains("yeah.net")
+            || h.contains("netease.com")
+            || h.contains("sina.com")
+            || h.contains("sina.cn")
     }
 
     /// Send IMAP ID command on a raw stream, returning the greeting bytes
@@ -339,7 +359,9 @@ impl ImapProvider {
 
         // Send ID command
         stream
-            .write_all(b"A000 ID (\"name\" \"Pebble\" \"version\" \"1.0\" \"vendor\" \"Pebble\")\r\n")
+            .write_all(
+                b"A000 ID (\"name\" \"Pebble\" \"version\" \"1.0\" \"vendor\" \"Pebble\")\r\n",
+            )
             .await
             .map_err(|e| PebbleError::Network(format!("Send ID: {e}")))?;
         stream
@@ -424,20 +446,28 @@ impl ImapProvider {
 
         let tcp = if let Some(ref proxy) = self.config.proxy {
             let proxy_addr = format!("{}:{}", proxy.host, proxy.port);
-            debug!("Connecting to {} via SOCKS5 proxy {} (security={:?})...", addr, proxy_addr, self.config.security);
-            let stream = tokio_socks::tcp::Socks5Stream::connect(
-                proxy_addr.as_str(),
-                addr.as_str(),
-            )
-            .await
-            .map_err(|e| PebbleError::Network(format!("SOCKS5 proxy connect to {addr} via {proxy_addr}: {e}")))?;
+            debug!(
+                "Connecting to {} via SOCKS5 proxy {} (security={:?})...",
+                addr, proxy_addr, self.config.security
+            );
+            let stream =
+                tokio_socks::tcp::Socks5Stream::connect(proxy_addr.as_str(), addr.as_str())
+                    .await
+                    .map_err(|e| {
+                        PebbleError::Network(format!(
+                            "SOCKS5 proxy connect to {addr} via {proxy_addr}: {e}"
+                        ))
+                    })?;
             let tcp = stream.into_inner();
             if let Ok(peer) = tcp.peer_addr() {
                 debug!("SOCKS5 connected to {} (proxy peer: {})", addr, peer);
             }
             tcp
         } else {
-            debug!("Resolving and connecting to {} (security={:?})...", addr, self.config.security);
+            debug!(
+                "Resolving and connecting to {} (security={:?})...",
+                addr, self.config.security
+            );
             let tcp = TcpStream::connect(&addr)
                 .await
                 .map_err(|e| PebbleError::Network(format!("TCP connect to {addr}: {e}")))?;
@@ -459,7 +489,10 @@ impl ImapProvider {
         let session: ImapSession = match self.config.security {
             ConnectionSecurity::Tls => {
                 // Implicit TLS — wrap immediately
-                debug!("Starting TLS handshake (rustls) with SNI={}", self.config.host);
+                debug!(
+                    "Starting TLS handshake (rustls) with SNI={}",
+                    self.config.host
+                );
                 let mut tls_stream = tls_connect(&self.config.host, tcp).await?;
 
                 let prefix = if needs_id {
@@ -508,7 +541,10 @@ impl ImapProvider {
                         }
                         resp.extend_from_slice(&buf[..n]);
                         let text = String::from_utf8_lossy(&resp);
-                        if text.contains("A000 OK") || text.contains("A000 NO") || text.contains("A000 BAD") {
+                        if text.contains("A000 OK")
+                            || text.contains("A000 NO")
+                            || text.contains("A000 BAD")
+                        {
                             break;
                         }
                     }
@@ -547,7 +583,10 @@ impl ImapProvider {
 
         let mut guard = self.session.lock().await;
         *guard = Some(session);
-        debug!("IMAP connected to {} ({:?})", self.config.host, self.config.security);
+        debug!(
+            "IMAP connected to {} ({:?})",
+            self.config.host, self.config.security
+        );
         Ok(())
     }
 
@@ -567,10 +606,15 @@ impl ImapProvider {
                 tokio_socks::tcp::Socks5Stream::connect(proxy_addr.as_str(), addr.as_str()),
             )
             .await
-            .map_err(|_| PebbleError::Network(format!("SOCKS5 connect to {proxy_addr} timed out (10s)")))?
+            .map_err(|_| {
+                PebbleError::Network(format!("SOCKS5 connect to {proxy_addr} timed out (10s)"))
+            })?
             .map_err(|e| PebbleError::Network(format!("SOCKS5 proxy: {e}")))?;
             let tcp = stream.into_inner();
-            report.push_str(&format!("TCP via SOCKS5 {proxy_addr}: OK ({:.0}ms)\n", t0.elapsed().as_millis()));
+            report.push_str(&format!(
+                "TCP via SOCKS5 {proxy_addr}: OK ({:.0}ms)\n",
+                t0.elapsed().as_millis()
+            ));
             tcp
         } else {
             let tcp = tokio::time::timeout(
@@ -581,9 +625,15 @@ impl ImapProvider {
             .map_err(|_| PebbleError::Network(format!("TCP connect to {addr} timed out (10s)")))?
             .map_err(|e| PebbleError::Network(format!("TCP connect: {e}")))?;
             if let Ok(peer) = tcp.peer_addr() {
-                report.push_str(&format!("TCP direct to {addr} (IP: {peer}): OK ({:.0}ms)\n", t0.elapsed().as_millis()));
+                report.push_str(&format!(
+                    "TCP direct to {addr} (IP: {peer}): OK ({:.0}ms)\n",
+                    t0.elapsed().as_millis()
+                ));
             } else {
-                report.push_str(&format!("TCP direct to {addr}: OK ({:.0}ms)\n", t0.elapsed().as_millis()));
+                report.push_str(&format!(
+                    "TCP direct to {addr}: OK ({:.0}ms)\n",
+                    t0.elapsed().as_millis()
+                ));
             }
             tcp
         };
@@ -597,54 +647,72 @@ impl ImapProvider {
                     tls_connect(&config.host, tcp),
                 )
                 .await
-                .map_err(|_| PebbleError::Network("TLS handshake timed out (10s)".into()))?
-                ?;
-                report.push_str(&format!("TLS handshake (implicit): OK ({:.0}ms)\n", t1.elapsed().as_millis()));
+                .map_err(|_| PebbleError::Network("TLS handshake timed out (10s)".into()))??;
+                report.push_str(&format!(
+                    "TLS handshake (implicit): OK ({:.0}ms)\n",
+                    t1.elapsed().as_millis()
+                ));
 
                 // Step 3: Read IMAP greeting
                 let t2 = Instant::now();
                 let mut buf = vec![0u8; 4096];
-                let n = tokio::time::timeout(
-                    std::time::Duration::from_secs(10),
-                    tls.read(&mut buf),
-                )
-                .await
-                .map_err(|_| PebbleError::Network("Read IMAP greeting timed out (10s)".into()))?
-                .map_err(|e| PebbleError::Network(format!("Read greeting: {e}")))?;
+                let n =
+                    tokio::time::timeout(std::time::Duration::from_secs(10), tls.read(&mut buf))
+                        .await
+                        .map_err(|_| {
+                            PebbleError::Network("Read IMAP greeting timed out (10s)".into())
+                        })?
+                        .map_err(|e| PebbleError::Network(format!("Read greeting: {e}")))?;
                 let greeting = String::from_utf8_lossy(&buf[..n]);
-                report.push_str(&format!("IMAP greeting ({:.0}ms): {}\n", t2.elapsed().as_millis(), greeting.trim()));
+                report.push_str(&format!(
+                    "IMAP greeting ({:.0}ms): {}\n",
+                    t2.elapsed().as_millis(),
+                    greeting.trim()
+                ));
             }
             ConnectionSecurity::StartTls => {
                 // Read plain greeting first
                 let mut tcp = tcp;
                 let t1 = Instant::now();
                 let mut buf = vec![0u8; 4096];
-                let n = tokio::time::timeout(
-                    std::time::Duration::from_secs(10),
-                    tcp.read(&mut buf),
-                )
-                .await
-                .map_err(|_| PebbleError::Network("Read plain greeting timed out (10s)".into()))?
-                .map_err(|e| PebbleError::Network(format!("Read greeting: {e}")))?;
+                let n =
+                    tokio::time::timeout(std::time::Duration::from_secs(10), tcp.read(&mut buf))
+                        .await
+                        .map_err(|_| {
+                            PebbleError::Network("Read plain greeting timed out (10s)".into())
+                        })?
+                        .map_err(|e| PebbleError::Network(format!("Read greeting: {e}")))?;
                 let greeting = String::from_utf8_lossy(&buf[..n]);
-                report.push_str(&format!("Plain greeting ({:.0}ms): {}\n", t1.elapsed().as_millis(), greeting.trim()));
+                report.push_str(&format!(
+                    "Plain greeting ({:.0}ms): {}\n",
+                    t1.elapsed().as_millis(),
+                    greeting.trim()
+                ));
 
                 // Send STARTTLS
                 let t2 = Instant::now();
-                tcp.write_all(b"A001 STARTTLS\r\n").await
+                tcp.write_all(b"A001 STARTTLS\r\n")
+                    .await
                     .map_err(|e| PebbleError::Network(format!("Send STARTTLS: {e}")))?;
-                tcp.flush().await
+                tcp.flush()
+                    .await
                     .map_err(|e| PebbleError::Network(format!("Flush: {e}")))?;
                 let mut resp = vec![0u8; 4096];
-                let n = tokio::time::timeout(
-                    std::time::Duration::from_secs(10),
-                    tcp.read(&mut resp),
-                )
-                .await
-                .map_err(|_| PebbleError::Network("STARTTLS response timed out (10s)".into()))?
-                .map_err(|e| PebbleError::Network(format!("Read STARTTLS response: {e}")))?;
+                let n =
+                    tokio::time::timeout(std::time::Duration::from_secs(10), tcp.read(&mut resp))
+                        .await
+                        .map_err(|_| {
+                            PebbleError::Network("STARTTLS response timed out (10s)".into())
+                        })?
+                        .map_err(|e| {
+                            PebbleError::Network(format!("Read STARTTLS response: {e}"))
+                        })?;
                 let resp_str = String::from_utf8_lossy(&resp[..n]);
-                report.push_str(&format!("STARTTLS response ({:.0}ms): {}\n", t2.elapsed().as_millis(), resp_str.trim()));
+                report.push_str(&format!(
+                    "STARTTLS response ({:.0}ms): {}\n",
+                    t2.elapsed().as_millis(),
+                    resp_str.trim()
+                ));
 
                 // TLS upgrade
                 let t3 = Instant::now();
@@ -653,24 +721,30 @@ impl ImapProvider {
                     tls_connect(&config.host, tcp),
                 )
                 .await
-                .map_err(|_| PebbleError::Network("TLS upgrade timed out (10s)".into()))?
-                ?;
-                report.push_str(&format!("TLS upgrade (STARTTLS): OK ({:.0}ms)\n", t3.elapsed().as_millis()));
+                .map_err(|_| PebbleError::Network("TLS upgrade timed out (10s)".into()))??;
+                report.push_str(&format!(
+                    "TLS upgrade (STARTTLS): OK ({:.0}ms)\n",
+                    t3.elapsed().as_millis()
+                ));
             }
             ConnectionSecurity::Plain => {
                 // Read plain greeting
                 let mut tcp = tcp;
                 let t1 = Instant::now();
                 let mut buf = vec![0u8; 4096];
-                let n = tokio::time::timeout(
-                    std::time::Duration::from_secs(10),
-                    tcp.read(&mut buf),
-                )
-                .await
-                .map_err(|_| PebbleError::Network("Read plain greeting timed out (10s)".into()))?
-                .map_err(|e| PebbleError::Network(format!("Read greeting: {e}")))?;
+                let n =
+                    tokio::time::timeout(std::time::Duration::from_secs(10), tcp.read(&mut buf))
+                        .await
+                        .map_err(|_| {
+                            PebbleError::Network("Read plain greeting timed out (10s)".into())
+                        })?
+                        .map_err(|e| PebbleError::Network(format!("Read greeting: {e}")))?;
                 let greeting = String::from_utf8_lossy(&buf[..n]);
-                report.push_str(&format!("Plain greeting ({:.0}ms): {}\n", t1.elapsed().as_millis(), greeting.trim()));
+                report.push_str(&format!(
+                    "Plain greeting ({:.0}ms): {}\n",
+                    t1.elapsed().as_millis(),
+                    greeting.trim()
+                ));
             }
         }
 
@@ -723,8 +797,8 @@ impl ImapProvider {
             .map(|raw_name| {
                 // Decode IMAP Modified UTF-7 folder name to UTF-8
                 let display_name = utf7_imap::decode_utf7_imap(raw_name.clone());
-                let role = detect_folder_role(&raw_name)
-                    .or_else(|| detect_folder_role(&display_name));
+                let role =
+                    detect_folder_role(&raw_name).or_else(|| detect_folder_role(&display_name));
                 let sort_order = folder_sort_order(&role);
                 Folder {
                     id: new_id(),
@@ -795,7 +869,11 @@ impl ImapProvider {
                         }
                     }
                 } else {
-                    let start = if exists > limit { exists - limit + 1 } else { 1 };
+                    let start = if exists > limit {
+                        exists - limit + 1
+                    } else {
+                        1
+                    };
                     let seq_set = format!("{start}:{exists}");
                     let fetches: Vec<async_imap::types::Fetch> = $s
                         .fetch(&seq_set, "(UID BODY.PEEK[])")
@@ -825,11 +903,7 @@ impl ImapProvider {
     }
 
     /// Fetch flags for a set of UIDs. Returns `(uid, is_read, is_starred)`.
-    pub async fn fetch_flags(
-        &self,
-        mailbox: &str,
-        uids: &[u32],
-    ) -> Result<Vec<(u32, bool, bool)>> {
+    pub async fn fetch_flags(&self, mailbox: &str, uids: &[u32]) -> Result<Vec<(u32, bool, bool)>> {
         if uids.is_empty() {
             return Ok(Vec::new());
         }
@@ -863,7 +937,10 @@ impl ImapProvider {
                     .into_iter()
                     .filter_map(|fetch| {
                         let uid = fetch.uid.or_else(|| {
-                            tracing::warn!("Skipping flags for message without UID (seq={})", fetch.message);
+                            tracing::warn!(
+                                "Skipping flags for message without UID (seq={})",
+                                fetch.message
+                            );
                             None
                         })?;
                         let (is_read, is_starred) = parse_flags(fetch.flags());
@@ -907,14 +984,10 @@ impl ImapProvider {
                     let _: Vec<async_imap::types::Fetch> = $s
                         .uid_store(&uid_str, &flag_cmd)
                         .await
-                        .map_err(|e| {
-                            PebbleError::Network(format!("STORE \\Seen failed: {e}"))
-                        })?
+                        .map_err(|e| PebbleError::Network(format!("STORE \\Seen failed: {e}")))?
                         .try_collect()
                         .await
-                        .map_err(|e| {
-                            PebbleError::Network(format!("STORE \\Seen collect: {e}"))
-                        })?;
+                        .map_err(|e| PebbleError::Network(format!("STORE \\Seen collect: {e}")))?;
                 }
 
                 if let Some(starred) = is_starred {
@@ -926,9 +999,7 @@ impl ImapProvider {
                     let _: Vec<async_imap::types::Fetch> = $s
                         .uid_store(&uid_str, &flag_cmd)
                         .await
-                        .map_err(|e| {
-                            PebbleError::Network(format!("STORE \\Flagged failed: {e}"))
-                        })?
+                        .map_err(|e| PebbleError::Network(format!("STORE \\Flagged failed: {e}")))?
                         .try_collect()
                         .await
                         .map_err(|e| {
@@ -968,11 +1039,17 @@ impl ImapProvider {
                 // Try MOVE extension first
                 match $s.uid_mv(&uid_str, dest_mailbox).await {
                     Ok(_) => {
-                        debug!("MOVE UID {} from {} to {} succeeded", uid, source_mailbox, dest_mailbox);
+                        debug!(
+                            "MOVE UID {} from {} to {} succeeded",
+                            uid, source_mailbox, dest_mailbox
+                        );
                     }
                     Err(_move_err) => {
                         // Fallback: COPY + flag Deleted + EXPUNGE
-                        debug!("MOVE not supported, falling back to COPY+DELETE for UID {}", uid);
+                        debug!(
+                            "MOVE not supported, falling back to COPY+DELETE for UID {}",
+                            uid
+                        );
 
                         // Re-select in case MOVE attempt changed state
                         $s.select(source_mailbox)
@@ -986,10 +1063,14 @@ impl ImapProvider {
                         let _: Vec<async_imap::types::Fetch> = $s
                             .uid_store(&uid_str, "+FLAGS (\\Deleted)")
                             .await
-                            .map_err(|e| PebbleError::Network(format!("STORE \\Deleted failed: {e}")))?
+                            .map_err(|e| {
+                                PebbleError::Network(format!("STORE \\Deleted failed: {e}"))
+                            })?
                             .try_collect()
                             .await
-                            .map_err(|e| PebbleError::Network(format!("STORE \\Deleted collect: {e}")))?;
+                            .map_err(|e| {
+                                PebbleError::Network(format!("STORE \\Deleted collect: {e}"))
+                            })?;
 
                         let _: Vec<u32> = $s
                             .expunge()
@@ -999,7 +1080,10 @@ impl ImapProvider {
                             .await
                             .map_err(|e| PebbleError::Network(format!("EXPUNGE collect: {e}")))?;
 
-                        debug!("COPY+DELETE UID {} from {} to {} succeeded", uid, source_mailbox, dest_mailbox);
+                        debug!(
+                            "COPY+DELETE UID {} from {} to {} succeeded",
+                            uid, source_mailbox, dest_mailbox
+                        );
                     }
                 }
             }};
@@ -1110,6 +1194,11 @@ impl ImapProvider {
     /// SELECT a mailbox and return the HIGHESTMODSEQ value if the server supports CONDSTORE.
     /// Returns `Ok(Some(modseq))` if available, `Ok(None)` otherwise.
     pub async fn get_highest_modseq(&self, mailbox: &str) -> Result<Option<u64>> {
+        Ok(self.get_mailbox_status(mailbox).await?.highest_modseq)
+    }
+
+    /// SELECT a mailbox and return the UIDVALIDITY/HIGHESTMODSEQ values advertised by the server.
+    pub async fn get_mailbox_status(&self, mailbox: &str) -> Result<ImapMailboxStatus> {
         let mut guard = self.session.lock().await;
         let sess = guard
             .as_mut()
@@ -1121,7 +1210,10 @@ impl ImapProvider {
                     .select(mailbox)
                     .await
                     .map_err(|e| PebbleError::Network(format!("SELECT failed: {e}")))?;
-                mailbox_info.highest_modseq
+                ImapMailboxStatus {
+                    uid_validity: mailbox_info.uid_validity,
+                    highest_modseq: mailbox_info.highest_modseq,
+                }
             }};
         }
 
@@ -1167,16 +1259,17 @@ impl ImapProvider {
                     })?
                     .try_collect()
                     .await
-                    .map_err(|e| {
-                        PebbleError::Network(format!("FLAGS MODSEQ collect: {e}"))
-                    })?;
+                    .map_err(|e| PebbleError::Network(format!("FLAGS MODSEQ collect: {e}")))?;
 
                 let mut highest = 0u64;
                 let results: Vec<(u32, bool, bool)> = fetches
                     .into_iter()
                     .filter_map(|fetch| {
                         let uid = fetch.uid.or_else(|| {
-                            tracing::warn!("Skipping modseq flags for message without UID (seq={})", fetch.message);
+                            tracing::warn!(
+                                "Skipping modseq flags for message without UID (seq={})",
+                                fetch.message
+                            );
                             None
                         })?;
                         if let Some(ms) = fetch.modseq {
@@ -1323,11 +1416,20 @@ pub fn detect_folder_role(name: &str) -> Option<FolderRole> {
         Some(FolderRole::Sent)
     } else if leaf.contains("draft") || leaf.contains("草稿") {
         Some(FolderRole::Drafts)
-    } else if leaf.contains("trash") || leaf.contains("deleted") || leaf.contains("已删除") || leaf.contains("废纸篓") {
+    } else if leaf.contains("trash")
+        || leaf.contains("deleted")
+        || leaf.contains("已删除")
+        || leaf.contains("废纸篓")
+    {
         Some(FolderRole::Trash)
     } else if leaf.contains("archive") || leaf.contains("归档") || leaf.contains("存档") {
         Some(FolderRole::Archive)
-    } else if leaf.contains("spam") || leaf.contains("junk") || leaf.contains("垃圾") || leaf.contains("病毒") || leaf.contains("广告") {
+    } else if leaf.contains("spam")
+        || leaf.contains("junk")
+        || leaf.contains("垃圾")
+        || leaf.contains("病毒")
+        || leaf.contains("广告")
+    {
         Some(FolderRole::Spam)
     } else {
         None

@@ -1,7 +1,7 @@
 use pebble_core::{PebbleError, Result};
 use rusqlite::Connection;
 
-const CURRENT_VERSION: u32 = 6;
+const CURRENT_VERSION: u32 = 9;
 
 fn get_schema_version(conn: &Connection) -> u32 {
     conn.pragma_query_value(None, "user_version", |row| row.get(0))
@@ -24,19 +24,22 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
     let version = get_schema_version(conn);
 
     // Each migration is wrapped in a transaction so that the DDL and version
-    // update are atomic — a crash mid-migration won't leave an inconsistent state.
+    // update are atomic; a crash mid-migration won't leave an inconsistent state.
 
     if version < 1 {
-        let tx = conn.unchecked_transaction()
+        let tx = conn
+            .unchecked_transaction()
             .map_err(|e| PebbleError::Storage(format!("Migration V1 begin failed: {e}")))?;
         tx.execute_batch(SCHEMA_V1)
             .map_err(|e| PebbleError::Storage(format!("Migration V1 failed: {e}")))?;
         set_schema_version(&tx, 1)?;
-        tx.commit().map_err(|e| PebbleError::Storage(format!("Migration V1 commit failed: {e}")))?;
+        tx.commit()
+            .map_err(|e| PebbleError::Storage(format!("Migration V1 commit failed: {e}")))?;
     }
 
     if version < 2 {
-        let tx = conn.unchecked_transaction()
+        let tx = conn
+            .unchecked_transaction()
             .map_err(|e| PebbleError::Storage(format!("Migration V2 begin failed: {e}")))?;
         let has_content_id: bool = tx
             .prepare("SELECT content_id FROM attachments LIMIT 0")
@@ -49,11 +52,13 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
             .map_err(|e| PebbleError::Storage(format!("Migration V2 failed: {e}")))?;
         }
         set_schema_version(&tx, 2)?;
-        tx.commit().map_err(|e| PebbleError::Storage(format!("Migration V2 commit failed: {e}")))?;
+        tx.commit()
+            .map_err(|e| PebbleError::Storage(format!("Migration V2 commit failed: {e}")))?;
     }
 
     if version < 3 {
-        let tx = conn.unchecked_transaction()
+        let tx = conn
+            .unchecked_transaction()
             .map_err(|e| PebbleError::Storage(format!("Migration V3 begin failed: {e}")))?;
         tx.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_messages_account_remote ON messages(account_id, remote_id);
@@ -62,11 +67,13 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
         )
         .map_err(|e| PebbleError::Storage(format!("Migration V3 failed: {e}")))?;
         set_schema_version(&tx, 3)?;
-        tx.commit().map_err(|e| PebbleError::Storage(format!("Migration V3 commit failed: {e}")))?;
+        tx.commit()
+            .map_err(|e| PebbleError::Storage(format!("Migration V3 commit failed: {e}")))?;
     }
 
     if version < 4 {
-        let tx = conn.unchecked_transaction()
+        let tx = conn
+            .unchecked_transaction()
             .map_err(|e| PebbleError::Storage(format!("Migration V4 begin failed: {e}")))?;
         tx.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_message_folders_folder_id ON message_folders(folder_id);
@@ -75,23 +82,27 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
         )
         .map_err(|e| PebbleError::Storage(format!("Migration V4 failed: {e}")))?;
         set_schema_version(&tx, 4)?;
-        tx.commit().map_err(|e| PebbleError::Storage(format!("Migration V4 commit failed: {e}")))?;
+        tx.commit()
+            .map_err(|e| PebbleError::Storage(format!("Migration V4 commit failed: {e}")))?;
     }
 
     if version < 5 {
-        let tx = conn.unchecked_transaction()
+        let tx = conn
+            .unchecked_transaction()
             .map_err(|e| PebbleError::Storage(format!("Migration V5 begin failed: {e}")))?;
         tx.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_mf_folder_message ON message_folders(folder_id, message_id);",
         )
         .map_err(|e| PebbleError::Storage(format!("Migration V5 failed: {e}")))?;
         set_schema_version(&tx, 5)?;
-        tx.commit().map_err(|e| PebbleError::Storage(format!("Migration V5 commit failed: {e}")))?;
+        tx.commit()
+            .map_err(|e| PebbleError::Storage(format!("Migration V5 commit failed: {e}")))?;
     }
 
     // V6: search_pending table for crash-recovery of the search index
     if version < 6 {
-        let tx = conn.unchecked_transaction()
+        let tx = conn
+            .unchecked_transaction()
             .map_err(|e| PebbleError::Storage(format!("Migration V6 begin failed: {e}")))?;
         tx.execute_batch(
             "CREATE TABLE IF NOT EXISTS search_pending (
@@ -102,7 +113,81 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
         )
         .map_err(|e| PebbleError::Storage(format!("Migration V6 failed: {e}")))?;
         set_schema_version(&tx, CURRENT_VERSION)?;
-        tx.commit().map_err(|e| PebbleError::Storage(format!("Migration V6 commit failed: {e}")))?;
+        tx.commit()
+            .map_err(|e| PebbleError::Storage(format!("Migration V6 commit failed: {e}")))?;
+    }
+
+    if version < 7 {
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| PebbleError::Storage(format!("Migration V7 begin failed: {e}")))?;
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS folder_sync_state (
+                 account_id TEXT NOT NULL,
+                 folder_id TEXT NOT NULL,
+                 state TEXT NOT NULL,
+                 updated_at INTEGER NOT NULL,
+                 PRIMARY KEY (account_id, folder_id),
+                 FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+                 FOREIGN KEY(folder_id) REFERENCES folders(id) ON DELETE CASCADE
+             );",
+        )
+        .map_err(|e| PebbleError::Storage(format!("Migration V7 failed: {e}")))?;
+        set_schema_version(&tx, CURRENT_VERSION)?;
+        tx.commit()
+            .map_err(|e| PebbleError::Storage(format!("Migration V7 commit failed: {e}")))?;
+    }
+
+    if version < 8 {
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| PebbleError::Storage(format!("Migration V8 begin failed: {e}")))?;
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS sync_failures (
+                 account_id TEXT NOT NULL,
+                 folder_id TEXT NOT NULL,
+                 remote_id TEXT NOT NULL,
+                 provider TEXT NOT NULL,
+                 reason TEXT NOT NULL,
+                 attempts INTEGER NOT NULL DEFAULT 1,
+                 updated_at INTEGER NOT NULL,
+                 PRIMARY KEY (account_id, folder_id, remote_id),
+                 FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+                 FOREIGN KEY(folder_id) REFERENCES folders(id) ON DELETE CASCADE
+             );
+             CREATE INDEX IF NOT EXISTS idx_sync_failures_folder
+                 ON sync_failures(account_id, folder_id);",
+        )
+        .map_err(|e| PebbleError::Storage(format!("Migration V8 failed: {e}")))?;
+        set_schema_version(&tx, CURRENT_VERSION)?;
+        tx.commit()
+            .map_err(|e| PebbleError::Storage(format!("Migration V8 commit failed: {e}")))?;
+    }
+
+    if version < 9 {
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| PebbleError::Storage(format!("Migration V9 begin failed: {e}")))?;
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS pending_mail_ops (
+                 id TEXT PRIMARY KEY,
+                 account_id TEXT NOT NULL,
+                 message_id TEXT NOT NULL,
+                 op_type TEXT NOT NULL,
+                 payload_json TEXT NOT NULL,
+                 status TEXT NOT NULL CHECK(status IN ('pending', 'in_progress', 'failed', 'done')),
+                 attempts INTEGER NOT NULL DEFAULT 0,
+                 last_error TEXT,
+                 created_at INTEGER NOT NULL,
+                 updated_at INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_pending_mail_ops_account_status
+                 ON pending_mail_ops(account_id, status, updated_at);",
+        )
+        .map_err(|e| PebbleError::Storage(format!("Migration V9 failed: {e}")))?;
+        set_schema_version(&tx, CURRENT_VERSION)?;
+        tx.commit()
+            .map_err(|e| PebbleError::Storage(format!("Migration V9 commit failed: {e}")))?;
     }
 
     Ok(())

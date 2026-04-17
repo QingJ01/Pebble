@@ -128,22 +128,20 @@ impl Store {
 
     pub fn list_accounts(&self) -> Result<Vec<Account>> {
         self.with_read(|conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, email, display_name, provider, created_at, updated_at
+            let mut stmt = conn.prepare(
+                "SELECT id, email, display_name, provider, created_at, updated_at
                      FROM accounts ORDER BY created_at ASC",
-                )?;
-            let rows = stmt
-                .query_map([], |row| {
-                    Ok(Account {
-                        id: row.get(0)?,
-                        email: row.get(1)?,
-                        display_name: row.get(2)?,
-                        provider: str_to_provider(&row.get::<_, String>(3)?),
-                        created_at: row.get(4)?,
-                        updated_at: row.get(5)?,
-                    })
-                })?;
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok(Account {
+                    id: row.get(0)?,
+                    email: row.get(1)?,
+                    display_name: row.get(2)?,
+                    provider: str_to_provider(&row.get::<_, String>(3)?),
+                    created_at: row.get(4)?,
+                    updated_at: row.get(5)?,
+                })
+            })?;
             let mut accounts = Vec::new();
             for row in rows {
                 accounts.push(row?);
@@ -171,12 +169,11 @@ impl Store {
 
     pub fn get_account_sync_state(&self, account_id: &str) -> Result<Option<String>> {
         self.with_read(|conn| {
-            let result = conn
-                .query_row(
-                    "SELECT sync_state FROM accounts WHERE id = ?1",
-                    rusqlite::params![account_id],
-                    |row| row.get::<_, Option<String>>(0),
-                )?;
+            let result = conn.query_row(
+                "SELECT sync_state FROM accounts WHERE id = ?1",
+                rusqlite::params![account_id],
+                |row| row.get::<_, Option<String>>(0),
+            )?;
             Ok(result)
         })
     }
@@ -244,6 +241,43 @@ impl Store {
             s.last_sync_cursor = Some(cursor.to_string());
         })
     }
+
+    pub fn get_folder_sync_state(
+        &self,
+        account_id: &str,
+        folder_id: &str,
+    ) -> Result<Option<String>> {
+        self.with_read(|conn| {
+            let state = conn
+                .query_row(
+                    "SELECT state FROM folder_sync_state
+                     WHERE account_id = ?1 AND folder_id = ?2",
+                    rusqlite::params![account_id, folder_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+            Ok(state)
+        })
+    }
+
+    pub fn set_folder_sync_state(
+        &self,
+        account_id: &str,
+        folder_id: &str,
+        state: &str,
+    ) -> Result<()> {
+        self.with_write(|conn| {
+            conn.execute(
+                "INSERT INTO folder_sync_state (account_id, folder_id, state, updated_at)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(account_id, folder_id) DO UPDATE SET
+                    state = excluded.state,
+                    updated_at = excluded.updated_at",
+                rusqlite::params![account_id, folder_id, state, pebble_core::now_timestamp()],
+            )?;
+            Ok(())
+        })
+    }
 }
 
 #[cfg(test)]
@@ -306,5 +340,78 @@ mod cursor_tests {
         let value: serde_json::Value = serde_json::from_str(&state).unwrap();
         assert_eq!(value["foo"], "bar");
         assert_eq!(value["provider"], "imap");
+    }
+}
+
+#[cfg(test)]
+mod folder_sync_state_tests {
+    use crate::Store;
+    use pebble_core::*;
+
+    fn test_account() -> Account {
+        Account {
+            id: new_id(),
+            email: "test@example.com".to_string(),
+            display_name: "Test".to_string(),
+            provider: ProviderType::Imap,
+            created_at: now_timestamp(),
+            updated_at: now_timestamp(),
+        }
+    }
+
+    fn test_folder(account_id: &str, remote_id: &str, role: FolderRole, sort_order: i32) -> Folder {
+        Folder {
+            id: new_id(),
+            account_id: account_id.to_string(),
+            remote_id: remote_id.to_string(),
+            name: remote_id.to_string(),
+            folder_type: FolderType::Folder,
+            role: Some(role),
+            parent_id: None,
+            color: None,
+            is_system: true,
+            sort_order,
+        }
+    }
+
+    #[test]
+    fn folder_sync_state_is_scoped_by_account_and_folder() {
+        let store = Store::open_in_memory().unwrap();
+        let account = test_account();
+        store.insert_account(&account).unwrap();
+        let inbox = test_folder(&account.id, "INBOX", FolderRole::Inbox, 0);
+        let sent = test_folder(&account.id, "Sent", FolderRole::Sent, 1);
+        store.insert_folder(&inbox).unwrap();
+        store.insert_folder(&sent).unwrap();
+
+        store
+            .set_folder_sync_state(&account.id, &inbox.id, r#"{"last_uid":10}"#)
+            .unwrap();
+        store
+            .set_folder_sync_state(&account.id, &sent.id, r#"{"last_uid":20}"#)
+            .unwrap();
+
+        assert_eq!(
+            store.get_folder_sync_state(&account.id, &inbox.id).unwrap(),
+            Some(r#"{"last_uid":10}"#.to_string())
+        );
+        assert_eq!(
+            store.get_folder_sync_state(&account.id, &sent.id).unwrap(),
+            Some(r#"{"last_uid":20}"#.to_string())
+        );
+    }
+
+    #[test]
+    fn folder_sync_state_returns_none_when_missing() {
+        let store = Store::open_in_memory().unwrap();
+        let account = test_account();
+        store.insert_account(&account).unwrap();
+        let inbox = test_folder(&account.id, "INBOX", FolderRole::Inbox, 0);
+        store.insert_folder(&inbox).unwrap();
+
+        assert_eq!(
+            store.get_folder_sync_state(&account.id, &inbox.id).unwrap(),
+            None
+        );
     }
 }

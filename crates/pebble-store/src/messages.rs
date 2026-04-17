@@ -53,8 +53,7 @@ fn row_to_message(row: &Row) -> rusqlite::Result<Message> {
     })
 }
 
-const MSG_SELECT: &str =
-    "id, account_id, remote_id, message_id_header, in_reply_to, \
+const MSG_SELECT: &str = "id, account_id, remote_id, message_id_header, in_reply_to, \
      references_header, thread_id, subject, snippet, from_address, \
      from_name, to_list, cc_list, bcc_list, \
      body_text, body_html_raw, \
@@ -62,8 +61,7 @@ const MSG_SELECT: &str =
      date, remote_version, is_deleted, deleted_at, created_at, updated_at";
 
 /// Column list for list queries (excludes body_text and body_html_raw).
-const MSG_SUMMARY_SELECT: &str =
-    "id, account_id, remote_id, message_id_header, in_reply_to, \
+const MSG_SUMMARY_SELECT: &str = "id, account_id, remote_id, message_id_header, in_reply_to, \
      references_header, thread_id, subject, snippet, from_address, \
      from_name, to_list, cc_list, bcc_list, \
      has_attachments, is_read, is_starred, is_draft, \
@@ -188,8 +186,8 @@ impl Store {
                 MSG_SUMMARY_SELECT.replace(", ", ", m.")
             );
             let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt
-                .query_map(params![account_id, limit, offset], row_to_message_summary)?;
+            let rows =
+                stmt.query_map(params![account_id, limit, offset], row_to_message_summary)?;
             let mut messages = Vec::new();
             for row in rows {
                 messages.push(row?);
@@ -214,8 +212,7 @@ impl Store {
                 MSG_SUMMARY_SELECT.replace(", ", ", m.")
             );
             let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt
-                .query_map(params![folder_id, limit, offset], row_to_message_summary)?;
+            let rows = stmt.query_map(params![folder_id, limit, offset], row_to_message_summary)?;
             let mut messages = Vec::new();
             for row in rows {
                 messages.push(row?);
@@ -241,8 +238,7 @@ impl Store {
                 MSG_SELECT.replace(", ", ", m.")
             );
             let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt
-                .query_map(params![folder_id, limit, offset], row_to_message)?;
+            let rows = stmt.query_map(params![folder_id, limit, offset], row_to_message)?;
             let mut messages = Vec::new();
             for row in rows {
                 messages.push(row?);
@@ -272,8 +268,7 @@ impl Store {
                 MSG_SELECT,
             );
             let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt
-                .query_map(params![account_id, limit, offset], row_to_message)?;
+            let rows = stmt.query_map(params![account_id, limit, offset], row_to_message)?;
             let mut messages = Vec::new();
             for row in rows {
                 messages.push(row?);
@@ -333,7 +328,8 @@ impl Store {
             return self.list_messages_by_folder(&folder_ids[0], limit, offset);
         }
         self.with_read(|conn| {
-            let placeholders: Vec<String> = (1..=folder_ids.len()).map(|i| format!("?{}", i)).collect();
+            let placeholders: Vec<String> =
+                (1..=folder_ids.len()).map(|i| format!("?{}", i)).collect();
             let sql = format!(
                 "SELECT DISTINCT m.{} FROM messages m
                  JOIN message_folders mf ON m.id = mf.message_id
@@ -354,7 +350,8 @@ impl Store {
             param_values.push(Box::new(limit));
             param_values.push(Box::new(offset));
 
-            let params_ref: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|v| v.as_ref()).collect();
+            let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+                param_values.iter().map(|v| v.as_ref()).collect();
             let rows = stmt.query_map(params_ref.as_slice(), row_to_message_summary)?;
             let mut messages = Vec::new();
             for row in rows {
@@ -385,18 +382,17 @@ impl Store {
                 "SELECT {MSG_SELECT} FROM messages WHERE id IN ({})",
                 placeholders.join(", ")
             );
-            let mut stmt = conn
-                .prepare(&sql)?;
+            let mut stmt = conn.prepare(&sql)?;
 
-            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::with_capacity(ids.len());
+            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
+                Vec::with_capacity(ids.len());
             for id in ids {
                 param_values.push(Box::new(id.clone()));
             }
             let params: Vec<&dyn rusqlite::types::ToSql> =
                 param_values.iter().map(|v| v.as_ref()).collect();
 
-            let rows = stmt
-                .query_map(params.as_slice(), row_to_message)?;
+            let rows = stmt.query_map(params.as_slice(), row_to_message)?;
 
             let mut by_id = HashMap::new();
             for row in rows {
@@ -444,8 +440,13 @@ impl Store {
             let id_idx = values.len() + 1;
             values.push(Box::new(id.to_string()));
 
-            let sql = format!("UPDATE messages SET {} WHERE id = ?{}", sets.join(", "), id_idx);
-            let params: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
+            let sql = format!(
+                "UPDATE messages SET {} WHERE id = ?{}",
+                sets.join(", "),
+                id_idx
+            );
+            let params: Vec<&dyn rusqlite::types::ToSql> =
+                values.iter().map(|v| v.as_ref()).collect();
             conn.execute(&sql, params.as_slice())?;
 
             Ok(())
@@ -556,7 +557,11 @@ impl Store {
     }
 
     /// Find a local message ID by its remote (Gmail/IMAP) ID.
-    pub fn find_message_id_by_remote(&self, account_id: &str, remote_id: &str) -> Result<Option<String>> {
+    pub fn find_message_id_by_remote(
+        &self,
+        account_id: &str,
+        remote_id: &str,
+    ) -> Result<Option<String>> {
         self.with_read(|conn| {
             let result = conn
                 .query_row(
@@ -599,6 +604,54 @@ impl Store {
             }
             let param_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
             let rows = stmt.query_map(param_refs.as_slice(), |row| row.get::<_, String>(0))?;
+            let mut result = HashSet::new();
+            for row in rows {
+                result.insert(row?);
+            }
+            Ok(result)
+        })
+    }
+
+    /// Bulk-check which remote IDs already exist for an account inside one folder.
+    /// IMAP UIDs are only unique within a mailbox, so callers must use this
+    /// instead of account-wide lookup when syncing IMAP folders.
+    pub fn get_existing_remote_ids_in_folder(
+        &self,
+        account_id: &str,
+        folder_id: &str,
+        remote_ids: &[String],
+    ) -> Result<std::collections::HashSet<String>> {
+        use std::collections::HashSet;
+        if remote_ids.is_empty() {
+            return Ok(HashSet::new());
+        }
+
+        self.with_read(|conn| {
+            let placeholders: Vec<String> = (0..remote_ids.len())
+                .map(|i| format!("?{}", i + 3))
+                .collect();
+            let sql = format!(
+                "SELECT DISTINCT m.remote_id
+                 FROM messages m
+                 JOIN message_folders mf ON m.id = mf.message_id
+                 WHERE m.account_id = ?1
+                   AND mf.folder_id = ?2
+                   AND m.remote_id IN ({})
+                   AND m.is_deleted = 0",
+                placeholders.join(", ")
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> =
+                Vec::with_capacity(remote_ids.len() + 2);
+            params_vec.push(Box::new(account_id.to_string()));
+            params_vec.push(Box::new(folder_id.to_string()));
+            for rid in remote_ids {
+                params_vec.push(Box::new(rid.clone()));
+            }
+            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                params_vec.iter().map(|p| p.as_ref()).collect();
+            let rows = stmt.query_map(param_refs.as_slice(), |row| row.get::<_, String>(0))?;
+
             let mut result = HashSet::new();
             for row in rows {
                 result.insert(row?);
@@ -650,21 +703,16 @@ impl Store {
     }
 
     /// Get the maximum remote_id (interpreted as integer) for messages in a folder.
-    pub fn get_max_remote_id(
-        &self,
-        account_id: &str,
-        folder_id: &str,
-    ) -> Result<Option<String>> {
+    pub fn get_max_remote_id(&self, account_id: &str, folder_id: &str) -> Result<Option<String>> {
         self.with_read(|conn| {
-            let result: Option<i64> = conn
-                .query_row(
-                    "SELECT MAX(CAST(m.remote_id AS INTEGER))
+            let result: Option<i64> = conn.query_row(
+                "SELECT MAX(CAST(m.remote_id AS INTEGER))
                      FROM messages m
                      JOIN message_folders mf ON m.id = mf.message_id
                      WHERE m.account_id = ?1 AND mf.folder_id = ?2 AND m.is_deleted = 0",
-                    params![account_id, folder_id],
-                    |row| row.get(0),
-                )?;
+                params![account_id, folder_id],
+                |row| row.get(0),
+            )?;
             Ok(result.map(|v| v.to_string()))
         })
     }
@@ -680,7 +728,7 @@ impl Store {
                 "SELECT m.id, m.remote_id, m.is_read, m.is_starred, m.updated_at
                  FROM messages m
                  JOIN message_folders mf ON m.id = mf.message_id
-                 WHERE m.account_id = ?1 AND mf.folder_id = ?2 AND m.is_deleted = 0"
+                 WHERE m.account_id = ?1 AND mf.folder_id = ?2 AND m.is_deleted = 0",
             )?;
             let rows = stmt.query_map(params![account_id, folder_id], |row| {
                 Ok((
@@ -702,12 +750,9 @@ impl Store {
     /// Get the folder IDs that contain a given message.
     pub fn get_message_folder_ids(&self, message_id: &str) -> Result<Vec<String>> {
         self.with_read(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT folder_id FROM message_folders WHERE message_id = ?1"
-            )?;
-            let rows = stmt.query_map(params![message_id], |row| {
-                row.get::<_, String>(0)
-            })?;
+            let mut stmt =
+                conn.prepare("SELECT folder_id FROM message_folders WHERE message_id = ?1")?;
+            let rows = stmt.query_map(params![message_id], |row| row.get::<_, String>(0))?;
             let mut ids = Vec::new();
             for row in rows {
                 ids.push(row?);
@@ -746,8 +791,13 @@ impl Store {
                 values.push(Box::new(now));
                 let id_idx = values.len() + 1;
                 values.push(Box::new(msg_id.clone()));
-                let sql = format!("UPDATE messages SET {} WHERE id = ?{}", sets.join(", "), id_idx);
-                let params: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
+                let sql = format!(
+                    "UPDATE messages SET {} WHERE id = ?{}",
+                    sets.join(", "),
+                    id_idx
+                );
+                let params: Vec<&dyn rusqlite::types::ToSql> =
+                    values.iter().map(|v| v.as_ref()).collect();
                 tx.execute(&sql, params.as_slice())?;
             }
 
@@ -791,14 +841,23 @@ impl Store {
 
             // Batch delete using IN clause for better performance
             for chunk in ids.chunks(100) {
-                let placeholders: String = chunk.iter().enumerate()
+                let placeholders: String = chunk
+                    .iter()
+                    .enumerate()
                     .map(|(i, _)| format!("?{}", i + 1))
-                    .collect::<Vec<_>>().join(",");
+                    .collect::<Vec<_>>()
+                    .join(",");
 
-                let sql_folders = format!("DELETE FROM message_folders WHERE message_id IN ({})", placeholders);
+                let sql_folders = format!(
+                    "DELETE FROM message_folders WHERE message_id IN ({})",
+                    placeholders
+                );
                 let sql_messages = format!("DELETE FROM messages WHERE id IN ({})", placeholders);
 
-                let params: Vec<&dyn rusqlite::types::ToSql> = chunk.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+                let params: Vec<&dyn rusqlite::types::ToSql> = chunk
+                    .iter()
+                    .map(|id| id as &dyn rusqlite::types::ToSql)
+                    .collect();
 
                 tx.execute(&sql_folders, params.as_slice())?;
                 tx.execute(&sql_messages, params.as_slice())?;
@@ -825,9 +884,7 @@ impl Store {
     /// Return all message IDs belonging to an account (including soft-deleted).
     pub fn list_message_ids_by_account(&self, account_id: &str) -> Result<Vec<String>> {
         self.with_read(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id FROM messages WHERE account_id = ?1"
-            )?;
+            let mut stmt = conn.prepare("SELECT id FROM messages WHERE account_id = ?1")?;
             let rows = stmt.query_map(params![account_id], |row| row.get(0))?;
             let mut ids = Vec::new();
             for row in rows {
@@ -844,10 +901,8 @@ impl Store {
                 "SELECT {} FROM messages WHERE thread_id = ?1 AND is_deleted = 0 ORDER BY date ASC",
                 MSG_SELECT
             );
-            let mut stmt = conn
-                .prepare(&sql)?;
-            let rows = stmt
-                .query_map(params![thread_id], row_to_message)?;
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(params![thread_id], row_to_message)?;
             let mut messages = Vec::new();
             for row in rows {
                 messages.push(row?);
@@ -870,9 +925,8 @@ impl Store {
         offset: u32,
     ) -> Result<Vec<pebble_core::ThreadSummary>> {
         self.with_read(|conn| {
-            let mut stmt = conn
-                .prepare(
-                    "WITH thread_participants AS (
+            let mut stmt = conn.prepare(
+                "WITH thread_participants AS (
                         SELECT thread_id,
                                GROUP_CONCAT(from_address, '||') AS participants
                         FROM (
@@ -911,30 +965,29 @@ impl Store {
                      GROUP BY m.thread_id
                      ORDER BY last_date DESC
                      LIMIT ?2 OFFSET ?3",
-                )?;
+            )?;
 
-            let rows = stmt
-                .query_map(params![folder_id, limit, offset], |row| {
-                    let participants_str: String = row.get(7)?;
-                    let participants: Vec<String> = participants_str
-                        .split("||")
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect();
-                    let is_starred: i32 = row.get(6)?;
-                    let has_attachments: i32 = row.get(8)?;
-                    Ok(pebble_core::ThreadSummary {
-                        thread_id: row.get(0)?,
-                        subject: row.get(1)?,
-                        snippet: row.get(2)?,
-                        last_date: row.get(3)?,
-                        message_count: row.get::<_, i64>(4)? as u32,
-                        unread_count: row.get::<_, i64>(5)? as u32,
-                        is_starred: is_starred != 0,
-                        participants,
-                        has_attachments: has_attachments != 0,
-                    })
-                })?;
+            let rows = stmt.query_map(params![folder_id, limit, offset], |row| {
+                let participants_str: String = row.get(7)?;
+                let participants: Vec<String> = participants_str
+                    .split("||")
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                let is_starred: i32 = row.get(6)?;
+                let has_attachments: i32 = row.get(8)?;
+                Ok(pebble_core::ThreadSummary {
+                    thread_id: row.get(0)?,
+                    subject: row.get(1)?,
+                    snippet: row.get(2)?,
+                    last_date: row.get(3)?,
+                    message_count: row.get::<_, i64>(4)? as u32,
+                    unread_count: row.get::<_, i64>(5)? as u32,
+                    is_starred: is_starred != 0,
+                    participants,
+                    has_attachments: has_attachments != 0,
+                })
+            })?;
 
             let mut results = Vec::new();
             for row in rows {
@@ -951,19 +1004,17 @@ impl Store {
         account_id: &str,
     ) -> Result<std::collections::HashMap<String, String>> {
         self.with_read(|conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT message_id_header, thread_id
+            let mut stmt = conn.prepare(
+                "SELECT message_id_header, thread_id
                      FROM messages
                      WHERE account_id = ?1
                        AND message_id_header IS NOT NULL
                        AND thread_id IS NOT NULL
                        AND is_deleted = 0",
-                )?;
-            let rows = stmt
-                .query_map(params![account_id], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })?;
+            )?;
+            let rows = stmt.query_map(params![account_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
             let mut results = std::collections::HashMap::new();
             for row in rows {
                 let (mid, tid) = row?;
@@ -1042,7 +1093,7 @@ impl Store {
                  FROM messages m
                  JOIN message_folders mf ON m.id = mf.message_id
                  WHERE m.account_id = ?1 AND m.is_read = 0 AND m.is_deleted = 0
-                 GROUP BY mf.folder_id"
+                 GROUP BY mf.folder_id",
             )?;
             let rows = stmt.query_map(params![account_id], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
@@ -1054,6 +1105,97 @@ impl Store {
             }
             Ok(counts)
         })
+    }
+}
+
+#[cfg(test)]
+mod remote_id_scope_tests {
+    use crate::Store;
+    use pebble_core::*;
+
+    fn make_account() -> Account {
+        let now = now_timestamp();
+        Account {
+            id: new_id(),
+            email: "imap@example.com".to_string(),
+            display_name: "IMAP".to_string(),
+            provider: ProviderType::Imap,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn make_folder(account_id: &str, remote_id: &str, role: FolderRole, sort_order: i32) -> Folder {
+        Folder {
+            id: new_id(),
+            account_id: account_id.to_string(),
+            remote_id: remote_id.to_string(),
+            name: remote_id.to_string(),
+            folder_type: FolderType::Folder,
+            role: Some(role),
+            parent_id: None,
+            color: None,
+            is_system: true,
+            sort_order,
+        }
+    }
+
+    fn make_message(account_id: &str, remote_id: &str) -> Message {
+        let now = now_timestamp();
+        Message {
+            id: new_id(),
+            account_id: account_id.to_string(),
+            remote_id: remote_id.to_string(),
+            message_id_header: None,
+            in_reply_to: None,
+            references_header: None,
+            thread_id: None,
+            subject: "Test".to_string(),
+            snippet: "test".to_string(),
+            from_address: "from@example.com".to_string(),
+            from_name: "From".to_string(),
+            to_list: vec![],
+            cc_list: vec![],
+            bcc_list: vec![],
+            body_text: "body".to_string(),
+            body_html_raw: String::new(),
+            has_attachments: false,
+            is_read: false,
+            is_starred: false,
+            is_draft: false,
+            date: now,
+            remote_version: None,
+            is_deleted: false,
+            deleted_at: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn existing_remote_ids_are_scoped_by_folder_for_imap() {
+        let store = Store::open_in_memory().unwrap();
+        let account = make_account();
+        store.insert_account(&account).unwrap();
+
+        let inbox = make_folder(&account.id, "INBOX", FolderRole::Inbox, 0);
+        let sent = make_folder(&account.id, "Sent", FolderRole::Sent, 1);
+        store.insert_folder(&inbox).unwrap();
+        store.insert_folder(&sent).unwrap();
+
+        let msg = make_message(&account.id, "123");
+        store.insert_message(&msg, &[inbox.id.clone()]).unwrap();
+
+        let remote_ids = vec!["123".to_string()];
+        let inbox_matches = store
+            .get_existing_remote_ids_in_folder(&account.id, &inbox.id, &remote_ids)
+            .unwrap();
+        let sent_matches = store
+            .get_existing_remote_ids_in_folder(&account.id, &sent.id, &remote_ids)
+            .unwrap();
+
+        assert!(inbox_matches.contains("123"));
+        assert!(!sent_matches.contains("123"));
     }
 }
 
@@ -1237,6 +1379,12 @@ mod thread_listing_tests {
         assert_eq!(t.unread_count, 3);
         let mut parts = t.participants.clone();
         parts.sort();
-        assert_eq!(parts, vec!["alice@example.com".to_string(), "bob@example.com".to_string()]);
+        assert_eq!(
+            parts,
+            vec![
+                "alice@example.com".to_string(),
+                "bob@example.com".to_string()
+            ]
+        );
     }
 }

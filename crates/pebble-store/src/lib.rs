@@ -9,9 +9,11 @@ pub mod kanban;
 pub mod labels;
 pub mod messages;
 pub mod migrations;
+pub mod pending_ops;
 pub mod rules;
 pub mod search_pending;
 pub mod snooze;
+pub mod sync_failures;
 pub mod translate_config;
 pub mod trusted_senders;
 
@@ -30,7 +32,9 @@ pub struct Store {
 impl Store {
     pub fn open(path: &Path) -> Result<Self> {
         let write_manager = SqliteConnectionManager::file(path).with_init(|conn| {
-            conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;")?;
+            conn.execute_batch(
+                "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;",
+            )?;
             Ok(())
         });
         let write_pool = Pool::builder()
@@ -39,7 +43,9 @@ impl Store {
             .map_err(|e| PebbleError::Storage(format!("Failed to create write pool: {e}")))?;
 
         let read_manager = SqliteConnectionManager::file(path).with_init(|conn| {
-            conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;")?;
+            conn.execute_batch(
+                "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;",
+            )?;
             Ok(())
         });
         let read_pool = Pool::builder()
