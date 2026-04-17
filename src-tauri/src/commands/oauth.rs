@@ -257,13 +257,13 @@ pub(crate) fn build_oauth_token_refresher(
                         scopes: token_pair.scopes.clone(),
                     };
                     persist_oauth_tokens_raw(&crypto, &store, &account_id, &tokens)?;
-                    Ok(token_pair.access_token)
+                    Ok((token_pair.access_token, token_pair.expires_at))
                 })
             })
         },
         None => Box::new(move || {
             let token = fallback_access_token.clone();
-            Box::pin(async move { Ok(token) })
+            Box::pin(async move { Ok((token, None)) })
         }),
     }
 }

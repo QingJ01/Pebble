@@ -167,9 +167,11 @@ pub async fn batch_delete(
 
     // Track which messages were successfully deleted remotely
     let mut deleted_ids: Vec<String> = Vec::new();
+    let mut connection_attempted = false;
 
     // Remote sync — connect once per account, operate, disconnect
     for (account_id, (provider_type, messages)) in &groups {
+        connection_attempted = true;
         if let Ok(conn) = ConnectedProvider::connect(&state, account_id, provider_type).await {
             match &conn {
                 ConnectedProvider::Gmail(provider) => {
@@ -209,11 +211,13 @@ pub async fn batch_delete(
         }
     }
 
-    // If no remote deletes succeeded at all, fall back to local delete (true offline mode)
-    let ids_to_delete = if deleted_ids.is_empty() {
-        message_ids.as_slice()
+    // Fall back to local-only when genuinely offline (no connection was attempted).
+    // If connections were made but all operations failed, only apply the successes.
+    let ids_to_delete = if !connection_attempted || !deleted_ids.is_empty() {
+        if deleted_ids.is_empty() { message_ids.as_slice() } else { deleted_ids.as_slice() }
     } else {
-        deleted_ids.as_slice()
+        // Connected but every remote op failed — don't silently apply locally
+        &[]
     };
 
     // Local bulk soft-delete
@@ -221,6 +225,8 @@ pub async fn batch_delete(
     let success_count = ids_to_delete.len() as u32;
 
     // Update search index — remove deleted messages
+    let delete_ids: Vec<String> = ids_to_delete.iter().map(|s| s.to_string()).collect();
+    let _ = state.store.add_search_pending(&delete_ids, "remove");
     for id in ids_to_delete {
         if let Err(e) = state.search.remove_message(id) {
             warn!("Failed to remove deleted message {id} from search index: {e}");
@@ -229,6 +235,7 @@ pub async fn batch_delete(
     if let Err(e) = state.search.commit() {
         warn!("Failed to commit search index after batch delete: {e}");
     }
+    let _ = state.store.clear_search_pending(&delete_ids);
 
     info!(
         "Batch delete: {}/{} messages deleted",
@@ -250,9 +257,11 @@ pub async fn batch_mark_read(
 
     // Track which messages were successfully updated remotely
     let mut synced_ids: Vec<String> = Vec::new();
+    let mut connection_attempted = false;
 
     // Remote sync — connect once per account, operate, disconnect
     for (account_id, (provider_type, messages)) in &groups {
+        connection_attempted = true;
         if let Ok(conn) = ConnectedProvider::connect(&state, account_id, provider_type).await {
             match &conn {
                 ConnectedProvider::Gmail(provider) => {
@@ -294,11 +303,11 @@ pub async fn batch_mark_read(
         // If connection failed, those messages are not added to synced_ids
     }
 
-    // If no remote syncs succeeded at all, fall back to updating all (true offline mode)
-    let ids_to_update = if synced_ids.is_empty() {
-        message_ids.as_slice()
+    // Fall back to local-only when genuinely offline (no connection was attempted).
+    let ids_to_update = if !connection_attempted || !synced_ids.is_empty() {
+        if synced_ids.is_empty() { message_ids.as_slice() } else { synced_ids.as_slice() }
     } else {
-        synced_ids.as_slice()
+        &[]
     };
 
     // Local bulk flag update — only for messages that succeeded remotely (or all if offline)
@@ -330,9 +339,11 @@ pub async fn batch_star(
 
     // Track which messages were successfully updated remotely
     let mut synced_ids: Vec<String> = Vec::new();
+    let mut connection_attempted = false;
 
     // Remote sync — connect once per account, operate, disconnect
     for (account_id, (provider_type, messages)) in &groups {
+        connection_attempted = true;
         if let Ok(conn) = ConnectedProvider::connect(&state, account_id, provider_type).await {
             match &conn {
                 ConnectedProvider::Gmail(provider) => {
@@ -374,11 +385,11 @@ pub async fn batch_star(
         // If connection failed, those messages are not added to synced_ids
     }
 
-    // If no remote syncs succeeded at all, fall back to updating all (true offline mode)
-    let ids_to_update = if synced_ids.is_empty() {
-        message_ids.as_slice()
+    // Fall back to local-only when genuinely offline (no connection was attempted).
+    let ids_to_update = if !connection_attempted || !synced_ids.is_empty() {
+        if synced_ids.is_empty() { message_ids.as_slice() } else { synced_ids.as_slice() }
     } else {
-        synced_ids.as_slice()
+        &[]
     };
 
     // Local bulk flag update — only for messages that succeeded remotely (or all if offline)

@@ -43,7 +43,9 @@ fn str_to_folder_role(s: &str) -> Option<FolderRole> {
 }
 
 impl Store {
-    pub fn insert_folder(&self, folder: &Folder) -> Result<()> {
+    /// Upsert a folder. Returns the effective database id (the existing row's id
+    /// when the folder already exists, or `folder.id` for a new insert).
+    pub fn insert_folder(&self, folder: &Folder) -> Result<String> {
         self.with_write(|conn| {
             // Upsert: if a folder with the same (account_id, remote_id) exists,
             // update its name/role/sort_order instead of creating a duplicate.
@@ -67,6 +69,7 @@ impl Store {
                         existing_id,
                     ],
                 )?;
+                Ok(existing_id)
             } else {
                 conn.execute(
                     "INSERT INTO folders (id, account_id, remote_id, name, folder_type, role, parent_id, color, is_system, sort_order)
@@ -84,8 +87,8 @@ impl Store {
                         folder.sort_order,
                     ],
                 )?;
+                Ok(folder.id.clone())
             }
-            Ok(())
         })
     }
 

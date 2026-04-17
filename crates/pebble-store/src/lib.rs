@@ -10,6 +10,7 @@ pub mod labels;
 pub mod messages;
 pub mod migrations;
 pub mod rules;
+pub mod search_pending;
 pub mod snooze;
 pub mod translate_config;
 pub mod trusted_senders;
@@ -19,6 +20,7 @@ use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{Connection, OpenFlags};
 use std::path::Path;
+use std::sync::Arc;
 
 pub struct Store {
     read_pool: Pool<SqliteConnectionManager>,
@@ -125,6 +127,32 @@ impl Store {
             .get()
             .map_err(|e| PebbleError::Internal(format!("Pool error: {e}")))?;
         f(&conn)
+    }
+
+    /// Run a closure against a read connection on a blocking thread.
+    /// Use from async sync workers to avoid blocking the Tokio runtime.
+    pub async fn with_read_async<F, T>(self: &Arc<Self>, f: F) -> Result<T>
+    where
+        F: FnOnce(&rusqlite::Connection) -> Result<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let store = Arc::clone(self);
+        tokio::task::spawn_blocking(move || store.with_read(f))
+            .await
+            .map_err(|e| PebbleError::Internal(format!("spawn_blocking: {e}")))?
+    }
+
+    /// Run a closure against the write connection on a blocking thread.
+    /// Use from async sync workers to avoid blocking the Tokio runtime.
+    pub async fn with_write_async<F, T>(self: &Arc<Self>, f: F) -> Result<T>
+    where
+        F: FnOnce(&rusqlite::Connection) -> Result<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let store = Arc::clone(self);
+        tokio::task::spawn_blocking(move || store.with_write(f))
+            .await
+            .map_err(|e| PebbleError::Internal(format!("spawn_blocking: {e}")))?
     }
 
     /// Run VACUUM to reclaim space from soft-deleted rows.

@@ -1,7 +1,7 @@
 use pebble_core::{PebbleError, Result};
 use rusqlite::Connection;
 
-const CURRENT_VERSION: u32 = 5;
+const CURRENT_VERSION: u32 = 6;
 
 fn get_schema_version(conn: &Connection) -> u32 {
     conn.pragma_query_value(None, "user_version", |row| row.get(0))
@@ -23,58 +23,86 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
 
     let version = get_schema_version(conn);
 
-    // V1: Initial schema
+    // Each migration is wrapped in a transaction so that the DDL and version
+    // update are atomic — a crash mid-migration won't leave an inconsistent state.
+
     if version < 1 {
-        conn.execute_batch(SCHEMA_V1)
+        let tx = conn.unchecked_transaction()
+            .map_err(|e| PebbleError::Storage(format!("Migration V1 begin failed: {e}")))?;
+        tx.execute_batch(SCHEMA_V1)
             .map_err(|e| PebbleError::Storage(format!("Migration V1 failed: {e}")))?;
-        set_schema_version(conn, 1)?;
+        set_schema_version(&tx, 1)?;
+        tx.commit().map_err(|e| PebbleError::Storage(format!("Migration V1 commit failed: {e}")))?;
     }
 
-    // V2: add content_id and is_inline columns to attachments
     if version < 2 {
-        // Check if columns already exist (for databases created before version tracking)
-        let has_content_id: bool = conn
+        let tx = conn.unchecked_transaction()
+            .map_err(|e| PebbleError::Storage(format!("Migration V2 begin failed: {e}")))?;
+        let has_content_id: bool = tx
             .prepare("SELECT content_id FROM attachments LIMIT 0")
             .is_ok();
         if !has_content_id {
-            conn.execute_batch(
+            tx.execute_batch(
                 "ALTER TABLE attachments ADD COLUMN content_id TEXT;
                  ALTER TABLE attachments ADD COLUMN is_inline INTEGER NOT NULL DEFAULT 0;",
             )
             .map_err(|e| PebbleError::Storage(format!("Migration V2 failed: {e}")))?;
         }
-        set_schema_version(conn, 2)?;
+        set_schema_version(&tx, 2)?;
+        tx.commit().map_err(|e| PebbleError::Storage(format!("Migration V2 commit failed: {e}")))?;
     }
 
-    // V3: add missing indexes for performance
     if version < 3 {
-        conn.execute_batch(
+        let tx = conn.unchecked_transaction()
+            .map_err(|e| PebbleError::Storage(format!("Migration V3 begin failed: {e}")))?;
+        tx.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_messages_account_remote ON messages(account_id, remote_id);
              CREATE INDEX IF NOT EXISTS idx_snoozed_unsnoozed_at ON snoozed_messages(unsnoozed_at);
              CREATE UNIQUE INDEX IF NOT EXISTS idx_folders_account_remote ON folders(account_id, remote_id);"
         )
         .map_err(|e| PebbleError::Storage(format!("Migration V3 failed: {e}")))?;
-        set_schema_version(conn, 3)?;
+        set_schema_version(&tx, 3)?;
+        tx.commit().map_err(|e| PebbleError::Storage(format!("Migration V3 commit failed: {e}")))?;
     }
 
-    // V4: add indexes for folder joins, starred queries, and thread date sorting
     if version < 4 {
-        conn.execute_batch(
+        let tx = conn.unchecked_transaction()
+            .map_err(|e| PebbleError::Storage(format!("Migration V4 begin failed: {e}")))?;
+        tx.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_message_folders_folder_id ON message_folders(folder_id);
              CREATE INDEX IF NOT EXISTS idx_messages_account_starred ON messages(account_id, is_starred) WHERE is_starred = 1 AND is_deleted = 0;
              CREATE INDEX IF NOT EXISTS idx_messages_thread_date ON messages(thread_id, date) WHERE thread_id IS NOT NULL AND is_deleted = 0;"
         )
         .map_err(|e| PebbleError::Storage(format!("Migration V4 failed: {e}")))?;
-        set_schema_version(conn, 4)?;
+        set_schema_version(&tx, 4)?;
+        tx.commit().map_err(|e| PebbleError::Storage(format!("Migration V4 commit failed: {e}")))?;
     }
 
-    // V5: add composite index for folder_id + message_id covering queries
     if version < 5 {
-        conn.execute_batch(
+        let tx = conn.unchecked_transaction()
+            .map_err(|e| PebbleError::Storage(format!("Migration V5 begin failed: {e}")))?;
+        tx.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_mf_folder_message ON message_folders(folder_id, message_id);",
         )
         .map_err(|e| PebbleError::Storage(format!("Migration V5 failed: {e}")))?;
-        set_schema_version(conn, CURRENT_VERSION)?;
+        set_schema_version(&tx, 5)?;
+        tx.commit().map_err(|e| PebbleError::Storage(format!("Migration V5 commit failed: {e}")))?;
+    }
+
+    // V6: search_pending table for crash-recovery of the search index
+    if version < 6 {
+        let tx = conn.unchecked_transaction()
+            .map_err(|e| PebbleError::Storage(format!("Migration V6 begin failed: {e}")))?;
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS search_pending (
+                 message_id TEXT PRIMARY KEY,
+                 operation TEXT NOT NULL CHECK(operation IN ('index', 'remove')),
+                 created_at INTEGER NOT NULL
+             );",
+        )
+        .map_err(|e| PebbleError::Storage(format!("Migration V6 failed: {e}")))?;
+        set_schema_version(&tx, CURRENT_VERSION)?;
+        tx.commit().map_err(|e| PebbleError::Storage(format!("Migration V6 commit failed: {e}")))?;
     }
 
     Ok(())

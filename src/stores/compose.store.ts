@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { Message } from "@/lib/api";
-import type { ActiveView } from "./ui.store";
+import { useUIStore, type ActiveView } from "./ui.store";
 
 export type ComposeMode = "new" | "reply" | "reply-all" | "forward";
 
@@ -27,7 +27,6 @@ function getComposeResetState() {
 
 /** Check if compose view can be left without losing data. */
 export function isComposeDirty(): boolean {
-  const { useUIStore } = require("./ui.store");
   const ui = useUIStore.getState();
   const compose = useComposeStore.getState();
   return ui.activeView === "compose" && compose.composeDirty;
@@ -41,8 +40,6 @@ export const useComposeStore = create<ComposeState>((set) => ({
   pendingView: null,
   setComposeDirty: (dirty) => set({ composeDirty: dirty }),
   openCompose: (mode, replyTo = null) => {
-    // Import lazily to avoid circular dependency
-    const { useUIStore } = require("./ui.store");
     const uiState = useUIStore.getState();
     useUIStore.setState({
       previousView: uiState.activeView === "compose" ? uiState.previousView : uiState.activeView,
@@ -56,7 +53,6 @@ export const useComposeStore = create<ComposeState>((set) => ({
   },
   closeCompose: () => {
     const state = useComposeStore.getState();
-    const { useUIStore } = require("./ui.store");
     const uiState = useUIStore.getState();
     if (uiState.activeView !== "compose") return;
 
@@ -70,7 +66,6 @@ export const useComposeStore = create<ComposeState>((set) => ({
   },
   confirmCloseCompose: () => {
     const state = useComposeStore.getState();
-    const { useUIStore } = require("./ui.store");
     const uiState = useUIStore.getState();
     const targetView = state.pendingView ?? uiState.previousView;
     useUIStore.setState({ activeView: targetView });

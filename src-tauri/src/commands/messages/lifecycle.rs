@@ -342,47 +342,60 @@ pub async fn empty_trash(
     account_id: String,
 ) -> std::result::Result<u32, PebbleError> {
     let trash = find_folder_by_role(&state, &account_id, FolderRole::Trash)?;
-    let messages = state.store.list_messages_by_folder(&trash.id, 10000, 0)?;
     let provider_type = state
         .store
         .get_account(&account_id)?
         .map(|account| account.provider)
         .ok_or_else(|| PebbleError::Internal(format!("Account not found: {account_id}")))?;
 
-    if messages.is_empty() {
-        return Ok(0);
-    }
+    let conn = ConnectedProvider::connect(&state, &account_id, &provider_type).await.ok();
 
-    let count = messages.len() as u32;
+    let mut total_deleted: u32 = 0;
+    const PAGE_SIZE: u32 = 500;
 
-    if let Ok(conn) = ConnectedProvider::connect(&state, &account_id, &provider_type).await {
-        match &conn {
-            ConnectedProvider::Gmail(provider) => {
-                for msg in &messages {
-                    let _ = provider.delete_message_permanently(&msg.remote_id).await;
+    loop {
+        let messages = state.store.list_messages_by_folder(&trash.id, PAGE_SIZE, 0)?;
+        if messages.is_empty() {
+            break;
+        }
+
+        if let Some(ref conn) = conn {
+            match conn {
+                ConnectedProvider::Gmail(provider) => {
+                    for msg in &messages {
+                        let _ = provider.delete_message_permanently(&msg.remote_id).await;
+                    }
                 }
-            }
-            ConnectedProvider::Outlook(provider) => {
-                for msg in &messages {
-                    let _ = provider.delete_message_permanently(&msg.remote_id).await;
+                ConnectedProvider::Outlook(provider) => {
+                    for msg in &messages {
+                        let _ = provider.delete_message_permanently(&msg.remote_id).await;
+                    }
                 }
-            }
-            ConnectedProvider::Imap(imap) => {
-                for msg in &messages {
-                    if let Ok(uid) = parse_imap_uid(&msg.remote_id) {
-                        let _ = imap.delete_message(&trash.remote_id, uid).await;
+                ConnectedProvider::Imap(imap) => {
+                    for msg in &messages {
+                        if let Ok(uid) = parse_imap_uid(&msg.remote_id) {
+                            let _ = imap.delete_message(&trash.remote_id, uid).await;
+                        }
                     }
                 }
             }
         }
+
+        let ids: Vec<String> = messages.iter().map(|m| m.id.clone()).collect();
+        let batch_count = ids.len() as u32;
+        state.store.hard_delete_messages(&ids)?;
+        remove_search_documents(&state, &ids)?;
+        total_deleted += batch_count;
+
+        if batch_count < PAGE_SIZE {
+            break;
+        }
+    }
+
+    if let Some(conn) = conn {
         conn.disconnect().await;
     }
 
-    // Permanently delete locally (hard delete, not soft delete + purge)
-    let ids: Vec<String> = messages.iter().map(|m| m.id.clone()).collect();
-    state.store.hard_delete_messages(&ids)?;
-    remove_search_documents(&state, &ids)?;
-
-    info!("Emptied trash: {} messages permanently deleted", count);
-    Ok(count)
+    info!("Emptied trash: {} messages permanently deleted", total_deleted);
+    Ok(total_deleted)
 }

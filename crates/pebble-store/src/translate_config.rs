@@ -44,6 +44,16 @@ impl Store {
         })
     }
 
+    pub fn update_translate_config_blob(&self, encrypted_config: &str) -> Result<()> {
+        self.with_write(|conn| {
+            conn.execute(
+                "UPDATE translate_config SET config = ?1, updated_at = ?2 WHERE id = 'active'",
+                params![encrypted_config, pebble_core::now_timestamp()],
+            )?;
+            Ok(())
+        })
+    }
+
     pub fn delete_translate_config(&self) -> Result<()> {
         self.with_write(|conn| {
             conn.execute("DELETE FROM translate_config WHERE id = 'active'", [])?;

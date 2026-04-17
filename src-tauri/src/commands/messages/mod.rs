@@ -33,6 +33,9 @@ pub(super) fn refresh_search_document(
     state: &AppState,
     message_id: &str,
 ) -> std::result::Result<(), PebbleError> {
+    let ids = vec![message_id.to_string()];
+    state.store.add_search_pending(&ids, "index")?;
+
     match state.store.get_message(message_id)? {
         Some(message) if !message.is_deleted => {
             let folder_ids = state.store.get_message_folder_ids(message_id)?;
@@ -48,6 +51,7 @@ pub(super) fn refresh_search_document(
     }
 
     state.search.commit()?;
+    state.store.clear_search_pending(&ids)?;
     Ok(())
 }
 
@@ -55,12 +59,15 @@ pub(super) fn remove_search_documents(
     state: &AppState,
     message_ids: &[String],
 ) -> std::result::Result<(), PebbleError> {
+    if message_ids.is_empty() {
+        return Ok(());
+    }
+    state.store.add_search_pending(message_ids, "remove")?;
     for message_id in message_ids {
         state.search.remove_message(message_id)?;
     }
-    if !message_ids.is_empty() {
-        state.search.commit()?;
-    }
+    state.search.commit()?;
+    state.store.clear_search_pending(message_ids)?;
     Ok(())
 }
 
@@ -75,6 +82,7 @@ pub(super) fn refresh_search_documents(
     if message_ids.is_empty() {
         return Ok(());
     }
+    state.store.add_search_pending(message_ids, "index")?;
     for message_id in message_ids {
         match state.store.get_message(message_id)? {
             Some(message) if !message.is_deleted => {
@@ -91,6 +99,7 @@ pub(super) fn refresh_search_documents(
         }
     }
     state.search.commit()?;
+    state.store.clear_search_pending(message_ids)?;
     Ok(())
 }
 

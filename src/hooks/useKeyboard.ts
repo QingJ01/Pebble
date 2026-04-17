@@ -161,6 +161,7 @@ export function useKeyboard() {
               })
               .catch(() => {
                 queryClient.invalidateQueries({ queryKey: ["messages"] });
+                useMailStore.getState().setSelectedMessage(selectedMessageId);
                 useToastStore.getState().addToast({ message: i18n.t("messageActions.archiveFailed", "Failed to archive"), type: "error" });
               });
           }

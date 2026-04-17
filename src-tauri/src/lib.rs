@@ -93,6 +93,37 @@ pub fn run() {
             let search_for_reindex = state.search.clone();
             let app_for_reindex = app_handle.clone();
             tauri::async_runtime::spawn_blocking(move || {
+                // 1. Process any pending search ops left over from a previous crash.
+                let pending = store_for_reindex.list_search_pending().unwrap_or_default();
+                if !pending.is_empty() {
+                    tracing::info!("Recovering {} pending search operations from previous session", pending.len());
+                    let mut ids_to_clear = Vec::with_capacity(pending.len());
+                    for (msg_id, op) in &pending {
+                        match op.as_str() {
+                            "remove" => {
+                                let _ = search_for_reindex.remove_message(msg_id);
+                            }
+                            _ => {
+                                match store_for_reindex.get_message(msg_id) {
+                                    Ok(Some(msg)) if !msg.is_deleted => {
+                                        let folder_ids = store_for_reindex.get_message_folder_ids(msg_id).unwrap_or_default();
+                                        if folder_ids.is_empty() {
+                                            let _ = search_for_reindex.remove_message(msg_id);
+                                        } else {
+                                            let _ = search_for_reindex.index_message(&msg, &folder_ids);
+                                        }
+                                    }
+                                    _ => { let _ = search_for_reindex.remove_message(msg_id); }
+                                }
+                            }
+                        }
+                        ids_to_clear.push(msg_id.clone());
+                    }
+                    let _ = search_for_reindex.commit();
+                    let _ = store_for_reindex.clear_search_pending(&ids_to_clear);
+                }
+
+                // 2. Full rebuild if schema changed or counts diverge.
                 let needs_rebuild = if search_needs_reindex {
                     tracing::info!("Search index schema changed, rebuild required");
                     true
@@ -100,22 +131,13 @@ pub fn run() {
                     let idx_count = search_for_reindex.doc_count();
                     let db_count = store_for_reindex.count_all_messages().unwrap_or(0);
                     if idx_count == 0 && db_count > 0 {
-                        tracing::info!(
-                            "Search index empty but DB has {db_count} messages, rebuild required"
+                        tracing::info!("Search index empty but DB has {db_count} messages, rebuild required");
+                        true
+                    } else if idx_count > 0 && idx_count != db_count {
+                        tracing::warn!(
+                            "SQLite/Tantivy count mismatch (db={db_count}, index={idx_count}), rebuilding"
                         );
                         true
-                    } else if idx_count > 0 {
-                        // Consistency check: if counts diverge by >10%, rebuild
-                        let diff = (db_count as i64 - idx_count as i64).unsigned_abs();
-                        let threshold = (db_count.max(idx_count) / 10).max(5);
-                        if diff > threshold {
-                            tracing::warn!(
-                                "SQLite/Tantivy count mismatch (db={db_count}, index={idx_count}), rebuilding"
-                            );
-                            true
-                        } else {
-                            false
-                        }
                     } else {
                         false
                     }
@@ -130,6 +152,7 @@ pub fn run() {
                         }
                         Err(e) => tracing::error!("Background reindex failed: {e}"),
                     }
+                    let _ = store_for_reindex.clear_all_search_pending();
                 }
             });
 

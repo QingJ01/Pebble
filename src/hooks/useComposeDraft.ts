@@ -136,8 +136,11 @@ export function useComposeDraft({
         saveDraftToStorage({ accountId: fromAccountId, to, cc, bcc, subject, rawSource, richTextHtml, editorMode });
         // Also save to backend under the current From account
         {
-          // Pick body source based on current editor mode to avoid stale content
-          const bodyText = editorMode === "rich" ? "" : rawSource;
+          // Pick body source based on current editor mode to avoid stale content.
+          // For rich text, strip HTML tags to produce a plain-text fallback.
+          const bodyText = editorMode === "rich"
+            ? richTextHtml.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim()
+            : rawSource;
           const bodyHtml = editorMode === "rich" ? richTextHtml : (editorMode === "html" ? rawSource : undefined);
           saveDraft({
             accountId: fromAccountId,

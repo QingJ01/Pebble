@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import i18n from "@/lib/i18n";
+import { useComposeStore } from "./compose.store";
 
 export type ActiveView = "inbox" | "kanban" | "settings" | "search" | "snoozed" | "starred" | "compose";
 export type Theme = "light" | "dark" | "system";
@@ -62,7 +63,6 @@ export const useUIStore = create<UIState>((set) => ({
 
     // Delegate dirty-compose guard to the compose store
     if (state.activeView === "compose" && view !== "compose") {
-      const { useComposeStore } = require("./compose.store");
       const composeState = useComposeStore.getState();
       if (composeState.composeDirty) {
         useComposeStore.setState({ showComposeLeaveConfirm: true, pendingView: view });

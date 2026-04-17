@@ -60,7 +60,7 @@ export default function Sidebar() {
 
   const showUnread = useUIStore((s) => s.showFolderUnreadCount);
   const { data: accounts = EMPTY_ACCOUNTS } = useAccountsQuery();
-  const { data: folders = EMPTY_FOLDERS } = useFoldersQuery(activeAccountId);
+  const { data: folders = EMPTY_FOLDERS, isFetched: foldersFetched } = useFoldersQuery(activeAccountId);
   const { data: unreadCounts = {} } = useFolderUnreadCounts(activeAccountId);
 
   const ROLE_LABELS: Record<string, string> = {
@@ -101,15 +101,22 @@ export default function Sidebar() {
     }
   }, [accounts, activeAccountId, setActiveAccountId]);
 
-  // Auto-select inbox folder when folders load
+  // Auto-select inbox folder when folders load.
+  // If the selected account has no folders, try the next account.
   useEffect(() => {
     if (folders.length > 0 && !activeFolderId) {
       const inbox = folders.find((f) => f.role === "inbox");
       if (inbox) {
         setActiveFolderId(inbox.id);
       }
+    } else if (foldersFetched && folders.length === 0 && activeAccountId && accounts.length > 1) {
+      const idx = accounts.findIndex((a) => a.id === activeAccountId);
+      const next = accounts[idx + 1] ?? accounts.find((a) => a.id !== activeAccountId);
+      if (next) {
+        setActiveAccountId(next.id);
+      }
     }
-  }, [folders, activeFolderId, setActiveFolderId]);
+  }, [folders, foldersFetched, activeFolderId, setActiveFolderId, accounts, activeAccountId, setActiveAccountId]);
 
   async function safeSetActiveView(view: Parameters<typeof setActiveView>[0]) {
     if (isComposeDirty()) {

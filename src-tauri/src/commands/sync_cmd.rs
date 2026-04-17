@@ -53,10 +53,14 @@ async fn start_sync_inner(
 ) -> std::result::Result<(), PebbleError> {
     // Atomically check and reserve the slot to prevent two sync workers
     // for the same account from starting concurrently.
+    // If an old task has finished, remove its stale entry so a new one can start.
     {
         let mut handles = state.sync_handles.lock().await;
-        if handles.contains_key(&account_id) {
-            return Ok(());
+        if let Some(existing) = handles.get(&account_id) {
+            if !existing.task.is_finished() {
+                return Ok(());
+            }
+            handles.remove(&account_id);
         }
         // Insert a placeholder with a dummy stop channel. The real handle
         // will replace it below. If setup fails, we remove the placeholder.
