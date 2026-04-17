@@ -11,7 +11,7 @@ use tracing::{info, warn};
 use crate::backoff::SyncBackoff;
 use crate::provider::outlook::OutlookProvider;
 use crate::gmail_sync::TokenRefresher;
-use crate::sync::{StoredMessage, SyncConfig, SyncError, SyncWorkerBase, persist_message_attachments};
+use crate::sync::{StoredMessage, SyncConfig, SyncError, SyncWorkerBase, persist_message_attachments_async};
 use crate::thread::compute_thread_id;
 
 /// A sync worker for Outlook accounts using the Microsoft Graph API.
@@ -79,10 +79,10 @@ impl OutlookSyncWorker {
         if needs_refresh {
             if let Some(ref refresher) = self.token_refresher {
                 match refresher().await {
-                    Ok(new_token) => {
+                    Ok((new_token, new_expires_at)) => {
                         self.provider.set_access_token(new_token);
                         let mut expires = self.token_expires_at.lock().unwrap_or_else(|e| e.into_inner());
-                        *expires = Some(now + 3600);
+                        *expires = new_expires_at.or(Some(now + 3600));
                         info!("Outlook OAuth token refreshed for account {}", self.base.account_id);
                     }
                     Err(e) => {
@@ -117,6 +117,7 @@ impl OutlookSyncWorker {
                     Ok(Ok(())) if *stop_rx.borrow() => break,
                     _ => {}
                 }
+                continue;
             }
 
             // Refresh token if needed
@@ -156,7 +157,12 @@ impl OutlookSyncWorker {
             for folder in &folders {
                 // Persist folder
                 let _ = self.base.store.insert_folder(folder);
+            }
 
+            // Re-read folders from DB so we use persisted IDs (upsert may keep old IDs)
+            let db_folders = self.base.store.list_folders(&self.base.account_id).unwrap_or_default();
+
+            for folder in &db_folders {
                 let query = FetchQuery {
                     folder_id: folder.remote_id.clone(),
                     limit: Some(50),
@@ -222,12 +228,13 @@ impl OutlookSyncWorker {
                             if msg.has_attachments {
                                 match self.provider.list_message_attachments(&msg.remote_id).await {
                                     Ok(attachments) if !attachments.is_empty() => {
-                                        persist_message_attachments(
-                                            &self.base.store,
-                                            &self.base.attachments_dir,
-                                            &msg.id,
+                                        persist_message_attachments_async(
+                                            Arc::clone(&self.base.store),
+                                            self.base.attachments_dir.clone(),
+                                            msg.id.clone(),
                                             attachments,
-                                        );
+                                        )
+                                        .await;
                                     }
                                     Ok(_) => {}
                                     Err(e) => {

@@ -204,6 +204,22 @@ pub(crate) fn persist_message_attachments(
     }
 }
 
+/// Async wrapper that offloads attachment I/O to a blocking thread.
+pub(crate) async fn persist_message_attachments_async(
+    store: Arc<Store>,
+    attachments_root: PathBuf,
+    message_id: String,
+    attachments: Vec<AttachmentData>,
+) {
+    if attachments.is_empty() {
+        return;
+    }
+    let _ = tokio::task::spawn_blocking(move || {
+        persist_message_attachments(&store, &attachments_root, &message_id, attachments);
+    })
+    .await;
+}
+
 // ---------------------------------------------------------------------------
 // Sync cursor helpers
 // ---------------------------------------------------------------------------
@@ -297,6 +313,7 @@ impl SyncWorkerBase {
 pub struct SyncWorker {
     pub(crate) base: SyncWorkerBase,
     provider: Arc<ImapMailProvider>,
+    idle_provider: Arc<ImapMailProvider>,
     stop_rx: watch::Receiver<bool>,
 }
 
@@ -309,6 +326,7 @@ impl SyncWorker {
         stop_rx: watch::Receiver<bool>,
         attachments_dir: impl Into<PathBuf>,
     ) -> Self {
+        let idle_provider = Arc::new(provider.clone_for_idle());
         Self {
             base: SyncWorkerBase {
                 account_id: account_id.into(),
@@ -318,6 +336,7 @@ impl SyncWorker {
                 message_tx: None,
             },
             provider,
+            idle_provider,
             stop_rx,
         }
     }
@@ -338,16 +357,15 @@ impl SyncWorker {
     pub async fn initial_sync(&self) -> Result<()> {
         info!("Starting initial sync for account {}", self.base.account_id);
 
-        let folders = self.provider.inner().list_folders(&self.base.account_id).await?;
+        let remote_folders = self.provider.inner().list_folders(&self.base.account_id).await?;
 
-        for folder in &folders {
+        for folder in &remote_folders {
             // Upsert folder into store
-            // Ignore "already exists" errors
             let _ = self.base.store.insert_folder(folder);
         }
 
         // Ensure an Archive folder exists locally (even if the IMAP server doesn't have one)
-        let has_archive = folders.iter().any(|f| f.role == Some(pebble_core::FolderRole::Archive));
+        let has_archive = remote_folders.iter().any(|f| f.role == Some(pebble_core::FolderRole::Archive));
         if !has_archive {
             let archive = pebble_core::Folder {
                 id: new_id(),
@@ -364,6 +382,10 @@ impl SyncWorker {
             let _ = self.base.store.insert_folder(&archive);
             info!("Created local archive folder for account {}", self.base.account_id);
         }
+
+        // Re-read folders from DB so we use the actual persisted IDs
+        // (insert_folder upserts, so in-memory IDs from list_folders may differ).
+        let folders = self.base.store.list_folders(&self.base.account_id)?;
 
         // Sync all folders, prioritising Inbox first
         let mut ordered: Vec<&pebble_core::Folder> = Vec::with_capacity(folders.len());
@@ -554,12 +576,13 @@ impl SyncWorker {
                         folder_ids: vec![folder.id.clone()],
                     });
 
-                    persist_message_attachments(
-                        &self.base.store,
-                        &self.base.attachments_dir,
-                        &msg.id,
+                    persist_message_attachments_async(
+                        Arc::clone(&self.base.store),
+                        self.base.attachments_dir.clone(),
+                        msg.id.clone(),
                         parsed.attachments,
-                    );
+                    )
+                    .await;
                 }
                 Err(e) => {
                     error!("Failed to store message UID {}: {}", uid, e);
@@ -722,24 +745,34 @@ impl SyncWorker {
             }
         }
 
-        // Step 6: Detect deletions (always — CONDSTORE doesn't cover expunges)
-        let server_uids = self
+        // Step 6: Detect deletions (always — CONDSTORE doesn't cover expunges).
+        // Quick-check: if the server EXISTS count matches local count, no
+        // messages were expunged, so skip the expensive UID SEARCH ALL.
+        let server_exists = self
             .provider
             .inner()
-            .fetch_all_uids(&folder.remote_id)
+            .select_exists(&folder.remote_id)
             .await?;
-        let local_remote_ids: Vec<(String, String)> = local_state
-            .iter()
-            .map(|(id, rid, _, _, _)| (id.clone(), rid.clone()))
-            .collect();
-        let deleted = reconcile::detect_deletions(&local_remote_ids, &server_uids);
-        if !deleted.is_empty() {
-            info!(
-                "Soft-deleting {} server-removed messages from {}",
-                deleted.len(),
-                folder.name
-            );
-            self.base.store.bulk_soft_delete(&deleted)?;
+        let local_count = local_state.len() as u32;
+        if server_exists < local_count {
+            let server_uids = self
+                .provider
+                .inner()
+                .fetch_all_uids(&folder.remote_id)
+                .await?;
+            let local_remote_ids: Vec<(String, String)> = local_state
+                .iter()
+                .map(|(id, rid, _, _, _)| (id.clone(), rid.clone()))
+                .collect();
+            let deleted = reconcile::detect_deletions(&local_remote_ids, &server_uids);
+            if !deleted.is_empty() {
+                info!(
+                    "Soft-deleting {} server-removed messages from {}",
+                    deleted.len(),
+                    folder.name
+                );
+                self.base.store.bulk_soft_delete(&deleted)?;
+            }
         }
 
         Ok(())
@@ -785,6 +818,11 @@ impl SyncWorker {
 
         let supports_idle = self.provider.inner().supports_idle().await;
         if supports_idle {
+            if let Err(e) = self.idle_provider.connect().await {
+                warn!("Failed to connect IDLE session for account {}: {}", self.base.account_id, e);
+            }
+        }
+        if supports_idle {
             info!("IMAP IDLE supported for account {}", self.base.account_id);
         } else {
             info!("IMAP IDLE not supported for account {}, using polling", self.base.account_id);
@@ -814,6 +852,7 @@ impl SyncWorker {
                             Ok(Ok(())) if *stop_rx.borrow() => break,
                             _ => {}
                         }
+                        continue;
                     }
 
                     // Quick check if mailbox has changes before doing full poll
@@ -825,7 +864,8 @@ impl SyncWorker {
                         }
                     };
                     if let Some(inbox) = folders.iter().find(|f| f.role == Some(pebble_core::FolderRole::Inbox)) {
-                        match crate::idle::check_for_changes_with_idle(self.provider.inner(), &inbox.remote_id, &mut last_exists, supports_idle).await {
+                        let idle_inner = if supports_idle { self.idle_provider.inner() } else { self.provider.inner() };
+                        match crate::idle::check_for_changes_with_idle(idle_inner, &inbox.remote_id, &mut last_exists, supports_idle).await {
                             Ok(crate::idle::IdleEvent::NewMail) => {
                                 if let Err(e) = self.poll_new_messages().await {
                                     warn!("Poll error for account {}: {}", self.base.account_id, e);
@@ -888,6 +928,7 @@ impl SyncWorker {
                     if *stop_rx.borrow() {
                         info!("Sync worker stopping for account {}", self.base.account_id);
                         let _ = self.provider.disconnect().await;
+                        let _ = self.idle_provider.disconnect().await;
                         break;
                     }
                 }

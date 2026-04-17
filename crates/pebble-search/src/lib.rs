@@ -67,10 +67,26 @@ impl TantivySearch {
                 Ok(idx) => {
                     schema::register_tokenizers(&idx);
 
-                    // Check if body_text is stored (new schema requires it)
+                    // Check if schema needs rebuild: body_text must be stored and
+                    // use the default tokenizer (previously used n-gram which causes bloat).
                     let existing_schema = idx.schema();
                     let needs_rebuild = match existing_schema.get_field("body_text") {
-                        Ok(f) => !existing_schema.get_field_entry(f).is_stored(),
+                        Ok(f) => {
+                            let entry = existing_schema.get_field_entry(f);
+                            if !entry.is_stored() {
+                                true
+                            } else {
+                                match entry.field_type() {
+                                    tantivy::schema::FieldType::Str(text_opts) => {
+                                        match text_opts.get_indexing_options() {
+                                            Some(idx_opts) => idx_opts.tokenizer() != schema::BODY_TOKENIZER,
+                                            None => true,
+                                        }
+                                    }
+                                    _ => true,
+                                }
+                            }
+                        }
                         Err(_) => true,
                     };
 
@@ -188,6 +204,44 @@ impl TantivySearch {
             .add_document(doc)
             .map_err(|e| PebbleError::Internal(format!("Failed to add document: {e}")))?;
 
+        Ok(())
+    }
+
+    pub fn index_messages_batch(&self, messages: &[(Message, Vec<String>)]) -> Result<()> {
+        let ss = &self.schema;
+        let writer = self
+            .writer
+            .lock()
+            .map_err(|e| PebbleError::Internal(format!("Lock poisoned: {e}")))?;
+
+        for (msg, folder_ids) in messages {
+            let mut doc = TantivyDocument::default();
+            doc.add_text(ss.message_id, &msg.id);
+            doc.add_text(ss.subject, &msg.subject);
+            doc.add_text(ss.body_text, &msg.body_text);
+            doc.add_text(ss.from_address, &msg.from_address);
+            doc.add_text(ss.from_name, &msg.from_name);
+
+            let to_text: Vec<String> = msg.to_list.iter()
+                .chain(msg.cc_list.iter())
+                .chain(msg.bcc_list.iter())
+                .map(|ea| match &ea.name {
+                    Some(name) => format!("{} {}", name, ea.address),
+                    None => ea.address.clone(),
+                })
+                .collect();
+            doc.add_text(ss.to_addresses, to_text.join(" "));
+            doc.add_date(ss.date, DateTime::from_timestamp_secs(msg.date));
+            for fid in folder_ids {
+                doc.add_text(ss.folder_id, fid);
+            }
+            doc.add_text(ss.account_id, &msg.account_id);
+            doc.add_text(ss.has_attachment, if msg.has_attachments { "true" } else { "false" });
+
+            writer.delete_term(Term::from_field_text(ss.message_id, &msg.id));
+            writer.add_document(doc)
+                .map_err(|e| PebbleError::Internal(format!("Failed to add document: {e}")))?;
+        }
         Ok(())
     }
 

@@ -310,6 +310,11 @@ impl ImapProvider {
         }
     }
 
+    /// Return a clone of the connection configuration.
+    pub fn config(&self) -> ImapConfig {
+        self.config.clone()
+    }
+
     /// Whether this host requires an RFC 2971 ID command before LOGIN
     /// (Netease/163/126/188 servers reject as "Unsafe Login" without it).
     fn needs_id_command(&self) -> bool {
@@ -1071,6 +1076,21 @@ impl ImapProvider {
         let results = do_search!(sess);
 
         Ok(results)
+    }
+
+    /// SELECT a mailbox and return the EXISTS count without fetching UIDs.
+    pub async fn select_exists(&self, mailbox: &str) -> Result<u32> {
+        let mut guard = self.session.lock().await;
+        let sess = guard
+            .as_mut()
+            .ok_or_else(|| PebbleError::Network("Not connected".to_string()))?;
+
+        let mbox = sess
+            .select(mailbox)
+            .await
+            .map_err(|e| PebbleError::Network(format!("SELECT failed: {e}")))?;
+
+        Ok(mbox.exists)
     }
 
     /// Check if the server advertises the CONDSTORE capability (RFC 4551).

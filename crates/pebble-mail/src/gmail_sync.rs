@@ -13,8 +13,25 @@ use tracing::{debug, error, info, warn};
 
 use crate::backoff::SyncBackoff;
 use crate::provider::gmail::{GmailFetchedMessage, GmailProvider, visible_label_ids};
-use crate::sync::{StoredMessage, SyncConfig, SyncError, SyncWorkerBase, persist_message_attachments};
+use crate::sync::{StoredMessage, SyncConfig, SyncError, SyncWorkerBase, persist_message_attachments_async};
 use crate::thread::compute_thread_id;
+
+fn collect_ref_ids_from_messages(messages: &[GmailFetchedMessage]) -> Vec<String> {
+    let mut refs = std::collections::HashSet::new();
+    for fetched in messages {
+        if let Some(irt) = &fetched.message.in_reply_to {
+            for id in irt.split_whitespace() {
+                refs.insert(id.trim().to_string());
+            }
+        }
+        if let Some(r) = &fetched.message.references_header {
+            for id in r.split_whitespace() {
+                refs.insert(id.trim().to_string());
+            }
+        }
+    }
+    refs.into_iter().collect()
+}
 
 fn folder_sync_priority(folder: &Folder) -> i32 {
     match folder.role {
@@ -71,9 +88,9 @@ fn resolve_folder_ids(
     folder_ids
 }
 
-/// Callback that refreshes the OAuth token and returns the new access token.
+/// Callback that refreshes the OAuth token and returns (new_access_token, expires_at).
 pub type TokenRefresher =
-    Box<dyn Fn() -> Pin<Box<dyn Future<Output = Result<String>> + Send>> + Send + Sync>;
+    Box<dyn Fn() -> Pin<Box<dyn Future<Output = Result<(String, Option<i64>)>> + Send>> + Send + Sync>;
 
 /// A sync worker for Gmail accounts using the REST API (HTTPS on port 443).
 pub struct GmailSyncWorker {
@@ -158,12 +175,13 @@ impl GmailSyncWorker {
         let folder_ids = resolve_folder_ids(folders_by_remote, &visible_label_ids, fallback_folder_id);
 
         self.base.store.insert_message(&message, &folder_ids)?;
-        persist_message_attachments(
-            &self.base.store,
-            &self.base.attachments_dir,
-            &message.id,
+        persist_message_attachments_async(
+            Arc::clone(&self.base.store),
+            self.base.attachments_dir.clone(),
+            message.id.clone(),
             attachments,
-        );
+        )
+        .await;
 
         if let (Some(mid), Some(tid)) = (&message.message_id_header, &message.thread_id) {
             thread_mappings.insert(mid.clone(), tid.clone());
@@ -191,11 +209,10 @@ impl GmailSyncWorker {
             if let Some(ref refresher) = self.token_refresher {
                 debug!("Refreshing Gmail OAuth token for account {}", self.base.account_id);
                 match refresher().await {
-                    Ok(new_token) => {
+                    Ok((new_token, new_expires_at)) => {
                         self.provider.set_access_token(new_token);
-                        // Assume the new token is valid for 1 hour
                         let mut expires = self.token_expires_at.lock().unwrap_or_else(|e| e.into_inner());
-                        *expires = Some(now + 3600);
+                        *expires = new_expires_at.or(Some(now + 3600));
                         info!("Gmail OAuth token refreshed for account {}", self.base.account_id);
                     }
                     Err(e) => {
@@ -311,6 +328,8 @@ impl GmailSyncWorker {
 
         let mut stored_count = 0u32;
 
+        // Separate already-existing messages (just add folder) from new ones to fetch
+        let mut to_fetch = Vec::new();
         for msg_ref in msg_refs {
             if let Some(local_id) = existing.get(&msg_ref.id) {
                 if let Err(e) = self.base.store.add_message_to_folder(local_id, &folder_id) {
@@ -321,14 +340,27 @@ impl GmailSyncWorker {
                 } else {
                     self.emit_message_refresh(local_id);
                 }
-                continue;
+            } else {
+                to_fetch.push(msg_ref.id.clone());
             }
+        }
 
-            match self
-                .provider
-                .fetch_sync_message(&msg_ref.id, &self.base.account_id)
-                .await
-            {
+        // Fetch new messages concurrently (up to 10 in flight)
+        use futures::stream::{self, StreamExt};
+        let fetched_results: Vec<_> = stream::iter(to_fetch.into_iter().map(|gmail_id| {
+            let provider = Arc::clone(&self.provider);
+            let account_id = self.base.account_id.clone();
+            async move {
+                let result = provider.fetch_sync_message(&gmail_id, &account_id).await;
+                (gmail_id, result)
+            }
+        }))
+        .buffer_unordered(10)
+        .collect()
+        .await;
+
+        for (gmail_id, result) in fetched_results {
+            match result {
                 Ok(fetched) => match self
                     .store_fetched_message(fetched, &folder_id, thread_mappings, folders_by_remote)
                     .await
@@ -336,11 +368,11 @@ impl GmailSyncWorker {
                     Ok(true) => stored_count += 1,
                     Ok(false) => {}
                     Err(e) => {
-                        error!("Failed to store Gmail message {}: {}", msg_ref.id, e);
+                        error!("Failed to store Gmail message {}: {}", gmail_id, e);
                     }
                 },
                 Err(e) => {
-                    warn!("Failed to fetch Gmail message {}: {}", msg_ref.id, e);
+                    warn!("Failed to fetch Gmail message {}: {}", gmail_id, e);
                 }
             }
         }
@@ -480,44 +512,73 @@ impl GmailSyncWorker {
             }
         }
 
-        // Fetch new messages
+        // Fetch new messages concurrently, then collect refs and store.
         if !new_ids.is_empty() {
             let existing = self
                 .base.store
                 .get_existing_message_map_by_remote_ids(&self.base.account_id, &new_ids)
                 .unwrap_or_default();
 
-            let inbox_folder_id = folders_by_remote
-                .get("INBOX")
-                .cloned()
-                .unwrap_or_default();
-            // TODO: Gmail history messages are also fetched one-by-one; refs cannot be
-            // collected before the loop. Use full mapping until batch-fetch is available.
-            let mut thread_mappings = self
-                .base.store
-                .get_thread_mappings(&self.base.account_id)
-                .unwrap_or_default();
-
-            for gmail_id in new_ids {
-                if let Some(local_id) = existing.get(&gmail_id) {
-                    self.emit_message_refresh(local_id);
-                    continue;
-                }
-
-                match self
-                    .provider
-                    .fetch_sync_message(&gmail_id, &self.base.account_id)
-                    .await
-                {
-                    Ok(fetched) => {
-                        if let Err(e) = self
-                            .store_fetched_message(fetched, &inbox_folder_id, &mut thread_mappings, &folders_by_remote)
-                            .await
-                        {
-                            warn!("Failed to store history message {}: {}", gmail_id, e);
-                        }
+            // Emit refresh for already-known messages; collect truly new IDs.
+            let to_fetch: Vec<String> = new_ids
+                .into_iter()
+                .filter(|gid| {
+                    if let Some(local_id) = existing.get(gid) {
+                        self.emit_message_refresh(local_id);
+                        false
+                    } else {
+                        true
                     }
-                    Err(e) => warn!("Failed to fetch history message {}: {}", gmail_id, e),
+                })
+                .collect();
+
+            if !to_fetch.is_empty() {
+                let inbox_folder_id = folders_by_remote
+                    .get("INBOX")
+                    .cloned()
+                    .unwrap_or_default();
+
+                // Phase 1: fetch all messages concurrently.
+                use futures::stream::{self, StreamExt};
+                let fetched_results: Vec<_> = stream::iter(to_fetch.into_iter().map(|gmail_id| {
+                    let provider = Arc::clone(&self.provider);
+                    let account_id = self.base.account_id.clone();
+                    async move {
+                        let result = provider.fetch_sync_message(&gmail_id, &account_id).await;
+                        (gmail_id, result)
+                    }
+                }))
+                .buffer_unordered(10)
+                .collect()
+                .await;
+
+                let fetched_messages: Vec<GmailFetchedMessage> = fetched_results
+                    .into_iter()
+                    .filter_map(|(gmail_id, result)| match result {
+                        Ok(fetched) => Some(fetched),
+                        Err(e) => {
+                            warn!("Failed to fetch history message {}: {}", gmail_id, e);
+                            None
+                        }
+                    })
+                    .collect();
+
+                // Phase 2: collect refs from fetched messages for targeted thread lookup.
+                let ref_ids = collect_ref_ids_from_messages(&fetched_messages);
+                let mut thread_mappings = self
+                    .base.store
+                    .get_thread_mappings_for_refs(&self.base.account_id, &ref_ids)
+                    .unwrap_or_default();
+
+                // Phase 3: store all fetched messages.
+                for fetched in fetched_messages {
+                    let gmail_id = fetched.message.remote_id.clone();
+                    if let Err(e) = self
+                        .store_fetched_message(fetched, &inbox_folder_id, &mut thread_mappings, &folders_by_remote)
+                        .await
+                    {
+                        warn!("Failed to store history message {}: {}", gmail_id, e);
+                    }
                 }
             }
         }
@@ -571,6 +632,7 @@ impl GmailSyncWorker {
                             Ok(Ok(())) if *stop_rx.borrow() => break,
                             _ => {}
                         }
+                        continue;
                     }
 
                     if let Err(e) = self.ensure_valid_token().await {

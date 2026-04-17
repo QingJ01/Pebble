@@ -24,6 +24,14 @@ impl ImapMailProvider {
         &self.inner
     }
 
+    /// Create a second provider with the same config, for use as a dedicated IDLE connection.
+    pub fn clone_for_idle(&self) -> Self {
+        Self {
+            inner: ImapProvider::new(self.inner.config()),
+            account_id: self.account_id.clone(),
+        }
+    }
+
     /// Set the account ID used by FolderProvider::list_folders.
     pub fn set_account_id(&mut self, id: String) {
         self.account_id = id;

@@ -37,14 +37,18 @@ pub fn do_reindex(store: &Store, search: &TantivySearch) -> std::result::Result<
             let ids: Vec<String> = messages.iter().map(|m| m.id.clone()).collect();
             let folder_map = store.get_message_folder_ids_batch(&ids)?;
 
-            for msg in &messages {
-                let empty: Vec<String> = Vec::new();
-                let folder_ids = folder_map.get(&msg.id).unwrap_or(&empty);
-                if let Err(e) = search.index_message(msg, folder_ids) {
-                    warn!("Failed to index message {}: {}", msg.id, e);
-                } else {
-                    count += 1;
-                }
+            let batch: Vec<_> = messages
+                .iter()
+                .map(|msg| {
+                    let folder_ids = folder_map.get(&msg.id).cloned().unwrap_or_default();
+                    (msg.clone(), folder_ids)
+                })
+                .collect();
+            let batch_len = batch.len() as u32;
+            if let Err(e) = search.index_messages_batch(&batch) {
+                warn!("Failed to index batch of {} messages: {}", batch_len, e);
+            } else {
+                count += batch_len;
             }
 
             offset += messages.len() as u32;
