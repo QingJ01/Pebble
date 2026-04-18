@@ -27,10 +27,18 @@ struct GraphMessageList {
     delta_link: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct GraphRemoved {
+    #[allow(dead_code)]
+    reason: Option<String>,
+}
+
 #[allow(dead_code)]
 #[derive(Deserialize)]
 struct GraphMessage {
     id: String,
+    #[serde(rename = "@removed")]
+    removed: Option<GraphRemoved>,
     subject: Option<String>,
     #[serde(rename = "bodyPreview")]
     body_preview: Option<String>,
@@ -54,6 +62,35 @@ struct GraphMessage {
     #[serde(rename = "hasAttachments")]
     has_attachments: Option<bool>,
     categories: Option<Vec<String>>,
+}
+
+pub struct OutlookDeltaPage {
+    pub messages: Vec<Message>,
+    pub deleted_remote_ids: Vec<String>,
+    pub next_link: Option<String>,
+    pub delta_link: Option<String>,
+}
+
+fn graph_delta_list_to_changes(list: GraphMessageList, account_id: &str) -> ChangeSet {
+    let mut new_messages = Vec::new();
+    let mut deleted = Vec::new();
+    for gm in &list.value {
+        if gm.removed.is_some() {
+            deleted.push(gm.id.clone());
+        } else {
+            new_messages.push(OutlookProvider::graph_message_to_message(gm, account_id));
+        }
+    }
+
+    let cursor = list.delta_link.or(list.next_link).unwrap_or_default();
+
+    ChangeSet {
+        new_messages,
+        flag_changes: vec![],
+        moved: vec![],
+        deleted,
+        cursor: SyncCursor { value: cursor },
+    }
 }
 
 #[allow(dead_code)]
@@ -297,6 +334,52 @@ impl OutlookProvider {
         })
     }
 
+    pub async fn fetch_delta_page(
+        &self,
+        folder_id: &str,
+        cursor: Option<&str>,
+    ) -> Result<OutlookDeltaPage> {
+        let select = "id,subject,bodyPreview,body,from,toRecipients,ccRecipients,isRead,flag,isDraft,receivedDateTime,internetMessageId,conversationId,hasAttachments,categories";
+        let url = match cursor {
+            Some(cursor) if cursor.starts_with("https://") => cursor.to_string(),
+            Some(cursor) if !cursor.is_empty() => cursor.to_string(),
+            _ => format!(
+                "{GRAPH_API_BASE}/mailFolders/{folder_id}/messages/delta?$top=50&$select={select}"
+            ),
+        };
+
+        let resp = self.get(&url).await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(PebbleError::Network(format!(
+                "Failed to fetch Outlook delta (status {status}): {text}"
+            )));
+        }
+
+        let list: GraphMessageList = resp
+            .json()
+            .await
+            .map_err(|e| PebbleError::Network(format!("Failed to parse delta response: {e}")))?;
+
+        let mut messages = Vec::new();
+        let mut deleted_remote_ids = Vec::new();
+        for gm in &list.value {
+            if gm.removed.is_some() {
+                deleted_remote_ids.push(gm.id.clone());
+            } else {
+                messages.push(Self::graph_message_to_message(gm, &self.account_id));
+            }
+        }
+
+        Ok(OutlookDeltaPage {
+            messages,
+            deleted_remote_ids,
+            next_link: list.next_link,
+            delta_link: list.delta_link,
+        })
+    }
+
     async fn post_json<T: Serialize + Send + Sync>(
         &self,
         url: &str,
@@ -512,24 +595,7 @@ impl MailTransport for OutlookProvider {
             .await
             .map_err(|e| PebbleError::Network(format!("Failed to parse delta response: {e}")))?;
 
-        let new_messages: Vec<Message> = list
-            .value
-            .iter()
-            .map(|gm| Self::graph_message_to_message(gm, &self.account_id))
-            .collect();
-
-        let cursor = list
-            .delta_link
-            .or(list.next_link)
-            .unwrap_or_default();
-
-        Ok(ChangeSet {
-            new_messages,
-            flag_changes: vec![],
-            moved: vec![],
-            deleted: vec![],
-            cursor: SyncCursor { value: cursor },
-        })
+        Ok(graph_delta_list_to_changes(list, &self.account_id))
     }
 
     fn capabilities(&self) -> ProviderCapabilities {
@@ -1360,6 +1426,7 @@ mod tests {
     fn test_graph_message_to_draft() {
         let gm = GraphMessage {
             id: "draft-123".to_string(),
+            removed: None,
             subject: Some("Draft Subject".to_string()),
             body_preview: None,
             body: Some(GraphBody {
@@ -1390,6 +1457,61 @@ mod tests {
         assert_eq!(draft.body_html, None);
         assert_eq!(draft.to.len(), 1);
         assert_eq!(draft.to[0].address, "recv@example.com");
+    }
+
+    #[test]
+    fn graph_delta_list_to_changes_separates_removed_items() {
+        let list = GraphMessageList {
+            value: vec![
+                GraphMessage {
+                    id: "message-1".to_string(),
+                    removed: None,
+                    subject: Some("Hello".to_string()),
+                    body_preview: None,
+                    body: None,
+                    from: None,
+                    to_recipients: None,
+                    cc_recipients: None,
+                    is_read: Some(true),
+                    flag: None,
+                    is_draft: Some(false),
+                    received_date_time: None,
+                    internet_message_id: None,
+                    conversation_id: None,
+                    has_attachments: None,
+                    categories: None,
+                },
+                GraphMessage {
+                    id: "deleted-1".to_string(),
+                    removed: Some(GraphRemoved {
+                        reason: Some("deleted".to_string()),
+                    }),
+                    subject: None,
+                    body_preview: None,
+                    body: None,
+                    from: None,
+                    to_recipients: None,
+                    cc_recipients: None,
+                    is_read: None,
+                    flag: None,
+                    is_draft: None,
+                    received_date_time: None,
+                    internet_message_id: None,
+                    conversation_id: None,
+                    has_attachments: None,
+                    categories: None,
+                },
+            ],
+            next_link: None,
+            delta_link: Some("delta-link".to_string()),
+        };
+
+        let changes = graph_delta_list_to_changes(list, "account-1");
+
+        assert_eq!(changes.new_messages.len(), 1);
+        assert_eq!(changes.new_messages[0].remote_id, "message-1");
+        assert_eq!(changes.deleted, vec!["deleted-1".to_string()]);
+        assert_eq!(changes.cursor.value, "delta-link");
     }
 
     #[test]
