@@ -143,6 +143,8 @@
     "syncIntervalDesc": "检查新邮件的频率（秒）",
     "notifications": "通知",
     "enableNotifications": "启用桌面通知",
+    "folderCounts": "文件夹计数",
+    "showUnreadCount": "在侧边栏显示未读数徽章",
     "cloudSync": "设置备份",
     "about": "关于",
     "privacy": "隐私",

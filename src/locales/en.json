@@ -143,6 +143,8 @@
     "syncIntervalDesc": "How often to check for new messages (seconds)",
     "notifications": "Notifications",
     "enableNotifications": "Enable desktop notifications",
+    "folderCounts": "Folder Counts",
+    "showUnreadCount": "Show unread count badges in sidebar",
     "cloudSync": "Settings Backup",
     "about": "About",
     "privacy": "Privacy",

@@ -5,7 +5,40 @@ mod state;
 
 use state::AppState;
 use std::path::PathBuf;
+use std::time::Instant;
 use tauri::{Emitter, Manager};
+
+#[derive(Debug, PartialEq, Eq)]
+struct StartupPhaseTiming {
+    label: &'static str,
+    phase_ms: u128,
+    total_ms: u128,
+}
+
+fn startup_phase_timing(
+    label: &'static str,
+    start: Instant,
+    phase_start: Instant,
+    now: Instant,
+) -> StartupPhaseTiming {
+    StartupPhaseTiming {
+        label,
+        phase_ms: now.duration_since(phase_start).as_millis(),
+        total_ms: now.duration_since(start).as_millis(),
+    }
+}
+
+fn log_startup_phase(start: Instant, phase_start: &mut Instant, label: &'static str) {
+    let now = Instant::now();
+    let timing = startup_phase_timing(label, start, *phase_start, now);
+    tracing::info!(
+        "[startup] {}: {}ms phase, {}ms total",
+        timing.label,
+        timing.phase_ms,
+        timing.total_ms
+    );
+    *phase_start = now;
+}
 
 fn get_db_path(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let app_data = app
@@ -26,6 +59,25 @@ fn get_index_path(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error
     Ok(index_dir)
 }
 
+#[cfg(test)]
+mod startup_timing_tests {
+    use super::startup_phase_timing;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn startup_phase_timing_reports_phase_and_total_elapsed_ms() {
+        let start = Instant::now();
+        let phase_start = start + Duration::from_millis(75);
+        let now = start + Duration::from_millis(250);
+
+        let timing = startup_phase_timing("search index opened", start, phase_start, now);
+
+        assert_eq!(timing.label, "search index opened");
+        assert_eq!(timing.phase_ms, 175);
+        assert_eq!(timing.total_ms, 250);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -39,22 +91,35 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
+            let startup_start = Instant::now();
+            let mut startup_phase = startup_start;
+            tracing::info!("[startup] tauri setup started");
+
             let db_path = get_db_path(app)?;
             tracing::info!("Database path: {}", db_path.display());
+            log_startup_phase(startup_start, &mut startup_phase, "app data paths resolved");
+
             let store = pebble_store::Store::open(&db_path)?;
             tracing::info!("Database initialized successfully");
+            log_startup_phase(
+                startup_start,
+                &mut startup_phase,
+                "database opened and migrations complete",
+            );
 
             match store.quick_check() {
                 Ok(result) if result == "ok" => tracing::info!("Database integrity check passed"),
                 Ok(result) => tracing::warn!("Database integrity check warning: {}", result),
                 Err(e) => tracing::warn!("Database integrity check failed: {}", e),
             }
+            log_startup_phase(startup_start, &mut startup_phase, "database quick check complete");
 
             let index_path = get_index_path(app)?;
             tracing::info!("Search index path: {}", index_path.display());
             let search = pebble_search::TantivySearch::open(&index_path)?;
             let search_needs_reindex = search.needs_reindex();
             tracing::info!("Search index initialized successfully");
+            log_startup_phase(startup_start, &mut startup_phase, "search index opened");
 
             // The full `SELECT COUNT(*) FROM messages` consistency check used
             // to run here and block the main window from appearing. It now
@@ -63,6 +128,7 @@ pub fn run() {
 
             let crypto = pebble_crypto::CryptoService::init()?;
             tracing::info!("Crypto service initialized successfully");
+            log_startup_phase(startup_start, &mut startup_phase, "crypto service initialized");
 
             let app_data = app
                 .path()
@@ -70,9 +136,11 @@ pub fn run() {
             let attachments_dir = app_data.join("attachments");
             std::fs::create_dir_all(&attachments_dir)?;
             tracing::info!("Attachments directory: {}", attachments_dir.display());
+            log_startup_phase(startup_start, &mut startup_phase, "attachments directory ready");
 
             let (snooze_stop_tx, snooze_stop_rx) = std::sync::mpsc::channel::<()>();
             app.manage(AppState::new(store, search, crypto, snooze_stop_tx, attachments_dir));
+            log_startup_phase(startup_start, &mut startup_phase, "app state registered");
 
             // Start snooze watcher on the Tauri async runtime
             let state: tauri::State<AppState> = app.state();
@@ -166,6 +234,11 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 commands::pending_mail_ops::run_pending_mail_ops_worker(app_for_pending_ops).await;
             });
+            log_startup_phase(startup_start, &mut startup_phase, "background workers scheduled");
+            tracing::info!(
+                "[startup] tauri setup complete: {}ms total",
+                startup_start.elapsed().as_millis()
+            );
 
             Ok(())
         })

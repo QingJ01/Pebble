@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode, useEffect } from "react";
 import i18next from "i18next";
 import Layout from "./app/Layout";
+import { logStartupTiming } from "@/lib/startupTiming";
 
 class ErrorBoundary extends Component<
   { children: ReactNode },
@@ -49,6 +50,7 @@ class ErrorBoundary extends Component<
 
 export default function App() {
   useEffect(() => {
+    logStartupTiming("react app mounted");
     const splash = document.getElementById("splash");
     if (!splash) return;
     // Ensure the full animation plays (draw 1.2s + fill 0.8s delay + 0.6s)
@@ -57,10 +59,12 @@ export default function App() {
     const elapsed = Date.now() - splashStart;
     const remaining = Math.max(0, minDisplay - elapsed);
     setTimeout(() => {
+      logStartupTiming("splash fade started");
       splash.classList.add("fade-out");
       setTimeout(() => {
         splash.remove();
         document.getElementById("splash-style")?.remove();
+        logStartupTiming("splash removed");
       }, 500);
     }, remaining);
   }, []);

@@ -13,13 +13,30 @@ import { useKanbanStore } from "../stores/kanban.store";
 import { useKeyboard } from "../hooks/useKeyboard";
 import { useNetworkStatus } from "../hooks/useNetworkStatus";
 import { buildCommands } from "../features/command-palette/commands";
-import { useEffect, lazy, Suspense, Component, type ReactNode, type ErrorInfo } from "react";
-const SettingsView = lazy(() => import("../features/settings/SettingsView"));
-const ComposeView = lazy(() => import("../features/compose/ComposeView"));
-const KanbanView = lazy(() => import("../features/kanban/KanbanView"));
-const SearchView = lazy(() => import("../features/search/SearchView"));
-const SnoozedView = lazy(() => import("../features/snoozed/SnoozedView"));
-const StarredView = lazy(() => import("../features/starred/StarredView"));
+import { useDeferredValue, useEffect, lazy, Suspense, Component, type ReactNode, type ErrorInfo } from "react";
+import { createLazyViewPreloader, scheduleLazyViewPreload } from "./lazyViewPreload";
+
+const loadSettingsView = () => import("../features/settings/SettingsView");
+const loadComposeView = () => import("../features/compose/ComposeView");
+const loadKanbanView = () => import("../features/kanban/KanbanView");
+const loadSearchView = () => import("../features/search/SearchView");
+const loadSnoozedView = () => import("../features/snoozed/SnoozedView");
+const loadStarredView = () => import("../features/starred/StarredView");
+const preloadLazyViews = createLazyViewPreloader([
+  loadSettingsView,
+  loadComposeView,
+  loadKanbanView,
+  loadSearchView,
+  loadSnoozedView,
+  loadStarredView,
+]);
+
+const SettingsView = lazy(loadSettingsView);
+const ComposeView = lazy(loadComposeView);
+const KanbanView = lazy(loadKanbanView);
+const SearchView = lazy(loadSearchView);
+const SnoozedView = lazy(loadSnoozedView);
+const StarredView = lazy(loadStarredView);
 import { useTranslation } from "react-i18next";
 import i18next from "i18next";
 import { WifiOff } from "lucide-react";
@@ -29,6 +46,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 export default function Layout() {
   const activeView = useUIStore((s) => s.activeView);
+  const displayedView = useDeferredValue(activeView);
   const setActiveView = useUIStore((s) => s.setActiveView);
   const theme = useUIStore((s) => s.theme);
   const { t } = useTranslation();
@@ -40,6 +58,9 @@ export default function Layout() {
   useEffect(() => {
     useKanbanStore.getState().fetchCards();
   }, []);
+
+  useEffect(() => scheduleLazyViewPreload(preloadLazyViews), []);
+
   useNetworkStatus();
 
   // Re-register commands when language changes
@@ -98,15 +119,15 @@ export default function Layout() {
         <Sidebar />
         <main className="flex-1 min-w-0 overflow-auto" style={{ position: "relative" }}>
           <OfflineBanner />
-          <ViewErrorBoundary key={activeView}>
+          <ViewErrorBoundary key={displayedView}>
             <Suspense fallback={<ViewLoadingFallback />}>
-              {activeView === "inbox" && <InboxView />}
-              {activeView === "kanban" && <KanbanView />}
-              {activeView === "settings" && <SettingsView />}
-              {activeView === "search" && <SearchView />}
-              {activeView === "snoozed" && <SnoozedView />}
-              {activeView === "starred" && <StarredView />}
-              {activeView === "compose" && <ComposeView />}
+              {displayedView === "inbox" && <InboxView />}
+              {displayedView === "kanban" && <KanbanView />}
+              {displayedView === "settings" && <SettingsView />}
+              {displayedView === "search" && <SearchView />}
+              {displayedView === "snoozed" && <SnoozedView />}
+              {displayedView === "starred" && <StarredView />}
+              {displayedView === "compose" && <ComposeView />}
             </Suspense>
           </ViewErrorBoundary>
         </main>
