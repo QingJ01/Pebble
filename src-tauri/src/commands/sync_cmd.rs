@@ -4,7 +4,7 @@ use crate::commands::oauth::{
     outlook_oauth_config,
 };
 use crate::events;
-use crate::realtime::SyncTrigger;
+use crate::realtime::{RealtimeMode, RealtimeStatusPayload, SyncTrigger};
 use crate::state::{AppState, SyncHandle};
 use pebble_core::{PebbleError, ProviderType};
 use pebble_mail::{
@@ -14,6 +14,7 @@ use pebble_mail::{
 use pebble_store::Store;
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, State};
 use tokio::sync::{mpsc, watch};
 use tracing::{error, info, warn};
@@ -98,6 +99,8 @@ async fn start_sync_inner(
         }
     };
 
+    let provider_for_errors = account.provider.clone();
+    let account_id_for_errors = account_id.clone();
     let store = Arc::clone(&state.store);
     let attachments_dir = state.attachments_dir.clone();
     let (stop_tx, stop_rx) = watch::channel(false);
@@ -108,6 +111,17 @@ async fn start_sync_inner(
     tokio::spawn(async move {
         while let Some(sync_error) = error_rx.recv().await {
             let _ = app_handle.emit(events::MAIL_ERROR, &sync_error);
+            emit_realtime_status(
+                &app_handle,
+                realtime_status_payload(
+                    &account_id_for_errors,
+                    &provider_for_errors,
+                    realtime_error_mode(&sync_error),
+                    None,
+                    None,
+                    Some(sync_error.message.clone()),
+                ),
+            );
         }
     });
 
@@ -164,6 +178,64 @@ async fn start_sync_inner(
     Ok(())
 }
 
+fn provider_slug(provider: &ProviderType) -> &'static str {
+    match provider {
+        ProviderType::Imap => "imap",
+        ProviderType::Gmail => "gmail",
+        ProviderType::Outlook => "outlook",
+    }
+}
+
+fn now_timestamp_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
+fn realtime_status_payload(
+    account_id: &str,
+    provider: &ProviderType,
+    mode: RealtimeMode,
+    last_success_at: Option<i64>,
+    next_retry_at: Option<i64>,
+    message: Option<String>,
+) -> RealtimeStatusPayload {
+    RealtimeStatusPayload {
+        account_id: account_id.to_string(),
+        mode,
+        provider: provider_slug(provider).to_string(),
+        last_success_at,
+        next_retry_at,
+        message,
+    }
+}
+
+fn realtime_error_mode(sync_error: &pebble_mail::SyncError) -> RealtimeMode {
+    let text = format!(
+        "{} {}",
+        sync_error.error_type.to_ascii_lowercase(),
+        sync_error.message.to_ascii_lowercase()
+    );
+    if text.contains("auth")
+        || text.contains("token")
+        || text.contains("unauthorized")
+        || text.contains("401")
+    {
+        RealtimeMode::AuthRequired
+    } else if text.contains("offline") || text.contains("network") {
+        RealtimeMode::Offline
+    } else if text.contains("circuit") || text.contains("backoff") {
+        RealtimeMode::Backoff
+    } else {
+        RealtimeMode::Error
+    }
+}
+
+fn emit_realtime_status(app: &tauri::AppHandle, payload: RealtimeStatusPayload) {
+    let _ = app.emit(events::MAIL_REALTIME_STATUS, payload);
+}
+
 /// Build and spawn the provider-specific sync task.
 ///
 /// Extracted so that any `?` propagation (token decode, config parse, etc.)
@@ -186,7 +258,23 @@ fn build_sync_task(
     let task = match account.provider {
         ProviderType::Gmail => {
             // --- Gmail: REST API over HTTPS ---
-            let tokens = decode_oauth_account_tokens(state, &account_id_clone)?;
+            let tokens = match decode_oauth_account_tokens(state, &account_id_clone) {
+                Ok(tokens) => tokens,
+                Err(e) => {
+                    emit_realtime_status(
+                        &app_for_progress,
+                        realtime_status_payload(
+                            &account_id_clone,
+                            &ProviderType::Gmail,
+                            RealtimeMode::AuthRequired,
+                            None,
+                            None,
+                            Some(e.to_string()),
+                        ),
+                    );
+                    return Err(e);
+                }
+            };
             let expires_at = tokens.expires_at;
             let provider = Arc::new(GmailProvider::new(tokens.access_token.clone()));
             let refresher = build_oauth_token_refresher(
@@ -199,9 +287,24 @@ fn build_sync_task(
             );
 
             tokio::spawn(async move {
+                let mut config = SyncConfig::default();
+                if let Some(interval) = poll_interval_secs {
+                    config.poll_interval_secs = interval;
+                }
                 let _ = app_for_progress.emit(
                     events::MAIL_SYNC_PROGRESS,
                     serde_json::json!({ "account_id": &account_id_for_progress, "status": "started" }),
+                );
+                emit_realtime_status(
+                    &app_for_progress,
+                    realtime_status_payload(
+                        &account_id_for_progress,
+                        &ProviderType::Gmail,
+                        RealtimeMode::Polling,
+                        Some(now_timestamp_secs()),
+                        None,
+                        Some(format!("Polling every {}s", config.poll_interval_secs)),
+                    ),
                 );
                 let worker = GmailSyncWorker::new(
                     account_id_clone.clone(),
@@ -213,10 +316,6 @@ fn build_sync_task(
                 .with_error_tx(error_tx)
                 .with_message_tx(message_tx)
                 .with_token_refresher(refresher, expires_at);
-                let mut config = SyncConfig::default();
-                if let Some(interval) = poll_interval_secs {
-                    config.poll_interval_secs = interval;
-                }
                 worker.run(config).await;
                 let _ = app_for_progress.emit(
                     events::MAIL_SYNC_COMPLETE,
@@ -227,7 +326,23 @@ fn build_sync_task(
         }
         ProviderType::Outlook => {
             // --- Outlook: Graph API over HTTPS ---
-            let tokens = decode_oauth_account_tokens(state, &account_id_clone)?;
+            let tokens = match decode_oauth_account_tokens(state, &account_id_clone) {
+                Ok(tokens) => tokens,
+                Err(e) => {
+                    emit_realtime_status(
+                        &app_for_progress,
+                        realtime_status_payload(
+                            &account_id_clone,
+                            &ProviderType::Outlook,
+                            RealtimeMode::AuthRequired,
+                            None,
+                            None,
+                            Some(e.to_string()),
+                        ),
+                    );
+                    return Err(e);
+                }
+            };
             let expires_at = tokens.expires_at;
             let provider = Arc::new(OutlookProvider::new(
                 tokens.access_token.clone(),
@@ -243,9 +358,24 @@ fn build_sync_task(
             );
 
             tokio::spawn(async move {
+                let mut config = SyncConfig::default();
+                if let Some(interval) = poll_interval_secs {
+                    config.poll_interval_secs = interval;
+                }
                 let _ = app_for_progress.emit(
                     events::MAIL_SYNC_PROGRESS,
                     serde_json::json!({ "account_id": &account_id_for_progress, "status": "started" }),
+                );
+                emit_realtime_status(
+                    &app_for_progress,
+                    realtime_status_payload(
+                        &account_id_for_progress,
+                        &ProviderType::Outlook,
+                        RealtimeMode::Polling,
+                        Some(now_timestamp_secs()),
+                        None,
+                        Some(format!("Polling every {}s", config.poll_interval_secs)),
+                    ),
                 );
                 let worker = OutlookSyncWorker::new(
                     account_id_clone.clone(),
@@ -256,10 +386,6 @@ fn build_sync_task(
                 .with_error_tx(error_tx)
                 .with_message_tx(message_tx)
                 .with_token_refresher(refresher, expires_at);
-                let mut config = SyncConfig::default();
-                if let Some(interval) = poll_interval_secs {
-                    config.poll_interval_secs = interval;
-                }
                 worker.run(config, stop_rx).await;
                 let _ = app_for_progress.emit(
                     events::MAIL_SYNC_COMPLETE,
@@ -270,14 +396,44 @@ fn build_sync_task(
         }
         ProviderType::Imap => {
             // --- IMAP path ---
-            let imap_config =
-                crate::commands::messages::load_imap_config(&state.store, &state.crypto, &account_id_clone)?;
+            let imap_config = match crate::commands::messages::load_imap_config(
+                &state.store,
+                &state.crypto,
+                &account_id_clone,
+            ) {
+                Ok(config) => config,
+                Err(e) => {
+                    emit_realtime_status(
+                        &app_for_progress,
+                        realtime_status_payload(
+                            &account_id_clone,
+                            &ProviderType::Imap,
+                            RealtimeMode::Error,
+                            None,
+                            None,
+                            Some(e.to_string()),
+                        ),
+                    );
+                    return Err(e);
+                }
+            };
 
             let provider = Arc::new(ImapMailProvider::new(imap_config));
             tokio::spawn(async move {
                 let _ = app_for_progress.emit(
                     events::MAIL_SYNC_PROGRESS,
                     serde_json::json!({ "account_id": &account_id_for_progress, "status": "started" }),
+                );
+                emit_realtime_status(
+                    &app_for_progress,
+                    realtime_status_payload(
+                        &account_id_for_progress,
+                        &ProviderType::Imap,
+                        RealtimeMode::Realtime,
+                        Some(now_timestamp_secs()),
+                        None,
+                        None,
+                    ),
                 );
                 let worker = SyncWorker::new(account_id_clone.clone(), provider, store, stop_rx, attachments_dir)
                     .with_error_tx(error_tx)
@@ -370,5 +526,26 @@ mod trigger_tests {
         assert!(!state.mark_pending("account-1"));
         state.clear_pending("account-1");
         assert!(state.mark_pending("account-1"));
+    }
+
+    #[test]
+    fn realtime_status_payload_uses_provider_mode_contract() {
+        let payload = realtime_status_payload(
+            "account-1",
+            &ProviderType::Imap,
+            crate::realtime::RealtimeMode::Realtime,
+            Some(1_700_000_000),
+            None,
+            None,
+        );
+
+        let json = serde_json::to_value(payload).unwrap();
+
+        assert_eq!(json["account_id"], "account-1");
+        assert_eq!(json["provider"], "imap");
+        assert_eq!(json["mode"], "realtime");
+        assert_eq!(json["last_success_at"], 1_700_000_000);
+        assert!(json["next_retry_at"].is_null());
+        assert!(json["message"].is_null());
     }
 }

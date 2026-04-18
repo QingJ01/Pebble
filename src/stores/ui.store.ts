@@ -8,6 +8,16 @@ export type SettingsTab = "accounts" | "general" | "appearance" | "privacy" | "r
 export type Theme = "light" | "dark" | "system";
 export type Language = "en" | "zh";
 export type NetworkStatus = "online" | "offline";
+export type RealtimeMode = "realtime" | "polling" | "backoff" | "offline" | "auth_required" | "error";
+
+export interface RealtimeStatus {
+  account_id: string;
+  mode: RealtimeMode;
+  provider: string;
+  last_success_at?: number | null;
+  next_retry_at?: number | null;
+  message?: string | null;
+}
 
 /** Resolve "system" theme to an actual "dark" | "light" value. */
 function resolveTheme(theme: Theme): "dark" | "light" {
@@ -30,6 +40,7 @@ interface UIState {
   syncStatus: "idle" | "syncing" | "error";
   networkStatus: NetworkStatus;
   lastMailError: string | null;
+  realtimeStatusByAccount: Record<string, RealtimeStatus>;
   previousView: ActiveView;
   toggleSidebar: () => void;
   setActiveView: (view: ActiveView) => void;
@@ -39,6 +50,7 @@ interface UIState {
   setSyncStatus: (status: "idle" | "syncing" | "error") => void;
   setNetworkStatus: (status: NetworkStatus) => void;
   setLastMailError: (error: string | null) => void;
+  setRealtimeStatus: (accountId: string, status: RealtimeStatus) => void;
   pollInterval: number;
   setPollInterval: (secs: number) => void;
   searchQuery: string;
@@ -59,6 +71,7 @@ export const useUIStore = create<UIState>((set) => ({
   syncStatus: "idle",
   networkStatus: "online",
   lastMailError: null,
+  realtimeStatusByAccount: {},
   previousView: "inbox",
   toggleSidebar: () =>
     set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
@@ -109,6 +122,13 @@ export const useUIStore = create<UIState>((set) => ({
   setSyncStatus: (status) => set({ syncStatus: status }),
   setNetworkStatus: (status) => set({ networkStatus: status }),
   setLastMailError: (error) => set({ lastMailError: error }),
+  setRealtimeStatus: (accountId, status) =>
+    set((state) => ({
+      realtimeStatusByAccount: {
+        ...state.realtimeStatusByAccount,
+        [accountId]: status,
+      },
+    })),
   pollInterval: Number(localStorage.getItem("pebble-poll-interval")) || 15,
   setPollInterval: (secs) => {
     localStorage.setItem("pebble-poll-interval", String(secs));

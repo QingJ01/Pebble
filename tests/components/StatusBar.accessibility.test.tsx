@@ -9,6 +9,18 @@ const mocks = vi.hoisted(() => ({
     networkStatus: "online" as "online" | "offline",
     lastMailError: null as string | null,
     setLastMailError: vi.fn(),
+    realtimeStatusByAccount: {} as Record<
+      string,
+      {
+        account_id: string;
+        mode: "realtime" | "polling" | "backoff" | "offline" | "auth_required" | "error";
+        provider: string;
+        last_success_at?: number | null;
+        next_retry_at?: number | null;
+        message?: string | null;
+      }
+    >,
+    setRealtimeStatus: vi.fn(),
   },
   mailState: {
     activeAccountId: "account-1" as string | null,
@@ -34,6 +46,7 @@ vi.mock("react-i18next", () => ({
         "status.remoteWritesQueued": `${mocks.pendingOpsSummary.total_active_count} remote writes queued`,
         "status.remoteWritesPending": `${mocks.pendingOpsSummary.total_active_count} remote writes pending`,
         "status.remoteWritesRetrying": `${mocks.pendingOpsSummary.in_progress_count} remote writes retrying`,
+        "status.realtimeConnected": "Realtime connected",
       };
       return labels[key] ?? fallback ?? key;
     },
@@ -83,6 +96,7 @@ describe("StatusBar accessibility", () => {
     mocks.uiState.syncStatus = "idle";
     mocks.uiState.networkStatus = "online";
     mocks.uiState.lastMailError = null;
+    mocks.uiState.realtimeStatusByAccount = {};
     mocks.mailState.activeAccountId = "account-1";
     mocks.pendingOpsSummary.total_active_count = 0;
     mocks.pendingOpsSummary.failed_count = 0;
@@ -108,5 +122,24 @@ describe("StatusBar accessibility", () => {
     expect(alert.textContent).toContain("IMAP connection failed");
     expect(alert.getAttribute("aria-live")).toBe("assertive");
     expect(alert.getAttribute("aria-atomic")).toBe("true");
+  });
+
+  it("announces realtime connection health politely", () => {
+    mocks.uiState.realtimeStatusByAccount = {
+      "account-1": {
+        account_id: "account-1",
+        mode: "realtime",
+        provider: "imap",
+        last_success_at: 1_700_000_000,
+        next_retry_at: null,
+        message: null,
+      },
+    };
+
+    render(<StatusBar />);
+
+    const status = screen.getByRole("status", { name: /realtime connected/i });
+    expect(status.getAttribute("aria-live")).toBe("polite");
+    expect(status.getAttribute("aria-atomic")).toBe("true");
   });
 });

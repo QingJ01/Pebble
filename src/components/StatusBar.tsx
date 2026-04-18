@@ -1,9 +1,10 @@
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { listen } from "@tauri-apps/api/event";
 import { AlertCircle, Clock, RefreshCw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useUIStore } from "../stores/ui.store";
+import { useUIStore, type RealtimeStatus } from "../stores/ui.store";
 import { useMailStore } from "@/stores/mail.store";
 import { stopSync } from "@/lib/api";
 import { useSyncMutation } from "@/hooks/mutations/useSyncMutation";
@@ -35,6 +36,8 @@ export default function StatusBar() {
   const networkStatus = useUIStore((s) => s.networkStatus);
   const lastMailError = useUIStore((s) => s.lastMailError);
   const setLastMailError = useUIStore((s) => s.setLastMailError);
+  const realtimeStatusByAccount = useUIStore((s) => s.realtimeStatusByAccount);
+  const setRealtimeStatus = useUIStore((s) => s.setRealtimeStatus);
   const activeAccountId = useMailStore((s) => s.activeAccountId);
   const syncMutation = useSyncMutation();
   const queryClient = useQueryClient();
@@ -87,6 +90,13 @@ export default function StatusBar() {
     return () => { unlisten.then((fn) => fn()); };
   }, [activeAccountId, queryClient]);
 
+  useEffect(() => {
+    const unlisten = listen<RealtimeStatus>("mail:realtime-status", (event) => {
+      setRealtimeStatus(event.payload.account_id, event.payload);
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, [setRealtimeStatus]);
+
   async function handleSync() {
     if (!activeAccountId) return;
     if (syncStatus === "syncing") {
@@ -108,6 +118,8 @@ export default function StatusBar() {
     syncing: t("status.syncing", "Syncing..."),
     error: t("status.syncError", "Sync error"),
   }[syncStatus];
+  const realtimeStatus = activeAccountId ? realtimeStatusByAccount[activeAccountId] : undefined;
+  const realtimeStatusText = getRealtimeStatusText(realtimeStatus, t);
 
   const notificationsEnabled = typeof window !== "undefined" && localStorage.getItem("pebble-notifications-enabled") === "true";
   const pendingRemoteWrites = pendingOpsSummary?.total_active_count ?? 0;
@@ -150,6 +162,19 @@ export default function StatusBar() {
       ) : (
         <>
           <span role="status" aria-live="polite" aria-atomic="true">{syncText}</span>
+          {realtimeStatusText && (
+            <span
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              aria-label={realtimeStatusText}
+              className="truncate"
+              title={realtimeStatus?.message ?? realtimeStatusText}
+              style={{ maxWidth: "180px" }}
+            >
+              {realtimeStatusText}
+            </span>
+          )}
           <button
             onClick={handleSync}
             disabled={!activeAccountId}
@@ -217,4 +242,30 @@ export default function StatusBar() {
       </span>
     </footer>
   );
+}
+
+function getRealtimeStatusText(
+  status: RealtimeStatus | undefined,
+  t: TFunction,
+) {
+  if (!status) return null;
+
+  if (status.message) {
+    return status.message;
+  }
+
+  switch (status.mode) {
+    case "realtime":
+      return t("status.realtimeConnected", "Realtime connected");
+    case "polling":
+      return t("status.realtimePolling", "Polling");
+    case "backoff":
+      return t("status.realtimeBackoff", "Retrying");
+    case "auth_required":
+      return t("status.realtimeAuthRequired", "Reconnect required");
+    case "offline":
+      return t("status.offline", "Offline");
+    case "error":
+      return t("status.realtimeError", "Realtime error");
+  }
 }

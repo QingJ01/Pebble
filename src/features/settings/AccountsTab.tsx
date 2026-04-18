@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2, Mail, Pencil, Plug } from "lucide-react";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { deleteAccount, updateAccount, testAccountConnection } from "@/lib/api";
 import type { Account, ConnectionSecurity } from "@/lib/api";
 import { useAccountsQuery, accountsQueryKey } from "@/hooks/queries";
 import { useMailStore } from "@/stores/mail.store";
+import { useUIStore, type RealtimeStatus } from "@/stores/ui.store";
 import { useToastStore } from "@/stores/toast.store";
 import AccountSetup from "@/components/AccountSetup";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
@@ -17,6 +19,7 @@ export default function AccountsTab() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { data: accounts = [] } = useAccountsQuery();
+  const realtimeStatusByAccount = useUIStore((state) => state.realtimeStatusByAccount);
   const [showSetup, setShowSetup] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; email: string } | null>(null);
@@ -141,125 +144,142 @@ export default function AccountsTab() {
             border: "1px solid var(--color-border)",
           }}
         >
-          {accounts.map((account, index) => (
-            <div
-              key={account.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "14px 16px",
-                backgroundColor: "var(--color-bg)",
-                borderTop: index > 0 ? "1px solid var(--color-border)" : "none",
-              }}
-            >
-              <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                <span style={{ fontSize: "13px", fontWeight: 500 }}>
-                  {account.display_name}
-                </span>
-                <span
-                  style={{
-                    fontSize: "12px",
-                    color: "var(--color-text-secondary)",
-                  }}
-                >
-                  {account.email}
-                </span>
-                <span
-                  style={{
-                    fontSize: "11px",
-                    color: "var(--color-text-secondary)",
-                    textTransform: "capitalize",
-                  }}
-                >
-                  {account.provider}
-                </span>
-              </div>
-              <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-                <button
-                  onClick={() => doTestConnection(account.id)}
-                  disabled={testingId === account.id}
-                  title={t("accountSetup.testConnection", "Test Connection")}
-                  aria-label={t("accountSetup.testConnection", "Test Connection")}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    padding: "6px",
-                    borderRadius: "6px",
-                    border: "none",
-                    backgroundColor: "transparent",
-                    color: testingId === account.id ? "var(--color-accent)" : "var(--color-text-secondary)",
-                    cursor: testingId === account.id ? "wait" : "pointer",
-                    opacity: testingId === account.id ? 0.6 : 1,
-                  }}
-                  onMouseEnter={(e) => {
-                    if (testingId !== account.id) {
+          {accounts.map((account, index) => {
+            const realtimeStatus = realtimeStatusByAccount[account.id];
+            const realtimeLabel = getAccountRealtimeStatusText(realtimeStatus, t);
+
+            return (
+              <div
+                key={account.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "14px 16px",
+                  backgroundColor: "var(--color-bg)",
+                  borderTop: index > 0 ? "1px solid var(--color-border)" : "none",
+                }}
+              >
+                <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                  <span style={{ fontSize: "13px", fontWeight: 500 }}>
+                    {account.display_name}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: "12px",
+                      color: "var(--color-text-secondary)",
+                    }}
+                  >
+                    {account.email}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: "11px",
+                      color: "var(--color-text-secondary)",
+                      textTransform: "capitalize",
+                    }}
+                  >
+                    {account.provider}
+                  </span>
+                  {realtimeLabel && (
+                    <span
+                      aria-label={realtimeLabel}
+                      title={realtimeStatus?.message ?? realtimeLabel}
+                      style={{
+                        fontSize: "11px",
+                        color: "var(--color-text-secondary)",
+                      }}
+                    >
+                      {realtimeLabel}
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+                  <button
+                    onClick={() => doTestConnection(account.id)}
+                    disabled={testingId === account.id}
+                    title={t("accountSetup.testConnection", "Test Connection")}
+                    aria-label={t("accountSetup.testConnection", "Test Connection")}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      padding: "6px",
+                      borderRadius: "6px",
+                      border: "none",
+                      backgroundColor: "transparent",
+                      color: testingId === account.id ? "var(--color-accent)" : "var(--color-text-secondary)",
+                      cursor: testingId === account.id ? "wait" : "pointer",
+                      opacity: testingId === account.id ? 0.6 : 1,
+                    }}
+                    onMouseEnter={(e) => {
+                      if (testingId !== account.id) {
+                        e.currentTarget.style.color = "var(--color-accent)";
+                        e.currentTarget.style.backgroundColor = "var(--color-bg-hover)";
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (testingId !== account.id) {
+                        e.currentTarget.style.color = "var(--color-text-secondary)";
+                        e.currentTarget.style.backgroundColor = "transparent";
+                      }
+                    }}
+                  >
+                    <Plug size={15} />
+                  </button>
+                  <button
+                    onClick={() => setEditingAccount(account)}
+                    title={t("settings.editAccount", "Edit account")}
+                    aria-label={t("settings.editAccount", "Edit account")}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      padding: "6px",
+                      borderRadius: "6px",
+                      border: "none",
+                      backgroundColor: "transparent",
+                      color: "var(--color-text-secondary)",
+                      cursor: "pointer",
+                    }}
+                    onMouseEnter={(e) => {
                       e.currentTarget.style.color = "var(--color-accent)";
                       e.currentTarget.style.backgroundColor = "var(--color-bg-hover)";
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (testingId !== account.id) {
+                    }}
+                    onMouseLeave={(e) => {
                       e.currentTarget.style.color = "var(--color-text-secondary)";
                       e.currentTarget.style.backgroundColor = "transparent";
-                    }
-                  }}
-                >
-                  <Plug size={15} />
-                </button>
-                <button
-                  onClick={() => setEditingAccount(account)}
-                  title={t("settings.editAccount", "Edit account")}
-                  aria-label={t("settings.editAccount", "Edit account")}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    padding: "6px",
-                    borderRadius: "6px",
-                    border: "none",
-                    backgroundColor: "transparent",
-                    color: "var(--color-text-secondary)",
-                    cursor: "pointer",
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.color = "var(--color-accent)";
-                    e.currentTarget.style.backgroundColor = "var(--color-bg-hover)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.color = "var(--color-text-secondary)";
-                    e.currentTarget.style.backgroundColor = "transparent";
-                  }}
-                >
-                  <Pencil size={15} />
-                </button>
-                <button
-                  onClick={() => setDeleteTarget({ id: account.id, email: account.email })}
-                  title={t("settings.removeAccount")}
-                  aria-label={t("settings.removeAccount")}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    padding: "6px",
-                    borderRadius: "6px",
-                    border: "none",
-                    backgroundColor: "transparent",
-                    color: "var(--color-text-secondary)",
-                    cursor: "pointer",
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.color = "#ef4444";
-                    e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.08)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.color = "var(--color-text-secondary)";
-                    e.currentTarget.style.backgroundColor = "transparent";
-                  }}
-                >
-                  <Trash2 size={15} />
-                </button>
+                    }}
+                  >
+                    <Pencil size={15} />
+                  </button>
+                  <button
+                    onClick={() => setDeleteTarget({ id: account.id, email: account.email })}
+                    title={t("settings.removeAccount")}
+                    aria-label={t("settings.removeAccount")}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      padding: "6px",
+                      borderRadius: "6px",
+                      border: "none",
+                      backgroundColor: "transparent",
+                      color: "var(--color-text-secondary)",
+                      cursor: "pointer",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.color = "#ef4444";
+                      e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.08)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.color = "var(--color-text-secondary)";
+                      e.currentTarget.style.backgroundColor = "transparent";
+                    }}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -313,6 +333,32 @@ export default function AccountsTab() {
       )}
     </div>
   );
+}
+
+function getAccountRealtimeStatusText(
+  status: RealtimeStatus | undefined,
+  t: TFunction,
+) {
+  if (!status) return null;
+
+  if (status.message) {
+    return status.message;
+  }
+
+  switch (status.mode) {
+    case "realtime":
+      return t("status.realtimeConnected", "Realtime connected");
+    case "polling":
+      return t("status.realtimePolling", "Polling");
+    case "backoff":
+      return t("status.realtimeBackoff", "Retrying");
+    case "auth_required":
+      return t("status.realtimeAuthRequired", "Reconnect required");
+    case "offline":
+      return t("status.offline", "Offline");
+    case "error":
+      return t("status.realtimeError", "Realtime error");
+  }
 }
 
 function EditAccountModal({ account, onClose, onSaved }: {
