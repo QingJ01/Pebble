@@ -236,6 +236,14 @@ fn emit_realtime_status(app: &tauri::AppHandle, payload: RealtimeStatusPayload) 
     let _ = app.emit(events::MAIL_REALTIME_STATUS, payload);
 }
 
+fn polling_status_message(config: &SyncConfig) -> String {
+    if config.manual_only() {
+        "Manual only".to_string()
+    } else {
+        format!("Polling every {}s", config.poll_interval_secs)
+    }
+}
+
 /// Build and spawn the provider-specific sync task.
 ///
 /// Extracted so that any `?` propagation (token decode, config parse, etc.)
@@ -303,7 +311,7 @@ fn build_sync_task(
                         RealtimeMode::Polling,
                         Some(now_timestamp_secs()),
                         None,
-                        Some(format!("Polling every {}s", config.poll_interval_secs)),
+                        Some(polling_status_message(&config)),
                     ),
                 );
                 let worker = GmailSyncWorker::new(
@@ -374,7 +382,7 @@ fn build_sync_task(
                         RealtimeMode::Polling,
                         Some(now_timestamp_secs()),
                         None,
-                        Some(format!("Polling every {}s", config.poll_interval_secs)),
+                        Some(polling_status_message(&config)),
                     ),
                 );
                 let worker = OutlookSyncWorker::new(
@@ -420,6 +428,10 @@ fn build_sync_task(
 
             let provider = Arc::new(ImapMailProvider::new(imap_config));
             tokio::spawn(async move {
+                let mut config = SyncConfig::default();
+                if let Some(interval) = poll_interval_secs {
+                    config.poll_interval_secs = interval;
+                }
                 let _ = app_for_progress.emit(
                     events::MAIL_SYNC_PROGRESS,
                     serde_json::json!({ "account_id": &account_id_for_progress, "status": "started" }),
@@ -429,19 +441,15 @@ fn build_sync_task(
                     realtime_status_payload(
                         &account_id_for_progress,
                         &ProviderType::Imap,
-                        RealtimeMode::Realtime,
+                        if config.manual_only() { RealtimeMode::Polling } else { RealtimeMode::Realtime },
                         Some(now_timestamp_secs()),
                         None,
-                        None,
+                        if config.manual_only() { Some(polling_status_message(&config)) } else { None },
                     ),
                 );
                 let worker = SyncWorker::new(account_id_clone.clone(), provider, store, stop_rx, attachments_dir)
                     .with_error_tx(error_tx)
                     .with_message_tx(message_tx);
-                let mut config = SyncConfig::default();
-                if let Some(interval) = poll_interval_secs {
-                    config.poll_interval_secs = interval;
-                }
                 worker.run(config).await;
                 let _ = app_for_progress.emit(
                     events::MAIL_SYNC_COMPLETE,

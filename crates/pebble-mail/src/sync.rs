@@ -300,6 +300,12 @@ impl Default for SyncConfig {
     }
 }
 
+impl SyncConfig {
+    pub fn manual_only(&self) -> bool {
+        self.poll_interval_secs == 0
+    }
+}
+
 /// A newly stored message along with the folder IDs it belongs to.
 /// Emitted via `message_tx` so callers (e.g. the search indexer) can react.
 #[derive(Debug, Clone)]
@@ -1023,12 +1029,6 @@ impl SyncWorker {
 
     /// Run the sync worker loop until the stop signal is received.
     pub async fn run(&self, config: SyncConfig) {
-        let poll_interval = tokio::time::Duration::from_secs(config.poll_interval_secs);
-        let reconcile_interval = tokio::time::Duration::from_secs(config.reconcile_interval_secs);
-
-        let mut poll_ticker = tokio::time::interval(poll_interval);
-        let mut reconcile_ticker = tokio::time::interval(reconcile_interval);
-
         // Connect and do initial sync
         if let Err(e) = self.provider.connect().await {
             error!(
@@ -1048,6 +1048,18 @@ impl SyncWorker {
             self.base
                 .emit_error("sync", &format!("Initial sync failed: {}", e));
         }
+
+        if config.manual_only() {
+            info!("Manual sync completed for account {}", self.base.account_id);
+            let _ = self.provider.disconnect().await;
+            return;
+        }
+
+        let poll_interval = tokio::time::Duration::from_secs(config.poll_interval_secs);
+        let reconcile_interval = tokio::time::Duration::from_secs(config.reconcile_interval_secs);
+
+        let mut poll_ticker = tokio::time::interval(poll_interval);
+        let mut reconcile_ticker = tokio::time::interval(reconcile_interval);
 
         let supports_idle = self.provider.inner().supports_idle().await;
         if supports_idle {
@@ -1259,6 +1271,14 @@ mod tests {
             "quarterly_report_final_.pdf",
         );
         assert_eq!(sanitize_filename("report. "), "report");
+    }
+
+    #[test]
+    fn zero_poll_interval_is_manual_only() {
+        let mut config = SyncConfig::default();
+        config.poll_interval_secs = 0;
+
+        assert!(config.manual_only());
     }
 
     #[test]

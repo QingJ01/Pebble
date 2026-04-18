@@ -8,6 +8,7 @@ import { addAccount, startSync, testImapConnection, completeOAuthFlow } from "@/
 import type { AddAccountRequest } from "@/lib/api";
 import { accountsQueryKey } from "@/hooks/queries";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
+import { realtimePreferenceToPollInterval, useUIStore } from "@/stores/ui.store";
 import { useToastStore } from "@/stores/toast.store";
 import { inputStyle, labelStyle } from "../styles/form";
 
@@ -60,6 +61,8 @@ export default function AccountSetup({ onClose }: Props) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const emailInputRef = useRef<HTMLInputElement>(null);
+  const realtimeMode = useUIStore((state) => state.realtimeMode);
+  const syncPollInterval = realtimePreferenceToPollInterval(realtimeMode);
 
   const initialForm: AddAccountRequest = {
     email: "",
@@ -174,7 +177,7 @@ export default function AccountSetup({ onClose }: Props) {
     try {
       const account = await completeOAuthFlow(provider, form.email || "", form.display_name || "");
       await queryClient.invalidateQueries({ queryKey: accountsQueryKey });
-      await startSync(account.id);
+      await startSync(account.id, syncPollInterval);
       onClose();
     } catch (err) {
       const msg = extractErrorMessage(err);
@@ -215,7 +218,7 @@ export default function AccountSetup({ onClose }: Props) {
         type: "success",
       });
       // Start sync in background; poll folders until they appear
-      startSync(account.id).catch((err) =>
+      startSync(account.id, syncPollInterval).catch((err) =>
         console.warn("Initial sync failed (will retry later):", err),
       );
       // Poll for folders a few times so sidebar updates without manual refresh

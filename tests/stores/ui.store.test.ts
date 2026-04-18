@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useComposeStore } from "../../src/stores/compose.store";
 import { useMailStore } from "../../src/stores/mail.store";
-import { useUIStore } from "../../src/stores/ui.store";
+import { realtimePreferenceToPollInterval, useUIStore } from "../../src/stores/ui.store";
 
 describe("UIStore", () => {
   beforeEach(() => {
@@ -13,8 +13,10 @@ describe("UIStore", () => {
       syncStatus: "idle",
       networkStatus: "online",
       lastMailError: null,
+      realtimeStatusByAccount: {},
       previousView: "inbox",
       pollInterval: 15,
+      realtimeMode: "realtime",
       searchQuery: "",
       settingsTab: "accounts",
       pendingRuleDraftText: null,
@@ -48,6 +50,7 @@ describe("UIStore", () => {
     expect(state.activeView).toBe("inbox");
     expect(state.theme).toBe("light");
     expect(state.syncStatus).toBe("idle");
+    expect(state.realtimeMode).toBe("realtime");
   });
 
   it("should toggle sidebar", () => {
@@ -217,5 +220,12 @@ describe("UIStore", () => {
     expect(useUIStore.getState().syncStatus).toBe("syncing");
     useUIStore.getState().setSyncStatus("error");
     expect(useUIStore.getState().syncStatus).toBe("error");
+  });
+
+  it("maps realtime preferences to backend poll intervals", () => {
+    expect(realtimePreferenceToPollInterval("realtime")).toBe(10);
+    expect(realtimePreferenceToPollInterval("balanced")).toBe(30);
+    expect(realtimePreferenceToPollInterval("battery")).toBe(120);
+    expect(realtimePreferenceToPollInterval("manual")).toBe(0);
   });
 });

@@ -9,6 +9,7 @@ export type Theme = "light" | "dark" | "system";
 export type Language = "en" | "zh";
 export type NetworkStatus = "online" | "offline";
 export type RealtimeMode = "realtime" | "polling" | "backoff" | "offline" | "auth_required" | "error";
+export type RealtimePreference = "realtime" | "balanced" | "battery" | "manual";
 
 export interface RealtimeStatus {
   account_id: string;
@@ -17,6 +18,29 @@ export interface RealtimeStatus {
   last_success_at?: number | null;
   next_retry_at?: number | null;
   message?: string | null;
+}
+
+const REALTIME_PREFERENCE_KEY = "pebble-realtime-mode";
+const REALTIME_PREFERENCES = new Set<RealtimePreference>(["realtime", "balanced", "battery", "manual"]);
+
+function readRealtimePreference(): RealtimePreference {
+  const stored = localStorage.getItem(REALTIME_PREFERENCE_KEY);
+  return REALTIME_PREFERENCES.has(stored as RealtimePreference)
+    ? (stored as RealtimePreference)
+    : "realtime";
+}
+
+export function realtimePreferenceToPollInterval(mode: RealtimePreference): number {
+  switch (mode) {
+    case "realtime":
+      return 10;
+    case "balanced":
+      return 30;
+    case "battery":
+      return 120;
+    case "manual":
+      return 0;
+  }
 }
 
 /** Resolve "system" theme to an actual "dark" | "light" value. */
@@ -41,6 +65,7 @@ interface UIState {
   networkStatus: NetworkStatus;
   lastMailError: string | null;
   realtimeStatusByAccount: Record<string, RealtimeStatus>;
+  realtimeMode: RealtimePreference;
   previousView: ActiveView;
   toggleSidebar: () => void;
   setActiveView: (view: ActiveView) => void;
@@ -51,6 +76,7 @@ interface UIState {
   setNetworkStatus: (status: NetworkStatus) => void;
   setLastMailError: (error: string | null) => void;
   setRealtimeStatus: (accountId: string, status: RealtimeStatus) => void;
+  setRealtimeMode: (mode: RealtimePreference) => void;
   pollInterval: number;
   setPollInterval: (secs: number) => void;
   searchQuery: string;
@@ -72,6 +98,7 @@ export const useUIStore = create<UIState>((set) => ({
   networkStatus: "online",
   lastMailError: null,
   realtimeStatusByAccount: {},
+  realtimeMode: readRealtimePreference(),
   previousView: "inbox",
   toggleSidebar: () =>
     set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
@@ -129,6 +156,15 @@ export const useUIStore = create<UIState>((set) => ({
         [accountId]: status,
       },
     })),
+  setRealtimeMode: (mode) => {
+    const pollInterval = realtimePreferenceToPollInterval(mode);
+    localStorage.setItem(REALTIME_PREFERENCE_KEY, mode);
+    localStorage.setItem("pebble-poll-interval", String(pollInterval));
+    set({
+      realtimeMode: mode,
+      pollInterval,
+    });
+  },
   pollInterval: Number(localStorage.getItem("pebble-poll-interval")) || 15,
   setPollInterval: (secs) => {
     localStorage.setItem("pebble-poll-interval", String(secs));

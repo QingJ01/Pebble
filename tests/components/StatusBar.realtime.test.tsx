@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
     networkStatus: "online" as "online" | "offline",
     lastMailError: null as string | null,
     setLastMailError: vi.fn(),
+    realtimeStatusByAccount: {},
+    setRealtimeStatus: vi.fn(),
   },
   mailState: {
     activeAccountId: "account-1" as string | null,

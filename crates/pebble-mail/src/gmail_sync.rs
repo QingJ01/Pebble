@@ -828,10 +828,12 @@ impl GmailSyncWorker {
             // Don't return — still enter poll loop so we can retry
         }
 
-        let policy = RealtimePollPolicy {
-            foreground_recent_secs: config.poll_interval_secs.clamp(1, 10),
-            ..RealtimePollPolicy::default()
-        };
+        if config.manual_only() {
+            info!("Gmail manual sync completed for account {}", self.base.account_id);
+            return;
+        }
+
+        let policy = RealtimePollPolicy::from_foreground_interval_secs(config.poll_interval_secs);
         let mut stop_rx = self.stop_rx.clone();
         let mut backoff = SyncBackoff::new();
 

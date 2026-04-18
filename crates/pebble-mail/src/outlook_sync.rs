@@ -275,10 +275,7 @@ impl OutlookSyncWorker {
 
     /// Main sync loop.
     pub async fn run(&self, config: SyncConfig, mut stop_rx: watch::Receiver<bool>) {
-        let policy = RealtimePollPolicy {
-            foreground_recent_secs: config.poll_interval_secs.clamp(1, 10),
-            ..RealtimePollPolicy::default()
-        };
+        let policy = RealtimePollPolicy::from_foreground_interval_secs(config.poll_interval_secs);
         let mut backoff = SyncBackoff::new();
 
         loop {
@@ -403,6 +400,10 @@ impl OutlookSyncWorker {
                 if *stop_rx.borrow() {
                     break;
                 }
+            }
+
+            if config.manual_only() {
+                break;
             }
 
             // Wait for next poll or stop signal

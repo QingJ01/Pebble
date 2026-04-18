@@ -25,6 +25,13 @@ pub struct RealtimeContext {
 }
 
 impl RealtimePollPolicy {
+    pub fn from_foreground_interval_secs(foreground_recent_secs: u64) -> Self {
+        Self {
+            foreground_recent_secs: foreground_recent_secs.max(1),
+            ..Self::default()
+        }
+    }
+
     pub fn next_delay(&self, ctx: RealtimeContext) -> std::time::Duration {
         if ctx.consecutive_failures > 0 {
             let delay = self
@@ -83,6 +90,20 @@ mod tests {
                 consecutive_failures: 3,
             }),
             std::time::Duration::from_secs(80)
+        );
+    }
+
+    #[test]
+    fn configured_foreground_interval_supports_battery_saver() {
+        let policy = RealtimePollPolicy::from_foreground_interval_secs(120);
+
+        assert_eq!(
+            policy.next_delay(RealtimeContext {
+                app_foreground: true,
+                recent_activity: true,
+                consecutive_failures: 0,
+            }),
+            std::time::Duration::from_secs(120)
         );
     }
 }

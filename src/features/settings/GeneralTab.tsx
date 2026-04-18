@@ -1,15 +1,24 @@
 import { useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { useUIStore } from "@/stores/ui.store";
+import { useUIStore, type RealtimePreference } from "@/stores/ui.store";
 
 const NOTIFICATIONS_KEY = "pebble-notifications-enabled";
-const POLL_OPTIONS = [5, 10, 15, 30, 60, 120, 300];
+const REALTIME_OPTIONS: Array<{
+  mode: RealtimePreference;
+  labelKey: string;
+  fallback: string;
+}> = [
+  { mode: "realtime", labelKey: "settings.realtimeModeRealtime", fallback: "Realtime (recommended)" },
+  { mode: "balanced", labelKey: "settings.realtimeModeBalanced", fallback: "Balanced" },
+  { mode: "battery", labelKey: "settings.realtimeModeBattery", fallback: "Battery saver" },
+  { mode: "manual", labelKey: "settings.realtimeModeManual", fallback: "Manual only" },
+];
 
 export default function GeneralTab() {
   const { t } = useTranslation();
-  const pollInterval = useUIStore((s) => s.pollInterval);
-  const setPollInterval = useUIStore((s) => s.setPollInterval);
+  const realtimeMode = useUIStore((s) => s.realtimeMode);
+  const setRealtimeMode = useUIStore((s) => s.setRealtimeMode);
 
   const [notificationsEnabled, setNotificationsEnabled] = useState(() => {
     return localStorage.getItem(NOTIFICATIONS_KEY) === "true";
@@ -34,30 +43,36 @@ export default function GeneralTab() {
   return (
     <div>
       <h3 style={{ fontSize: "14px", fontWeight: 600, marginBottom: "8px" }}>
-        {t("settings.syncInterval")}
+        {t("settings.realtimeMode", "Realtime Mode")}
       </h3>
       <p style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginBottom: "12px", marginTop: 0 }}>
-        {t("settings.syncIntervalDesc")}
+        {t("settings.realtimeModeDesc", "Choose how aggressively Pebble checks for new mail.")}
       </p>
-      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-        {POLL_OPTIONS.map((secs) => {
-          const label = secs >= 60 ? `${secs / 60}m` : `${secs}s`;
+      <div
+        role="group"
+        aria-label={t("settings.realtimeMode", "Realtime Mode")}
+        style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}
+      >
+        {REALTIME_OPTIONS.map((option) => {
+          const selected = realtimeMode === option.mode;
           return (
             <button
-              key={secs}
-              onClick={() => setPollInterval(secs)}
+              key={option.mode}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => setRealtimeMode(option.mode)}
               style={{
                 padding: "8px 16px",
                 borderRadius: "6px",
-                border: pollInterval === secs ? "2px solid var(--color-accent)" : "1px solid var(--color-border)",
-                backgroundColor: pollInterval === secs ? "var(--color-bg-hover)" : "transparent",
+                border: selected ? "2px solid var(--color-accent)" : "1px solid var(--color-border)",
+                backgroundColor: selected ? "var(--color-bg-hover)" : "transparent",
                 cursor: "pointer",
                 fontSize: "13px",
-                fontWeight: pollInterval === secs ? 600 : 400,
+                fontWeight: selected ? 600 : 400,
                 color: "var(--color-text-primary)",
               }}
             >
-              {label}
+              {t(option.labelKey, option.fallback)}
             </button>
           );
         })}
