@@ -264,6 +264,7 @@ fn queue_remote_rule_action(
     message_id: &str,
     action: &pebble_rules::types::RuleAction,
 ) -> pebble_core::Result<bool> {
+    use crate::commands::gmail_labels::gmail_move_label_delta;
     use pebble_core::{FolderRole, ProviderType};
     use pebble_rules::types::RuleAction;
 
@@ -343,12 +344,19 @@ fn queue_remote_rule_action(
             let mut payload = json!({
                 "source_folder_id": source_folder.as_ref().map(|folder| folder.id.as_str()),
                 "source_folder_remote_id": source_folder.as_ref().map(|folder| folder.remote_id.as_str()),
-                "target_folder_id": target_folder.id,
-                "target_folder_remote_id": target_folder.remote_id,
+                "target_folder_id": target_folder.id.as_str(),
+                "target_folder_remote_id": target_folder.remote_id.as_str(),
             });
             if account.provider == ProviderType::Gmail {
-                payload["add_labels"] = json!([target_folder.remote_id]);
-                payload["remove_labels"] = json!(["INBOX"]);
+                let delta = gmail_move_label_delta(
+                    source_folder
+                        .as_ref()
+                        .map(|folder| folder.remote_id.as_str()),
+                    &target_folder.remote_id,
+                    target_folder.role,
+                );
+                payload["add_labels"] = json!(delta.add_labels);
+                payload["remove_labels"] = json!(delta.remove_labels);
             }
             queue_pending_mail_op(store, &message, "move_to_folder", payload)?;
             Ok(true)
@@ -364,6 +372,7 @@ mod rule_writeback_tests {
     use pebble_rules::types::RuleAction;
     use pebble_store::pending_ops::PendingMailOpStatus;
     use pebble_store::Store;
+    use serde_json::Value;
 
     fn test_account() -> Account {
         let now = now_timestamp();
@@ -388,6 +397,21 @@ mod rule_writeback_tests {
             parent_id: None,
             color: None,
             is_system: true,
+            sort_order: 0,
+        }
+    }
+
+    fn test_label(account_id: &str, remote_id: &str, name: &str) -> Folder {
+        Folder {
+            id: new_id(),
+            account_id: account_id.to_string(),
+            remote_id: remote_id.to_string(),
+            name: name.to_string(),
+            folder_type: FolderType::Label,
+            role: None,
+            parent_id: None,
+            color: None,
+            is_system: false,
             sort_order: 0,
         }
     }
@@ -442,5 +466,42 @@ mod rule_writeback_tests {
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0].op_type, "update_flags");
         assert_eq!(ops[0].status, PendingMailOpStatus::Pending);
+    }
+
+    #[test]
+    fn rule_move_to_folder_from_gmail_label_removes_source_label() {
+        let store = Store::open_in_memory().unwrap();
+        let account = test_account();
+        store.insert_account(&account).unwrap();
+        let source = test_label(&account.id, "Label_A", "Label A");
+        let target = test_label(&account.id, "Label_B", "Label B");
+        store.insert_folder(&source).unwrap();
+        store.insert_folder(&target).unwrap();
+        let message = test_message(&account.id);
+        store.insert_message(&message, &[source.id]).unwrap();
+
+        apply_rule_action(
+            &store,
+            &account.id,
+            &message.id,
+            &RuleAction::MoveToFolder("Label B".to_string()),
+        )
+        .unwrap();
+
+        let ops = store.list_pending_mail_ops(&account.id).unwrap();
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].op_type, "move_to_folder");
+        let payload: Value = serde_json::from_str(&ops[0].payload_json).unwrap();
+        let payload = &payload["payload"];
+        assert_eq!(
+            payload["add_labels"],
+            serde_json::json!(["Label_B"]),
+            "payload: {payload}"
+        );
+        assert_eq!(
+            payload["remove_labels"],
+            serde_json::json!(["Label_A"]),
+            "payload: {payload}"
+        );
     }
 }

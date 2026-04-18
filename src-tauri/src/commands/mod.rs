@@ -8,6 +8,7 @@ pub mod cloud_sync;
 pub mod compose;
 pub mod contacts;
 pub mod folders;
+pub mod gmail_labels;
 pub mod health;
 pub mod indexing;
 pub mod kanban;

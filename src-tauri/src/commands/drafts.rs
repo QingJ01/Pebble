@@ -1,9 +1,31 @@
 use crate::state::AppState;
-use pebble_core::{traits::DraftProvider, DraftMessage, EmailAddress, FolderRole, PebbleError};
+use pebble_core::{
+    traits::DraftProvider, DraftMessage, EmailAddress, FolderRole, PebbleError, ProviderType,
+};
 use tauri::State;
 use tracing::warn;
 
 use super::messages::provider_dispatch::ConnectedProvider;
+
+fn requires_remote_draft_delete(provider_type: Option<ProviderType>) -> bool {
+    matches!(
+        provider_type,
+        Some(ProviderType::Gmail | ProviderType::Outlook)
+    )
+}
+
+fn should_delete_local_draft(
+    provider_type: Option<ProviderType>,
+    remote_delete_confirmed: bool,
+) -> bool {
+    !requires_remote_draft_delete(provider_type) || remote_delete_confirmed
+}
+
+fn hard_delete_local_draft(state: &AppState, draft_id: &str) {
+    if let Err(e) = state.store.hard_delete_messages(&[draft_id.to_string()]) {
+        warn!("Failed to delete local draft {draft_id}: {e}");
+    }
+}
 
 #[tauri::command]
 pub async fn save_draft(
@@ -117,10 +139,15 @@ pub async fn delete_draft(
     account_id: String,
     draft_id: String,
 ) -> std::result::Result<(), PebbleError> {
-    let provider_type = state.store.get_account(&account_id)?
-        .map(|a| a.provider);
+    let provider_type = state.store.get_account(&account_id)?.map(|a| a.provider);
+
+    if should_delete_local_draft(provider_type.clone(), false) {
+        hard_delete_local_draft(&state, &draft_id);
+        return Ok(());
+    }
+
     let mut remote_ok = true;
-    if let Some(pt) = provider_type {
+    if let Some(pt) = provider_type.clone() {
         if let Ok(conn) = ConnectedProvider::connect(&state, &account_id, &pt).await {
             let result = match &conn {
                 ConnectedProvider::Gmail(p) => p.delete_draft(&draft_id).await,
@@ -133,13 +160,45 @@ pub async fn delete_draft(
                 remote_ok = false;
             }
         } else {
-            // Connection failed — don't delete locally either
+            // Gmail and Outlook drafts have provider-side draft records. Keep
+            // the local draft when the remote delete cannot be confirmed.
             remote_ok = false;
         }
     }
-    // Only delete locally if the remote was either successful or not applicable (IMAP/no account)
-    if remote_ok {
-        let _ = state.store.hard_delete_messages(&[draft_id]);
+    if should_delete_local_draft(provider_type, remote_ok) {
+        hard_delete_local_draft(&state, &draft_id);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{requires_remote_draft_delete, should_delete_local_draft};
+    use pebble_core::ProviderType;
+
+    #[test]
+    fn draft_delete_does_not_require_remote_delete_for_local_or_imap() {
+        assert!(!requires_remote_draft_delete(None));
+        assert!(!requires_remote_draft_delete(Some(ProviderType::Imap)));
+    }
+
+    #[test]
+    fn draft_delete_requires_remote_delete_for_oauth_providers() {
+        assert!(requires_remote_draft_delete(Some(ProviderType::Gmail)));
+        assert!(requires_remote_draft_delete(Some(ProviderType::Outlook)));
+    }
+
+    #[test]
+    fn draft_delete_local_decision_skips_remote_requirement_for_local_and_imap() {
+        assert!(should_delete_local_draft(None, false));
+        assert!(should_delete_local_draft(Some(ProviderType::Imap), false));
+    }
+
+    #[test]
+    fn draft_delete_local_decision_requires_remote_confirmation_for_oauth_providers() {
+        assert!(!should_delete_local_draft(Some(ProviderType::Gmail), false));
+        assert!(!should_delete_local_draft(Some(ProviderType::Outlook), false));
+        assert!(should_delete_local_draft(Some(ProviderType::Gmail), true));
+        assert!(should_delete_local_draft(Some(ProviderType::Outlook), true));
+    }
 }

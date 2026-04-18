@@ -1,3 +1,4 @@
+use crate::commands::gmail_labels::gmail_move_label_delta;
 use crate::state::AppState;
 use pebble_core::traits::{FolderProvider, LabelProvider};
 use pebble_core::{FolderRole, Message, PebbleError, ProviderType};
@@ -939,7 +940,6 @@ pub async fn move_to_folder(
             Err(queued_remote_error("move_to_folder", error))
         };
 
-    // TODO(FC-5): add full remote-move support for Gmail label semantics.
     let outcome = match provider_type {
         ProviderType::Outlook => {
             if is_local_move {
@@ -1004,60 +1004,34 @@ pub async fn move_to_folder(
             }
         }
         ProviderType::Gmail => {
-            if target_folder.role == Some(pebble_core::FolderRole::Spam) {
-                match connect_gmail(&state, &msg.account_id).await {
-                    Ok(provider) => match provider
-                        .modify_labels(
-                            &msg.remote_id,
-                            &["SPAM".to_string()],
-                            &["INBOX".to_string()],
-                        )
-                        .await
-                    {
-                        Ok(()) => RemoteMutationOutcome::Applied,
-                        Err(e) => {
-                            let error = e.to_string();
-                            let mut payload = base_payload();
-                            payload["add_labels"] = json!(["SPAM"]);
-                            payload["remove_labels"] = json!(["INBOX"]);
-                            return queue_move_failure(&error, payload);
-                        }
-                    },
-                    Err(e) => {
-                        let error = e.to_string();
-                        let mut payload = base_payload();
-                        payload["add_labels"] = json!(["SPAM"]);
-                        payload["remove_labels"] = json!(["INBOX"]);
-                        return queue_move_failure(&error, payload);
-                    }
-                }
-            } else if is_local_move {
+            if is_local_move && target_folder.role != Some(pebble_core::FolderRole::Spam) {
                 RemoteMutationOutcome::LocalOnly
             } else {
+                let delta = gmail_move_label_delta(
+                    Some(&source_folder.remote_id),
+                    &target_folder.remote_id,
+                    target_folder.role.clone(),
+                );
+                let move_payload = || {
+                    let mut payload = base_payload();
+                    payload["add_labels"] = json!(delta.add_labels.clone());
+                    payload["remove_labels"] = json!(delta.remove_labels.clone());
+                    payload
+                };
                 match connect_gmail(&state, &msg.account_id).await {
                     Ok(provider) => match provider
-                        .modify_labels(
-                            &msg.remote_id,
-                            &[target_folder.remote_id.clone()],
-                            &["INBOX".to_string()],
-                        )
+                        .modify_labels(&msg.remote_id, &delta.add_labels, &delta.remove_labels)
                         .await
                     {
                         Ok(()) => RemoteMutationOutcome::Applied,
                         Err(e) => {
                             let error = e.to_string();
-                            let mut payload = base_payload();
-                            payload["add_labels"] = json!([target_folder.remote_id.as_str()]);
-                            payload["remove_labels"] = json!(["INBOX"]);
-                            return queue_move_failure(&error, payload);
+                            return queue_move_failure(&error, move_payload());
                         }
                     },
                     Err(e) => {
                         let error = e.to_string();
-                        let mut payload = base_payload();
-                        payload["add_labels"] = json!([target_folder.remote_id.as_str()]);
-                        payload["remove_labels"] = json!(["INBOX"]);
-                        return queue_move_failure(&error, payload);
+                        return queue_move_failure(&error, move_payload());
                     }
                 }
             }
