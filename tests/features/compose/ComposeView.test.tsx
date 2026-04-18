@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   closeCompose: vi.fn(),
   setComposeDirty: vi.fn(),
   addToast: vi.fn(),
+  loadDraftFromStorage: vi.fn(),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -78,7 +79,7 @@ vi.mock("../../../src/hooks/useComposeDraft", () => ({
     draftIdRef: { current: "draft-1" },
     draftIdsByAccountRef: { current: { "account-1": "draft-1" } },
   }),
-  loadDraftFromStorage: () => null,
+  loadDraftFromStorage: mocks.loadDraftFromStorage,
   clearDraftStorage: vi.fn(),
 }));
 
@@ -149,6 +150,8 @@ describe("ComposeView", () => {
     mocks.closeCompose.mockReset();
     mocks.setComposeDirty.mockReset();
     mocks.addToast.mockReset();
+    mocks.loadDraftFromStorage.mockReset();
+    mocks.loadDraftFromStorage.mockReturnValue(null);
     vi.mocked(deleteDraft).mockReset();
   });
 
@@ -167,5 +170,11 @@ describe("ComposeView", () => {
     await waitFor(() => expect(mocks.addToast).toHaveBeenCalledWith(expect.objectContaining({
       type: "error",
     })));
+  });
+
+  it("validates a restored new-message draft against loaded account ids", () => {
+    render(<ComposeView />);
+
+    expect(mocks.loadDraftFromStorage).toHaveBeenCalledWith(["account-1"]);
   });
 });

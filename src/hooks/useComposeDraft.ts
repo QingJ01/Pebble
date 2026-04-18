@@ -50,6 +50,7 @@ export function loadDraftFromStorage(validAccountIds?: string[]): DraftData | nu
       return null;
     }
     if (validAccountIds && !validAccountIds.includes(draft.accountId)) {
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
       return null;
     }
     return {
@@ -144,7 +145,7 @@ export function useComposeDraft({
 
   // Auto-save draft to localStorage and backend (debounced 3s)
   useEffect(() => {
-    if (!composeMode || !editorReady) return;
+    if (!composeMode || !editorReady || !initialSnapshot.current) return;
     const timer = setTimeout(() => {
       const draftAttachments = attachments.filter((attachment) =>
         attachment.path.trim().length > 0 || attachment.name.trim().length > 0,

@@ -19,10 +19,22 @@ import { deleteDraft } from "@/lib/api";
 import { useComposeEditor } from "@/hooks/useComposeEditor";
 import { useConfirmStore } from "@/stores/confirm.store";
 import { useToastStore } from "@/stores/toast.store";
+import type { Account } from "@/lib/ipc-types";
 import type { ComposeAttachment } from "./compose-draft";
 import { ModeButton, EditorToolbar, MarkdownToolbar, composeStyles } from "./ComposeToolbar";
 
 export default function ComposeView() {
+  const composeMode = useComposeStore((s) => s.composeMode);
+  const { data: accounts = [], isLoading } = useAccountsQuery();
+
+  if (composeMode === "new" && isLoading) {
+    return <div style={{ height: "100%" }} />;
+  }
+
+  return <ComposeViewInner accounts={accounts} />;
+}
+
+function ComposeViewInner({ accounts }: { accounts: Account[] }) {
   const { t } = useTranslation();
   const composeMode = useComposeStore((s) => s.composeMode);
   const composeReplyTo = useComposeStore((s) => s.composeReplyTo);
@@ -31,10 +43,11 @@ export default function ComposeView() {
   const confirmCloseCompose = useComposeStore((s) => s.confirmCloseCompose);
   const cancelCloseCompose = useComposeStore((s) => s.cancelCloseCompose);
   const activeAccountId = useMailStore((s) => s.activeAccountId);
-  const { data: accounts = [] } = useAccountsQuery();
 
   const isReply = composeMode === "reply" || composeMode === "reply-all";
-  const restoredDraft = useRef(composeMode === "new" ? loadDraftFromStorage() : null);
+  const restoredDraft = useRef(
+    composeMode === "new" ? loadDraftFromStorage(accounts.map((account) => account.id)) : null,
+  );
 
   // ─── Recipients ──────────────────────────────────────────────────────────────
   const {

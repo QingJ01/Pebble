@@ -1,21 +1,34 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Folder, MessageSummary } from "../../src/lib/api";
 import { useMailStore } from "../../src/stores/mail.store";
 
 const mocks = vi.hoisted(() => ({
   folders: [] as Folder[],
+  queryClient: {
+    invalidateQueries: vi.fn(),
+  },
+  getMessageLabelsBatch: vi.fn(),
+  batchArchive: vi.fn(),
+  batchDelete: vi.fn(),
+  batchMarkRead: vi.fn(),
+  batchStar: vi.fn(),
+  addToast: vi.fn(),
+  confirm: vi.fn(),
 }));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback ?? _key,
+    t: (key: string, fallbackOrOptions?: string | { defaultValue?: string }) => {
+      if (typeof fallbackOrOptions === "string") return fallbackOrOptions;
+      return fallbackOrOptions?.defaultValue ?? key;
+    },
   }),
 }));
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({ data: {} }),
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQueryClient: () => mocks.queryClient,
 }));
 
 vi.mock("@tanstack/react-virtual", () => ({
@@ -34,6 +47,24 @@ vi.mock("@tanstack/react-virtual", () => ({
 
 vi.mock("../../src/hooks/queries", () => ({
   useFoldersQuery: () => ({ data: mocks.folders }),
+}));
+
+vi.mock("../../src/lib/api", () => ({
+  getMessageLabelsBatch: mocks.getMessageLabelsBatch,
+  batchArchive: mocks.batchArchive,
+  batchDelete: mocks.batchDelete,
+  batchMarkRead: mocks.batchMarkRead,
+  batchStar: mocks.batchStar,
+}));
+
+vi.mock("../../src/stores/toast.store", () => ({
+  useToastStore: (selector: (state: { addToast: (toast: unknown) => void }) => unknown) =>
+    selector({ addToast: mocks.addToast }),
+}));
+
+vi.mock("../../src/stores/confirm.store", () => ({
+  useConfirmStore: (selector: (state: { confirm: () => Promise<boolean> }) => unknown) =>
+    selector({ confirm: mocks.confirm }),
 }));
 
 vi.mock("../../src/components/MessageItem", () => ({
@@ -82,6 +113,11 @@ function makeMessage(id: string): MessageSummary {
 describe("MessageList", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.batchArchive.mockResolvedValue(1);
+    mocks.batchDelete.mockResolvedValue(1);
+    mocks.batchMarkRead.mockResolvedValue(1);
+    mocks.batchStar.mockResolvedValue(1);
+    mocks.confirm.mockResolvedValue(true);
     mocks.folders = [{
       id: "folder-archive",
       account_id: "account-1",
@@ -130,5 +166,29 @@ describe("MessageList", () => {
     );
 
     expect(screen.getByTestId("message-m-1").getAttribute("data-folder-role")).toBe("archive");
+  });
+
+  it("refreshes derived queries after a successful batch star action", async () => {
+    mocks.batchStar.mockResolvedValueOnce(2);
+    useMailStore.setState({
+      selectedMessageIds: new Set(["m-1", "m-2"]),
+      batchMode: true,
+    });
+
+    render(
+      <MessageList
+        messages={[makeMessage("m-1"), makeMessage("m-2")]}
+        selectedMessageId={null}
+        onSelectMessage={vi.fn()}
+        loading={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Star" }));
+
+    await waitFor(() => expect(mocks.batchStar).toHaveBeenCalledWith(["m-1", "m-2"], true));
+    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["messages"] });
+    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["threads"] });
+    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["starred-messages"] });
   });
 });

@@ -103,6 +103,12 @@ export default function MessageList({
     );
   }
 
+  function invalidateMessageViews() {
+    queryClient.invalidateQueries({ queryKey: ["messages"] });
+    queryClient.invalidateQueries({ queryKey: ["threads"] });
+    queryClient.invalidateQueries({ queryKey: ["starred-messages"] });
+  }
+
   async function handleBatchAction(action: "archive" | "delete" | "markRead" | "markUnread" | "star" | "unstar") {
     const ids = [...selectedMessageIds];
     if (ids.length === 0) return;
@@ -128,7 +134,7 @@ export default function MessageList({
       else if (action === "markUnread") count = await batchMarkRead(ids, false);
       else if (action === "star") count = await batchStar(ids, true);
       else count = await batchStar(ids, false);
-      queryClient.invalidateQueries({ queryKey: ["messages"] });
+      invalidateMessageViews();
       addToast({ message: t("batch.success", { count }), type: "success" });
       clearSelection();
     } catch {

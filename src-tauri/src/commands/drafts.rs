@@ -24,6 +24,29 @@ fn should_delete_local_draft(
     !requires_remote_draft_delete(provider_type) || remote_delete_confirmed
 }
 
+fn validate_existing_local_draft_account(
+    store: &pebble_store::Store,
+    account_id: &str,
+    existing_draft_id: Option<&str>,
+) -> std::result::Result<(), PebbleError> {
+    let Some(draft_id) = existing_draft_id else {
+        return Ok(());
+    };
+
+    let Some(existing) = store.get_message(draft_id)? else {
+        // Remote provider draft IDs may not have a local mirror yet.
+        return Ok(());
+    };
+
+    if existing.account_id != account_id || !existing.is_draft {
+        return Err(PebbleError::Validation(
+            "Existing draft does not belong to the selected account".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
 fn hard_delete_local_draft(state: &AppState, draft_id: &str) {
     if let Err(e) = state.store.hard_delete_messages(&[draft_id.to_string()]) {
         warn!("Failed to delete local draft {draft_id}: {e}");
@@ -50,6 +73,11 @@ pub async fn save_draft(
     } else {
         validate_attachment_paths(&raw_attachment_paths, &state.attachments_dir)?
     };
+    validate_existing_local_draft_account(
+        state.store.as_ref(),
+        &account_id,
+        existing_draft_id.as_deref(),
+    )?;
     let draft = DraftMessage {
         id: existing_draft_id.clone(),
         to: to.into_iter().map(|a| EmailAddress { name: None, address: a }).collect(),
@@ -204,8 +232,58 @@ pub async fn delete_draft(
 
 #[cfg(test)]
 mod tests {
-    use super::{requires_remote_draft_delete, should_delete_local_draft};
-    use pebble_core::ProviderType;
+    use super::{
+        requires_remote_draft_delete, should_delete_local_draft,
+        validate_existing_local_draft_account,
+    };
+    use pebble_core::{
+        new_id, now_timestamp, Account, Message, PebbleError, ProviderType,
+    };
+    use pebble_store::Store;
+
+    fn make_account(id: &str, email: &str) -> Account {
+        let now = now_timestamp();
+        Account {
+            id: id.to_string(),
+            email: email.to_string(),
+            display_name: email.to_string(),
+            provider: ProviderType::Imap,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn make_draft(account_id: &str, id: &str) -> Message {
+        let now = now_timestamp();
+        Message {
+            id: id.to_string(),
+            account_id: account_id.to_string(),
+            remote_id: String::new(),
+            message_id_header: None,
+            in_reply_to: None,
+            references_header: None,
+            thread_id: None,
+            subject: "Draft".to_string(),
+            snippet: "Draft body".to_string(),
+            from_address: String::new(),
+            from_name: String::new(),
+            to_list: Vec::new(),
+            cc_list: Vec::new(),
+            bcc_list: Vec::new(),
+            body_text: "Draft body".to_string(),
+            body_html_raw: String::new(),
+            has_attachments: false,
+            is_read: true,
+            is_starred: false,
+            is_draft: true,
+            date: now,
+            remote_version: None,
+            is_deleted: false,
+            deleted_at: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
 
     #[test]
     fn draft_delete_does_not_require_remote_delete_for_local_or_imap() {
@@ -231,5 +309,43 @@ mod tests {
         assert!(!should_delete_local_draft(Some(ProviderType::Outlook), false));
         assert!(should_delete_local_draft(Some(ProviderType::Gmail), true));
         assert!(should_delete_local_draft(Some(ProviderType::Outlook), true));
+    }
+
+    #[test]
+    fn existing_local_draft_validation_rejects_cross_account_draft_id() {
+        let store = Store::open_in_memory().unwrap();
+        let account_a = make_account("account-a", "a@example.com");
+        let account_b = make_account("account-b", "b@example.com");
+        store.insert_account(&account_a).unwrap();
+        store.insert_account(&account_b).unwrap();
+        let draft_id = new_id();
+        let draft = make_draft(&account_a.id, &draft_id);
+        store.insert_message(&draft, &[]).unwrap();
+
+        let err =
+            validate_existing_local_draft_account(&store, &account_b.id, Some(&draft_id))
+                .unwrap_err();
+
+        assert!(matches!(err, PebbleError::Validation(_)));
+    }
+
+    #[test]
+    fn existing_local_draft_validation_allows_same_account_draft_id() {
+        let store = Store::open_in_memory().unwrap();
+        let account = make_account("account-a", "a@example.com");
+        store.insert_account(&account).unwrap();
+        let draft_id = new_id();
+        let draft = make_draft(&account.id, &draft_id);
+        store.insert_message(&draft, &[]).unwrap();
+
+        validate_existing_local_draft_account(&store, &account.id, Some(&draft_id)).unwrap();
+    }
+
+    #[test]
+    fn existing_local_draft_validation_allows_missing_local_record() {
+        let store = Store::open_in_memory().unwrap();
+
+        validate_existing_local_draft_account(&store, "account-a", Some("remote-draft-1"))
+            .unwrap();
     }
 }

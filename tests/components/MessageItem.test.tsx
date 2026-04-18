@@ -1,6 +1,19 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MessageSummary } from "../../src/lib/api";
+
+const mocks = vi.hoisted(() => ({
+  queryClient: {
+    invalidateQueries: vi.fn(),
+  },
+  patchMessagesCache: vi.fn(),
+  snapshotMessagesCache: vi.fn(),
+  restoreMessagesCache: vi.fn(),
+  updateMessageFlags: vi.fn(),
+  archiveMessage: vi.fn(),
+  moveToFolder: vi.fn(),
+  addToast: vi.fn(),
+}));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -9,6 +22,7 @@ vi.mock("react-i18next", () => ({
         "messageActions.archive": "Archive",
         "messageActions.unarchive": "Unarchive",
         "messageActions.addToKanban": "Add to kanban",
+        "messageActions.reportSpam": "Report spam",
         "messageActions.star": "Star",
         "messageActions.unstar": "Unstar",
       };
@@ -18,19 +32,19 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({
-    invalidateQueries: vi.fn(),
-  }),
+  useQueryClient: () => mocks.queryClient,
 }));
 
 vi.mock("../../src/hooks/queries", () => ({
-  patchMessagesCache: vi.fn(),
+  patchMessagesCache: mocks.patchMessagesCache,
+  snapshotMessagesCache: mocks.snapshotMessagesCache,
+  restoreMessagesCache: mocks.restoreMessagesCache,
 }));
 
 vi.mock("../../src/lib/api", () => ({
-  updateMessageFlags: vi.fn(),
-  archiveMessage: vi.fn(),
-  moveToFolder: vi.fn(),
+  updateMessageFlags: mocks.updateMessageFlags,
+  archiveMessage: mocks.archiveMessage,
+  moveToFolder: mocks.moveToFolder,
 }));
 
 vi.mock("../../src/stores/kanban.store", () => ({
@@ -40,7 +54,7 @@ vi.mock("../../src/stores/kanban.store", () => ({
 
 vi.mock("../../src/stores/toast.store", () => ({
   useToastStore: {
-    getState: () => ({ addToast: vi.fn() }),
+    getState: () => ({ addToast: mocks.addToast }),
   },
 }));
 
@@ -78,6 +92,10 @@ function makeMessage(): MessageSummary {
 describe("MessageItem", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.snapshotMessagesCache.mockReturnValue({ messages: "snapshot" });
+    mocks.updateMessageFlags.mockResolvedValue(undefined);
+    mocks.archiveMessage.mockResolvedValue("archived");
+    mocks.moveToFolder.mockResolvedValue(undefined);
   });
 
   it("labels the archive action as unarchive in the archive folder", () => {
@@ -94,5 +112,67 @@ describe("MessageItem", () => {
 
     expect(screen.getByRole("button", { name: "Unarchive" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
+  });
+
+  it("restores message lists when archive optimistic update fails", async () => {
+    const snapshot = { messages: "before-archive" };
+    mocks.snapshotMessagesCache.mockReturnValueOnce(snapshot);
+    mocks.archiveMessage.mockRejectedValueOnce(new Error("archive failed"));
+
+    render(
+      <MessageItem
+        message={makeMessage()}
+        isSelected={false}
+        onClick={vi.fn()}
+      />,
+    );
+
+    fireEvent.mouseEnter(screen.getByRole("option"));
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+
+    expect(mocks.snapshotMessagesCache).toHaveBeenCalledWith(mocks.queryClient);
+    expect(mocks.patchMessagesCache).toHaveBeenCalledWith(mocks.queryClient, expect.any(Function));
+    await waitFor(() => expect(mocks.restoreMessagesCache).toHaveBeenCalledWith(mocks.queryClient, snapshot));
+  });
+
+  it("restores message lists when spam optimistic update fails", async () => {
+    const snapshot = { messages: "before-spam" };
+    mocks.snapshotMessagesCache.mockReturnValueOnce(snapshot);
+    mocks.moveToFolder.mockRejectedValueOnce(new Error("spam failed"));
+
+    render(
+      <MessageItem
+        message={makeMessage()}
+        isSelected={false}
+        onClick={vi.fn()}
+        spamFolderId="folder-spam"
+      />,
+    );
+
+    fireEvent.mouseEnter(screen.getByRole("option"));
+    fireEvent.click(screen.getByRole("button", { name: "Report spam" }));
+
+    expect(mocks.snapshotMessagesCache).toHaveBeenCalledWith(mocks.queryClient);
+    expect(mocks.patchMessagesCache).toHaveBeenCalledWith(mocks.queryClient, expect.any(Function));
+    await waitFor(() => expect(mocks.restoreMessagesCache).toHaveBeenCalledWith(mocks.queryClient, snapshot));
+  });
+
+  it("refreshes derived queries after starring from row actions", async () => {
+    render(
+      <MessageItem
+        message={makeMessage()}
+        isSelected={false}
+        onClick={vi.fn()}
+      />,
+    );
+
+    fireEvent.mouseEnter(screen.getByRole("option"));
+    fireEvent.click(screen.getByRole("button", { name: "Star" }));
+
+    await waitFor(() => expect(mocks.updateMessageFlags).toHaveBeenCalledWith("message-1", undefined, true));
+    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["messages"] });
+    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["threads"] });
+    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["starred-messages"] });
+    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["message", "message-1"] });
   });
 });

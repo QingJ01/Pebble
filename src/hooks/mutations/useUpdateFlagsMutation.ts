@@ -75,5 +75,11 @@ export function useUpdateFlagsMutation() {
         restoreMessagesCache(queryClient, context.previousLists);
       }
     },
+    onSettled: (_data, _err, params) => {
+      queryClient.invalidateQueries({ queryKey: ["messages"] });
+      queryClient.invalidateQueries({ queryKey: ["threads"] });
+      queryClient.invalidateQueries({ queryKey: ["starred-messages"] });
+      queryClient.invalidateQueries({ queryKey: ["message", params.messageId] });
+    },
   });
 }
