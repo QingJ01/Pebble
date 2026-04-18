@@ -308,6 +308,11 @@ pub struct StoredMessage {
     pub folder_ids: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImapWorkerTrigger {
+    ProviderPush,
+}
+
 /// Common fields shared by all sync workers.
 pub(crate) struct SyncWorkerBase {
     pub(crate) account_id: String,
@@ -912,6 +917,110 @@ impl SyncWorker {
         }
     }
 
+    fn spawn_idle_watcher(
+        account_id: String,
+        idle_provider: Arc<ImapMailProvider>,
+        inbox_remote_id: String,
+        configured_idle_wait_secs: u64,
+        mut stop_rx: watch::Receiver<bool>,
+        trigger_tx: mpsc::UnboundedSender<ImapWorkerTrigger>,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            let idle_wait = tokio::time::Duration::from_secs(
+                crate::idle::recommended_idle_wait_secs(configured_idle_wait_secs),
+            );
+            let mut backoff = SyncBackoff::new();
+            let mut connected = false;
+
+            loop {
+                if *stop_rx.borrow() {
+                    break;
+                }
+
+                if backoff.is_circuit_open() {
+                    let delay = backoff.current_delay();
+                    warn!(
+                        "IMAP IDLE watcher circuit open for account {} ({} failures), waiting {:?}",
+                        account_id,
+                        backoff.failure_count(),
+                        delay
+                    );
+                    match tokio::time::timeout(delay, stop_rx.changed()).await {
+                        Ok(Ok(())) if *stop_rx.borrow() => break,
+                        _ => {}
+                    }
+                    continue;
+                }
+
+                if !connected {
+                    match idle_provider.connect().await {
+                        Ok(()) => {
+                            connected = true;
+                            backoff.record_success();
+                        }
+                        Err(e) => {
+                            warn!("Failed to connect IMAP IDLE watcher for account {account_id}: {e}");
+                            let delay = backoff.record_failure();
+                            match tokio::time::timeout(delay, stop_rx.changed()).await {
+                                Ok(Ok(())) if *stop_rx.borrow() => break,
+                                _ => {}
+                            }
+                            continue;
+                        }
+                    }
+                }
+
+                let idle_result = tokio::select! {
+                    result = idle_provider.inner().idle_wait(&inbox_remote_id, idle_wait) => Some(result),
+                    changed = stop_rx.changed() => {
+                        match changed {
+                            Ok(()) if *stop_rx.borrow() => None,
+                            _ => continue,
+                        }
+                    }
+                };
+
+                let Some(idle_result) = idle_result else {
+                    break;
+                };
+
+                match idle_result {
+                    Ok(crate::idle::IdleEvent::NewMail) => {
+                        let _ = trigger_tx.send(ImapWorkerTrigger::ProviderPush);
+                        backoff.record_success();
+                    }
+                    Ok(crate::idle::IdleEvent::Timeout) => {
+                        debug!("IMAP IDLE timeout for account {account_id}; re-entering IDLE");
+                        backoff.record_success();
+                    }
+                    Ok(crate::idle::IdleEvent::Error(e)) => {
+                        warn!("IMAP IDLE watcher error for account {account_id}: {e}");
+                        let _ = idle_provider.disconnect().await;
+                        connected = false;
+                        let delay = backoff.record_failure();
+                        match tokio::time::timeout(delay, stop_rx.changed()).await {
+                            Ok(Ok(())) if *stop_rx.borrow() => break,
+                            _ => {}
+                        }
+                    }
+                    Err(e) => {
+                        warn!("IMAP IDLE watcher failed for account {account_id}: {e}");
+                        let _ = idle_provider.disconnect().await;
+                        connected = false;
+                        let delay = backoff.record_failure();
+                        match tokio::time::timeout(delay, stop_rx.changed()).await {
+                            Ok(Ok(())) if *stop_rx.borrow() => break,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            let _ = idle_provider.disconnect().await;
+            info!("IMAP IDLE watcher stopped for account {account_id}");
+        })
+    }
+
     /// Run the sync worker loop until the stop signal is received.
     pub async fn run(&self, config: SyncConfig) {
         let poll_interval = tokio::time::Duration::from_secs(config.poll_interval_secs);
@@ -942,14 +1051,6 @@ impl SyncWorker {
 
         let supports_idle = self.provider.inner().supports_idle().await;
         if supports_idle {
-            if let Err(e) = self.idle_provider.connect().await {
-                warn!(
-                    "Failed to connect IDLE session for account {}: {}",
-                    self.base.account_id, e
-                );
-            }
-        }
-        if supports_idle {
             info!("IMAP IDLE supported for account {}", self.base.account_id);
         } else {
             info!(
@@ -971,10 +1072,49 @@ impl SyncWorker {
         let mut stop_rx = self.stop_rx.clone();
         let mut last_exists: u32 = 0;
         let mut backoff = SyncBackoff::new();
+        let (idle_trigger_tx, mut idle_trigger_rx) = mpsc::unbounded_channel();
+        let mut idle_watcher = None;
+
+        if supports_idle {
+            match self.base.store.list_folders(&self.base.account_id) {
+                Ok(folders) => {
+                    if let Some(inbox) = folders
+                        .iter()
+                        .find(|f| f.role == Some(pebble_core::FolderRole::Inbox))
+                    {
+                        idle_watcher = Some(Self::spawn_idle_watcher(
+                            self.base.account_id.clone(),
+                            Arc::clone(&self.idle_provider),
+                            inbox.remote_id.clone(),
+                            config.poll_interval_secs,
+                            self.stop_rx.clone(),
+                            idle_trigger_tx.clone(),
+                        ));
+                    } else {
+                        warn!(
+                            "IMAP IDLE supported for account {}, but no Inbox folder was available; using polling",
+                            self.base.account_id
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to load folders before starting IMAP IDLE for account {}: {}; using polling",
+                        self.base.account_id, e
+                    );
+                }
+            }
+        }
+        drop(idle_trigger_tx);
+        let mut idle_watcher_active = idle_watcher.is_some();
 
         loop {
             tokio::select! {
                 _ = poll_ticker.tick() => {
+                    if idle_watcher_active {
+                        continue;
+                    }
+
                     if backoff.is_circuit_open() {
                         let delay = backoff.current_delay();
                         warn!(
@@ -997,8 +1137,7 @@ impl SyncWorker {
                         }
                     };
                     if let Some(inbox) = folders.iter().find(|f| f.role == Some(pebble_core::FolderRole::Inbox)) {
-                        let idle_inner = if supports_idle { self.idle_provider.inner() } else { self.provider.inner() };
-                        match crate::idle::check_for_changes_with_idle(idle_inner, &inbox.remote_id, &mut last_exists, supports_idle).await {
+                        match crate::idle::check_for_changes_with_idle(self.provider.inner(), &inbox.remote_id, &mut last_exists, false).await {
                             Ok(crate::idle::IdleEvent::NewMail) => {
                                 if let Err(e) = self.poll_new_messages().await {
                                     warn!("Poll error for account {}: {}", self.base.account_id, e);
@@ -1032,6 +1171,34 @@ impl SyncWorker {
                         }
                     }
                 }
+                trigger = idle_trigger_rx.recv(), if idle_watcher_active => {
+                    match trigger {
+                        Some(ImapWorkerTrigger::ProviderPush) => {
+                            if backoff.is_circuit_open() {
+                                debug!(
+                                    "Ignoring IMAP provider push while circuit is open for account {}",
+                                    self.base.account_id
+                                );
+                                continue;
+                            }
+
+                            if let Err(e) = self.poll_new_messages().await {
+                                warn!("Provider push poll error for account {}: {}", self.base.account_id, e);
+                                self.base.emit_error("poll", &format!("Provider push poll error: {}", e));
+                                backoff.record_failure();
+                            } else {
+                                backoff.record_success();
+                            }
+                        }
+                        None => {
+                            warn!(
+                                "IMAP IDLE watcher exited for account {}; falling back to polling",
+                                self.base.account_id
+                            );
+                            idle_watcher_active = false;
+                        }
+                    }
+                }
                 _ = reconcile_ticker.tick() => {
                     // Full reconcile: poll new messages + flag diff + deletion detection
                     if let Err(e) = self.poll_new_messages().await {
@@ -1060,13 +1227,17 @@ impl SyncWorker {
                 Ok(()) = stop_rx.changed() => {
                     if *stop_rx.borrow() {
                         info!("Sync worker stopping for account {}", self.base.account_id);
-                        let _ = self.provider.disconnect().await;
-                        let _ = self.idle_provider.disconnect().await;
                         break;
                     }
                 }
             }
         }
+
+        if let Some(handle) = idle_watcher.take() {
+            handle.abort();
+        }
+        let _ = self.provider.disconnect().await;
+        let _ = self.idle_provider.disconnect().await;
     }
 }
 

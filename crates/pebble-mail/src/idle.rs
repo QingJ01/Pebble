@@ -12,6 +12,14 @@ pub enum IdleEvent {
     Error(String),
 }
 
+/// Recommended maximum time to remain in one IMAP IDLE command.
+///
+/// RFC 2177 recommends re-issuing IDLE before 30 minutes, so cap the wait at
+/// 29 minutes and enforce a 60-second floor to avoid tight reconnect loops.
+pub fn recommended_idle_wait_secs(configured_secs: u64) -> u64 {
+    configured_secs.clamp(60, 1740)
+}
+
 /// Check if a mailbox has new messages by comparing UID count.
 ///
 /// This is a lightweight fallback for servers that do not advertise the
@@ -53,9 +61,12 @@ pub async fn check_for_changes_with_idle(
     use_idle: bool,
 ) -> Result<IdleEvent> {
     if use_idle {
-        // Use native IMAP IDLE with a 60-second timeout to match the poll interval.
+        // Use native IMAP IDLE with a bounded timeout. Callers with a dedicated
+        // watcher can pass a longer configured value through `idle_wait`
+        // directly; this helper keeps its historical 60-second behavior.
+        let timeout = std::time::Duration::from_secs(recommended_idle_wait_secs(60));
         match provider
-            .idle_wait(mailbox, std::time::Duration::from_secs(60))
+            .idle_wait(mailbox, timeout)
             .await
         {
             Ok(event) => Ok(event),
@@ -97,5 +108,13 @@ mod tests {
         let event = IdleEvent::NewMail;
         let debug_str = format!("{:?}", event);
         assert!(debug_str.contains("NewMail"));
+    }
+
+    #[test]
+    fn idle_timeout_is_shorter_than_server_disconnect_window() {
+        assert_eq!(recommended_idle_wait_secs(1), 60);
+        assert_eq!(recommended_idle_wait_secs(120), 120);
+        assert_eq!(recommended_idle_wait_secs(1800), 1740);
+        assert_eq!(recommended_idle_wait_secs(3600), 1740);
     }
 }
