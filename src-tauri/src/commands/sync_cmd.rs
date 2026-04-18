@@ -244,6 +244,16 @@ fn polling_status_message(config: &SyncConfig) -> String {
     }
 }
 
+fn realtime_preference_poll_interval(mode: &str) -> std::result::Result<u64, PebbleError> {
+    match mode {
+        "realtime" => Ok(10),
+        "balanced" => Ok(30),
+        "battery" => Ok(120),
+        "manual" => Ok(0),
+        other => Err(PebbleError::Validation(format!("Invalid realtime preference: {other}"))),
+    }
+}
+
 /// Build and spawn the provider-specific sync task.
 ///
 /// Extracted so that any `?` propagation (token decode, config parse, etc.)
@@ -254,7 +264,7 @@ fn build_sync_task(
     store: Arc<Store>,
     attachments_dir: std::path::PathBuf,
     stop_rx: watch::Receiver<bool>,
-    _trigger_rx: mpsc::UnboundedReceiver<SyncTrigger>,
+    trigger_rx: mpsc::UnboundedReceiver<SyncTrigger>,
     error_tx: mpsc::UnboundedSender<pebble_mail::SyncError>,
     message_tx: mpsc::UnboundedSender<pebble_mail::StoredMessage>,
     app_for_progress: tauri::AppHandle,
@@ -324,7 +334,7 @@ fn build_sync_task(
                 .with_error_tx(error_tx)
                 .with_message_tx(message_tx)
                 .with_token_refresher(refresher, expires_at);
-                worker.run(config).await;
+                worker.run(config, Some(trigger_rx)).await;
                 let _ = app_for_progress.emit(
                     events::MAIL_SYNC_COMPLETE,
                     serde_json::json!({ "account_id": &account_id_for_progress }),
@@ -394,7 +404,7 @@ fn build_sync_task(
                 .with_error_tx(error_tx)
                 .with_message_tx(message_tx)
                 .with_token_refresher(refresher, expires_at);
-                worker.run(config, stop_rx).await;
+                worker.run(config, stop_rx, Some(trigger_rx)).await;
                 let _ = app_for_progress.emit(
                     events::MAIL_SYNC_COMPLETE,
                     serde_json::json!({ "account_id": &account_id_for_progress }),
@@ -450,7 +460,7 @@ fn build_sync_task(
                 let worker = SyncWorker::new(account_id_clone.clone(), provider, store, stop_rx, attachments_dir)
                     .with_error_tx(error_tx)
                     .with_message_tx(message_tx);
-                worker.run(config).await;
+                worker.run(config, Some(trigger_rx)).await;
                 let _ = app_for_progress.emit(
                     events::MAIL_SYNC_COMPLETE,
                     serde_json::json!({ "account_id": &account_id_for_progress }),
@@ -482,12 +492,48 @@ pub async fn stop_sync(
     state: State<'_, AppState>,
     account_id: String,
 ) -> std::result::Result<(), PebbleError> {
+    stop_sync_inner(&state, &account_id).await;
+    Ok(())
+}
+
+async fn stop_sync_inner(state: &AppState, account_id: &str) {
     let mut handles = state.sync_handles.lock().await;
-    if let Some(handle) = handles.remove(&account_id) {
+    if let Some(handle) = handles.remove(account_id) {
         if let Err(e) = handle.stop_tx.send(true) {
             error!("Failed to send stop signal for account {}: {}", account_id, e);
         }
         handle.task.abort();
+    }
+}
+
+#[tauri::command]
+pub async fn set_realtime_preference(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    mode: String,
+) -> std::result::Result<(), PebbleError> {
+    let poll_interval_secs = realtime_preference_poll_interval(&mode)?;
+    let running_account_ids = {
+        let handles = state.sync_handles.lock().await;
+        handles.keys().cloned().collect::<Vec<_>>()
+    };
+
+    for account_id in running_account_ids {
+        stop_sync_inner(&state, &account_id).await;
+    }
+
+    if poll_interval_secs == 0 {
+        return Ok(());
+    }
+
+    let account_ids = state
+        .store
+        .list_accounts()?
+        .into_iter()
+        .map(|account| account.id)
+        .collect::<Vec<_>>();
+    for account_id in account_ids {
+        start_sync_inner(&app, &state, account_id, Some(poll_interval_secs)).await?;
     }
     Ok(())
 }
@@ -555,5 +601,14 @@ mod trigger_tests {
         assert_eq!(json["last_success_at"], 1_700_000_000);
         assert!(json["next_retry_at"].is_null());
         assert!(json["message"].is_null());
+    }
+
+    #[test]
+    fn realtime_preference_maps_to_backend_poll_interval() {
+        assert_eq!(realtime_preference_poll_interval("realtime").unwrap(), 10);
+        assert_eq!(realtime_preference_poll_interval("balanced").unwrap(), 30);
+        assert_eq!(realtime_preference_poll_interval("battery").unwrap(), 120);
+        assert_eq!(realtime_preference_poll_interval("manual").unwrap(), 0);
+        assert!(realtime_preference_poll_interval("turbo").is_err());
     }
 }

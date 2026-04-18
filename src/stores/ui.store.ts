@@ -43,6 +43,8 @@ export function realtimePreferenceToPollInterval(mode: RealtimePreference): numb
   }
 }
 
+const initialRealtimeMode = readRealtimePreference();
+
 /** Resolve "system" theme to an actual "dark" | "light" value. */
 function resolveTheme(theme: Theme): "dark" | "light" {
   if (theme === "system") {
@@ -98,7 +100,7 @@ export const useUIStore = create<UIState>((set) => ({
   networkStatus: "online",
   lastMailError: null,
   realtimeStatusByAccount: {},
-  realtimeMode: readRealtimePreference(),
+  realtimeMode: initialRealtimeMode,
   previousView: "inbox",
   toggleSidebar: () =>
     set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
@@ -165,7 +167,7 @@ export const useUIStore = create<UIState>((set) => ({
       pollInterval,
     });
   },
-  pollInterval: Number(localStorage.getItem("pebble-poll-interval")) || 15,
+  pollInterval: realtimePreferenceToPollInterval(initialRealtimeMode),
   setPollInterval: (secs) => {
     localStorage.setItem("pebble-poll-interval", String(secs));
     set({ pollInterval: secs });

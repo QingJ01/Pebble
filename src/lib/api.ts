@@ -269,6 +269,12 @@ export async function triggerSync(accountId: string, reason: string): Promise<vo
   return invoke<void>("trigger_sync", { accountId, reason });
 }
 
+export type RealtimePreference = "realtime" | "balanced" | "battery" | "manual";
+
+export async function setRealtimePreference(mode: RealtimePreference): Promise<void> {
+  return invoke<void>("set_realtime_preference", { mode });
+}
+
 export async function stopSync(accountId: string): Promise<void> {
   return invoke<void>("stop_sync", { accountId });
 }

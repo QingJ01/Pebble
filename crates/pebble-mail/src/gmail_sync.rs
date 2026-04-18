@@ -3,6 +3,7 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use pebble_core::traits::FolderProvider;
 use pebble_core::{new_id, now_timestamp, Folder, FolderRole, PebbleError, Result};
@@ -13,9 +14,9 @@ use tracing::{debug, error, info, warn};
 
 use crate::backoff::SyncBackoff;
 use crate::provider::gmail::{visible_label_ids, GmailFetchedMessage, GmailMessageRef, GmailProvider};
-use crate::realtime_policy::{RealtimeContext, RealtimePollPolicy};
+use crate::realtime_policy::{RealtimePollPolicy, RealtimeRuntimeState, SyncTrigger};
 use crate::sync::{
-    persist_message_attachments_async, StoredMessage, SyncConfig, SyncError, SyncWorkerBase,
+    persist_message_attachments_async, recv_sync_trigger, StoredMessage, SyncConfig, SyncError, SyncWorkerBase,
 };
 use crate::thread::compute_thread_id;
 
@@ -804,8 +805,38 @@ impl GmailSyncWorker {
         Ok(())
     }
 
+    async fn run_poll_cycle(&self, backoff: &mut SyncBackoff) {
+        if backoff.is_circuit_open() {
+            warn!(
+                "Circuit open for Gmail account {} ({} failures), waiting {:?}",
+                self.base.account_id,
+                backoff.failure_count(),
+                backoff.current_delay()
+            );
+            return;
+        }
+
+        if let Err(e) = self.ensure_valid_token().await {
+            warn!("Token refresh failed: {}", e);
+            let _ = backoff.record_failure();
+            return;
+        }
+        match self.poll_changes().await {
+            Ok(()) => backoff.record_success(),
+            Err(e) => {
+                warn!("Gmail poll failed for account {}: {}", self.base.account_id, e);
+                self.base.emit_error("sync", &format!("Poll failed: {e}"));
+                let _ = backoff.record_failure();
+            }
+        }
+    }
+
     /// Main sync loop.
-    pub async fn run(&self, config: SyncConfig) {
+    pub async fn run(
+        &self,
+        config: SyncConfig,
+        trigger_rx: Option<mpsc::UnboundedReceiver<SyncTrigger>>,
+    ) {
         // Ensure token is valid before starting
         if let Err(e) = self.ensure_valid_token().await {
             error!(
@@ -836,13 +867,11 @@ impl GmailSyncWorker {
         let policy = RealtimePollPolicy::from_foreground_interval_secs(config.poll_interval_secs);
         let mut stop_rx = self.stop_rx.clone();
         let mut backoff = SyncBackoff::new();
+        let mut trigger_rx = trigger_rx;
+        let mut runtime = RealtimeRuntimeState::new(Duration::from_secs(60), Instant::now());
 
         loop {
-            let next_delay = policy.next_delay(RealtimeContext {
-                app_foreground: true,
-                recent_activity: true,
-                consecutive_failures: backoff.failure_count(),
-            });
+            let next_delay = policy.next_delay(runtime.context(backoff.failure_count(), Instant::now()));
 
             tokio::select! {
                 _ = stop_rx.changed() => {
@@ -852,25 +881,18 @@ impl GmailSyncWorker {
                     }
                 }
                 _ = tokio::time::sleep(next_delay) => {
-                    if backoff.is_circuit_open() {
-                        warn!(
-                            "Circuit open for Gmail account {} ({} failures), adaptive wait {:?}",
-                            self.base.account_id, backoff.failure_count(), next_delay
-                        );
-                        continue;
-                    }
-
-                    if let Err(e) = self.ensure_valid_token().await {
-                        warn!("Token refresh failed: {}", e);
-                        let _ = backoff.record_failure();
-                        continue;
-                    }
-                    match self.poll_changes().await {
-                        Ok(()) => backoff.record_success(),
-                        Err(e) => {
-                            warn!("Gmail poll failed for account {}: {}", self.base.account_id, e);
-                            self.base.emit_error("sync", &format!("Poll failed: {e}"));
-                            let _ = backoff.record_failure();
+                    self.run_poll_cycle(&mut backoff).await;
+                }
+                trigger = recv_sync_trigger(&mut trigger_rx) => {
+                    match trigger {
+                        Some(trigger) => {
+                            runtime.record_trigger(trigger, Instant::now());
+                            if trigger.should_sync_now() {
+                                self.run_poll_cycle(&mut backoff).await;
+                            }
+                        }
+                        None => {
+                            trigger_rx = None;
                         }
                     }
                 }

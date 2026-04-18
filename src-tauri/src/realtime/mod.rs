@@ -1,5 +1,7 @@
 use serde::Serialize;
 
+pub use pebble_mail::SyncTrigger;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RealtimeMode {
@@ -19,27 +21,6 @@ pub struct RealtimeStatusPayload {
     pub last_success_at: Option<i64>,
     pub next_retry_at: Option<i64>,
     pub message: Option<String>,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SyncTrigger {
-    Startup,
-    Manual,
-    Timer,
-    NetworkOnline,
-    WindowFocus,
-    ProviderPush,
-}
-
-impl SyncTrigger {
-    pub fn from_reason(reason: &str) -> Self {
-        match reason {
-            "network_online" => Self::NetworkOnline,
-            "window_focus" => Self::WindowFocus,
-            _ => Self::Manual,
-        }
-    }
 }
 
 #[cfg(test)]

@@ -2,6 +2,7 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
+use std::time::{Duration, Instant};
 
 use pebble_core::traits::FolderProvider;
 use pebble_core::{now_timestamp, Folder, Message, PebbleError, Result};
@@ -12,14 +13,70 @@ use tracing::{info, warn};
 use crate::backoff::SyncBackoff;
 use crate::provider::outlook::{OutlookDeltaPage, OutlookProvider};
 use crate::gmail_sync::TokenRefresher;
-use crate::realtime_policy::{RealtimeContext, RealtimePollPolicy};
-use crate::sync::{StoredMessage, SyncConfig, SyncError, SyncWorkerBase, persist_message_attachments_async};
+use crate::realtime_policy::{RealtimePollPolicy, RealtimeRuntimeState, SyncTrigger};
+use crate::sync::{StoredMessage, SyncConfig, SyncError, SyncWorkerBase, persist_message_attachments_async, recv_sync_trigger};
 use crate::thread::compute_thread_id;
 
 struct OutlookDeltaBatch {
     messages: Vec<Message>,
     deleted_remote_ids: Vec<String>,
     delta_link: Option<String>,
+}
+
+enum SyncWaitOutcome {
+    Stop,
+    ReadyToPoll,
+    ContextChanged,
+}
+
+async fn wait_for_outlook_delay(
+    wait: Duration,
+    runtime: &mut RealtimeRuntimeState,
+    stop_rx: &mut watch::Receiver<bool>,
+    trigger_rx: &mut Option<mpsc::UnboundedReceiver<SyncTrigger>>,
+) -> SyncWaitOutcome {
+    tokio::select! {
+        _ = tokio::time::sleep(wait) => SyncWaitOutcome::ReadyToPoll,
+        changed = stop_rx.changed() => {
+            match changed {
+                Ok(()) if *stop_rx.borrow() => SyncWaitOutcome::Stop,
+                _ => SyncWaitOutcome::ContextChanged,
+            }
+        }
+        trigger = recv_sync_trigger(trigger_rx) => {
+            match trigger {
+                Some(trigger) => {
+                    runtime.record_trigger(trigger, Instant::now());
+                    if trigger.should_sync_now() {
+                        SyncWaitOutcome::ReadyToPoll
+                    } else {
+                        SyncWaitOutcome::ContextChanged
+                    }
+                }
+                None => {
+                    *trigger_rx = None;
+                    SyncWaitOutcome::ContextChanged
+                }
+            }
+        }
+    }
+}
+
+async fn wait_for_outlook_policy_delay(
+    policy: &RealtimePollPolicy,
+    backoff: &SyncBackoff,
+    runtime: &mut RealtimeRuntimeState,
+    stop_rx: &mut watch::Receiver<bool>,
+    trigger_rx: &mut Option<mpsc::UnboundedReceiver<SyncTrigger>>,
+) -> bool {
+    loop {
+        let wait = policy.next_delay(runtime.context(backoff.failure_count(), Instant::now()));
+        match wait_for_outlook_delay(wait, runtime, stop_rx, trigger_rx).await {
+            SyncWaitOutcome::Stop => return true,
+            SyncWaitOutcome::ReadyToPoll => return false,
+            SyncWaitOutcome::ContextChanged => continue,
+        }
+    }
 }
 
 async fn collect_outlook_delta_pages<F, Fut>(
@@ -274,11 +331,18 @@ impl OutlookSyncWorker {
     }
 
     /// Main sync loop.
-    pub async fn run(&self, config: SyncConfig, mut stop_rx: watch::Receiver<bool>) {
+    pub async fn run(
+        &self,
+        config: SyncConfig,
+        mut stop_rx: watch::Receiver<bool>,
+        trigger_rx: Option<mpsc::UnboundedReceiver<SyncTrigger>>,
+    ) {
         let policy = RealtimePollPolicy::from_foreground_interval_secs(config.poll_interval_secs);
         let mut backoff = SyncBackoff::new();
+        let mut trigger_rx = trigger_rx;
+        let mut runtime = RealtimeRuntimeState::new(Duration::from_secs(60), Instant::now());
 
-        loop {
+        'sync_loop: loop {
             if *stop_rx.borrow() {
                 break;
             }
@@ -290,9 +354,12 @@ impl OutlookSyncWorker {
                     "Circuit open for Outlook account {} ({} failures), waiting {:?}",
                     self.base.account_id, backoff.failure_count(), delay
                 );
-                match tokio::time::timeout(delay, stop_rx.changed()).await {
-                    Ok(Ok(())) if *stop_rx.borrow() => break,
-                    _ => {}
+                loop {
+                    match wait_for_outlook_delay(delay, &mut runtime, &mut stop_rx, &mut trigger_rx).await {
+                        SyncWaitOutcome::Stop => break 'sync_loop,
+                        SyncWaitOutcome::ReadyToPoll => break,
+                        SyncWaitOutcome::ContextChanged => continue,
+                    }
                 }
                 continue;
             }
@@ -304,7 +371,13 @@ impl OutlookSyncWorker {
                 let _ = backoff.record_failure();
                 if backoff.is_circuit_open() {
                     let delay = backoff.current_delay();
-                    let _ = tokio::time::timeout(delay, stop_rx.changed()).await;
+                    loop {
+                        match wait_for_outlook_delay(delay, &mut runtime, &mut stop_rx, &mut trigger_rx).await {
+                            SyncWaitOutcome::Stop => break 'sync_loop,
+                            SyncWaitOutcome::ReadyToPoll => break,
+                            SyncWaitOutcome::ContextChanged => continue,
+                        }
+                    }
                 }
                 continue;
             }
@@ -325,16 +398,19 @@ impl OutlookSyncWorker {
                             self.base.account_id, backoff.failure_count(), delay
                         );
                     }
-                    let wait = if backoff.is_circuit_open() {
-                        delay
+                    if backoff.is_circuit_open() {
+                        loop {
+                            match wait_for_outlook_delay(delay, &mut runtime, &mut stop_rx, &mut trigger_rx).await {
+                                SyncWaitOutcome::Stop => break 'sync_loop,
+                                SyncWaitOutcome::ReadyToPoll => break,
+                                SyncWaitOutcome::ContextChanged => continue,
+                            }
+                        }
                     } else {
-                        policy.next_delay(RealtimeContext {
-                            app_foreground: true,
-                            recent_activity: true,
-                            consecutive_failures: backoff.failure_count(),
-                        })
-                    };
-                    let _ = tokio::time::timeout(wait, stop_rx.changed()).await;
+                        if wait_for_outlook_policy_delay(&policy, &backoff, &mut runtime, &mut stop_rx, &mut trigger_rx).await {
+                            break 'sync_loop;
+                        }
+                    }
                     continue;
                 }
             };
@@ -406,13 +482,9 @@ impl OutlookSyncWorker {
                 break;
             }
 
-            // Wait for next poll or stop signal
-            let wait = policy.next_delay(RealtimeContext {
-                app_foreground: true,
-                recent_activity: true,
-                consecutive_failures: backoff.failure_count(),
-            });
-            let _ = tokio::time::timeout(wait, stop_rx.changed()).await;
+            if wait_for_outlook_policy_delay(&policy, &backoff, &mut runtime, &mut stop_rx, &mut trigger_rx).await {
+                break;
+            }
         }
 
         info!("Outlook sync task completed for account {}", self.base.account_id);

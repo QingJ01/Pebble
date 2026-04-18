@@ -13,9 +13,16 @@ export function useRealtimeSyncTriggers() {
     const onFocus = () => {
       triggerSync(activeAccountId, "window_focus").catch(() => {});
     };
+    const onBlur = () => {
+      triggerSync(activeAccountId, "window_blur").catch(() => {});
+    };
 
     window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
+    };
   }, [activeAccountId]);
 
   useEffect(() => {

@@ -15,6 +15,7 @@ import { useNetworkStatus } from "../hooks/useNetworkStatus";
 import { buildCommands } from "../features/command-palette/commands";
 import { useDeferredValue, useEffect, lazy, Suspense, Component, type ReactNode, type ErrorInfo } from "react";
 import { createLazyViewPreloader, scheduleLazyViewPreload } from "./lazyViewPreload";
+import { useRealtimePreferenceSync } from "./useRealtimePreferenceSync";
 import { useRealtimeSyncTriggers } from "./useRealtimeSyncTriggers";
 
 const loadSettingsView = () => import("../features/settings/SettingsView");
@@ -63,6 +64,7 @@ export default function Layout() {
   useEffect(() => scheduleLazyViewPreload(preloadLazyViews), []);
 
   useNetworkStatus();
+  useRealtimePreferenceSync();
   useRealtimeSyncTriggers();
 
   // Re-register commands when language changes

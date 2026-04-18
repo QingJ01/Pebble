@@ -17,6 +17,7 @@ pub struct SyncError {
 
 use crate::parser::{parse_raw_email, AttachmentData, ParsedMessage};
 use crate::provider::imap_provider::ImapMailProvider;
+use crate::realtime_policy::SyncTrigger;
 use crate::reconcile;
 use crate::thread::compute_thread_id;
 
@@ -317,6 +318,15 @@ pub struct StoredMessage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ImapWorkerTrigger {
     ProviderPush,
+}
+
+pub(crate) async fn recv_sync_trigger(
+    trigger_rx: &mut Option<mpsc::UnboundedReceiver<SyncTrigger>>,
+) -> Option<SyncTrigger> {
+    match trigger_rx {
+        Some(rx) => rx.recv().await,
+        None => std::future::pending().await,
+    }
 }
 
 /// Common fields shared by all sync workers.
@@ -1028,7 +1038,11 @@ impl SyncWorker {
     }
 
     /// Run the sync worker loop until the stop signal is received.
-    pub async fn run(&self, config: SyncConfig) {
+    pub async fn run(
+        &self,
+        config: SyncConfig,
+        trigger_rx: Option<mpsc::UnboundedReceiver<SyncTrigger>>,
+    ) {
         // Connect and do initial sync
         if let Err(e) = self.provider.connect().await {
             error!(
@@ -1084,6 +1098,7 @@ impl SyncWorker {
         let mut stop_rx = self.stop_rx.clone();
         let mut last_exists: u32 = 0;
         let mut backoff = SyncBackoff::new();
+        let mut trigger_rx = trigger_rx;
         let (idle_trigger_tx, mut idle_trigger_rx) = mpsc::unbounded_channel();
         let mut idle_watcher = None;
 
@@ -1208,6 +1223,32 @@ impl SyncWorker {
                                 self.base.account_id
                             );
                             idle_watcher_active = false;
+                        }
+                    }
+                }
+                trigger = recv_sync_trigger(&mut trigger_rx) => {
+                    match trigger {
+                        Some(trigger) => {
+                            if !trigger.should_sync_now() {
+                                continue;
+                            }
+                            if backoff.is_circuit_open() {
+                                debug!(
+                                    "Ignoring realtime trigger while circuit is open for account {}",
+                                    self.base.account_id
+                                );
+                                continue;
+                            }
+                            if let Err(e) = self.poll_new_messages().await {
+                                warn!("Triggered poll error for account {}: {}", self.base.account_id, e);
+                                self.base.emit_error("poll", &format!("Triggered poll error: {}", e));
+                                backoff.record_failure();
+                            } else {
+                                backoff.record_success();
+                            }
+                        }
+                        None => {
+                            trigger_rx = None;
                         }
                     }
                 }

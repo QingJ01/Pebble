@@ -32,6 +32,16 @@ describe("useRealtimeSyncTriggers", () => {
     expect(triggerSync).toHaveBeenCalledWith("account-1", "window_focus");
   });
 
+  it("notifies the backend when the window loses focus", () => {
+    renderHook(() => useRealtimeSyncTriggers());
+
+    act(() => {
+      window.dispatchEvent(new Event("blur"));
+    });
+
+    expect(triggerSync).toHaveBeenCalledWith("account-1", "window_blur");
+  });
+
   it("triggers sync when the app is online with an active account", () => {
     renderHook(() => useRealtimeSyncTriggers());
 

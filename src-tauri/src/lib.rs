@@ -271,6 +271,7 @@ pub fn run() {
             commands::sync_cmd::start_sync,
             commands::sync_cmd::trigger_sync,
             commands::sync_cmd::stop_sync,
+            commands::sync_cmd::set_realtime_preference,
             commands::kanban::move_to_kanban,
             commands::kanban::list_kanban_cards,
             commands::kanban::remove_from_kanban,
