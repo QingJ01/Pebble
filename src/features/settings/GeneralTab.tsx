@@ -8,11 +8,37 @@ const REALTIME_OPTIONS: Array<{
   mode: RealtimePreference;
   labelKey: string;
   fallback: string;
+  descriptionKey: string;
+  descriptionFallback: string;
 }> = [
-  { mode: "realtime", labelKey: "settings.realtimeModeRealtime", fallback: "Realtime (recommended)" },
-  { mode: "balanced", labelKey: "settings.realtimeModeBalanced", fallback: "Balanced" },
-  { mode: "battery", labelKey: "settings.realtimeModeBattery", fallback: "Battery saver" },
-  { mode: "manual", labelKey: "settings.realtimeModeManual", fallback: "Manual only" },
+  {
+    mode: "realtime",
+    labelKey: "settings.realtimeModeRealtime",
+    fallback: "Realtime (recommended)",
+    descriptionKey: "settings.realtimeModeRealtimeDesc",
+    descriptionFallback: "IMAP uses IDLE push when supported. Other providers check about every 3 seconds while you are active.",
+  },
+  {
+    mode: "balanced",
+    labelKey: "settings.realtimeModeBalanced",
+    fallback: "Balanced",
+    descriptionKey: "settings.realtimeModeBalancedDesc",
+    descriptionFallback: "Checks about every 15 seconds while you are active.",
+  },
+  {
+    mode: "battery",
+    labelKey: "settings.realtimeModeBattery",
+    fallback: "Battery saver",
+    descriptionKey: "settings.realtimeModeBatteryDesc",
+    descriptionFallback: "Checks about every 60 seconds while you are active and slows down in the background.",
+  },
+  {
+    mode: "manual",
+    labelKey: "settings.realtimeModeManual",
+    fallback: "Manual only",
+    descriptionKey: "settings.realtimeModeManualDesc",
+    descriptionFallback: "Stops background checks. Use Sync now to run a single pass.",
+  },
 ];
 
 export default function GeneralTab() {
@@ -55,24 +81,32 @@ export default function GeneralTab() {
       >
         {REALTIME_OPTIONS.map((option) => {
           const selected = realtimeMode === option.mode;
+          const label = t(option.labelKey, option.fallback);
           return (
             <button
               key={option.mode}
               type="button"
+              aria-label={label}
               aria-pressed={selected}
               onClick={() => setRealtimeMode(option.mode)}
               style={{
-                padding: "8px 16px",
+                flex: "1 1 180px",
+                minWidth: 0,
+                padding: "8px 10px",
                 borderRadius: "6px",
                 border: selected ? "2px solid var(--color-accent)" : "1px solid var(--color-border)",
                 backgroundColor: selected ? "var(--color-bg-hover)" : "transparent",
                 cursor: "pointer",
-                fontSize: "13px",
-                fontWeight: selected ? 600 : 400,
+                textAlign: "left",
                 color: "var(--color-text-primary)",
               }}
             >
-              {t(option.labelKey, option.fallback)}
+              <span style={{ display: "block", fontSize: "13px", fontWeight: selected ? 600 : 500, lineHeight: 1.3 }}>
+                {label}
+              </span>
+              <span style={{ display: "block", marginTop: "4px", fontSize: "12px", lineHeight: 1.35, color: "var(--color-text-secondary)" }}>
+                {t(option.descriptionKey, option.descriptionFallback)}
+              </span>
             </button>
           );
         })}

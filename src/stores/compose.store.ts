@@ -15,6 +15,7 @@ interface ComposeState {
   closeCompose: () => void;
   confirmCloseCompose: () => void;
   cancelCloseCompose: () => void;
+  discardComposeAndSetActiveView: (view: ActiveView) => void;
 }
 
 function getComposeResetState() {
@@ -68,12 +69,15 @@ export const useComposeStore = create<ComposeState>((set) => ({
     const state = useComposeStore.getState();
     const uiState = useUIStore.getState();
     const targetView = state.pendingView ?? uiState.previousView;
-    useUIStore.setState({ activeView: targetView });
+    useComposeStore.getState().discardComposeAndSetActiveView(targetView);
+  },
+  cancelCloseCompose: () => set({ showComposeLeaveConfirm: false, pendingView: null }),
+  discardComposeAndSetActiveView: (view) => {
+    useUIStore.setState({ activeView: view });
     set({
       showComposeLeaveConfirm: false,
       pendingView: null,
       ...getComposeResetState(),
     });
   },
-  cancelCloseCompose: () => set({ showComposeLeaveConfirm: false, pendingView: null }),
 }));

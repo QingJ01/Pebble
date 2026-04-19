@@ -33,11 +33,11 @@ function readRealtimePreference(): RealtimePreference {
 export function realtimePreferenceToPollInterval(mode: RealtimePreference): number {
   switch (mode) {
     case "realtime":
-      return 10;
+      return 3;
     case "balanced":
-      return 30;
+      return 15;
     case "battery":
-      return 120;
+      return 60;
     case "manual":
       return 0;
   }

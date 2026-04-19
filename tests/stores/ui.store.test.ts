@@ -223,9 +223,9 @@ describe("UIStore", () => {
   });
 
   it("maps realtime preferences to backend poll intervals", () => {
-    expect(realtimePreferenceToPollInterval("realtime")).toBe(10);
-    expect(realtimePreferenceToPollInterval("balanced")).toBe(30);
-    expect(realtimePreferenceToPollInterval("battery")).toBe(120);
+    expect(realtimePreferenceToPollInterval("realtime")).toBe(3);
+    expect(realtimePreferenceToPollInterval("balanced")).toBe(15);
+    expect(realtimePreferenceToPollInterval("battery")).toBe(60);
     expect(realtimePreferenceToPollInterval("manual")).toBe(0);
   });
 });

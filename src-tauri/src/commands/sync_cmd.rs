@@ -246,9 +246,9 @@ fn polling_status_message(config: &SyncConfig) -> String {
 
 fn realtime_preference_poll_interval(mode: &str) -> std::result::Result<u64, PebbleError> {
     match mode {
-        "realtime" => Ok(10),
-        "balanced" => Ok(30),
-        "battery" => Ok(120),
+        "realtime" => Ok(3),
+        "balanced" => Ok(15),
+        "battery" => Ok(60),
         "manual" => Ok(0),
         other => Err(PebbleError::Validation(format!("Invalid realtime preference: {other}"))),
     }
@@ -642,9 +642,9 @@ mod trigger_tests {
 
     #[test]
     fn realtime_preference_maps_to_backend_poll_interval() {
-        assert_eq!(realtime_preference_poll_interval("realtime").unwrap(), 10);
-        assert_eq!(realtime_preference_poll_interval("balanced").unwrap(), 30);
-        assert_eq!(realtime_preference_poll_interval("battery").unwrap(), 120);
+        assert_eq!(realtime_preference_poll_interval("realtime").unwrap(), 3);
+        assert_eq!(realtime_preference_poll_interval("balanced").unwrap(), 15);
+        assert_eq!(realtime_preference_poll_interval("battery").unwrap(), 60);
         assert_eq!(realtime_preference_poll_interval("manual").unwrap(), 0);
         assert!(realtime_preference_poll_interval("turbo").is_err());
     }

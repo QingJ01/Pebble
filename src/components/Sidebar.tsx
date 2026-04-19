@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useUIStore } from "../stores/ui.store";
-import { isComposeDirty } from "../stores/compose.store";
+import { isComposeDirty, useComposeStore } from "../stores/compose.store";
 import { useConfirmStore } from "../stores/confirm.store";
 import { useMailStore } from "../stores/mail.store";
 import { useAccountsQuery, useFoldersQuery } from "../hooks/queries";
@@ -118,26 +118,33 @@ export default function Sidebar() {
     }
   }, [folders, foldersFetched, activeFolderId, setActiveFolderId, accounts, activeAccountId, setActiveAccountId]);
 
-  async function safeSetActiveView(view: Parameters<typeof setActiveView>[0]) {
+  async function confirmDiscardDraft() {
     if (isComposeDirty()) {
       const confirmed = await useConfirmStore.getState().confirm({
         title: t("compose.discardDraft", "Discard draft"),
         message: t("compose.discardDraftConfirm", "You have an unsaved draft. Discard and leave?"),
         destructive: true,
       });
-      if (!confirmed) return;
+      return confirmed;
+    }
+    return true;
+  }
+
+  async function safeSetActiveView(view: Parameters<typeof setActiveView>[0]) {
+    if (!(await confirmDiscardDraft())) return;
+    if (isComposeDirty()) {
+      useComposeStore.getState().discardComposeAndSetActiveView(view);
+      return;
     }
     setActiveView(view);
   }
 
   async function handleFolderClick(folderId: string) {
+    if (!(await confirmDiscardDraft())) return;
     if (isComposeDirty()) {
-      const confirmed = await useConfirmStore.getState().confirm({
-        title: t("compose.discardDraft", "Discard draft"),
-        message: t("compose.discardDraftConfirm", "You have an unsaved draft. Discard and leave?"),
-        destructive: true,
-      });
-      if (!confirmed) return;
+      useComposeStore.getState().discardComposeAndSetActiveView("inbox");
+      setActiveFolderId(folderId);
+      return;
     }
     setActiveView("inbox");
     setActiveFolderId(folderId);

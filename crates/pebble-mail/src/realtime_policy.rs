@@ -107,9 +107,14 @@ impl RealtimeRuntimeState {
 
 impl RealtimePollPolicy {
     pub fn from_foreground_interval_secs(foreground_recent_secs: u64) -> Self {
+        let foreground_recent_secs = foreground_recent_secs.max(1);
+        let defaults = Self::default();
+        let foreground_idle_secs = defaults.foreground_idle_secs.max(foreground_recent_secs);
         Self {
-            foreground_recent_secs: foreground_recent_secs.max(1),
-            ..Self::default()
+            foreground_recent_secs,
+            foreground_idle_secs,
+            background_secs: defaults.background_secs.max(foreground_idle_secs),
+            max_backoff_secs: defaults.max_backoff_secs,
         }
     }
 
@@ -204,7 +209,7 @@ mod tests {
 
     #[test]
     fn configured_foreground_interval_supports_battery_saver() {
-        let policy = RealtimePollPolicy::from_foreground_interval_secs(120);
+        let policy = RealtimePollPolicy::from_foreground_interval_secs(60);
 
         assert_eq!(
             policy.next_delay(RealtimeContext {
@@ -212,7 +217,21 @@ mod tests {
                 recent_activity: true,
                 consecutive_failures: 0,
             }),
-            std::time::Duration::from_secs(120)
+            std::time::Duration::from_secs(60)
+        );
+    }
+
+    #[test]
+    fn configured_interval_is_a_floor_for_foreground_idle_polling() {
+        let policy = RealtimePollPolicy::from_foreground_interval_secs(60);
+
+        assert_eq!(
+            policy.next_delay(RealtimeContext {
+                app_foreground: true,
+                recent_activity: false,
+                consecutive_failures: 0,
+            }),
+            std::time::Duration::from_secs(60)
         );
     }
 
