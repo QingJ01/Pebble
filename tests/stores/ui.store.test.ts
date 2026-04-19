@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useComposeStore } from "../../src/stores/compose.store";
 import { useMailStore } from "../../src/stores/mail.store";
-import { realtimePreferenceToPollInterval, useUIStore } from "../../src/stores/ui.store";
+import {
+  readNotificationsEnabledPreference,
+  realtimePreferenceToPollInterval,
+  useUIStore,
+} from "../../src/stores/ui.store";
 
 describe("UIStore", () => {
   beforeEach(() => {
@@ -21,6 +25,7 @@ describe("UIStore", () => {
       settingsTab: "accounts",
       pendingRuleDraftText: null,
       showFolderUnreadCount: false,
+      notificationsEnabled: true,
     });
     useComposeStore.setState({
       composeMode: null,
@@ -227,5 +232,24 @@ describe("UIStore", () => {
     expect(realtimePreferenceToPollInterval("balanced")).toBe(15);
     expect(realtimePreferenceToPollInterval("battery")).toBe(60);
     expect(realtimePreferenceToPollInterval("manual")).toBe(0);
+  });
+
+  it("defaults desktop notifications to enabled when the user has no stored preference", () => {
+    localStorage.removeItem("pebble-notifications-enabled");
+
+    expect(readNotificationsEnabledPreference()).toBe(true);
+    expect(useUIStore.getState().notificationsEnabled).toBe(true);
+  });
+
+  it("persists desktop notification preference through the UI store", () => {
+    useUIStore.getState().setNotificationsEnabled(false);
+
+    expect(useUIStore.getState().notificationsEnabled).toBe(false);
+    expect(localStorage.getItem("pebble-notifications-enabled")).toBe("false");
+
+    useUIStore.getState().setNotificationsEnabled(true);
+
+    expect(useUIStore.getState().notificationsEnabled).toBe(true);
+    expect(localStorage.getItem("pebble-notifications-enabled")).toBe("true");
   });
 });

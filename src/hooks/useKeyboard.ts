@@ -276,9 +276,8 @@ export function useKeyboard() {
           confirmLeaveCompose().then((ok) => { if (ok) navigateAfterComposeConfirm("settings"); });
           break;
         case "toggle-notifications": {
-          const key = "pebble-notifications-enabled";
-          const cur = localStorage.getItem(key) === "true";
-          localStorage.setItem(key, String(!cur));
+          const { notificationsEnabled, setNotificationsEnabled } = useUIStore.getState();
+          setNotificationsEnabled(!notificationsEnabled);
           break;
         }
         default:

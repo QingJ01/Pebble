@@ -1,9 +1,7 @@
-import { useState, useCallback } from "react";
+import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import { useUIStore, type RealtimePreference } from "@/stores/ui.store";
 
-const NOTIFICATIONS_KEY = "pebble-notifications-enabled";
 const REALTIME_OPTIONS: Array<{
   mode: RealtimePreference;
   labelKey: string;
@@ -45,19 +43,12 @@ export default function GeneralTab() {
   const { t } = useTranslation();
   const realtimeMode = useUIStore((s) => s.realtimeMode);
   const setRealtimeMode = useUIStore((s) => s.setRealtimeMode);
-
-  const [notificationsEnabled, setNotificationsEnabled] = useState(() => {
-    return localStorage.getItem(NOTIFICATIONS_KEY) === "true";
-  });
+  const notificationsEnabled = useUIStore((s) => s.notificationsEnabled);
+  const setNotificationsEnabled = useUIStore((s) => s.setNotificationsEnabled);
 
   const toggleNotifications = useCallback(() => {
-    setNotificationsEnabled((prev) => {
-      const next = !prev;
-      localStorage.setItem(NOTIFICATIONS_KEY, String(next));
-      invoke("set_notifications_enabled", { enabled: next }).catch((err) => console.warn("Failed to update notifications setting in backend", err));
-      return next;
-    });
-  }, []);
+    setNotificationsEnabled(!notificationsEnabled);
+  }, [notificationsEnabled, setNotificationsEnabled]);
 
   const showUnreadCount = useUIStore((s) => s.showFolderUnreadCount);
   const setShowUnreadCount = useUIStore((s) => s.setShowFolderUnreadCount);

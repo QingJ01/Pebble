@@ -313,6 +313,7 @@ impl SyncConfig {
 pub struct StoredMessage {
     pub message: Message,
     pub folder_ids: Vec<String>,
+    pub notify: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -563,7 +564,7 @@ impl SyncWorker {
             let cursor = self.imap_folder_cursor_for_sync(folder).await;
             let since_uid = cursor.last_uid;
             let limit = if since_uid.is_some() { 50 } else { 200 };
-            match self.sync_folder(folder, since_uid, limit).await {
+            match self.sync_folder(folder, since_uid, limit, false).await {
                 Ok(count) => {
                     if count > 0 {
                         info!(
@@ -594,6 +595,7 @@ impl SyncWorker {
         folder: &pebble_core::Folder,
         since_uid: Option<u32>,
         limit: u32,
+        notify_new: bool,
     ) -> Result<u32> {
         // Skip local-only folders (not backed by IMAP)
         if Self::is_local_folder(folder) {
@@ -738,6 +740,7 @@ impl SyncWorker {
                     self.base.emit_message(StoredMessage {
                         message: msg.clone(),
                         folder_ids: vec![folder.id.clone()],
+                        notify: notify_new,
                     });
 
                     persist_message_attachments_async(
@@ -776,7 +779,7 @@ impl SyncWorker {
             let cursor = self.imap_folder_cursor_for_sync(folder).await;
             let since_uid = cursor.last_uid;
 
-            match self.sync_folder(folder, since_uid, 50).await {
+            match self.sync_folder(folder, since_uid, 50, true).await {
                 Ok(count) if count > 0 => {
                     info!(
                         "Polled {} new messages from {} for account {}",

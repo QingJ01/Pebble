@@ -8,8 +8,6 @@ import { updateMessageFlags, archiveMessage } from "@/lib/api";
 import { queryClient } from "@/lib/query-client";
 import { patchMessagesCache, findCachedMessage } from "@/hooks/queries";
 
-const NOTIFICATIONS_KEY = "pebble-notifications-enabled";
-
 export function buildCommands(t: (key: string, defaultValue: string) => string): Command[] {
   return [
     // Navigation
@@ -137,15 +135,8 @@ export function buildCommands(t: (key: string, defaultValue: string) => string):
       name: t("commands.toggleNotifications", "Toggle Notifications"),
       category: t("commands.settings", "Settings"),
       execute: async () => {
-        const current = localStorage.getItem(NOTIFICATIONS_KEY) === "true";
-        const next = !current;
-        localStorage.setItem(NOTIFICATIONS_KEY, String(next));
-        try {
-          const { invoke } = await import("@tauri-apps/api/core");
-          await invoke("set_notifications_enabled", { enabled: next });
-        } catch {
-          // backend may not have this command yet — localStorage is the source of truth
-        }
+        const { notificationsEnabled, setNotificationsEnabled } = useUIStore.getState();
+        setNotificationsEnabled(!notificationsEnabled);
       },
     },
   ];

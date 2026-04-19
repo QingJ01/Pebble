@@ -22,12 +22,18 @@ export interface RealtimeStatus {
 
 const REALTIME_PREFERENCE_KEY = "pebble-realtime-mode";
 const REALTIME_PREFERENCES = new Set<RealtimePreference>(["realtime", "balanced", "battery", "manual"]);
+const NOTIFICATIONS_KEY = "pebble-notifications-enabled";
 
 function readRealtimePreference(): RealtimePreference {
   const stored = localStorage.getItem(REALTIME_PREFERENCE_KEY);
   return REALTIME_PREFERENCES.has(stored as RealtimePreference)
     ? (stored as RealtimePreference)
     : "realtime";
+}
+
+export function readNotificationsEnabledPreference(): boolean {
+  const stored = localStorage.getItem(NOTIFICATIONS_KEY);
+  return stored === null ? true : stored === "true";
 }
 
 export function realtimePreferenceToPollInterval(mode: RealtimePreference): number {
@@ -44,6 +50,7 @@ export function realtimePreferenceToPollInterval(mode: RealtimePreference): numb
 }
 
 const initialRealtimeMode = readRealtimePreference();
+const initialNotificationsEnabled = readNotificationsEnabledPreference();
 
 /** Resolve "system" theme to an actual "dark" | "light" value. */
 function resolveTheme(theme: Theme): "dark" | "light" {
@@ -68,6 +75,8 @@ interface UIState {
   lastMailError: string | null;
   realtimeStatusByAccount: Record<string, RealtimeStatus>;
   realtimeMode: RealtimePreference;
+  notificationsEnabled: boolean;
+  setNotificationsEnabled: (enabled: boolean) => void;
   previousView: ActiveView;
   toggleSidebar: () => void;
   setActiveView: (view: ActiveView) => void;
@@ -101,6 +110,11 @@ export const useUIStore = create<UIState>((set) => ({
   lastMailError: null,
   realtimeStatusByAccount: {},
   realtimeMode: initialRealtimeMode,
+  notificationsEnabled: initialNotificationsEnabled,
+  setNotificationsEnabled: (enabled) => {
+    localStorage.setItem(NOTIFICATIONS_KEY, String(enabled));
+    set({ notificationsEnabled: enabled });
+  },
   previousView: "inbox",
   toggleSidebar: () =>
     set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),

@@ -284,7 +284,7 @@ impl OutlookSyncWorker {
         Ok(())
     }
 
-    async fn persist_folder_messages(&self, folder: &Folder, messages: Vec<Message>) -> u32 {
+    async fn persist_folder_messages(&self, folder: &Folder, messages: Vec<Message>, notify_new: bool) -> u32 {
         let remote_ids: Vec<String> = messages.iter().map(|m| m.remote_id.clone()).collect();
         let existing = self
             .base.store
@@ -359,6 +359,7 @@ impl OutlookSyncWorker {
             self.base.emit_message(StoredMessage {
                 message: msg.clone(),
                 folder_ids,
+                notify: notify_new,
             });
         }
 
@@ -464,6 +465,7 @@ impl OutlookSyncWorker {
                     .ok()
                     .flatten();
                 let cursor = parse_outlook_delta_cursor(&folder.remote_id, state.as_deref());
+                let notify_new = cursor.is_some();
 
                 match collect_outlook_delta_pages(&folder.remote_id, cursor.as_deref(), |folder_id, cursor| {
                     let provider = Arc::clone(&self.provider);
@@ -472,7 +474,7 @@ impl OutlookSyncWorker {
                 .await
                 {
                     Ok(batch) => {
-                        let mut failure_count = self.persist_folder_messages(folder, batch.messages).await;
+                        let mut failure_count = self.persist_folder_messages(folder, batch.messages, notify_new).await;
 
                         match apply_outlook_deleted_remote_ids(
                             &self.base.store,

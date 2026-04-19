@@ -206,6 +206,7 @@ impl GmailSyncWorker {
         let _ = tx.send(StoredMessage {
             message,
             folder_ids,
+            notify: false,
         });
     }
 
@@ -215,6 +216,7 @@ impl GmailSyncWorker {
         fallback_folder_id: &str,
         thread_mappings: &mut HashMap<String, String>,
         folders_by_remote: &HashMap<String, String>,
+        notify: bool,
     ) -> Result<bool> {
         let GmailFetchedMessage {
             mut message,
@@ -243,6 +245,7 @@ impl GmailSyncWorker {
         self.base.emit_message(StoredMessage {
             message,
             folder_ids,
+            notify,
         });
 
         Ok(true)
@@ -375,7 +378,7 @@ impl GmailSyncWorker {
 
         for label_id in &labels_to_sync {
             match self
-                .sync_label(label_id, limit, &folders_by_remote, &mut thread_mappings)
+                .sync_label(label_id, limit, &folders_by_remote, &mut thread_mappings, false)
                 .await
             {
                 Ok(outcome) => {
@@ -415,6 +418,7 @@ impl GmailSyncWorker {
         limit: u32,
         folders_by_remote: &HashMap<String, String>,
         thread_mappings: &mut HashMap<String, String>,
+        notify_new: bool,
     ) -> Result<GmailLabelSyncOutcome> {
         let folder_id = match folders_by_remote.get(label_id) {
             Some(id) => id.clone(),
@@ -483,7 +487,7 @@ impl GmailSyncWorker {
         for (gmail_id, result) in fetched_results {
             match result {
                 Ok(fetched) => match self
-                    .store_fetched_message(fetched, &folder_id, thread_mappings, folders_by_remote)
+                    .store_fetched_message(fetched, &folder_id, thread_mappings, folders_by_remote, notify_new)
                     .await
                 {
                     Ok(true) => outcome.stored_count += 1,
@@ -778,6 +782,7 @@ impl GmailSyncWorker {
                             &inbox_folder_id,
                             &mut thread_mappings,
                             &folders_by_remote,
+                            true,
                         )
                         .await
                     {

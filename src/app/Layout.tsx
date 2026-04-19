@@ -51,6 +51,7 @@ export default function Layout() {
   const displayedView = useDeferredValue(activeView);
   const setActiveView = useUIStore((s) => s.setActiveView);
   const theme = useUIStore((s) => s.theme);
+  const notificationsEnabled = useUIStore((s) => s.notificationsEnabled);
   const { t } = useTranslation();
   const queryClient = useQueryClient();
 
@@ -70,10 +71,13 @@ export default function Layout() {
   // Re-register commands when language changes
   useEffect(() => {
     useCommandStore.getState().registerCommands(buildCommands(t));
-    // Sync notification preference from localStorage to backend on startup
-    const enabled = localStorage.getItem("pebble-notifications-enabled") === "true";
-    invoke("set_notifications_enabled", { enabled }).catch((err) => console.warn("Failed to sync notification preference to backend", err));
   }, [t]);
+
+  // Keep the Rust notification gate aligned with the single frontend preference source.
+  useEffect(() => {
+    invoke("set_notifications_enabled", { enabled: notificationsEnabled })
+      .catch((err) => console.warn("Failed to sync notification preference to backend", err));
+  }, [notificationsEnabled]);
 
   // Global listener: update sync status when backend starts a sync pass
   useEffect(() => {

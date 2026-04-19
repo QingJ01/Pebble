@@ -4,15 +4,19 @@
 //! Tantivy, and applies rule-engine actions. Split out of `sync_cmd.rs`
 //! so the sync lifecycle and the indexing pipeline can evolve independently.
 
-use crate::events;
 use crate::commands::pending_mail_ops::queue_pending_mail_op;
-use pebble_core::PebbleError;
+use crate::events;
+use crate::state::AppState;
+use pebble_core::{FolderRole, PebbleError};
 use pebble_rules::RuleEngine;
 use pebble_search::TantivySearch;
 use pebble_store::Store;
 use serde_json::json;
+use std::collections::HashSet;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
+use tauri_plugin_notification::NotificationExt;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
@@ -80,6 +84,74 @@ fn new_mail_event_payload(stored: &pebble_mail::StoredMessage) -> serde_json::Va
     })
 }
 
+fn should_send_new_mail_notification(
+    store: &Store,
+    stored: &pebble_mail::StoredMessage,
+) -> pebble_core::Result<bool> {
+    if !stored.notify || stored.message.is_deleted || stored.message.is_draft {
+        return Ok(false);
+    }
+
+    let folder_ids: HashSet<&str> = stored.folder_ids.iter().map(String::as_str).collect();
+    if folder_ids.is_empty() {
+        return Ok(false);
+    }
+
+    let folders = store.list_folders(&stored.message.account_id)?;
+    Ok(folders.iter().any(|folder| {
+        folder.role == Some(FolderRole::Inbox) && folder_ids.contains(folder.id.as_str())
+    }))
+}
+
+fn new_mail_notification_body(stored: &pebble_mail::StoredMessage) -> String {
+    let sender = if stored.message.from_name.trim().is_empty() {
+        stored.message.from_address.trim()
+    } else {
+        stored.message.from_name.trim()
+    };
+    let subject = stored.message.subject.trim();
+
+    match (sender.is_empty(), subject.is_empty()) {
+        (true, true) => "New message".to_string(),
+        (true, false) => subject.to_string(),
+        (false, true) => sender.to_string(),
+        (false, false) => format!("{sender}: {subject}"),
+    }
+}
+
+fn maybe_send_new_mail_notification(
+    app: &tauri::AppHandle,
+    store: &Store,
+    stored: &pebble_mail::StoredMessage,
+) {
+    let notifications_enabled = app
+        .try_state::<AppState>()
+        .is_some_and(|state| state.notifications_enabled.load(Ordering::SeqCst));
+
+    if !notifications_enabled {
+        return;
+    }
+
+    match should_send_new_mail_notification(store, stored) {
+        Ok(true) => {
+            if let Err(e) = app
+                .notification()
+                .builder()
+                .title("Pebble - New Mail")
+                .body(&new_mail_notification_body(stored))
+                .show()
+            {
+                warn!("Failed to show new mail notification: {e}");
+            }
+        }
+        Ok(false) => {}
+        Err(e) => warn!(
+            "Failed to evaluate new mail notification eligibility for message {}: {e}",
+            stored.message.id
+        ),
+    }
+}
+
 pub async fn index_new_messages(
     search: &Arc<TantivySearch>,
     store: &Arc<Store>,
@@ -135,6 +207,7 @@ pub async fn index_new_messages(
                 events::MAIL_NEW,
                 new_mail_event_payload(&stored),
             );
+            maybe_send_new_mail_notification(app, store, &stored);
         }
 
         if let Some(ref engine) = engine {
@@ -374,7 +447,7 @@ fn queue_remote_rule_action(
 
 #[cfg(test)]
 mod rule_writeback_tests {
-    use super::{apply_rule_action, new_mail_event_payload};
+    use super::{apply_rule_action, new_mail_event_payload, should_send_new_mail_notification};
     use pebble_core::*;
     use pebble_rules::types::RuleAction;
     use pebble_store::pending_ops::PendingMailOpStatus;
@@ -426,6 +499,7 @@ mod rule_writeback_tests {
         let stored = pebble_mail::StoredMessage {
             message,
             folder_ids: vec!["folder-inbox".to_string()],
+            notify: true,
         };
 
         let payload = new_mail_event_payload(&stored);
@@ -499,6 +573,40 @@ mod rule_writeback_tests {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    #[test]
+    fn initial_sync_messages_do_not_trigger_new_mail_notifications() {
+        let store = Store::open_in_memory().unwrap();
+        let account = test_account();
+        store.insert_account(&account).unwrap();
+        let folder = test_folder(&account.id);
+        store.insert_folder(&folder).unwrap();
+        let message = test_message(&account.id);
+        let stored = pebble_mail::StoredMessage {
+            message,
+            folder_ids: vec![folder.id],
+            notify: false,
+        };
+
+        assert!(!should_send_new_mail_notification(&store, &stored).unwrap());
+    }
+
+    #[test]
+    fn realtime_inbox_messages_trigger_new_mail_notifications() {
+        let store = Store::open_in_memory().unwrap();
+        let account = test_account();
+        store.insert_account(&account).unwrap();
+        let folder = test_folder(&account.id);
+        store.insert_folder(&folder).unwrap();
+        let message = test_message(&account.id);
+        let stored = pebble_mail::StoredMessage {
+            message,
+            folder_ids: vec![folder.id],
+            notify: true,
+        };
+
+        assert!(should_send_new_mail_notification(&store, &stored).unwrap());
     }
 
     #[test]

@@ -44,6 +44,7 @@ describe("GeneralTab realtime mode", () => {
       pollInterval: 15,
       realtimeMode: "realtime",
       showFolderUnreadCount: false,
+      notificationsEnabled: true,
     });
   });
 
@@ -67,5 +68,17 @@ describe("GeneralTab realtime mode", () => {
 
     expect(useUIStore.getState().realtimeMode).toBe("battery");
     expect(localStorage.getItem("pebble-realtime-mode")).toBe("battery");
+  });
+
+  it("shows the persisted desktop notification state and updates it through the UI store", () => {
+    render(<GeneralTab />);
+
+    const checkbox = screen.getByRole("checkbox", { name: "Enable desktop notifications" });
+    expect((checkbox as HTMLInputElement).checked).toBe(true);
+
+    fireEvent.click(checkbox);
+
+    expect(useUIStore.getState().notificationsEnabled).toBe(false);
+    expect(localStorage.getItem("pebble-notifications-enabled")).toBe("false");
   });
 });

@@ -38,6 +38,7 @@ export default function StatusBar() {
   const setLastMailError = useUIStore((s) => s.setLastMailError);
   const realtimeStatusByAccount = useUIStore((s) => s.realtimeStatusByAccount);
   const setRealtimeStatus = useUIStore((s) => s.setRealtimeStatus);
+  const notificationsEnabled = useUIStore((s) => s.notificationsEnabled);
   const activeAccountId = useMailStore((s) => s.activeAccountId);
   const syncMutation = useSyncMutation();
   const queryClient = useQueryClient();
@@ -121,7 +122,6 @@ export default function StatusBar() {
   const realtimeStatus = activeAccountId ? realtimeStatusByAccount[activeAccountId] : undefined;
   const realtimeStatusText = getRealtimeStatusText(realtimeStatus, t);
 
-  const notificationsEnabled = typeof window !== "undefined" && localStorage.getItem("pebble-notifications-enabled") === "true";
   const pendingRemoteWrites = pendingOpsSummary?.total_active_count ?? 0;
   const failedRemoteWrites = pendingOpsSummary?.failed_count ?? 0;
   const retryingRemoteWrites = pendingOpsSummary?.in_progress_count ?? 0;
