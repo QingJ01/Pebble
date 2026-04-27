@@ -12,6 +12,7 @@ jobs:
   windows:
     name: Windows Release
     runs-on: windows-latest
+    environment: action
 
     defaults:
       run:
@@ -71,6 +72,20 @@ jobs:
           }
           "PEBBLE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
 
+      - name: Validate OAuth build config
+        env:
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          MICROSOFT_CLIENT_ID: ${{ vars.MICROSOFT_CLIENT_ID }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          foreach ($name in @("GOOGLE_CLIENT_ID", "MICROSOFT_CLIENT_ID")) {
+            $value = [Environment]::GetEnvironmentVariable($name)
+            if ([string]::IsNullOrWhiteSpace($value)) {
+              throw "$name is not configured in the 'action' GitHub environment."
+            }
+          }
+          "OAuth client IDs are configured for this release build."
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -87,6 +102,9 @@ jobs:
         run: pnpm test
 
       - name: Build Windows installer
+        env:
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          MICROSOFT_CLIENT_ID: ${{ vars.MICROSOFT_CLIENT_ID }}
         run: pnpm build
 
       - name: Collect release artifacts
