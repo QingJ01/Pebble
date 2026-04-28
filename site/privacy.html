@@ -18,10 +18,16 @@
       Pebble
     </a>
     <ul class="nav-links">
-      <li><a href="privacy.html">Privacy</a></li>
-      <li><a href="terms.html">Terms</a></li>
-      <li><a href="https://github.com/QingJ01/Pebble" target="_blank" rel="noopener noreferrer">GitHub</a></li>
-      <li><a href="index.html#download" class="nav-btn">Download</a></li>
+      <li><a href="privacy.html" data-i18n="navPrivacy">Privacy</a></li>
+      <li><a href="terms.html" data-i18n="navTerms">Terms</a></li>
+      <li><a href="https://github.com/QingJ01/Pebble" target="_blank" rel="noopener noreferrer" data-i18n="navGitHub">GitHub</a></li>
+      <li>
+        <div class="lang-switch">
+          <button data-lang="en" class="active">EN</button>
+          <button data-lang="zh">中文</button>
+        </div>
+      </li>
+      <li><a href="index.html#download" class="nav-btn" data-i18n="navDownload">Download</a></li>
     </ul>
   </div>
 </nav>
@@ -29,86 +35,86 @@
 <main class="policy-main">
   <div class="container policy-container">
     <header class="policy-header">
-      <a class="policy-back" href="index.html">Back to Pebble</a>
-      <div class="section-label">Privacy Policy</div>
-      <h1>Pebble Privacy Policy</h1>
-      <p class="policy-meta">Last updated: April 28, 2026</p>
-      <p>Pebble is a local-first desktop email client. This policy explains how Pebble accesses, uses, stores, and shares data, including Google user data requested through OAuth.</p>
+      <a class="policy-back" href="index.html" data-i18n="policyBack">Back to Pebble</a>
+      <div class="section-label" data-i18n="privacyPolicyLabel">Privacy Policy</div>
+      <h1 data-i18n="privacyPolicyTitle">Pebble Privacy Policy</h1>
+      <p class="policy-meta" data-i18n="policyUpdated">Last updated: April 28, 2026</p>
+      <p data-i18n="privacyPolicyIntro">Pebble is a local-first desktop email client. This policy explains how Pebble accesses, uses, stores, and shares data, including Google user data requested through OAuth.</p>
     </header>
 
     <article class="policy-content">
       <section class="policy-section">
-        <h2>What Pebble Accesses</h2>
-        <p>When you connect a Gmail account, Pebble requests Google OAuth permissions needed to work as a desktop mail client.</p>
+        <h2 data-i18n="privacyAccessTitle">What Pebble Accesses</h2>
+        <p data-i18n="privacyAccessIntro">When you connect a Gmail account, Pebble requests Google OAuth permissions needed to work as a desktop mail client.</p>
         <ul>
-          <li><strong>Google account identity:</strong> your email address and basic profile name from Google userinfo scopes.</li>
-          <li><strong>Gmail mailbox access:</strong> the <code>https://mail.google.com/</code> scope may allow Pebble to read, compose, send, modify, and delete Gmail messages as needed for mail-client features.</li>
-          <li><strong>Mail content and metadata:</strong> message headers, subject lines, senders, recipients, dates, snippets, bodies, labels, folders, thread IDs, read/starred state, drafts, and attachments.</li>
-          <li><strong>OAuth tokens:</strong> access tokens, refresh tokens, expiration data, and granted scopes used to keep your account connected.</li>
-          <li><strong>Local app data:</strong> accounts, settings, rules, Kanban cards, search index data, trusted senders, pending mail operations, and preferences.</li>
+          <li data-i18n="privacyAccessIdentity" data-i18n-html><strong>Google account identity:</strong> your email address and basic profile name from Google userinfo scopes.</li>
+          <li data-i18n="privacyAccessGmail" data-i18n-html><strong>Gmail mailbox access:</strong> the <code>https://mail.google.com/</code> scope may allow Pebble to read, compose, send, modify, and delete Gmail messages as needed for mail-client features.</li>
+          <li data-i18n="privacyAccessMail" data-i18n-html><strong>Mail content and metadata:</strong> message headers, subject lines, senders, recipients, dates, snippets, bodies, labels, folders, thread IDs, read/starred state, drafts, and attachments.</li>
+          <li data-i18n="privacyAccessTokens" data-i18n-html><strong>OAuth tokens:</strong> access tokens, refresh tokens, expiration data, and granted scopes used to keep your account connected.</li>
+          <li data-i18n="privacyAccessLocal" data-i18n-html><strong>Local app data:</strong> accounts, settings, rules, Kanban cards, search index data, trusted senders, pending mail operations, and preferences.</li>
         </ul>
       </section>
 
       <section class="policy-section">
-        <h2>How Pebble Uses Data</h2>
-        <p>Pebble uses your data only to provide email features you choose to use, including account connection, mailbox sync, message viewing, search, compose and send, draft management, archive, trash, labels, read/starred state, rules, snooze, and Kanban workflows.</p>
-        <p>Pebble does not use Google user data for advertising, credit evaluation, surveillance, or unrelated analytics.</p>
+        <h2 data-i18n="privacyUseTitle">How Pebble Uses Data</h2>
+        <p data-i18n="privacyUseFeatures">Pebble uses your data only to provide email features you choose to use, including account connection, mailbox sync, message viewing, search, compose and send, draft management, archive, trash, labels, read/starred state, rules, snooze, and Kanban workflows.</p>
+        <p data-i18n="privacyUseNoAds">Pebble does not use Google user data for advertising, credit evaluation, surveillance, or unrelated analytics.</p>
       </section>
 
       <section class="policy-section">
-        <h2>Local Storage and Security</h2>
-        <p>Pebble stores mail data on your device by default. The local SQLite database, search index, attachments, rules, and settings are stored under the app data directory. OAuth tokens and credentials are encrypted at rest with a per-device key.</p>
-        <p>Pebble does not operate a Pebble-hosted cloud mailbox service and does not collect telemetry from the desktop app.</p>
+        <h2 data-i18n="privacyStorageTitle">Local Storage and Security</h2>
+        <p data-i18n="privacyStorageLocal">Pebble stores mail data on your device by default. The local SQLite database, search index, attachments, rules, and settings are stored under the app data directory. OAuth tokens and credentials are encrypted at rest with a per-device key.</p>
+        <p data-i18n="privacyStorageNoCloud">Pebble does not operate a Pebble-hosted cloud mailbox service and does not collect telemetry from the desktop app.</p>
       </section>
 
       <section class="policy-section">
-        <h2>When Data Leaves Your Device</h2>
-        <p>Pebble sends data over the network only when a feature requires it:</p>
+        <h2 data-i18n="privacyNetworkTitle">When Data Leaves Your Device</h2>
+        <p data-i18n="privacyNetworkIntro">Pebble sends data over the network only when a feature requires it:</p>
         <ul>
-          <li><strong>Mail providers:</strong> Gmail, Outlook, or IMAP/SMTP servers receive requests needed to sync mail, send mail, update labels, archive, trash, or manage drafts.</li>
-          <li><strong>Translation:</strong> if you use translation, the selected text may be sent to the translation provider or LLM endpoint you configure.</li>
-          <li><strong>WebDAV settings backup:</strong> if you enable backup, Pebble uploads settings, rules, Kanban data, translation config, and account metadata to the WebDAV server you provide. It does not include email messages, attachments, or OAuth secrets.</li>
-          <li><strong>External message images:</strong> if you choose to load external images in an email, those image hosts may receive network requests from your device.</li>
-          <li><strong>Public website:</strong> this website may load fonts from Google Fonts and links to GitHub resources.</li>
+          <li data-i18n="privacyNetworkProviders" data-i18n-html><strong>Mail providers:</strong> Gmail, Outlook, or IMAP/SMTP servers receive requests needed to sync mail, send mail, update labels, archive, trash, or manage drafts.</li>
+          <li data-i18n="privacyNetworkTranslation" data-i18n-html><strong>Translation:</strong> if you use translation, the selected text may be sent to the translation provider or LLM endpoint you configure.</li>
+          <li data-i18n="privacyNetworkWebdav" data-i18n-html><strong>WebDAV settings backup:</strong> if you enable backup, Pebble uploads settings, rules, Kanban data, translation config, and account metadata to the WebDAV server you provide. It does not include email messages, attachments, or OAuth secrets.</li>
+          <li data-i18n="privacyNetworkImages" data-i18n-html><strong>External message images:</strong> if you choose to load external images in an email, those image hosts may receive network requests from your device.</li>
+          <li data-i18n="privacyNetworkWebsite" data-i18n-html><strong>Public website:</strong> this website may load fonts from Google Fonts and links to GitHub resources.</li>
         </ul>
       </section>
 
       <section class="policy-section">
-        <h2>Sharing, Sale, and Limited Use</h2>
-        <p>Pebble does not sell Google user data, transfer it to advertising platforms, or use it for serving ads. Pebble does not allow humans to read your Google user data unless you explicitly provide it for support, it is required for security, or it is required by law.</p>
-        <p>Pebble's use and transfer of information received from Google APIs will adhere to the Google API Services User Data Policy, including the Limited Use requirements.</p>
+        <h2 data-i18n="privacyLimitedTitle">Sharing, Sale, and Limited Use</h2>
+        <p data-i18n="privacyLimitedNoSale">Pebble does not sell Google user data, transfer it to advertising platforms, or use it for serving ads. Pebble does not allow humans to read your Google user data unless you explicitly provide it for support, it is required for security, or it is required by law.</p>
+        <p data-i18n="privacyLimitedPolicy">Pebble's use and transfer of information received from Google APIs will adhere to the Google API Services User Data Policy, including the Limited Use requirements.</p>
       </section>
 
       <section class="policy-section">
-        <h2>Your Choices</h2>
+        <h2 data-i18n="privacyChoicesTitle">Your Choices</h2>
         <ul>
-          <li>You can disconnect accounts in Pebble and remove local account data from the app.</li>
-          <li>You can revoke Pebble's Google access from your Google Account permissions page.</li>
-          <li>You can delete Pebble's local app data from your device according to your operating system's app data controls.</li>
-          <li>You can choose whether to use translation, WebDAV backup, external image loading, and other optional network features.</li>
+          <li data-i18n="privacyChoiceDisconnect">You can disconnect accounts in Pebble and remove local account data from the app.</li>
+          <li data-i18n="privacyChoiceRevoke">You can revoke Pebble's Google access from your Google Account permissions page.</li>
+          <li data-i18n="privacyChoiceDelete">You can delete Pebble's local app data from your device according to your operating system's app data controls.</li>
+          <li data-i18n="privacyChoiceOptional">You can choose whether to use translation, WebDAV backup, external image loading, and other optional network features.</li>
         </ul>
       </section>
 
       <section class="policy-section">
-        <h2>Children</h2>
-        <p>Pebble is not directed to children under 13 and does not knowingly collect data from children.</p>
+        <h2 data-i18n="privacyChildrenTitle">Children</h2>
+        <p data-i18n="privacyChildrenText">Pebble is not directed to children under 13 and does not knowingly collect data from children.</p>
       </section>
 
       <section class="policy-section">
-        <h2>Changes</h2>
-        <p>If this policy changes, the updated version will be posted on this page with a new update date. If Pebble changes how it uses Google user data, users should review the updated policy before continuing to use the affected features.</p>
+        <h2 data-i18n="privacyChangesTitle">Changes</h2>
+        <p data-i18n="privacyChangesText">If this policy changes, the updated version will be posted on this page with a new update date. If Pebble changes how it uses Google user data, users should review the updated policy before continuing to use the affected features.</p>
       </section>
 
       <section class="policy-section">
-        <h2>Contact</h2>
-        <p>For privacy questions, contact the developer at <a href="mailto:sq2180802265@gmail.com">sq2180802265@gmail.com</a>.</p>
+        <h2 data-i18n="privacyContactTitle">Contact</h2>
+        <p data-i18n="privacyContactText" data-i18n-html>For privacy questions, contact the developer at <a href="mailto:sq2180802265@gmail.com">sq2180802265@gmail.com</a>.</p>
       </section>
 
       <section class="policy-section policy-chinese">
-        <h2>中文摘要</h2>
-        <p>Pebble 是本地优先的桌面邮件客户端。连接 Gmail 后，Pebble 会通过 Google OAuth 获取账号邮箱、基础资料，以及用于收发、同步、搜索、归档、标记、删除、草稿和附件处理的 Gmail 数据访问权限。</p>
-        <p>邮件、搜索索引、附件、规则和设置默认保存在你的设备上。OAuth token 和凭据会使用设备密钥加密保存。Pebble 不出售 Google 用户数据，不用于广告，也不会提供遥测服务。</p>
-        <p>只有在你使用对应功能时，数据才会离开设备，例如与邮件服务商同步、发送邮件、使用你配置的翻译服务、使用你配置的 WebDAV 设置备份，或手动加载邮件里的外部图片。</p>
+        <h2 data-i18n="privacySummaryTitle">Quick Summary</h2>
+        <p data-i18n="privacySummaryOne">Pebble is local-first. Connecting Gmail gives Pebble OAuth access to your Google account identity and Gmail data needed for email-client features.</p>
+        <p data-i18n="privacySummaryTwo">Mail, search indexes, attachments, rules, and settings stay on your device by default. OAuth tokens and credentials are encrypted locally.</p>
+        <p data-i18n="privacySummaryThree">Data leaves your device only when you use a feature that requires it, such as mail sync, sending mail, translation, WebDAV backup, or external image loading.</p>
       </section>
     </article>
   </div>
@@ -125,13 +131,14 @@
         <span class="license">AGPL-3.0</span>
       </div>
       <ul class="footer-links">
-        <li><a href="privacy.html">Privacy Policy</a></li>
-        <li><a href="terms.html">Terms</a></li>
+        <li><a href="privacy.html" data-i18n="footerPrivacy">Privacy Policy</a></li>
+        <li><a href="terms.html" data-i18n="footerTerms">Terms</a></li>
         <li><a href="https://github.com/QingJ01/Pebble" target="_blank" rel="noopener noreferrer">GitHub</a></li>
       </ul>
     </div>
-    <div class="footer-bottom">&copy; 2026 Pebble. Released under the GNU Affero General Public License v3.0.</div>
+    <div class="footer-bottom" data-i18n="footerCopyright">&copy; 2026 Pebble. Released under the GNU Affero General Public License v3.0.</div>
   </div>
 </footer>
+<script src="main.js"></script>
 </body>
 </html>

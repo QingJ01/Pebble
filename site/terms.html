@@ -18,10 +18,16 @@
       Pebble
     </a>
     <ul class="nav-links">
-      <li><a href="privacy.html">Privacy</a></li>
-      <li><a href="terms.html">Terms</a></li>
-      <li><a href="https://github.com/QingJ01/Pebble" target="_blank" rel="noopener noreferrer">GitHub</a></li>
-      <li><a href="index.html#download" class="nav-btn">Download</a></li>
+      <li><a href="privacy.html" data-i18n="navPrivacy">Privacy</a></li>
+      <li><a href="terms.html" data-i18n="navTerms">Terms</a></li>
+      <li><a href="https://github.com/QingJ01/Pebble" target="_blank" rel="noopener noreferrer" data-i18n="navGitHub">GitHub</a></li>
+      <li>
+        <div class="lang-switch">
+          <button data-lang="en" class="active">EN</button>
+          <button data-lang="zh">中文</button>
+        </div>
+      </li>
+      <li><a href="index.html#download" class="nav-btn" data-i18n="navDownload">Download</a></li>
     </ul>
   </div>
 </nav>
@@ -29,71 +35,71 @@
 <main class="policy-main">
   <div class="container policy-container">
     <header class="policy-header">
-      <a class="policy-back" href="index.html">Back to Pebble</a>
-      <div class="section-label">Terms of Service</div>
-      <h1>Pebble Terms of Service</h1>
-      <p class="policy-meta">Last updated: April 28, 2026</p>
-      <p>These terms govern your use of Pebble, a local-first desktop email client released as open source software.</p>
+      <a class="policy-back" href="index.html" data-i18n="policyBack">Back to Pebble</a>
+      <div class="section-label" data-i18n="termsLabel">Terms of Service</div>
+      <h1 data-i18n="termsTitle">Pebble Terms of Service</h1>
+      <p class="policy-meta" data-i18n="policyUpdated">Last updated: April 28, 2026</p>
+      <p data-i18n="termsIntro">These terms govern your use of Pebble, a local-first desktop email client released as open source software.</p>
     </header>
 
     <article class="policy-content">
       <section class="policy-section">
-        <h2>Using Pebble</h2>
-        <p>Pebble helps you connect email accounts, sync mail, read and search messages, compose and send email, organize messages, use rules, and manage mail workflows locally on your device.</p>
-        <p>You are responsible for the accounts you connect, the messages you send, and the actions you take through Pebble.</p>
+        <h2 data-i18n="termsUsingTitle">Using Pebble</h2>
+        <p data-i18n="termsUsingFeatures">Pebble helps you connect email accounts, sync mail, read and search messages, compose and send email, organize messages, use rules, and manage mail workflows locally on your device.</p>
+        <p data-i18n="termsUsingResponsibility">You are responsible for the accounts you connect, the messages you send, and the actions you take through Pebble.</p>
       </section>
 
       <section class="policy-section">
-        <h2>Email Providers and Third-Party Services</h2>
-        <p>When you connect Gmail, Outlook, IMAP/SMTP, translation providers, WebDAV servers, or other services, your use of those services is also governed by their own terms and policies. Pebble only requests access needed for the features you choose to use.</p>
-        <p>For Gmail, Pebble may act on your behalf to sync, send, modify labels, archive, trash, restore, delete, or manage drafts when you use those features.</p>
+        <h2 data-i18n="termsProvidersTitle">Email Providers and Third-Party Services</h2>
+        <p data-i18n="termsProvidersText">When you connect Gmail, Outlook, IMAP/SMTP, translation providers, WebDAV servers, or other services, your use of those services is also governed by their own terms and policies. Pebble only requests access needed for the features you choose to use.</p>
+        <p data-i18n="termsProvidersGmail">For Gmail, Pebble may act on your behalf to sync, send, modify labels, archive, trash, restore, delete, or manage drafts when you use those features.</p>
       </section>
 
       <section class="policy-section">
-        <h2>Privacy</h2>
-        <p>Your use of Pebble is also covered by the <a href="privacy.html">Pebble Privacy Policy</a>, which explains how data is accessed, stored, used, and shared.</p>
+        <h2 data-i18n="termsPrivacyTitle">Privacy</h2>
+        <p data-i18n="termsPrivacyText" data-i18n-html>Your use of Pebble is also covered by the <a href="privacy.html">Pebble Privacy Policy</a>, which explains how data is accessed, stored, used, and shared.</p>
       </section>
 
       <section class="policy-section">
-        <h2>Open Source License</h2>
-        <p>Pebble is released under the GNU Affero General Public License v3.0. The license governs copying, modification, distribution, and network use of the source code. These terms do not replace the open source license.</p>
+        <h2 data-i18n="termsLicenseTitle">Open Source License</h2>
+        <p data-i18n="termsLicenseText">Pebble is released under the GNU Affero General Public License v3.0. The license governs copying, modification, distribution, and network use of the source code. These terms do not replace the open source license.</p>
       </section>
 
       <section class="policy-section">
-        <h2>Acceptable Use</h2>
-        <p>You agree not to use Pebble to violate laws, abuse email providers, send spam, infringe others' rights, bypass security controls, or access accounts without authorization.</p>
+        <h2 data-i18n="termsAcceptableTitle">Acceptable Use</h2>
+        <p data-i18n="termsAcceptableText">You agree not to use Pebble to violate laws, abuse email providers, send spam, infringe others' rights, bypass security controls, or access accounts without authorization.</p>
       </section>
 
       <section class="policy-section">
-        <h2>Backups and Data Responsibility</h2>
-        <p>Email clients handle sensitive data. You are responsible for maintaining backups of important mail and for verifying account actions with your provider when needed. Optional WebDAV backup is controlled by the server and credentials you provide.</p>
+        <h2 data-i18n="termsBackupsTitle">Backups and Data Responsibility</h2>
+        <p data-i18n="termsBackupsText">Email clients handle sensitive data. You are responsible for maintaining backups of important mail and for verifying account actions with your provider when needed. Optional WebDAV backup is controlled by the server and credentials you provide.</p>
       </section>
 
       <section class="policy-section">
-        <h2>No Warranty</h2>
-        <p>Pebble is provided as-is, without warranties of any kind. The software may contain bugs, provider behavior may change, and mail operations may fail. Use Pebble at your own risk.</p>
+        <h2 data-i18n="termsWarrantyTitle">No Warranty</h2>
+        <p data-i18n="termsWarrantyText">Pebble is provided as-is, without warranties of any kind. The software may contain bugs, provider behavior may change, and mail operations may fail. Use Pebble at your own risk.</p>
       </section>
 
       <section class="policy-section">
-        <h2>Limitation of Liability</h2>
-        <p>To the maximum extent permitted by law, the Pebble developer is not liable for indirect, incidental, special, consequential, or punitive damages, or for loss of data, profits, or business arising from your use of Pebble.</p>
+        <h2 data-i18n="termsLiabilityTitle">Limitation of Liability</h2>
+        <p data-i18n="termsLiabilityText">To the maximum extent permitted by law, the Pebble developer is not liable for indirect, incidental, special, consequential, or punitive damages, or for loss of data, profits, or business arising from your use of Pebble.</p>
       </section>
 
       <section class="policy-section">
-        <h2>Changes</h2>
-        <p>These terms may be updated from time to time. The updated version will be posted on this page with a new update date.</p>
+        <h2 data-i18n="termsChangesTitle">Changes</h2>
+        <p data-i18n="termsChangesText">These terms may be updated from time to time. The updated version will be posted on this page with a new update date.</p>
       </section>
 
       <section class="policy-section">
-        <h2>Contact</h2>
-        <p>For questions about these terms, contact <a href="mailto:sq2180802265@gmail.com">sq2180802265@gmail.com</a>.</p>
+        <h2 data-i18n="termsContactTitle">Contact</h2>
+        <p data-i18n="termsContactText" data-i18n-html>For questions about these terms, contact <a href="mailto:sq2180802265@gmail.com">sq2180802265@gmail.com</a>.</p>
       </section>
 
       <section class="policy-section policy-chinese">
-        <h2>中文摘要</h2>
-        <p>Pebble 是本地优先的桌面邮件客户端。你需要对自己连接的邮箱账号、发送的邮件、以及在 Pebble 中执行的邮件操作负责。</p>
-        <p>当你连接 Gmail、Outlook、IMAP/SMTP、翻译服务或 WebDAV 服务时，这些第三方服务也有各自的条款和政策。Pebble 只会为了你选择使用的功能请求必要权限。</p>
-        <p>Pebble 基于 GNU Affero General Public License v3.0 开源发布，软件按现状提供，不作任何形式的保证。</p>
+        <h2 data-i18n="termsSummaryTitle">Quick Summary</h2>
+        <p data-i18n="termsSummaryOne">Pebble is an open source desktop email client. You are responsible for the accounts you connect and the actions you perform.</p>
+        <p data-i18n="termsSummaryTwo">Third-party providers such as Gmail, Outlook, translation services, and WebDAV servers remain governed by their own terms.</p>
+        <p data-i18n="termsSummaryThree">Pebble is provided as-is under the GNU Affero General Public License v3.0.</p>
       </section>
     </article>
   </div>
@@ -110,13 +116,14 @@
         <span class="license">AGPL-3.0</span>
       </div>
       <ul class="footer-links">
-        <li><a href="privacy.html">Privacy Policy</a></li>
-        <li><a href="terms.html">Terms</a></li>
+        <li><a href="privacy.html" data-i18n="footerPrivacy">Privacy Policy</a></li>
+        <li><a href="terms.html" data-i18n="footerTerms">Terms</a></li>
         <li><a href="https://github.com/QingJ01/Pebble" target="_blank" rel="noopener noreferrer">GitHub</a></li>
       </ul>
     </div>
-    <div class="footer-bottom">&copy; 2026 Pebble. Released under the GNU Affero General Public License v3.0.</div>
+    <div class="footer-bottom" data-i18n="footerCopyright">&copy; 2026 Pebble. Released under the GNU Affero General Public License v3.0.</div>
   </div>
 </footer>
+<script src="main.js"></script>
 </body>
 </html>

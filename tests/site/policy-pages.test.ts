@@ -29,4 +29,22 @@ describe("public policy pages", () => {
     expect(privacy).toContain("OAuth tokens");
     expect(privacy).toContain("Limited Use");
   });
+
+  it("wires privacy and terms pages into the site i18n system", () => {
+    const privacy = readSiteFile("privacy.html");
+    const terms = readSiteFile("terms.html");
+    const script = readSiteFile("main.js");
+
+    for (const page of [privacy, terms]) {
+      expect(page).toContain("lang-switch");
+      expect(page).toContain('data-lang="en"');
+      expect(page).toContain('data-lang="zh"');
+      expect(page).toContain('<script src="main.js"></script>');
+    }
+
+    expect(privacy).toContain('data-i18n="privacyPolicyTitle"');
+    expect(terms).toContain('data-i18n="termsTitle"');
+    expect(script).toContain("privacyPolicyTitle");
+    expect(script).toContain("termsTitle");
+  });
 });
