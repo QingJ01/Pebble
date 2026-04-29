@@ -10,8 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Added tray and background-running controls so Pebble can close to the system tray, restore from the tray menu, and keep the close-to-background preference in app state.
+- Added localized tray menu labels and status bar copy for background sync behavior.
 - Added public privacy policy and terms of service pages for Google OAuth app verification.
 - Added English and Chinese language switching for the privacy policy and terms pages.
+- Added Cloudflare Workers site deployment configuration for the public site.
+- Added the LINUX DO friend link to the English and Chinese README files.
+
+### Changed
+
+- Themed native form controls and focus-visible styling so inputs, selects, textareas, and buttons fit the dark UI.
 
 ### Fixed
 
@@ -20,6 +28,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Persisted IMAP attachments before notifying the frontend about newly synced messages.
 - Refined Gmail attachment parsing so large body parts are not shown as attachments and inline content-ID images stay out of the download list.
 - Added clearer attachment download failure messages and backend download logging.
+- Fixed the Cloudflare Worker site target and migrated the site config to the JSONC Workers format.
 
 ## [0.0.1] - 2026-04-27
 
