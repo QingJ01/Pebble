@@ -15,7 +15,9 @@ use serde_json::json;
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
+#[cfg(windows)]
+use tauri::Manager;
 use tauri_plugin_notification::NotificationExt;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
@@ -119,6 +121,7 @@ fn new_mail_notification_body(stored: &pebble_mail::StoredMessage) -> String {
     }
 }
 
+#[cfg(any(windows, test))]
 fn notification_open_payload(account_id: &str, message_id: &str) -> serde_json::Value {
     serde_json::json!({
         "account_id": account_id,
@@ -126,6 +129,7 @@ fn notification_open_payload(account_id: &str, message_id: &str) -> serde_json::
     })
 }
 
+#[cfg(windows)]
 fn open_message_from_notification(app: &tauri::AppHandle, account_id: &str, message_id: &str) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();

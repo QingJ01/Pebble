@@ -16,12 +16,26 @@ describe("macOS release configuration", () => {
   it("routes the generic build command to platform-specific bundles", async () => {
     const packageJson = JSON.parse(readFileSync(resolve(process.cwd(), "package.json"), "utf8"));
     const buildScriptPath = resolve(process.cwd(), "scripts", "build-tauri.mjs");
+    const buildScriptSource = readFileSync(buildScriptPath, "utf8");
     const buildScript = await import(pathToFileURL(buildScriptPath).href);
 
     expect(packageJson.scripts.build).toBe("node scripts/build-tauri.mjs");
+    expect(buildScriptSource).not.toMatch(/^#!/);
     expect(buildScript.bundleTargetsForPlatform("win32")).toBe("nsis");
     expect(buildScript.bundleTargetsForPlatform("darwin")).toBe("app,dmg");
     expect(() => buildScript.bundleTargetsForPlatform("linux")).toThrow("Unsupported desktop package platform");
+  });
+
+  it("keeps Windows notification click helpers out of non-Windows builds", () => {
+    const indexingSource = readFileSync(
+      resolve(process.cwd(), "src-tauri", "src", "commands", "indexing.rs"),
+      "utf8",
+    );
+    const eventsSource = readFileSync(resolve(process.cwd(), "src-tauri", "src", "events.rs"), "utf8");
+
+    expect(indexingSource).toContain("#[cfg(any(windows, test))]\nfn notification_open_payload");
+    expect(indexingSource).toContain("#[cfg(windows)]\nfn open_message_from_notification");
+    expect(eventsSource).toContain("#[cfg(windows)]\npub const MAIL_NOTIFICATION_OPEN");
   });
 
   it("includes a macOS icon in the Tauri bundle config", () => {

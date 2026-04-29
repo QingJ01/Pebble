@@ -5,6 +5,7 @@ pub const MAIL_REALTIME_STATUS: &str = "mail:realtime-status";
 pub const MAIL_FOLDER_CHANGED: &str = "mail:folder-changed";
 pub const MAIL_ERROR: &str = "mail:error";
 pub const MAIL_NEW: &str = "mail:new";
+#[cfg(windows)]
 pub const MAIL_NOTIFICATION_OPEN: &str = "mail:notification-open";
 pub const MAIL_UNSNOOZED: &str = "mail:unsnoozed";
 pub const MAIL_PENDING_OPS_CHANGED: &str = "mail:pending-ops-changed";
