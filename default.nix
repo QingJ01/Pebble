@@ -138,6 +138,8 @@ stdenv.mkDerivation (finalAttrs: {
     )
   '';
 
+  passthru.updateScript = ./update.sh;
+
   meta = with lib; {
     description = "A local-first desktop email client for people who want a calmer, more private inbox.";
     homepage = "https://github.com/QingJ01/Pebble";
