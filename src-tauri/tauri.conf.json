@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Pebble",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "identifier": "com.qingj01.pebble",
   "build": {
     "frontendDist": "../dist",

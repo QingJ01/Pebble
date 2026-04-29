@@ -6,6 +6,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-04-29
+
+### Added
+
+- Added public privacy policy and terms of service pages for Google OAuth app verification.
+- Added English and Chinese language switching for the privacy policy and terms pages.
+
+### Fixed
+
+- Improved attachment download reliability by saving duplicate target filenames with a unique suffix instead of failing.
+- Staged local draft, outbox, and sent-message attachments into Pebble's app data directory so downloads no longer depend on the original selected file path.
+- Persisted IMAP attachments before notifying the frontend about newly synced messages.
+- Refined Gmail attachment parsing so large body parts are not shown as attachments and inline content-ID images stay out of the download list.
+- Added clearer attachment download failure messages and backend download logging.
+
 ## [0.0.1] - 2026-04-27
 
 ### Initial Release
@@ -32,5 +47,6 @@ This release includes:
 - Windows installers are not code-signed yet, so Windows SmartScreen may show a warning.
 - Outlook support is still experimental and depends on Microsoft Graph permissions configured by the user.
 
-[Unreleased]: https://github.com/QingJ01/Pebble/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/QingJ01/Pebble/compare/v0.0.2...HEAD
+[0.0.2]: https://github.com/QingJ01/Pebble/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/QingJ01/Pebble/releases/tag/v0.0.1
