@@ -1,6 +1,7 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::commands::attachments::stage_local_attachment_records;
+use crate::commands::messages::refresh_search_document;
 use crate::commands::oauth::ensure_account_oauth_tokens;
 use crate::{events, state::AppState};
 use pebble_core::traits::{MailTransport, OutgoingMessage};
@@ -13,6 +14,7 @@ use pebble_mail::{smtp::SmtpSender, SmtpConfig};
 use pebble_mail::{GmailProvider, OutlookProvider};
 use pebble_store::Store;
 use tauri::{Emitter, State};
+use tracing::warn;
 
 /// Validate that all attachment paths are within allowed directories.
 pub(crate) fn validate_attachment_paths(
@@ -122,7 +124,7 @@ pub(crate) fn save_outgoing_message_locally(
     account: &Account,
     outgoing: &OutgoingMessage,
     state: LocalOutgoingState,
-    attachments_dir: &std::path::Path,
+    attachments_dir: &Path,
 ) -> std::result::Result<Message, PebbleError> {
     let folder = ensure_local_outgoing_folder(store, &account.id, state)?;
     let now = now_timestamp();
@@ -163,6 +165,26 @@ pub(crate) fn save_outgoing_message_locally(
     };
 
     store.replace_message_with_attachments(&message, &[folder.id], &attachments)?;
+    Ok(message)
+}
+
+fn save_outgoing_message_and_refresh_search(
+    state: &AppState,
+    account: &Account,
+    outgoing: &OutgoingMessage,
+    outgoing_state: LocalOutgoingState,
+    attachments_dir: &Path,
+) -> std::result::Result<Message, PebbleError> {
+    let message = save_outgoing_message_locally(
+        &state.store,
+        account,
+        outgoing,
+        outgoing_state,
+        attachments_dir,
+    )?;
+    if let Err(e) = refresh_search_document(state, &message.id) {
+        warn!("Failed to index outgoing message {}: {e}", message.id);
+    }
     Ok(message)
 }
 
@@ -271,7 +293,7 @@ fn queue_failed_send(
         LocalOutgoingState::Queued,
         &state.attachments_dir,
     )?;
-    state.store.insert_pending_mail_op(
+    let op_id = state.store.insert_pending_mail_op(
         &account.id,
         &message.id,
         "send",
@@ -284,7 +306,14 @@ fn queue_failed_send(
             },
         })
         .to_string(),
-    )
+    )?;
+    if let Err(e) = refresh_search_document(state, &message.id) {
+        warn!(
+            "Failed to index queued outgoing message {}: {e}",
+            message.id
+        );
+    }
+    Ok(op_id)
 }
 
 #[tauri::command]
@@ -358,8 +387,8 @@ pub async fn send_email(
 
     match send_imap_smtp_message(&state, &account, &outgoing).await {
         Ok(()) => {
-            save_outgoing_message_locally(
-                &state.store,
+            save_outgoing_message_and_refresh_search(
+                &state,
                 &account,
                 &outgoing,
                 LocalOutgoingState::Sent,
@@ -379,7 +408,9 @@ pub async fn send_email(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::messages::refresh_search_document_with_store;
     use pebble_core::{now_timestamp, Account, FolderRole};
+    use pebble_search::TantivySearch;
     use pebble_store::Store;
 
     fn test_account() -> Account {
@@ -472,6 +503,31 @@ mod tests {
         assert!(outbox.role.is_none());
         assert_eq!(folder_ids, vec![outbox.id]);
         assert!(saved.remote_id.starts_with("local-outbox-"));
+
+        let _ = std::fs::remove_dir_all(attachments_dir);
+    }
+
+    #[test]
+    fn locally_saved_outgoing_message_can_be_added_to_search_index() {
+        let store = Store::open_in_memory().unwrap();
+        let account = test_account();
+        store.insert_account(&account).unwrap();
+        let attachments_dir = temp_attachments_dir("pebble-outgoing-search");
+        let search = TantivySearch::open_in_memory().unwrap();
+
+        let saved = save_outgoing_message_locally(
+            &store,
+            &account,
+            &outgoing_message(),
+            LocalOutgoingState::Sent,
+            &attachments_dir,
+        )
+        .unwrap();
+        refresh_search_document_with_store(&store, &search, &saved.id).unwrap();
+
+        let hits = search.search("Queued", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].message_id, saved.id);
 
         let _ = std::fs::remove_dir_all(attachments_dir);
     }

@@ -11,6 +11,7 @@ use crate::state::AppState;
 use pebble_core::{FolderRole, Message, PebbleError};
 use pebble_crypto::CryptoService;
 use pebble_mail::{GmailProvider, ImapConfig, ImapProvider, OutlookProvider};
+use pebble_search::TantivySearch;
 use pebble_store::Store;
 use serde_json::json;
 
@@ -93,29 +94,37 @@ pub(super) async fn connect_outlook(
     ))
 }
 
-pub(super) fn refresh_search_document(
+pub(crate) fn refresh_search_document(
     state: &AppState,
     message_id: &str,
 ) -> std::result::Result<(), PebbleError> {
-    let ids = vec![message_id.to_string()];
-    state.store.add_search_pending(&ids, "index")?;
+    refresh_search_document_with_store(&state.store, &state.search, message_id)
+}
 
-    match state.store.get_message(message_id)? {
+pub(crate) fn refresh_search_document_with_store(
+    store: &Store,
+    search: &TantivySearch,
+    message_id: &str,
+) -> std::result::Result<(), PebbleError> {
+    let ids = vec![message_id.to_string()];
+    store.add_search_pending(&ids, "index")?;
+
+    match store.get_message(message_id)? {
         Some(message) if !message.is_deleted => {
-            let folder_ids = state.store.get_message_folder_ids(message_id)?;
+            let folder_ids = store.get_message_folder_ids(message_id)?;
             if folder_ids.is_empty() {
-                state.search.remove_message(message_id)?;
+                search.remove_message(message_id)?;
             } else {
-                state.search.index_message(&message, &folder_ids)?;
+                search.index_message(&message, &folder_ids)?;
             }
         }
         Some(_) | None => {
-            state.search.remove_message(message_id)?;
+            search.remove_message(message_id)?;
         }
     }
 
-    state.search.commit()?;
-    state.store.clear_search_pending(&ids)?;
+    search.commit()?;
+    store.clear_search_pending(&ids)?;
     Ok(())
 }
 
