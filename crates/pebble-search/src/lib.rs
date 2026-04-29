@@ -678,11 +678,13 @@ mod tests {
 
         Index::create_in_dir(&index_dir, builder.build()).unwrap();
 
-        let engine = TantivySearch::open(&index_dir).unwrap();
-        assert!(
-            engine.needs_reindex(),
-            "old case-sensitive short-field tokenizer should force a rebuild"
-        );
+        {
+            let engine = TantivySearch::open(&index_dir).unwrap();
+            assert!(
+                engine.needs_reindex(),
+                "old case-sensitive short-field tokenizer should force a rebuild"
+            );
+        }
 
         std::fs::remove_dir_all(&index_dir).unwrap();
     }
