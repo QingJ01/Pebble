@@ -38,19 +38,19 @@
 
 stdenv.mkDerivation (finalAttrs: {
   pname = "pebble";
-  version = "0.0.1";
+  version = "0.0.2";
 
   src = fetchFromGitHub {
     owner = "QingJ01";
     repo = "Pebble";
     rev = "v${finalAttrs.version}";
-    hash = "sha256-p5eRtHJ89pTlQHxATd4WyXWT0b3a7eGS05agNo4YFbg=";
+    hash = lib.fakeHash;
   };
 
   pnpmDeps = fetchPnpmDeps {
     inherit (finalAttrs) pname version src;
     fetcherVersion = 2;
-    hash = "sha256-jp+OGytRpHFUbfclDAW1V8dwLpaInw3KTAQMXvqcsEA=";
+    hash = lib.fakeHash;
   };
 
   cargoDeps = rustPlatform.importCargoLock {
