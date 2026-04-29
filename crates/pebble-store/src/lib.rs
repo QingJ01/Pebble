@@ -12,6 +12,7 @@ pub mod migrations;
 pub mod pending_ops;
 pub mod rules;
 pub mod search_pending;
+pub mod secure_user_data;
 pub mod snooze;
 pub mod sync_failures;
 pub mod translate_config;

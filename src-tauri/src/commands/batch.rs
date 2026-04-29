@@ -5,7 +5,7 @@ use pebble_core::traits::{FolderProvider, LabelProvider};
 use pebble_core::{FolderRole, Message, PebbleError, ProviderType};
 use pebble_store::Store;
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use tauri::State;
 use tracing::{info, warn};
 
@@ -54,6 +54,20 @@ fn queue_batch_pending_op(
     Ok(())
 }
 
+fn batch_local_commit_ids(
+    requested_ids: &[String],
+    remote_succeeded_ids: &[String],
+    queued_for_local_commit_ids: &[String],
+) -> Vec<String> {
+    let mut commit_ids: HashSet<&str> = remote_succeeded_ids.iter().map(String::as_str).collect();
+    commit_ids.extend(queued_for_local_commit_ids.iter().map(String::as_str));
+    requested_ids
+        .iter()
+        .filter(|id| commit_ids.contains(id.as_str()))
+        .cloned()
+        .collect()
+}
+
 /// Shared preamble for every batch_* command: enforce the 1000-id cap, then
 /// resolve the provider groupings off the Tokio runtime. Returns `Ok(None)`
 /// for an empty input so the caller can short-circuit with a zero count.
@@ -100,6 +114,7 @@ pub async fn batch_archive(
 
         // Track which messages succeeded remotely for this account group
         let mut remote_succeeded: Vec<String> = Vec::new();
+        let mut queued_for_local_commit: Vec<String> = Vec::new();
 
         if needs_connection {
             match ConnectedProvider::connect(&state, account_id, provider_type).await {
@@ -228,10 +243,10 @@ pub async fn batch_archive(
                             }),
                             &error,
                         )?;
+                        queued_for_local_commit.push(msg.id.clone());
                     }
                 }
             }
-            // If connection failed, remote_succeeded stays empty; skip local update.
         } else {
             // No remote target needed; all messages succeed locally
             for msg in messages {
@@ -243,7 +258,16 @@ pub async fn batch_archive(
         // Build a lookup map so we can find each message's archive_folder logic
         let msg_map: HashMap<&str, &Message> =
             messages.iter().map(|m| (m.id.as_str(), m)).collect();
-        for id in &remote_succeeded {
+        let requested_for_account = messages
+            .iter()
+            .map(|msg| msg.id.clone())
+            .collect::<Vec<_>>();
+        let local_commit_ids = batch_local_commit_ids(
+            &requested_for_account,
+            &remote_succeeded,
+            &queued_for_local_commit,
+        );
+        for id in &local_commit_ids {
             if let Some(msg) = msg_map.get(id.as_str()) {
                 let result = match &archive_folder {
                     Some(af) => state.store.move_message_to_folder(&msg.id, &af.id),
@@ -284,11 +308,9 @@ pub async fn batch_delete(
 
     // Track which messages were successfully deleted remotely
     let mut deleted_ids: Vec<String> = Vec::new();
-    let mut connection_attempted = false;
-
+    let mut queued_for_local_commit_ids: Vec<String> = Vec::new();
     // Remote sync: connect once per account, operate, disconnect.
     for (account_id, (provider_type, messages)) in &groups {
-        connection_attempted = true;
         match ConnectedProvider::connect(&state, account_id, provider_type).await {
             Ok(conn) => {
                 match &conn {
@@ -417,32 +439,26 @@ pub async fn batch_delete(
                         json!({ "trash": true }),
                         &error,
                     )?;
+                    queued_for_local_commit_ids.push(msg.id.clone());
                 }
             }
         }
     }
 
-    // Fall back to local-only when genuinely offline (no connection was attempted).
-    // If connections were made but all operations failed, only apply the successes.
-    let ids_to_delete = if !connection_attempted || !deleted_ids.is_empty() {
-        if deleted_ids.is_empty() {
-            message_ids.as_slice()
-        } else {
-            deleted_ids.as_slice()
-        }
-    } else {
-        // Connected but every remote op failed; don't silently apply locally.
-        &[]
-    };
+    // Apply locally after remote success or after a provider connection failure
+    // that was queued for retry. Per-message remote failures after a successful
+    // connection remain remote-only failures.
+    let ids_to_delete =
+        batch_local_commit_ids(&message_ids, &deleted_ids, &queued_for_local_commit_ids);
 
     // Local bulk soft-delete
-    state.store.bulk_soft_delete(ids_to_delete)?;
+    state.store.bulk_soft_delete(&ids_to_delete)?;
     let success_count = ids_to_delete.len() as u32;
 
     // Update search index: remove deleted messages.
-    let delete_ids: Vec<String> = ids_to_delete.iter().map(|s| s.to_string()).collect();
+    let delete_ids: Vec<String> = ids_to_delete.clone();
     let _ = state.store.add_search_pending(&delete_ids, "remove");
-    for id in ids_to_delete {
+    for id in &ids_to_delete {
         if let Err(e) = state.search.remove_message(id) {
             warn!("Failed to remove deleted message {id} from search index: {e}");
         }
@@ -472,11 +488,9 @@ pub async fn batch_mark_read(
 
     // Track which messages were successfully updated remotely
     let mut synced_ids: Vec<String> = Vec::new();
-    let mut connection_attempted = false;
-
+    let mut queued_for_local_commit_ids: Vec<String> = Vec::new();
     // Remote sync: connect once per account, operate, disconnect.
     for (account_id, (provider_type, messages)) in &groups {
-        connection_attempted = true;
         match ConnectedProvider::connect(&state, account_id, provider_type).await {
             Ok(conn) => {
                 match &conn {
@@ -580,22 +594,14 @@ pub async fn batch_mark_read(
                         json!({ "is_read": is_read, "is_starred": null }),
                         &error,
                     )?;
+                    queued_for_local_commit_ids.push(msg.id.clone());
                 }
             }
         }
-        // If connection failed, those messages are not added to synced_ids
     }
 
-    // Fall back to local-only when genuinely offline (no connection was attempted).
-    let ids_to_update = if !connection_attempted || !synced_ids.is_empty() {
-        if synced_ids.is_empty() {
-            message_ids.as_slice()
-        } else {
-            synced_ids.as_slice()
-        }
-    } else {
-        &[]
-    };
+    let ids_to_update =
+        batch_local_commit_ids(&message_ids, &synced_ids, &queued_for_local_commit_ids);
 
     // Local bulk flag update: only for messages that succeeded remotely (or all if offline).
     let changes: Vec<(String, Option<bool>, Option<bool>)> = ids_to_update
@@ -626,11 +632,9 @@ pub async fn batch_star(
 
     // Track which messages were successfully updated remotely
     let mut synced_ids: Vec<String> = Vec::new();
-    let mut connection_attempted = false;
-
+    let mut queued_for_local_commit_ids: Vec<String> = Vec::new();
     // Remote sync: connect once per account, operate, disconnect.
     for (account_id, (provider_type, messages)) in &groups {
-        connection_attempted = true;
         match ConnectedProvider::connect(&state, account_id, provider_type).await {
             Ok(conn) => {
                 match &conn {
@@ -731,22 +735,14 @@ pub async fn batch_star(
                         json!({ "is_read": null, "is_starred": starred }),
                         &error,
                     )?;
+                    queued_for_local_commit_ids.push(msg.id.clone());
                 }
             }
         }
-        // If connection failed, those messages are not added to synced_ids
     }
 
-    // Fall back to local-only when genuinely offline (no connection was attempted).
-    let ids_to_update = if !connection_attempted || !synced_ids.is_empty() {
-        if synced_ids.is_empty() {
-            message_ids.as_slice()
-        } else {
-            synced_ids.as_slice()
-        }
-    } else {
-        &[]
-    };
+    let ids_to_update =
+        batch_local_commit_ids(&message_ids, &synced_ids, &queued_for_local_commit_ids);
 
     // Local bulk flag update: only for messages that succeeded remotely (or all if offline).
     let changes: Vec<(String, Option<bool>, Option<bool>)> = ids_to_update
@@ -763,4 +759,33 @@ pub async fn batch_star(
         message_ids.len()
     );
     Ok(success_count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::batch_local_commit_ids;
+
+    #[test]
+    fn batch_local_commit_ids_include_remote_successes_and_queued_connection_failures_in_request_order(
+    ) {
+        let requested = vec![
+            "message-1".to_string(),
+            "message-2".to_string(),
+            "message-3".to_string(),
+        ];
+        let remote_succeeded = vec!["message-3".to_string()];
+        let queued_for_local_commit = vec!["message-1".to_string()];
+
+        assert_eq!(
+            batch_local_commit_ids(&requested, &remote_succeeded, &queued_for_local_commit),
+            vec!["message-1".to_string(), "message-3".to_string()],
+        );
+    }
+
+    #[test]
+    fn batch_local_commit_ids_are_empty_when_all_remote_operations_failed_after_connecting() {
+        let requested = vec!["message-1".to_string(), "message-2".to_string()];
+
+        assert!(batch_local_commit_ids(&requested, &[], &[]).is_empty());
+    }
 }

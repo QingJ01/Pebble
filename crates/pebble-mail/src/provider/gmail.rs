@@ -927,6 +927,11 @@ fn write_common_headers(
     if !cc.is_empty() {
         raw.push_str(&format!("Cc: {cc}\r\n"));
     }
+    // Gmail's raw send API derives recipients from the RFC 5322 message. Bcc
+    // must be present in the submission raw for Gmail to deliver to those
+    // recipients; Gmail is expected to strip it from delivered recipient
+    // copies. Do not remove this without replacing it with an envelope-level
+    // recipient API.
     if !bcc.is_empty() {
         raw.push_str(&format!("Bcc: {bcc}\r\n"));
     }

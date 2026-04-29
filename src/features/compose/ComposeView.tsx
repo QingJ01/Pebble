@@ -15,7 +15,7 @@ import { listTemplates, saveTemplate, deleteTemplate } from "@/lib/templates";
 import type { EmailTemplate } from "@/lib/templates";
 import { useComposeRecipients } from "@/hooks/useComposeRecipients";
 import { useComposeDraft, loadDraftFromStorage, clearDraftStorage } from "@/hooks/useComposeDraft";
-import { deleteDraft } from "@/lib/api";
+import { deleteDraft, stageComposeAttachment } from "@/lib/api";
 import { useComposeEditor } from "@/hooks/useComposeEditor";
 import { useConfirmStore } from "@/stores/confirm.store";
 import { useToastStore } from "@/stores/toast.store";
@@ -106,9 +106,39 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
 
   // ─── Templates ───────────────────────────────────────────────────────────────
   const [showTemplates, setShowTemplates] = useState(false);
-  const [templates, setTemplates] = useState<EmailTemplate[]>(() => listTemplates());
+  const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [showSaveTemplate, setShowSaveTemplate] = useState(false);
   const [templateName, setTemplateName] = useState("");
+
+  async function refreshTemplates() {
+    try {
+      const next = await listTemplates();
+      setTemplates(next);
+      return next;
+    } catch (err) {
+      console.warn("Failed to load templates:", err);
+      return [];
+    }
+  }
+
+  async function stageAttachmentFiles(files: FileList | File[]) {
+    const staged: ComposeAttachment[] = [];
+    for (const file of Array.from(files)) {
+      const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
+      const path = await stageComposeAttachment(file.name, bytes);
+      staged.push({ name: file.name, path, size: file.size });
+    }
+    setAttachments((prev) => [...prev, ...staged]);
+  }
+
+  async function handleSaveTemplate() {
+    if (!templateName.trim()) return;
+    const bodyContent = editorMode === "rich" && editor ? editor.getHTML() : rawSource;
+    await saveTemplate({ name: templateName.trim(), subject, body: bodyContent });
+    setTemplateName("");
+    setShowSaveTemplate(false);
+    void refreshTemplates();
+  }
 
   useEffect(() => {
     if (!sendError) return;
@@ -401,18 +431,16 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
                 onChange={(e) => {
                   const files = e.target.files;
                   if (!files) return;
-                  const newAttachments = Array.from(files).map((file) => ({
-                    name: file.name,
-                    path: (file as unknown as { path?: string }).path || file.name,
-                    size: file.size,
-                  }));
-                  setAttachments((prev) => [...prev, ...newAttachments]);
+                  void stageAttachmentFiles(files).catch((err) => {
+                    console.warn("Failed to stage attachment:", err);
+                    setSendError(t("compose.attachmentStageError", "Failed to attach file"));
+                  });
                   e.target.value = "";
                 }}
               />
               <div style={{ position: "relative" }}>
                 <button
-                  onClick={() => { setTemplates(listTemplates()); setShowTemplates((v) => !v); }}
+                  onClick={() => { void refreshTemplates(); setShowTemplates((v) => !v); }}
                   aria-haspopup="listbox"
                   aria-expanded={showTemplates}
                   aria-label={t("compose.templates", "Templates")}
@@ -491,7 +519,10 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
                                     message: t("compose.deleteTemplate", "Delete template") + ` "${tpl.name}"?`,
                                     destructive: true,
                                   });
-                                  if (confirmed) { deleteTemplate(tpl.id); setTemplates(listTemplates()); }
+                                  if (confirmed) {
+                                    await deleteTemplate(tpl.id);
+                                    void refreshTemplates();
+                                  }
                                 }}
                                 aria-label={t("compose.deleteTemplate", "Delete template")}
                                 title={t("compose.deleteTemplate", "Delete template")}
@@ -595,11 +626,7 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && templateName.trim()) {
-                    const bodyContent = editorMode === "rich" && editor ? editor.getHTML() : rawSource;
-                    saveTemplate({ name: templateName.trim(), subject, body: bodyContent });
-                    setTemplateName("");
-                    setShowSaveTemplate(false);
-                    setTemplates(listTemplates());
+                    void handleSaveTemplate();
                   }
                   if (e.key === "Escape") setShowSaveTemplate(false);
                 }}
@@ -607,11 +634,7 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
               <button
                 onClick={() => {
                   if (!templateName.trim()) return;
-                  const bodyContent = editorMode === "rich" && editor ? editor.getHTML() : rawSource;
-                  saveTemplate({ name: templateName.trim(), subject, body: bodyContent });
-                  setTemplateName("");
-                  setShowSaveTemplate(false);
-                  setTemplates(listTemplates());
+                  void handleSaveTemplate();
                 }}
                 style={{
                   padding: "5px 12px", fontSize: "12px", border: "none",
@@ -644,13 +667,12 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
               setIsDragging(false);
               const files = e.dataTransfer.files;
               if (!files.length) return;
-              const newAttachments: { name: string; path: string; size: number }[] = [];
-              for (let i = 0; i < files.length; i++) {
-                const file = files[i];
-                const path = (file as unknown as { path?: string }).path || file.name;
-                newAttachments.push({ name: file.name, path, size: file.size });
+              try {
+                await stageAttachmentFiles(files);
+              } catch (err) {
+                console.warn("Failed to stage dropped attachment:", err);
+                setSendError(t("compose.attachmentStageError", "Failed to attach file"));
               }
-              setAttachments((prev) => [...prev, ...newAttachments]);
             }}
           >
             {isDragging && (

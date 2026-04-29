@@ -382,10 +382,24 @@ function EditAccountModal({ account, onClose, onSaved }: {
   const [smtpSecurity, setSmtpSecurity] = useState<ConnectionSecurity | "">("");
   const [proxyHost, setProxyHost] = useState("");
   const [proxyPort, setProxyPort] = useState("");
-  const [signature, setSignatureValue] = useState(() => getSignature(account.id));
+  const [signature, setSignatureValue] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isOAuth = account.provider === "gmail" || account.provider === "outlook";
+
+  useEffect(() => {
+    let cancelled = false;
+    getSignature(account.id)
+      .then((loaded) => {
+        if (!cancelled) setSignatureValue(loaded);
+      })
+      .catch((err) => {
+        console.warn("Failed to load signature:", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [account.id]);
 
   useEffect(() => {
     const previousFocus =
@@ -442,7 +456,7 @@ function EditAccountModal({ account, onClose, onSaved }: {
         proxyHost || undefined,
         proxyPort ? parseInt(proxyPort, 10) : undefined,
       );
-      setSignature(account.id, signature);
+      await setSignature(account.id, signature);
       onSaved();
     } catch (err) {
       setError(extractErrorMessage(err));

@@ -1,4 +1,6 @@
-const STORAGE_KEY = "pebble-templates";
+import { invoke } from "@tauri-apps/api/core";
+
+const LEGACY_STORAGE_KEY = "pebble-templates";
 
 export interface EmailTemplate {
   id: string;
@@ -8,25 +10,25 @@ export interface EmailTemplate {
   createdAt: number;
 }
 
-export function listTemplates(): EmailTemplate[] {
+function clearLegacyTemplates() {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-  } catch { return []; }
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+  } catch { /* ignored */ }
 }
 
-export function saveTemplate(template: Omit<EmailTemplate, "id" | "createdAt">): EmailTemplate {
-  const templates = listTemplates();
-  const newTemplate: EmailTemplate = {
-    ...template,
-    id: crypto.randomUUID(),
-    createdAt: Date.now(),
-  };
-  templates.push(newTemplate);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(templates));
-  return newTemplate;
+export async function listTemplates(): Promise<EmailTemplate[]> {
+  const templates = await invoke<EmailTemplate[]>("list_email_templates");
+  clearLegacyTemplates();
+  return templates;
 }
 
-export function deleteTemplate(id: string): void {
-  const templates = listTemplates().filter((t) => t.id !== id);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(templates));
+export async function saveTemplate(template: Omit<EmailTemplate, "id" | "createdAt">): Promise<EmailTemplate> {
+  const saved = await invoke<EmailTemplate>("save_email_template", { template });
+  clearLegacyTemplates();
+  return saved;
+}
+
+export async function deleteTemplate(id: string): Promise<void> {
+  await invoke<void>("delete_email_template", { id });
+  clearLegacyTemplates();
 }

@@ -212,7 +212,7 @@ fn unique_save_path(save_path: &Path, attempt: u32) -> PathBuf {
     parent.join(format!("{stem} ({attempt}){extension}"))
 }
 
-fn sanitize_stored_filename(name: &str) -> String {
+pub(crate) fn sanitize_stored_filename(name: &str) -> String {
     let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
     if base == "." || base == ".." {
         return "attachment".to_string();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildComposeEditorContent } from "../../src/hooks/useComposeEditor";
+import { buildComposeEditorContent, shouldApplyInitialEditorContent } from "../../src/hooks/useComposeEditor";
 import type { Message } from "../../src/lib/ipc-types";
 import type { TFunction } from "i18next";
 
@@ -67,5 +67,29 @@ describe("buildComposeEditorContent", () => {
     expect(content).toContain("<blockquote>");
     expect(content).toContain("<strong>Hello</strong> team");
     expect(content).not.toContain("&lt;strong&gt;");
+  });
+
+  it("does not re-apply generated content after the editor was initialized", () => {
+    expect(shouldApplyInitialEditorContent({
+      editorExists: true,
+      initialized: true,
+      signatureReady: true,
+      hasRestoredDraft: false,
+    })).toBe(false);
+  });
+
+  it("waits for async signature loading before initializing new compose content", () => {
+    expect(shouldApplyInitialEditorContent({
+      editorExists: true,
+      initialized: false,
+      signatureReady: false,
+      hasRestoredDraft: false,
+    })).toBe(false);
+    expect(shouldApplyInitialEditorContent({
+      editorExists: true,
+      initialized: false,
+      signatureReady: true,
+      hasRestoredDraft: false,
+    })).toBe(true);
   });
 });

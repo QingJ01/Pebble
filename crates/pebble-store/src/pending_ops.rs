@@ -3,6 +3,10 @@ use rusqlite::{params, OptionalExtension};
 
 use crate::Store;
 
+pub const MAX_PENDING_MAIL_OP_ATTEMPTS: i64 = 8;
+const BASE_RETRY_DELAY_SECS: i64 = 60;
+const MAX_RETRY_DELAY_SECS: i64 = 60 * 60;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PendingMailOpStatus {
     Pending,
@@ -34,6 +38,13 @@ fn status_from_str(value: &str) -> Result<PendingMailOpStatus> {
     }
 }
 
+fn pending_mail_retry_delay_secs(attempts: i64) -> i64 {
+    let exponent = attempts.saturating_sub(1).clamp(0, 10) as u32;
+    BASE_RETRY_DELAY_SECS
+        .saturating_mul(2_i64.saturating_pow(exponent))
+        .min(MAX_RETRY_DELAY_SECS)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingMailOp {
     pub id: String,
@@ -46,6 +57,7 @@ pub struct PendingMailOp {
     pub last_error: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    pub next_retry_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,7 +103,7 @@ impl Store {
         self.with_read(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT id, account_id, message_id, op_type, payload_json, status,
-                        attempts, last_error, created_at, updated_at
+                        attempts, last_error, created_at, updated_at, next_retry_at
                  FROM pending_mail_ops
                  WHERE account_id = ?1
                  ORDER BY updated_at ASC",
@@ -109,6 +121,7 @@ impl Store {
                     row.get::<_, Option<String>>(7)?,
                     row.get::<_, i64>(8)?,
                     row.get::<_, i64>(9)?,
+                    row.get::<_, Option<i64>>(10)?,
                 ))
             })?;
 
@@ -125,6 +138,7 @@ impl Store {
                     last_error,
                     created_at,
                     updated_at,
+                    next_retry_at,
                 ) = row?;
                 ops.push(PendingMailOp {
                     id,
@@ -137,6 +151,7 @@ impl Store {
                     last_error,
                     created_at,
                     updated_at,
+                    next_retry_at,
                 });
             }
             Ok(ops)
@@ -151,7 +166,7 @@ impl Store {
         self.with_read(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT id, account_id, message_id, op_type, payload_json, status,
-                        attempts, last_error, created_at, updated_at
+                        attempts, last_error, created_at, updated_at, next_retry_at
                  FROM pending_mail_ops
                  WHERE status != 'done'
                    AND (?1 IS NULL OR account_id = ?1)
@@ -171,6 +186,7 @@ impl Store {
                     row.get::<_, Option<String>>(7)?,
                     row.get::<_, i64>(8)?,
                     row.get::<_, i64>(9)?,
+                    row.get::<_, Option<i64>>(10)?,
                 ))
             })?;
 
@@ -187,6 +203,7 @@ impl Store {
                     last_error,
                     created_at,
                     updated_at,
+                    next_retry_at,
                 ) = row?;
                 ops.push(PendingMailOp {
                     id,
@@ -199,6 +216,7 @@ impl Store {
                     last_error,
                     created_at,
                     updated_at,
+                    next_retry_at,
                 });
             }
             Ok(ops)
@@ -209,27 +227,35 @@ impl Store {
         self.with_read(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT id, account_id, message_id, op_type, payload_json, status,
-                        attempts, last_error, created_at, updated_at
+                        attempts, last_error, created_at, updated_at, next_retry_at
                  FROM pending_mail_ops
-                 WHERE status IN ('pending', 'failed')
+                 WHERE status = 'pending'
+                    OR (
+                        status = 'failed'
+                        AND attempts < ?2
+                        AND (next_retry_at IS NULL OR next_retry_at <= ?3)
+                    )
                  ORDER BY updated_at ASC
                  LIMIT ?1",
             )?;
-            let rows = stmt.query_map(params![limit], |row| {
-                let status: String = row.get(5)?;
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    status,
-                    row.get::<_, i64>(6)?,
-                    row.get::<_, Option<String>>(7)?,
-                    row.get::<_, i64>(8)?,
-                    row.get::<_, i64>(9)?,
-                ))
-            })?;
+            let now = pebble_core::now_timestamp();
+            let rows =
+                stmt.query_map(params![limit, MAX_PENDING_MAIL_OP_ATTEMPTS, now], |row| {
+                    let status: String = row.get(5)?;
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        status,
+                        row.get::<_, i64>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, i64>(8)?,
+                        row.get::<_, i64>(9)?,
+                        row.get::<_, Option<i64>>(10)?,
+                    ))
+                })?;
 
             let mut ops = Vec::new();
             for row in rows {
@@ -244,6 +270,7 @@ impl Store {
                     last_error,
                     created_at,
                     updated_at,
+                    next_retry_at,
                 ) = row?;
                 ops.push(PendingMailOp {
                     id,
@@ -256,6 +283,7 @@ impl Store {
                     last_error,
                     created_at,
                     updated_at,
+                    next_retry_at,
                 });
             }
             Ok(ops)
@@ -332,7 +360,8 @@ impl Store {
             conn.execute(
                 "UPDATE pending_mail_ops
                  SET status = ?1,
-                     updated_at = ?2
+                     updated_at = ?2,
+                     next_retry_at = NULL
                  WHERE status = ?3",
                 params![
                     PendingMailOpStatus::Pending.as_str(),
@@ -346,17 +375,34 @@ impl Store {
 
     pub fn mark_pending_mail_op_failed(&self, id: &str, error: &str) -> Result<()> {
         self.with_write(|conn| {
+            let current_attempts = conn
+                .query_row(
+                    "SELECT attempts FROM pending_mail_ops WHERE id = ?1",
+                    params![id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?
+                .unwrap_or(0);
+            let attempts = current_attempts + 1;
+            let now = pebble_core::now_timestamp();
+            let next_retry_at = if attempts < MAX_PENDING_MAIL_OP_ATTEMPTS {
+                Some(now + pending_mail_retry_delay_secs(attempts))
+            } else {
+                None
+            };
             conn.execute(
                 "UPDATE pending_mail_ops
                  SET status = ?1,
                      attempts = attempts + 1,
                      last_error = ?2,
-                     updated_at = ?3
-                 WHERE id = ?4",
+                     updated_at = ?3,
+                     next_retry_at = ?4
+                 WHERE id = ?5",
                 params![
                     PendingMailOpStatus::Failed.as_str(),
                     error,
-                    pebble_core::now_timestamp(),
+                    now,
+                    next_retry_at,
                     id,
                 ],
             )?;
@@ -370,13 +416,25 @@ impl Store {
                 "UPDATE pending_mail_ops
                  SET status = ?1,
                      last_error = NULL,
-                     updated_at = ?2
+                     updated_at = ?2,
+                     next_retry_at = NULL
                  WHERE id = ?3",
                 params![
                     PendingMailOpStatus::Done.as_str(),
                     pebble_core::now_timestamp(),
                     id,
                 ],
+            )?;
+            Ok(())
+        })
+    }
+
+    #[cfg(test)]
+    pub fn force_pending_mail_op_retry_now_for_test(&self, id: &str) -> Result<()> {
+        self.with_write(|conn| {
+            conn.execute(
+                "UPDATE pending_mail_ops SET next_retry_at = ?1 WHERE id = ?2",
+                params![pebble_core::now_timestamp() - 1, id],
             )?;
             Ok(())
         })
@@ -507,7 +565,7 @@ mod tests {
 
         let retryable = store.list_retryable_pending_mail_ops(10).unwrap();
         let retryable_ids: Vec<_> = retryable.iter().map(|op| op.id.as_str()).collect();
-        assert_eq!(retryable_ids, vec![pending_id.as_str(), failed_id.as_str()]);
+        assert_eq!(retryable_ids, vec![pending_id.as_str()]);
 
         store.mark_pending_mail_op_in_progress(&pending_id).unwrap();
         let summary = store.pending_mail_ops_summary(Some(&account.id)).unwrap();
@@ -518,8 +576,38 @@ mod tests {
         assert_eq!(summary.last_error.as_deref(), Some("network unavailable"));
 
         let retryable_after_claim = store.list_retryable_pending_mail_ops(10).unwrap();
-        assert_eq!(retryable_after_claim.len(), 1);
-        assert_eq!(retryable_after_claim[0].id, failed_id);
+        assert!(retryable_after_claim.is_empty());
+        let failed = store.list_pending_mail_ops(&account.id).unwrap();
+        let failed = failed.iter().find(|op| op.id == failed_id).unwrap();
+        assert!(failed.next_retry_at.unwrap() > now_timestamp());
+    }
+
+    #[test]
+    fn failed_pending_mail_ops_stop_retrying_after_max_attempts() {
+        let store = Store::open_in_memory().unwrap();
+        let account = test_account();
+        store.insert_account(&account).unwrap();
+        let folder = test_folder(&account.id);
+        store.insert_folder(&folder).unwrap();
+        let message = test_message(&account.id);
+        store.insert_message(&message, &[folder.id]).unwrap();
+
+        let op_id = store
+            .insert_pending_mail_op(&account.id, &message.id, "archive", "{}")
+            .unwrap();
+        for attempt in 0..MAX_PENDING_MAIL_OP_ATTEMPTS {
+            store
+                .mark_pending_mail_op_failed(&op_id, &format!("failure {attempt}"))
+                .unwrap();
+            store
+                .force_pending_mail_op_retry_now_for_test(&op_id)
+                .unwrap();
+        }
+
+        assert!(store
+            .list_retryable_pending_mail_ops(10)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

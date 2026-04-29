@@ -376,6 +376,7 @@ pub fn run() {
             commands::rules::update_rule,
             commands::rules::delete_rule,
             commands::compose::send_email,
+            commands::compose::stage_compose_attachment,
             commands::trusted_senders::trust_sender,
             commands::trusted_senders::list_trusted_senders,
             commands::trusted_senders::remove_trusted_sender,
@@ -406,6 +407,11 @@ pub fn run() {
             commands::drafts::save_draft,
             commands::drafts::delete_draft,
             commands::folder_counts::get_folder_unread_counts,
+            commands::user_data::list_email_templates,
+            commands::user_data::save_email_template,
+            commands::user_data::delete_email_template,
+            commands::user_data::get_email_signature,
+            commands::user_data::set_email_signature,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

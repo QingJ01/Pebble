@@ -34,6 +34,13 @@ interface BuildComposeEditorContentArgs {
   t: TFunction;
 }
 
+interface ShouldApplyInitialEditorContentArgs {
+  editorExists: boolean;
+  initialized: boolean;
+  signatureReady: boolean;
+  hasRestoredDraft: boolean;
+}
+
 function escapeHtml(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
@@ -104,6 +111,16 @@ export function buildComposeEditorContent({
   }
 }
 
+export function shouldApplyInitialEditorContent({
+  editorExists,
+  initialized,
+  signatureReady,
+  hasRestoredDraft,
+}: ShouldApplyInitialEditorContentArgs) {
+  if (!editorExists || initialized) return false;
+  return hasRestoredDraft || signatureReady;
+}
+
 export function useComposeEditor({
   fromAccountId,
   composeMode,
@@ -116,14 +133,40 @@ export function useComposeEditor({
   const [rawSource, setRawSource] = useState(restoredDraft?.rawSource ?? "");
   const [richTextHtml, setRichTextHtml] = useState("");
   const [htmlPreview, setHtmlPreview] = useState(false);
+  const [signature, setSignature] = useState("");
+  const [signatureReady, setSignatureReady] = useState(Boolean(restoredDraft));
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const contentInitializedRef = useRef(false);
+
+  useEffect(() => {
+    if (restoredDraft) {
+      setSignatureReady(true);
+      return;
+    }
+    let cancelled = false;
+    setSignatureReady(false);
+    getSignature(fromAccountId)
+      .then((loaded) => {
+        if (!cancelled) setSignature(loaded);
+      })
+      .catch((err) => {
+        console.warn("Failed to load signature:", err);
+        if (!cancelled) setSignature("");
+      })
+      .finally(() => {
+        if (!cancelled) setSignatureReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fromAccountId, restoredDraft]);
 
   // Build signature HTML block
   const signatureHtml = useMemo(() => {
-    const sig = getSignature(fromAccountId);
+    const sig = signature;
     if (!sig) return "";
     return `<br/><br/><div style="color:var(--color-text-secondary);font-size:13px">--<br/>${escapeHtml(sig).replace(/\n/g, "<br/>")}</div>`;
-  }, [fromAccountId]);
+  }, [signature]);
 
   const editorContent = useMemo(() => {
     return buildComposeEditorContent({ composeMode, composeReplyTo, isReply, signatureHtml, t });
@@ -141,14 +184,20 @@ export function useComposeEditor({
 
   // Set editor content after creation to avoid initialization crashes
   useEffect(() => {
-    if (!editor) return;
+    if (!shouldApplyInitialEditorContent({
+      editorExists: Boolean(editor),
+      initialized: contentInitializedRef.current,
+      signatureReady,
+      hasRestoredDraft: Boolean(restoredDraft),
+    }) || !editor) return;
     // If restoring a draft, prefer its richTextHtml over generated editorContent
     if (restoredDraft?.richTextHtml) {
       editor.commands.setContent(restoredDraft.richTextHtml);
     } else if (editorContent) {
       editor.commands.setContent(editorContent);
     }
-  }, [editor, editorContent]);
+    contentInitializedRef.current = true;
+  }, [editor, editorContent, restoredDraft, signatureReady]);
 
   useEffect(() => {
     if (!editor) {

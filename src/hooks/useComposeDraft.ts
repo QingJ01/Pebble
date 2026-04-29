@@ -20,44 +20,17 @@ export interface DraftData {
   savedAt: number;
 }
 
-function saveDraftToStorage(draft: Omit<DraftData, "savedAt">) {
-  try {
-    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify({ ...draft, savedAt: Date.now() }));
-  } catch { /* quota exceeded — silently skip */ }
-}
-
 /**
- * Load the stored compose draft.
- *
- * When `validAccountIds` is provided, the draft is only returned if its
- * `accountId` is in that list — this prevents restoring a draft authored under
- * an account that has since been removed (or silently writing it to the
- * currently-active account, which was a real bug).
+ * LocalStorage drafts are no longer restored because they contain plaintext
+ * message bodies and attachment paths. Backend drafts remain the persistence
+ * mechanism; this only clears legacy plaintext data left by older builds.
  */
 export function loadDraftFromStorage(validAccountIds?: string[]): DraftData | null {
+  void validAccountIds;
   try {
-    const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
-    if (!raw) return null;
-    const draft = JSON.parse(raw) as Partial<DraftData>;
-    // Discard drafts older than 24 hours
-    if (!draft.savedAt || Date.now() - draft.savedAt > 24 * 60 * 60 * 1000) {
-      localStorage.removeItem(DRAFT_STORAGE_KEY);
-      return null;
-    }
-    // Legacy drafts without accountId: drop them rather than guess.
-    if (!draft.accountId || typeof draft.accountId !== "string") {
-      localStorage.removeItem(DRAFT_STORAGE_KEY);
-      return null;
-    }
-    if (validAccountIds && !validAccountIds.includes(draft.accountId)) {
-      localStorage.removeItem(DRAFT_STORAGE_KEY);
-      return null;
-    }
-    return {
-      ...draft,
-      attachments: Array.isArray(draft.attachments) ? draft.attachments : [],
-    } as DraftData;
-  } catch { return null; }
+    localStorage.removeItem(DRAFT_STORAGE_KEY);
+  } catch { /* ignore legacy cleanup failure */ }
+  return null;
 }
 
 export function clearDraftStorage() {
@@ -87,7 +60,7 @@ export function useComposeDraft({
 }: UseComposeDraftArgs) {
   // Snapshot the initial compose state so pre-populated reply/forward
   // fields don't immediately trigger the "unsaved draft" guard.
-  // Deferred until the editor has rendered its initial content — taken once,
+  // Deferred until the editor has rendered its initial content - taken once,
   // in an effect that runs after the first render post-editorReady.
   const initialSnapshot = useRef<{
     to: string[]; cc: string[]; bcc: string[]; subject: string;
@@ -99,7 +72,7 @@ export function useComposeDraft({
       to: [...to], cc: [...cc], bcc: [...bcc], subject,
       rawSource, richTextHtml, attachments: attachments.map((a) => ({ ...a })),
     };
-    // Only depend on editorReady — we want this to run once after mount, not
+    // Only depend on editorReady - we want this to run once after mount, not
     // each time the user edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editorReady]);
@@ -143,7 +116,8 @@ export function useComposeDraft({
     useComposeStore.getState().setComposeDirty(userChanged);
   }, [arraysEqual, attachments, attachmentsEqual, bcc, cc, rawSource, richTextHtml, subject, to, editorReady]);
 
-  // Auto-save draft to localStorage and backend (debounced 3s)
+  // Auto-save draft to backend (debounced 3s). Do not persist plaintext draft
+  // data in WebView storage.
   useEffect(() => {
     if (!composeMode || !editorReady || !initialSnapshot.current) return;
     const timer = setTimeout(() => {
@@ -157,18 +131,7 @@ export function useComposeDraft({
         const accountIdAtSave = fromAccountId;
         const generation = (saveGenerationByAccountRef.current[accountIdAtSave] ?? 0) + 1;
         saveGenerationByAccountRef.current[accountIdAtSave] = generation;
-        saveDraftToStorage({
-          accountId: accountIdAtSave,
-          to,
-          cc,
-          bcc,
-          subject,
-          rawSource,
-          richTextHtml,
-          editorMode,
-          attachments: draftAttachments,
-        });
-        // Also save to backend under the current From account
+        // Save to backend under the current From account.
         {
           // Pick body source based on current editor mode to avoid stale content.
           // For rich text, strip HTML tags to produce a plain-text fallback.

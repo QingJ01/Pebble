@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::commands::attachments::stage_local_attachment_records;
+use crate::commands::attachments::{sanitize_stored_filename, stage_local_attachment_records};
 use crate::commands::messages::refresh_search_document;
 use crate::commands::oauth::ensure_account_oauth_tokens;
 use crate::{events, state::AppState};
@@ -568,4 +568,65 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(base);
     }
+
+    #[test]
+    fn compose_attachment_upload_stages_browser_file_bytes_under_attachments_dir() {
+        let attachments_dir = temp_attachments_dir("pebble-compose-upload");
+        let staged = stage_compose_attachment_bytes(
+            &attachments_dir,
+            "..\\quarterly:report?.txt",
+            b"payload",
+        )
+        .unwrap();
+
+        let canonical_attachments_dir = attachments_dir.canonicalize().unwrap();
+        assert!(staged.starts_with(&canonical_attachments_dir));
+        assert_eq!(std::fs::read(&staged).unwrap(), b"payload");
+        assert!(staged
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap()
+            .ends_with("-quarterly_report_.txt"));
+
+        let _ = std::fs::remove_dir_all(attachments_dir);
+    }
+}
+
+pub(crate) fn stage_compose_attachment_bytes(
+    attachments_dir: &Path,
+    filename: &str,
+    bytes: &[u8],
+) -> std::result::Result<PathBuf, PebbleError> {
+    let staging_dir = attachments_dir.join("compose_staging");
+    std::fs::create_dir_all(&staging_dir).map_err(|e| {
+        PebbleError::Internal(format!(
+            "Failed to create compose attachment staging directory {}: {e}",
+            staging_dir.display()
+        ))
+    })?;
+    let canonical_staging_dir = staging_dir.canonicalize().map_err(|e| {
+        PebbleError::Internal(format!(
+            "Failed to resolve compose attachment staging directory {}: {e}",
+            staging_dir.display()
+        ))
+    })?;
+    let safe_filename = sanitize_stored_filename(filename);
+    let staged_path = canonical_staging_dir.join(format!("{}-{safe_filename}", new_id()));
+    std::fs::write(&staged_path, bytes).map_err(|e| {
+        PebbleError::Internal(format!(
+            "Failed to stage compose attachment {}: {e}",
+            staged_path.display()
+        ))
+    })?;
+    Ok(staged_path)
+}
+
+#[tauri::command]
+pub async fn stage_compose_attachment(
+    state: State<'_, AppState>,
+    filename: String,
+    bytes: Vec<u8>,
+) -> std::result::Result<String, PebbleError> {
+    let staged = stage_compose_attachment_bytes(&state.attachments_dir, &filename, &bytes)?;
+    Ok(staged.to_string_lossy().into_owned())
 }

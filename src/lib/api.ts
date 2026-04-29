@@ -371,6 +371,10 @@ export async function sendEmail(
   });
 }
 
+export async function stageComposeAttachment(filename: string, bytes: number[]): Promise<string> {
+  return invoke<string>("stage_compose_attachment", { filename, bytes });
+}
+
 // ─── Batch Operations ───────────────────────────────────────────────────────
 
 export async function batchArchive(messageIds: string[]): Promise<number> {

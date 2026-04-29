@@ -1,20 +1,20 @@
-const STORAGE_KEY = "pebble-signatures";
+import { invoke } from "@tauri-apps/api/core";
 
-export function getSignature(accountId: string): string {
+const LEGACY_STORAGE_KEY = "pebble-signatures";
+
+function clearLegacySignatures() {
   try {
-    const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-    return data[accountId] || "";
-  } catch { return ""; }
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+  } catch { /* ignored */ }
 }
 
-export function setSignature(accountId: string, signature: string): void {
-  try {
-    const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-    if (signature.trim()) {
-      data[accountId] = signature;
-    } else {
-      delete data[accountId];
-    }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  } catch { /* quota exceeded */ }
+export async function getSignature(accountId: string): Promise<string> {
+  const signature = await invoke<string>("get_email_signature", { accountId });
+  clearLegacySignatures();
+  return signature;
+}
+
+export async function setSignature(accountId: string, signature: string): Promise<void> {
+  await invoke<void>("set_email_signature", { accountId, signature });
+  clearLegacySignatures();
 }

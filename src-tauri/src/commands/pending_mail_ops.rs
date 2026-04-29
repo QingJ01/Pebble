@@ -51,6 +51,7 @@ pub struct PendingMailOpResponse {
     pub last_error: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    pub next_retry_at: Option<i64>,
 }
 
 impl From<PendingMailOp> for PendingMailOpResponse {
@@ -65,6 +66,7 @@ impl From<PendingMailOp> for PendingMailOpResponse {
             last_error: value.last_error,
             created_at: value.created_at,
             updated_at: value.updated_at,
+            next_retry_at: value.next_retry_at,
         }
     }
 }

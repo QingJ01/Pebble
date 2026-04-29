@@ -101,6 +101,7 @@ export interface PendingMailOp {
   last_error: string | null;
   created_at: number;
   updated_at: number;
+  next_retry_at: number | null;
 }
 
 /** @rust src-tauri/src/commands/diagnostics.rs -> AppLogSnapshot */

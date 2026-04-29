@@ -43,7 +43,7 @@ describe("useComposeDraft", () => {
     saveDraftMock.mockReset();
   });
 
-  it("autosaves attachments to local storage and backend draft", async () => {
+  it("autosaves attachments only to the backend draft", async () => {
     saveDraftMock.mockResolvedValue("draft-1");
 
     renderHook((props) => useComposeDraft(props), {
@@ -60,9 +60,7 @@ describe("useComposeDraft", () => {
     expect(saveDraftMock).toHaveBeenCalledWith(expect.objectContaining({
       attachmentPaths: ["C:\\tmp\\report.pdf"],
     }));
-    expect(JSON.parse(localStorage.getItem("pebble-compose-draft") ?? "{}")).toMatchObject({
-      attachments: [{ name: "report.pdf", path: "C:\\tmp\\report.pdf", size: 1234 }],
-    });
+    expect(localStorage.getItem("pebble-compose-draft")).toBeNull();
   });
 
   it("does not reuse a stale draft id after switching accounts", async () => {
