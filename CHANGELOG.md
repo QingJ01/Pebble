@@ -21,6 +21,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Enabled the native macOS Keychain backend for local credential encryption.
 - Made search over subject, sender, and recipient short fields case-insensitive for Latin text, and trigger a search index rebuild for older case-sensitive indexes.
+- Indexed locally saved sent and queued outgoing messages so they appear in search results.
+- Moved compose drafts, templates, and signatures out of frontend `localStorage` and into encrypted backend secure storage.
+- Protected in-progress compose content from being overwritten when account, signature, or language-dependent defaults change.
+- Added retry scheduling, exponential backoff, and a maximum attempt limit for pending mail operations.
+- Aligned offline batch mail operations with single-message optimistic local commit behavior.
+- Staged compose attachments through the backend so valid selected files no longer depend on fragile frontend path handling.
 - Moved Kanban context notes out of frontend `localStorage` and into encrypted backend secure storage, with one-time legacy note migration.
 - Hardened HTML email CSS sanitization against escaped `url()` tokens that could trigger remote loads in strict privacy mode.
 - Prevented duplicate same-account sync workers by keeping the startup placeholder lock alive until the real worker replaces it.
