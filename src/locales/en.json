@@ -178,7 +178,7 @@
   },
   "cloudSync": {
     "title": "Settings Backup",
-    "description": "Back up rules, cards, and account metadata to WebDAV. This does not sync mail data, attachments, or OAuth secrets.",
+    "description": "Back up rules, Kanban cards and notes, and account metadata to WebDAV. This does not sync mail data, attachments, or OAuth secrets.",
     "webdavUrl": "WebDAV URL",
     "username": "Username",
     "password": "Password",
@@ -191,7 +191,7 @@
     "lastBackup": "Last backup",
     "backupSuccess": "Settings backup completed successfully",
     "restoreSuccess": "Backup restored. Reconnect email accounts and translation providers to continue.",
-    "restoreConfirm": "This will replace your local rules, cards, and saved account metadata with the backup. Reauthentication will still be required. Continue?",
+    "restoreConfirm": "This will replace local rules and Kanban cards/notes, and merge account metadata from the backup. Reauthentication will still be required for restored accounts. Continue?",
     "backupFailed": "Backup failed: {{error}}",
     "restoreFailed": "Restore failed: {{error}}",
     "encryptionWarning": "Note: Backups are uploaded as unencrypted JSON. Ensure your WebDAV server is trusted.",
@@ -201,8 +201,9 @@
     "restorePreviewAccounts": "Accounts: {{count}}",
     "restorePreviewRules": "Rules: {{count}}",
     "restorePreviewKanban": "Kanban cards: {{count}}",
+    "restorePreviewKanbanNotes": "Kanban notes: {{count}}",
     "restorePreviewSize": "Size: {{kb}} KB",
-    "scopeNotice": "WebDAV backup only includes settings, rules, and kanban data. Email messages are not included."
+    "scopeNotice": "WebDAV backup includes settings, rules, Kanban cards, and Kanban notes. Message bodies and attachments are not included unless you saved text into a Kanban note."
   },
   "pendingOps": {
     "title": "Remote Writes",

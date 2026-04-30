@@ -50,6 +50,7 @@ function filterStyleAttribute(style: string): string {
       const name = rawName.trim().toLowerCase();
       const value = rawValue.join(":").trim().toLowerCase();
       if (!SAFE_STYLE_PROPERTIES.has(name) || !value) return false;
+      if (value.includes("\\")) return false;
       return !/(url\s*\(|expression\s*\(|javascript:|data:)/i.test(value);
     })
     .join("; ");

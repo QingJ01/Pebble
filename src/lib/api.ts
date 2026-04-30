@@ -321,6 +321,23 @@ export async function removeFromKanban(messageId: string): Promise<void> {
   return invoke<void>("remove_from_kanban", { messageId });
 }
 
+export async function listKanbanContextNotes(): Promise<Record<string, string>> {
+  return invoke<Record<string, string>>("list_kanban_context_notes");
+}
+
+export async function setKanbanContextNote(
+  messageId: string,
+  note: string,
+): Promise<Record<string, string>> {
+  return invoke<Record<string, string>>("set_kanban_context_note", { messageId, note });
+}
+
+export async function mergeKanbanContextNotes(
+  notes: Record<string, string>,
+): Promise<Record<string, string>> {
+  return invoke<Record<string, string>>("merge_kanban_context_notes", { notes });
+}
+
 // ─── Snooze API ──────────────────────────────────────────────────────────────
 
 export async function snoozeMessage(messageId: string, until: number, returnTo: string): Promise<void> {

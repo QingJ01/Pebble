@@ -158,7 +158,7 @@ export default function CloudSyncTab() {
       >
         {t(
           "cloudSync.description",
-          "Back up rules, cards, and account metadata to WebDAV. This does not sync mail data, attachments, or OAuth secrets.",
+          "Back up rules, Kanban cards and notes, and account metadata to WebDAV. This does not sync mail data, attachments, or OAuth secrets.",
         )}
         {" "}
         <span style={{ color: "var(--color-warning, #e67e22)" }}>
@@ -185,7 +185,7 @@ export default function CloudSyncTab() {
       >
         {t(
           "cloudSync.scopeNotice",
-          "WebDAV backup only includes settings, rules, and kanban data. Email messages are not included.",
+          "WebDAV backup includes settings, rules, Kanban cards, and Kanban notes. Message bodies and attachments are not included unless you saved text into a Kanban note.",
         )}
       </p>
 
@@ -304,11 +304,13 @@ export default function CloudSyncTab() {
             "\n" +
             t("cloudSync.restorePreviewKanban", "Kanban cards: {{count}}", { count: restorePreview.kanban_card_count }) +
             "\n" +
+            t("cloudSync.restorePreviewKanbanNotes", "Kanban notes: {{count}}", { count: restorePreview.kanban_note_count }) +
+            "\n" +
             t("cloudSync.restorePreviewSize", "Size: {{kb}} KB", { kb: (restorePreview.size_bytes / 1024).toFixed(1) }) +
             "\n\n" +
             t(
               "cloudSync.restoreConfirm",
-              "This will replace your local rules, cards, and saved account metadata with the backup. Reauthentication will still be required. Continue?",
+              "This will replace local rules and Kanban cards/notes, and merge account metadata from the backup. Reauthentication will still be required for restored accounts. Continue?",
             )
           }
           destructive

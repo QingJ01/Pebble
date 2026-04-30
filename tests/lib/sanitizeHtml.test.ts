@@ -20,4 +20,13 @@ describe("sanitizeHtml", () => {
     expect(sanitized).not.toContain("javascript:");
     expect(sanitized).toContain("color:");
   });
+
+  it("removes inline styles with escaped url tokens", () => {
+    const sanitized = sanitizeHtml(
+      `<p style="color: u\\72l('https://evil.example/track')">hello</p>`,
+    );
+
+    expect(sanitized).not.toContain("evil.example");
+    expect(sanitized).not.toContain("u\\72l");
+  });
 });

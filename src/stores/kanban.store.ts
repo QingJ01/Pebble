@@ -1,6 +1,13 @@
 import { create } from "zustand";
 import type { KanbanCard, KanbanColumnType } from "@/lib/api";
-import { listKanbanCards, moveToKanban, removeFromKanban } from "@/lib/api";
+import {
+  listKanbanCards,
+  listKanbanContextNotes,
+  mergeKanbanContextNotes,
+  moveToKanban,
+  removeFromKanban,
+  setKanbanContextNote,
+} from "@/lib/api";
 
 interface KanbanState {
   cards: KanbanCard[];
@@ -12,22 +19,39 @@ interface KanbanState {
   addCard: (messageId: string, column: KanbanColumnType) => Promise<void>;
   removeCard: (messageId: string) => Promise<void>;
   reorderInColumn: (column: KanbanColumnType, orderedIds: string[]) => void;
-  setContextNote: (messageId: string, note: string) => void;
+  setContextNote: (messageId: string, note: string) => Promise<void>;
 }
 
-const CONTEXT_NOTES_STORAGE_KEY = "pebble-kanban-context-notes";
+const LEGACY_CONTEXT_NOTES_STORAGE_KEY = "pebble-kanban-context-notes";
 
-function loadContextNotes(): Record<string, string> {
+function loadLegacyContextNotes(): Record<string, string> {
+  if (typeof localStorage === "undefined") return {};
   try {
-    const parsed = JSON.parse(localStorage.getItem(CONTEXT_NOTES_STORAGE_KEY) || "{}");
+    const parsed = JSON.parse(localStorage.getItem(LEGACY_CONTEXT_NOTES_STORAGE_KEY) || "{}");
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
   } catch {
     return {};
   }
 }
 
-function saveContextNotes(notes: Record<string, string>) {
-  localStorage.setItem(CONTEXT_NOTES_STORAGE_KEY, JSON.stringify(notes));
+let legacyContextNotes = loadLegacyContextNotes();
+if (typeof localStorage !== "undefined") {
+  localStorage.removeItem(LEGACY_CONTEXT_NOTES_STORAGE_KEY);
+}
+
+async function loadContextNotes(): Promise<Record<string, string>> {
+  const backendNotes = await listKanbanContextNotes();
+  const legacyNotes = legacyContextNotes;
+  legacyContextNotes = {};
+  const legacyEntries = Object.entries(legacyNotes).filter(
+    ([messageId, note]) => messageId && note && backendNotes[messageId] === undefined,
+  );
+
+  if (legacyEntries.length === 0) {
+    return backendNotes;
+  }
+
+  return mergeKanbanContextNotes(Object.fromEntries(legacyEntries));
 }
 
 function buildIdSet(cards: KanbanCard[]): Set<string> {
@@ -37,14 +61,14 @@ function buildIdSet(cards: KanbanCard[]): Set<string> {
 export const useKanbanStore = create<KanbanState>((set, get) => ({
   cards: [],
   cardIdSet: new Set<string>(),
-  contextNotes: loadContextNotes(),
+  contextNotes: {},
   loading: false,
 
   fetchCards: async () => {
     set({ loading: true });
     try {
-      const cards = await listKanbanCards();
-      set({ cards, cardIdSet: buildIdSet(cards) });
+      const [cards, contextNotes] = await Promise.all([listKanbanCards(), loadContextNotes()]);
+      set({ cards, cardIdSet: buildIdSet(cards), contextNotes });
     } finally {
       set({ loading: false });
     }
@@ -100,9 +124,21 @@ export const useKanbanStore = create<KanbanState>((set, get) => ({
     }
   },
 
-  setContextNote: (messageId, note) => {
-    const next = { ...get().contextNotes, [messageId]: note };
-    saveContextNotes(next);
+  setContextNote: async (messageId, note) => {
+    const prev = get().contextNotes;
+    const next = { ...prev };
+    if (note) {
+      next[messageId] = note;
+    } else {
+      delete next[messageId];
+    }
     set({ contextNotes: next });
+    try {
+      const saved = await setKanbanContextNote(messageId, note);
+      set({ contextNotes: saved });
+    } catch (err) {
+      set({ contextNotes: prev });
+      throw err;
+    }
   },
 }));

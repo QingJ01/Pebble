@@ -134,7 +134,7 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
       if (!kanban.cardIdSet.has(messageId)) {
         await kanban.addCard(messageId, "todo");
       }
-      useKanbanStore.getState().setContextNote(messageId, text);
+      await useKanbanStore.getState().setContextNote(messageId, text);
       useUIStore.getState().setActiveView("kanban");
       useToastStore.getState().addToast({
         message: t("kanban.contextNoteAdded", "Added selected text to Kanban note"),

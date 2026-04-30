@@ -21,11 +21,20 @@ describe("KanbanStore", () => {
       { message_id: "m1", column: "todo", position: 0, created_at: 1000, updated_at: 1000 },
       { message_id: "m2", column: "done", position: 1, created_at: 1000, updated_at: 1000 },
     ];
-    mockedInvoke.mockResolvedValueOnce(mockCards);
+    mockedInvoke.mockImplementation((command) => {
+      if (command === "list_kanban_cards") {
+        return Promise.resolve(mockCards);
+      }
+      if (command === "list_kanban_context_notes") {
+        return Promise.resolve({});
+      }
+      return Promise.resolve(undefined);
+    });
 
     await useKanbanStore.getState().fetchCards();
 
     expect(mockedInvoke).toHaveBeenCalledWith("list_kanban_cards", { column: undefined });
+    expect(mockedInvoke).toHaveBeenCalledWith("list_kanban_context_notes");
     expect(useKanbanStore.getState().cards).toHaveLength(2);
     expect(useKanbanStore.getState().loading).toBe(false);
   });
@@ -83,12 +92,16 @@ describe("KanbanStore", () => {
     expect(useKanbanStore.getState().cards).toHaveLength(1);
   });
 
-  it("stores context notes for kanban cards", () => {
-    useKanbanStore.getState().setContextNote("m1", "follow up on the selected paragraph");
+  it("stores context notes through backend storage only", async () => {
+    mockedInvoke.mockResolvedValueOnce({ m1: "follow up on the selected paragraph" });
+
+    await useKanbanStore.getState().setContextNote("m1", "follow up on the selected paragraph");
 
     expect(useKanbanStore.getState().contextNotes.m1).toBe("follow up on the selected paragraph");
-    expect(JSON.parse(localStorage.getItem("pebble-kanban-context-notes") || "{}")).toEqual({
-      m1: "follow up on the selected paragraph",
+    expect(mockedInvoke).toHaveBeenCalledWith("set_kanban_context_note", {
+      messageId: "m1",
+      note: "follow up on the selected paragraph",
     });
+    expect(localStorage.getItem("pebble-kanban-context-notes")).toBeNull();
   });
 });

@@ -1,5 +1,6 @@
 use pebble_core::{PebbleError, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::Store;
 
@@ -28,6 +29,7 @@ pub struct BackupPreview {
     pub account_count: usize,
     pub rule_count: usize,
     pub kanban_card_count: usize,
+    pub kanban_note_count: usize,
     pub has_translate_config: bool,
     pub size_bytes: usize,
 }
@@ -57,6 +59,7 @@ pub fn preview_backup(data: &[u8]) -> Result<BackupPreview> {
         account_count: backup.accounts.len(),
         rule_count: backup.rules.len(),
         kanban_card_count: backup.kanban_cards.len(),
+        kanban_note_count: backup.kanban_context_notes.len(),
         has_translate_config: backup
             .translate_config
             .as_ref()
@@ -74,6 +77,8 @@ pub struct SettingsBackup {
     pub accounts: Vec<AccountBackup>,
     pub rules: Vec<pebble_core::Rule>,
     pub kanban_cards: Vec<pebble_core::KanbanCard>,
+    #[serde(default)]
+    pub kanban_context_notes: HashMap<String, String>,
     pub translate_config: Option<pebble_core::TranslateConfig>,
 }
 
@@ -242,6 +247,7 @@ impl Store {
             accounts: account_backups,
             rules,
             kanban_cards,
+            kanban_context_notes: HashMap::new(),
             translate_config,
         };
 
@@ -276,7 +282,8 @@ impl Store {
             let tx = conn.unchecked_transaction()
                 .map_err(|e| PebbleError::Storage(format!("Failed to begin transaction: {e}")))?;
 
-            // Upsert accounts (insert if not exists, skip if exists to avoid overwriting local data)
+            // Merge account metadata: insert restored accounts, update existing
+            // account display fields without touching auth_data.
             for ab in &backup.accounts {
                 let exists: bool = tx
                     .query_row(
@@ -307,6 +314,12 @@ impl Store {
                         "INSERT INTO accounts (id, email, display_name, provider, sync_state, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                         rusqlite::params![&ab.id, &ab.email, &ab.display_name, provider_slug(&ab.provider), sync_state_json, now, now],
                     ).map_err(|e| PebbleError::Storage(e.to_string()))?;
+                } else {
+                    tx.execute(
+                        "UPDATE accounts SET email = ?1, display_name = ?2, updated_at = ?3 WHERE id = ?4",
+                        rusqlite::params![&ab.email, &ab.display_name, pebble_core::now_timestamp(), &ab.id],
+                    )
+                    .map_err(|e| PebbleError::Storage(e.to_string()))?;
                 }
             }
 
@@ -320,7 +333,9 @@ impl Store {
                 ).map_err(|e| PebbleError::Storage(e.to_string()))?;
             }
 
-            // Upsert kanban cards
+            // Replace kanban cards atomically so restored boards match the backup.
+            tx.execute("DELETE FROM kanban_cards", [])
+                .map_err(|e| PebbleError::Storage(e.to_string()))?;
             for card in &backup.kanban_cards {
                 Self::upsert_kanban_card_with_conn(&tx, card)?;
             }
@@ -470,6 +485,7 @@ mod tests {
                 updated_at: now,
             }],
             kanban_cards: vec![],
+            kanban_context_notes: HashMap::new(),
             translate_config: None,
         };
         let data = serde_json::to_vec(&backup).unwrap();
@@ -478,6 +494,103 @@ mod tests {
         let rules = store.list_rules().unwrap();
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].name, "New Rule");
+    }
+
+    #[test]
+    fn test_import_replaces_kanban_cards() {
+        let store = Store::open_in_memory().unwrap();
+        let now = now_timestamp();
+
+        let account = Account {
+            id: new_id(),
+            email: "test@example.com".to_string(),
+            display_name: "Test User".to_string(),
+            provider: ProviderType::Imap,
+            created_at: now,
+            updated_at: now,
+        };
+        store.insert_account(&account).unwrap();
+        let folder = Folder {
+            id: new_id(),
+            account_id: account.id.clone(),
+            remote_id: "INBOX".to_string(),
+            name: "Inbox".to_string(),
+            folder_type: FolderType::Folder,
+            role: Some(FolderRole::Inbox),
+            parent_id: None,
+            color: None,
+            is_system: true,
+            sort_order: 0,
+        };
+        store.insert_folder(&folder).unwrap();
+        let make_msg = |subject: &str| Message {
+            id: new_id(),
+            account_id: account.id.clone(),
+            remote_id: new_id(),
+            message_id_header: None,
+            in_reply_to: None,
+            references_header: None,
+            thread_id: None,
+            subject: subject.to_string(),
+            snippet: String::new(),
+            from_address: "sender@example.com".to_string(),
+            from_name: String::new(),
+            to_list: vec![],
+            cc_list: vec![],
+            bcc_list: vec![],
+            body_text: String::new(),
+            body_html_raw: String::new(),
+            has_attachments: false,
+            is_read: false,
+            is_starred: false,
+            is_draft: false,
+            date: now,
+            remote_version: None,
+            is_deleted: false,
+            deleted_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let old_msg = make_msg("old");
+        let new_msg = make_msg("new");
+        store
+            .insert_message(&old_msg, &[folder.id.clone()])
+            .unwrap();
+        store.insert_message(&new_msg, &[folder.id]).unwrap();
+        store
+            .upsert_kanban_card(&KanbanCard {
+                message_id: old_msg.id,
+                column: KanbanColumn::Todo,
+                position: 0,
+                created_at: now,
+                updated_at: now,
+            })
+            .unwrap();
+
+        let backup = SettingsBackup {
+            version: 1,
+            exported_at: now,
+            accounts: vec![],
+            rules: vec![],
+            kanban_cards: vec![KanbanCard {
+                message_id: new_msg.id.clone(),
+                column: KanbanColumn::Done,
+                position: 0,
+                created_at: now,
+                updated_at: now,
+            }],
+            kanban_context_notes: HashMap::new(),
+            translate_config: None,
+        };
+
+        store
+            .import_settings(&serde_json::to_vec(&backup).unwrap())
+            .unwrap();
+
+        let cards = store.list_kanban_cards(None).unwrap();
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].message_id, new_msg.id);
+        assert_eq!(cards[0].column, KanbanColumn::Done);
     }
 
     #[test]
@@ -496,6 +609,7 @@ mod tests {
             }],
             rules: vec![],
             kanban_cards: vec![],
+            kanban_context_notes: HashMap::new(),
             translate_config: None,
         };
 

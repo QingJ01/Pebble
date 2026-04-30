@@ -19,6 +19,16 @@ use tauri::{Emitter, State};
 use tokio::sync::{mpsc, watch};
 use tracing::{info, warn};
 
+fn spawn_sync_start_placeholder(
+    stop_rx: watch::Receiver<bool>,
+    trigger_rx: mpsc::UnboundedReceiver<SyncTrigger>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let _keepalive = (stop_rx, trigger_rx);
+        std::future::pending::<()>().await;
+    })
+}
+
 #[tauri::command]
 pub async fn start_sync(
     app: tauri::AppHandle,
@@ -70,9 +80,9 @@ async fn start_sync_inner(
         }
         // Insert a placeholder with a dummy stop channel. The real handle
         // will replace it below. If setup fails, we remove the placeholder.
-        let (placeholder_tx, _placeholder_rx) = watch::channel(false);
-        let (placeholder_trigger_tx, _placeholder_trigger_rx) = mpsc::unbounded_channel();
-        let placeholder_task = tokio::spawn(async {});
+        let (placeholder_tx, placeholder_rx) = watch::channel(false);
+        let (placeholder_trigger_tx, placeholder_trigger_rx) = mpsc::unbounded_channel();
+        let placeholder_task = spawn_sync_start_placeholder(placeholder_rx, placeholder_trigger_rx);
         handles.insert(
             account_id.clone(),
             SyncHandle {
@@ -89,14 +99,18 @@ async fn start_sync_inner(
         Ok(Some(a)) => a,
         Ok(None) => {
             let mut handles = state.sync_handles.lock().await;
-            handles.remove(&account_id);
+            if let Some(handle) = handles.remove(&account_id) {
+                handle.task.abort();
+            }
             return Err(PebbleError::Internal(format!(
                 "Account not found: {account_id}"
             )));
         }
         Err(e) => {
             let mut handles = state.sync_handles.lock().await;
-            handles.remove(&account_id);
+            if let Some(handle) = handles.remove(&account_id) {
+                handle.task.abort();
+            }
             return Err(e);
         }
     };
@@ -165,7 +179,9 @@ async fn start_sync_inner(
         Ok(task) => task,
         Err(e) => {
             let mut handles = state.sync_handles.lock().await;
-            handles.remove(&account_id);
+            if let Some(handle) = handles.remove(&account_id) {
+                handle.task.abort();
+            }
             return Err(e);
         }
     };
@@ -173,14 +189,16 @@ async fn start_sync_inner(
     // Replace the placeholder with the real sync handle.
     {
         let mut handles = state.sync_handles.lock().await;
-        handles.insert(
+        if let Some(previous) = handles.insert(
             account_id,
             SyncHandle {
                 stop_tx,
                 trigger_tx,
                 task,
             },
-        );
+        ) {
+            previous.task.abort();
+        }
     }
 
     Ok(())
@@ -315,7 +333,22 @@ impl RealtimePreferenceStartSummary {
     }
 
     fn into_command_result(self) -> std::result::Result<(), PebbleError> {
-        Ok(())
+        if self.failures.is_empty() {
+            return Ok(());
+        }
+
+        let failures = self
+            .failures
+            .iter()
+            .map(|(account_id, error)| format!("{account_id}: {error}"))
+            .collect::<Vec<_>>()
+            .join("; ");
+        Err(PebbleError::Internal(format!(
+            "Realtime preference applied with {} account start failure(s); {} account(s) started; failures: {}",
+            self.failures.len(),
+            self.started_count,
+            failures
+        )))
     }
 }
 
@@ -793,7 +826,23 @@ mod trigger_tests {
 
         assert_eq!(summary.started_count, 1);
         assert_eq!(summary.failures.len(), 1);
-        assert!(summary.into_command_result().is_ok());
+        let err = summary
+            .into_command_result()
+            .expect_err("partial realtime preference failures should be visible to the UI");
+        assert!(err.to_string().contains("bad-account"));
+        assert!(err.to_string().contains("1 account(s) started"));
+    }
+
+    #[tokio::test]
+    async fn sync_start_placeholder_keeps_slot_reserved_until_replaced() {
+        let (_stop_tx, stop_rx) = watch::channel(false);
+        let (trigger_tx, trigger_rx) = mpsc::unbounded_channel();
+        let handle = spawn_sync_start_placeholder(stop_rx, trigger_rx);
+        tokio::task::yield_now().await;
+
+        assert!(!handle.is_finished());
+        assert!(trigger_tx.send(SyncTrigger::Manual).is_ok());
+        handle.abort();
     }
 
     #[test]

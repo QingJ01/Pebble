@@ -178,7 +178,7 @@
   },
   "cloudSync": {
     "title": "设置备份",
-    "description": "将规则、看板卡片和账户元数据备份到 WebDAV。不包含邮件数据、附件或 OAuth 密钥。",
+    "description": "将规则、看板卡片和备注、账户元数据备份到 WebDAV。不包含邮件数据、附件或 OAuth 密钥。",
     "webdavUrl": "WebDAV 地址",
     "username": "用户名",
     "password": "密码",
@@ -191,7 +191,7 @@
     "lastBackup": "上次备份",
     "backupSuccess": "设置备份已完成",
     "restoreSuccess": "备份已恢复，请重新连接邮箱账户和翻译提供方后再继续使用。",
-    "restoreConfirm": "这会用备份替换本地的规则、看板卡片和已保存的账户元数据。恢复后仍需要重新验证。是否继续？",
+    "restoreConfirm": "这会用备份替换本地的规则和看板卡片/备注，并合并备份中的账户元数据。恢复后的账户仍需要重新验证。是否继续？",
     "backupFailed": "备份失败：{{error}}",
     "restoreFailed": "恢复失败：{{error}}",
     "encryptionWarning": "注意：备份以未加密 JSON 格式上传，请确保你的 WebDAV 服务器可信。",
@@ -201,8 +201,9 @@
     "restorePreviewAccounts": "账户：{{count}}",
     "restorePreviewRules": "规则：{{count}}",
     "restorePreviewKanban": "看板卡片：{{count}}",
+    "restorePreviewKanbanNotes": "看板备注：{{count}}",
     "restorePreviewSize": "大小：{{kb}} KB",
-    "scopeNotice": "WebDAV 备份仅包含设置、规则和看板数据，不包含邮件消息。"
+    "scopeNotice": "WebDAV 备份包含设置、规则、看板卡片和看板备注。不包含邮件正文和附件，除非你把正文文本保存到了看板备注中。"
   },
   "pendingOps": {
     "title": "远端写回",
