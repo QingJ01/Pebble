@@ -64,7 +64,7 @@ Pebble currently supports Gmail, IMAP, and experimental Outlook accounts.
 - Built-in translation providers with bilingual reading.
 - Dark and light themes.
 - English and Chinese UI.
-- Optional WebDAV backup for settings, rules, and Kanban data.
+- Optional WebDAV backup for settings, rules, Kanban cards, and Kanban notes.
 
 ## Screenshots
 

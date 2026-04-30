@@ -4,6 +4,24 @@ import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
 describe("macOS release configuration", () => {
+  it("keeps release version metadata in sync", () => {
+    const packageJson = JSON.parse(readFileSync(resolve(process.cwd(), "package.json"), "utf8"));
+    const tauriConfig = JSON.parse(
+      readFileSync(resolve(process.cwd(), "src-tauri", "tauri.conf.json"), "utf8"),
+    );
+    const cargoToml = readFileSync(resolve(process.cwd(), "src-tauri", "Cargo.toml"), "utf8");
+    const changelog = readFileSync(resolve(process.cwd(), "CHANGELOG.md"), "utf8");
+    const releaseWorkflow = readFileSync(resolve(process.cwd(), ".github", "workflows", "release.yml"), "utf8");
+    const cargoVersion = cargoToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+
+    expect(packageJson.version).toBe("0.0.3");
+    expect(tauriConfig.version).toBe(packageJson.version);
+    expect(cargoVersion).toBe(packageJson.version);
+    expect(changelog).toContain(`## [${packageJson.version}] - `);
+    expect(changelog).toContain(`[Unreleased]: https://github.com/QingJ01/Pebble/compare/v${packageJson.version}...HEAD`);
+    expect(releaseWorkflow).toContain(`default: v${packageJson.version}`);
+  });
+
   it("defines explicit desktop build scripts for Windows and macOS bundles", () => {
     const packageJson = JSON.parse(readFileSync(resolve(process.cwd(), "package.json"), "utf8"));
 

@@ -6,15 +6,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-04-30
+
 ### Added
 
 - Added unsigned macOS app and DMG build scripts, current-platform desktop build routing, macOS CI packaging, and tagged release DMG artifact uploads.
 - Added the macOS `.icns` bundle icon required by Tauri's macOS application bundle.
 
+### Changed
+
+- WebDAV restore now replaces local rules and Kanban cards/notes while merging account metadata from the backup, and restore previews disclose Kanban note counts.
+
 ### Fixed
 
 - Enabled the native macOS Keychain backend for local credential encryption.
 - Made search over subject, sender, and recipient short fields case-insensitive for Latin text, and trigger a search index rebuild for older case-sensitive indexes.
+- Moved Kanban context notes out of frontend `localStorage` and into encrypted backend secure storage, with one-time legacy note migration.
+- Hardened HTML email CSS sanitization against escaped `url()` tokens that could trigger remote loads in strict privacy mode.
+- Prevented duplicate same-account sync workers by keeping the startup placeholder lock alive until the real worker replaces it.
+- Report realtime restart failures back to the UI instead of silently accepting preference changes after all or part of sync restart failed.
 
 ## [0.0.2] - 2026-04-29
 
@@ -66,6 +76,7 @@ This release includes:
 - Windows installers are not code-signed yet, so Windows SmartScreen may show a warning.
 - Outlook support is still experimental and depends on Microsoft Graph permissions configured by the user.
 
-[Unreleased]: https://github.com/QingJ01/Pebble/compare/v0.0.2...HEAD
+[Unreleased]: https://github.com/QingJ01/Pebble/compare/v0.0.3...HEAD
+[0.0.3]: https://github.com/QingJ01/Pebble/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/QingJ01/Pebble/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/QingJ01/Pebble/releases/tag/v0.0.1

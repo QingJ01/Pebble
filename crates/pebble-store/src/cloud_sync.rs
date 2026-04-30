@@ -554,7 +554,7 @@ mod tests {
         let old_msg = make_msg("old");
         let new_msg = make_msg("new");
         store
-            .insert_message(&old_msg, &[folder.id.clone()])
+            .insert_message(&old_msg, std::slice::from_ref(&folder.id))
             .unwrap();
         store.insert_message(&new_msg, &[folder.id]).unwrap();
         store
