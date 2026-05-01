@@ -1,12 +1,13 @@
 import { create } from "zustand";
 import i18n from "@/lib/i18n";
+import { getInitialLanguage, LANGUAGE_STORAGE_KEY, type Language } from "@/lib/language";
 import { useComposeStore } from "./compose.store";
 import { useMailStore } from "./mail.store";
 
 export type ActiveView = "inbox" | "kanban" | "settings" | "search" | "snoozed" | "starred" | "compose";
 export type SettingsTab = "accounts" | "general" | "proxy" | "appearance" | "privacy" | "rules" | "remoteWrites" | "translation" | "shortcuts" | "cloudSync" | "about";
 export type Theme = "light" | "dark" | "system";
-export type Language = "en" | "zh";
+export type { Language } from "@/lib/language";
 export type NetworkStatus = "online" | "offline";
 export type RealtimeMode = "realtime" | "polling" | "manual" | "backoff" | "offline" | "auth_required" | "error";
 export type RealtimePreference = "realtime" | "balanced" | "battery" | "manual";
@@ -58,6 +59,7 @@ export function realtimePreferenceToPollInterval(mode: RealtimePreference): numb
 const initialRealtimeMode = readRealtimePreference();
 const initialNotificationsEnabled = readNotificationsEnabledPreference();
 const initialKeepRunningInBackground = readKeepRunningInBackgroundPreference();
+const initialLanguage = getInitialLanguage();
 
 /** Resolve "system" theme to an actual "dark" | "light" value. */
 function resolveTheme(theme: Theme): "dark" | "light" {
@@ -113,7 +115,7 @@ export const useUIStore = create<UIState>((set) => ({
   sidebarCollapsed: false,
   activeView: "inbox",
   theme: (localStorage.getItem("pebble-theme") as Theme) || "light",
-  language: (localStorage.getItem("pebble-language") as Language) || "en",
+  language: initialLanguage,
   syncStatus: "idle",
   networkStatus: "online",
   lastMailError: null,
@@ -173,7 +175,7 @@ export const useUIStore = create<UIState>((set) => ({
   },
   setLanguage: (lang) => {
     i18n.changeLanguage(lang);
-    localStorage.setItem("pebble-language", lang);
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
     set({ language: lang });
   },
   setSyncStatus: (status) => set({ syncStatus: status }),
