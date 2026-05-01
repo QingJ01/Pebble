@@ -1,9 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Folder, MessageSummary } from "../../src/lib/api";
+import type { Account, Folder, MessageSummary } from "../../src/lib/api";
 import { useMailStore } from "../../src/stores/mail.store";
 
 const mocks = vi.hoisted(() => ({
+  accounts: [] as Account[],
   folders: [] as Folder[],
   queryClient: {
     invalidateQueries: vi.fn(),
@@ -47,32 +48,7 @@ vi.mock("@tanstack/react-virtual", () => ({
 
 vi.mock("../../src/hooks/queries", () => ({
   useAccountsQuery: () => ({
-    data: [
-      {
-        id: "account-1",
-        email: "one@example.com",
-        display_name: "One",
-        color: "#22c55e",
-      },
-      {
-        id: "account-2",
-        email: "two@example.com",
-        display_name: "Two",
-        color: "#3b82f6",
-      },
-      {
-        id: "account-3",
-        email: "three@example.com",
-        display_name: "Three",
-        color: null,
-      },
-      {
-        id: "account-4",
-        email: "four@example.com",
-        display_name: "Four",
-        color: null,
-      },
-    ],
+    data: mocks.accounts,
   }),
   useFoldersForAccountsQuery: () => ({ data: mocks.folders }),
 }));
@@ -151,6 +127,32 @@ function makeMessage(id: string): MessageSummary {
 describe("MessageList", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.accounts = [
+      {
+        id: "account-1",
+        email: "one@example.com",
+        display_name: "One",
+        color: "#22c55e",
+      },
+      {
+        id: "account-2",
+        email: "two@example.com",
+        display_name: "Two",
+        color: "#3b82f6",
+      },
+      {
+        id: "account-3",
+        email: "three@example.com",
+        display_name: "Three",
+        color: null,
+      },
+      {
+        id: "account-4",
+        email: "four@example.com",
+        display_name: "Four",
+        color: null,
+      },
+    ];
     mocks.batchArchive.mockResolvedValue(1);
     mocks.batchDelete.mockResolvedValue(1);
     mocks.batchMarkRead.mockResolvedValue(1);
@@ -224,6 +226,7 @@ describe("MessageList", () => {
 
   it("passes account color metadata to message items", () => {
     const message = { ...makeMessage("m-1"), account_id: "account-2" };
+    useMailStore.setState({ activeAccountId: null });
 
     render(
       <MessageList
@@ -240,8 +243,50 @@ describe("MessageList", () => {
     expect(row.getAttribute("data-account-label")).toBe("Two <two@example.com>");
   });
 
+  it("does not pass account color metadata when a single account is selected", () => {
+    const message = { ...makeMessage("m-1"), account_id: "account-1" };
+
+    render(
+      <MessageList
+        messages={[message]}
+        selectedMessageId={null}
+        onSelectMessage={vi.fn()}
+        loading={false}
+      />,
+    );
+
+    const row = screen.getByTestId("message-m-1");
+
+    expect(row.getAttribute("data-account-color")).toBe("");
+  });
+
+  it("does not pass account color metadata when there is only one account", () => {
+    mocks.accounts = [
+      {
+        id: "account-1",
+        email: "one@example.com",
+        display_name: "One",
+        color: "#22c55e",
+      },
+    ];
+
+    render(
+      <MessageList
+        messages={[makeMessage("m-1")]}
+        selectedMessageId={null}
+        onSelectMessage={vi.fn()}
+        loading={false}
+      />,
+    );
+
+    const row = screen.getByTestId("message-m-1");
+
+    expect(row.getAttribute("data-account-color")).toBe("");
+  });
+
   it("derives a stable account color when the account has no saved color", () => {
     const message = { ...makeMessage("m-1"), account_id: "missing-account" };
+    useMailStore.setState({ activeAccountId: null });
 
     render(
       <MessageList
@@ -258,6 +303,8 @@ describe("MessageList", () => {
   });
 
   it("uses different default colors for known accounts without saved colors", () => {
+    useMailStore.setState({ activeAccountId: null });
+
     render(
       <MessageList
         messages={[

@@ -39,6 +39,27 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
+const mocks = vi.hoisted(() => ({
+  accounts: [
+    {
+      id: "imap-1",
+      email: "imap@example.com",
+      display_name: "IMAP User",
+      provider: "imap" as const,
+      created_at: 1,
+      updated_at: 1,
+    },
+    {
+      id: "gmail-1",
+      email: "gmail@example.com",
+      display_name: "Gmail User",
+      provider: "gmail" as const,
+      created_at: 1,
+      updated_at: 1,
+    },
+  ],
+}));
+
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({
     invalidateQueries: vi.fn(),
@@ -48,24 +69,7 @@ vi.mock("@tanstack/react-query", () => ({
 vi.mock("../../../src/hooks/queries", () => ({
   accountsQueryKey: ["accounts"],
   useAccountsQuery: () => ({
-    data: [
-      {
-        id: "imap-1",
-        email: "imap@example.com",
-        display_name: "IMAP User",
-        provider: "imap",
-        created_at: 1,
-        updated_at: 1,
-      },
-      {
-        id: "gmail-1",
-        email: "gmail@example.com",
-        display_name: "Gmail User",
-        provider: "gmail",
-        created_at: 1,
-        updated_at: 1,
-      },
-    ],
+    data: mocks.accounts,
   }),
 }));
 
@@ -81,6 +85,24 @@ vi.mock("../../../src/lib/api", () => ({
 describe("ProxyTab global proxy", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.accounts = [
+      {
+        id: "imap-1",
+        email: "imap@example.com",
+        display_name: "IMAP User",
+        provider: "imap" as const,
+        created_at: 1,
+        updated_at: 1,
+      },
+      {
+        id: "gmail-1",
+        email: "gmail@example.com",
+        display_name: "Gmail User",
+        provider: "gmail" as const,
+        created_at: 1,
+        updated_at: 1,
+      },
+    ];
     vi.mocked(getGlobalProxy).mockResolvedValue({ host: "127.0.0.1", port: 7890 });
     vi.mocked(getAccountProxySetting).mockResolvedValue({
       mode: "custom",
@@ -199,5 +221,38 @@ describe("ProxyTab global proxy", () => {
     await waitFor(() => {
       expect(updateOAuthAccountProxySetting).toHaveBeenCalledWith("gmail-1", "inherit", undefined, undefined);
     });
+  });
+
+  it("refreshes account labels when account metadata changes without reloading proxy settings", async () => {
+    const { rerender } = render(<ProxyTab />);
+
+    await waitFor(() => {
+      expect(screen.getByText("IMAP User")).toBeTruthy();
+    });
+
+    mocks.accounts = [
+      {
+        id: "imap-1",
+        email: "renamed@example.com",
+        display_name: "Renamed IMAP",
+        provider: "imap" as const,
+        created_at: 1,
+        updated_at: 2,
+      },
+      {
+        id: "gmail-1",
+        email: "gmail@example.com",
+        display_name: "Gmail User",
+        provider: "gmail" as const,
+        created_at: 1,
+        updated_at: 1,
+      },
+    ];
+
+    rerender(<ProxyTab />);
+
+    expect(screen.getByText("Renamed IMAP")).toBeTruthy();
+    expect(screen.getByText("renamed@example.com")).toBeTruthy();
+    expect(getAccountProxySetting).toHaveBeenCalledTimes(1);
   });
 });

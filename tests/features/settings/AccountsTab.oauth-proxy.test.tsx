@@ -2,9 +2,9 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import AccountsTab from "../../../src/features/settings/AccountsTab";
 import {
-  getOAuthAccountProxy,
+  getOAuthAccountProxySetting,
   updateAccount,
-  updateOAuthAccountProxy,
+  updateOAuthAccountProxySetting,
 } from "../../../src/lib/api";
 
 vi.mock("react-i18next", () => ({
@@ -42,10 +42,12 @@ vi.mock("../../../src/hooks/queries", () => ({
 
 vi.mock("../../../src/lib/api", () => ({
   deleteAccount: vi.fn(),
-  getOAuthAccountProxy: vi.fn(),
+  getOAuthAccountProxy: vi.fn(() => Promise.resolve(null)),
+  getOAuthAccountProxySetting: vi.fn(),
   testAccountConnection: vi.fn(),
   updateAccount: vi.fn(),
-  updateOAuthAccountProxy: vi.fn(),
+  updateOAuthAccountProxy: vi.fn(() => Promise.resolve(undefined)),
+  updateOAuthAccountProxySetting: vi.fn(),
 }));
 
 vi.mock("../../../src/lib/signatures", () => ({
@@ -78,9 +80,12 @@ vi.mock("../../../src/stores/toast.store", () => ({
 describe("AccountsTab OAuth proxy", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getOAuthAccountProxy).mockResolvedValue({ host: "127.0.0.1", port: 7890 });
+    vi.mocked(getOAuthAccountProxySetting).mockResolvedValue({
+      mode: "custom",
+      proxy: { host: "127.0.0.1", port: 7890 },
+    });
     vi.mocked(updateAccount).mockResolvedValue(undefined);
-    vi.mocked(updateOAuthAccountProxy).mockResolvedValue(undefined);
+    vi.mocked(updateOAuthAccountProxySetting).mockResolvedValue(undefined);
   });
 
   it("loads and saves OAuth proxy settings without IMAP credentials", async () => {
@@ -89,7 +94,7 @@ describe("AccountsTab OAuth proxy", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit account" }));
 
     await waitFor(() => {
-      expect(getOAuthAccountProxy).toHaveBeenCalledWith("account-1");
+      expect(getOAuthAccountProxySetting).toHaveBeenCalledWith("account-1");
     });
     await waitFor(() => {
       expect((screen.getByLabelText("SOCKS5 Proxy") as HTMLInputElement).value).toBe(
@@ -123,7 +128,34 @@ describe("AccountsTab OAuth proxy", () => {
         "#22c55e",
       );
     });
-    expect(updateOAuthAccountProxy).toHaveBeenCalledWith("account-1", "10.0.0.2", 1080);
+    expect(updateOAuthAccountProxySetting).toHaveBeenCalledWith(
+      "account-1",
+      "custom",
+      "10.0.0.2",
+      1080,
+    );
+  });
+
+  it("preserves disabled OAuth proxy mode when editing account metadata", async () => {
+    vi.mocked(getOAuthAccountProxySetting).mockResolvedValueOnce({
+      mode: "disabled",
+      proxy: null,
+    });
+
+    render(<AccountsTab />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit account" }));
+    await screen.findByLabelText("Account color");
+    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+
+    await waitFor(() => {
+      expect(updateOAuthAccountProxySetting).toHaveBeenCalledWith(
+        "account-1",
+        "disabled",
+        undefined,
+        undefined,
+      );
+    });
   });
 
   it("saves a custom account color from the edit dialog", async () => {

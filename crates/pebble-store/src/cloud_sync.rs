@@ -295,6 +295,17 @@ impl Store {
                         |row| row.get(0),
                     )
                     .map_err(|e| PebbleError::Storage(e.to_string()))?;
+                let existing_color: Option<String> = if exists {
+                    tx.query_row(
+                        "SELECT color FROM accounts WHERE id = ?1",
+                        rusqlite::params![&ab.id],
+                        |row| row.get(0),
+                    )
+                    .map_err(|e| PebbleError::Storage(e.to_string()))?
+                } else {
+                    None
+                };
+                let restored_color = ab.color.as_deref().or(existing_color.as_deref());
                 if !exists {
                     let now = pebble_core::now_timestamp();
                     let mut sync_state = crate::accounts::SyncState {
@@ -315,12 +326,12 @@ impl Store {
                     let sync_state_json = sync_state.to_json()?;
                     tx.execute(
                         "INSERT INTO accounts (id, email, display_name, color, provider, sync_state, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                        rusqlite::params![&ab.id, &ab.email, &ab.display_name, ab.color.as_deref(), provider_slug(&ab.provider), sync_state_json, now, now],
+                        rusqlite::params![&ab.id, &ab.email, &ab.display_name, restored_color, provider_slug(&ab.provider), sync_state_json, now, now],
                     ).map_err(|e| PebbleError::Storage(e.to_string()))?;
                 } else {
                     tx.execute(
                         "UPDATE accounts SET email = ?1, display_name = ?2, color = ?3, updated_at = ?4 WHERE id = ?5",
-                        rusqlite::params![&ab.email, &ab.display_name, ab.color.as_deref(), pebble_core::now_timestamp(), &ab.id],
+                        rusqlite::params![&ab.email, &ab.display_name, restored_color, pebble_core::now_timestamp(), &ab.id],
                     )
                     .map_err(|e| PebbleError::Storage(e.to_string()))?;
                 }
@@ -457,6 +468,46 @@ mod tests {
 
         let accounts = store.list_accounts().unwrap();
         assert_eq!(accounts.len(), 1);
+    }
+
+    #[test]
+    fn test_import_legacy_backup_preserves_existing_account_color() {
+        let store = Store::open_in_memory().unwrap();
+        let now = now_timestamp();
+
+        let account = Account {
+            id: "fixed-id".to_string(),
+            email: "test@example.com".to_string(),
+            display_name: "Test".to_string(),
+            color: Some("#22c55e".to_string()),
+            provider: ProviderType::Imap,
+            created_at: now,
+            updated_at: now,
+        };
+        store.insert_account(&account).unwrap();
+
+        let legacy_backup = serde_json::json!({
+            "version": 1,
+            "exported_at": now,
+            "accounts": [{
+                "id": "fixed-id",
+                "email": "renamed@example.com",
+                "display_name": "Renamed",
+                "provider": "imap"
+            }],
+            "rules": [],
+            "kanban_cards": [],
+            "kanban_context_notes": {},
+            "translate_config": null
+        });
+
+        store
+            .import_settings(&serde_json::to_vec(&legacy_backup).unwrap())
+            .unwrap();
+
+        let updated = store.get_account("fixed-id").unwrap().unwrap();
+        assert_eq!(updated.email, "renamed@example.com");
+        assert_eq!(updated.color.as_deref(), Some("#22c55e"));
     }
 
     #[test]

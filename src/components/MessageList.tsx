@@ -55,6 +55,7 @@ export default function MessageList({
     [accounts],
   );
   const accountColorsById = useMemo(() => assignAccountColors(accounts), [accounts]);
+  const showAccountColorMarkers = !activeAccountId && accounts.length > 1;
   const folderAccountIds = useMemo(
     () => activeAccountId ? [activeAccountId] : accounts.map((account) => account.id),
     [accounts, activeAccountId],
@@ -232,8 +233,12 @@ export default function MessageList({
                   onToggleBatchSelect={toggleMessageSelection}
                   spamFolderId={spamFolderId}
                   folderRole={activeFolderRole}
-                  accountColor={accountColorsById.get(message.account_id) ?? getAccountColor(account, message.account_id)}
-                  accountLabel={getAccountLabel(account, message.account_id)}
+                  accountColor={
+                    showAccountColorMarkers
+                      ? accountColorsById.get(message.account_id) ?? getAccountColor(account, message.account_id)
+                      : undefined
+                  }
+                  accountLabel={showAccountColorMarkers ? getAccountLabel(account, message.account_id) : undefined}
                 />
               </div>
             );

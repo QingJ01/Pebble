@@ -6,12 +6,12 @@ import type { TFunction } from "i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   deleteAccount,
-  getOAuthAccountProxy,
+  getOAuthAccountProxySetting,
   testAccountConnection,
   updateAccount,
-  updateOAuthAccountProxy,
+  updateOAuthAccountProxySetting,
 } from "@/lib/api";
-import type { Account, ConnectionSecurity } from "@/lib/api";
+import type { Account, AccountProxyMode, ConnectionSecurity } from "@/lib/api";
 import { useAccountsQuery, accountsQueryKey } from "@/hooks/queries";
 import { useMailStore } from "@/stores/mail.store";
 import { useUIStore, type RealtimeStatus } from "@/stores/ui.store";
@@ -404,6 +404,7 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
   const [smtpPort, setSmtpPort] = useState("");
   const [imapSecurity, setImapSecurity] = useState<ConnectionSecurity | "">("");
   const [smtpSecurity, setSmtpSecurity] = useState<ConnectionSecurity | "">("");
+  const [oauthProxyMode, setOauthProxyMode] = useState<AccountProxyMode>("inherit");
   const [proxyHost, setProxyHost] = useState("");
   const [proxyPort, setProxyPort] = useState("");
   const [signature, setSignatureValue] = useState("");
@@ -428,11 +429,12 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
   useEffect(() => {
     if (!isOAuth) return;
     let cancelled = false;
-    getOAuthAccountProxy(account.id)
-      .then((proxy) => {
+    getOAuthAccountProxySetting(account.id)
+      .then((setting) => {
         if (cancelled) return;
-        setProxyHost(proxy?.host ?? "");
-        setProxyPort(proxy?.port ? String(proxy.port) : "");
+        setOauthProxyMode(setting.mode);
+        setProxyHost(setting.proxy?.host ?? "");
+        setProxyPort(setting.proxy?.port ? String(setting.proxy.port) : "");
       })
       .catch((err) => {
         console.warn("Failed to load OAuth proxy:", err);
@@ -499,10 +501,19 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
           undefined,
           accountColor,
         );
-        await updateOAuthAccountProxy(
+        const trimmedProxyHost = proxyHost.trim();
+        const trimmedProxyPort = proxyPort.trim();
+        const hasCustomProxyDraft = !!trimmedProxyHost || !!trimmedProxyPort;
+        const nextProxyMode: AccountProxyMode = hasCustomProxyDraft
+          ? "custom"
+          : oauthProxyMode === "disabled"
+            ? "disabled"
+            : "inherit";
+        await updateOAuthAccountProxySetting(
           account.id,
-          proxyHost.trim() || undefined,
-          proxyPort ? parseInt(proxyPort, 10) : undefined,
+          nextProxyMode,
+          nextProxyMode === "custom" ? trimmedProxyHost || undefined : undefined,
+          nextProxyMode === "custom" && trimmedProxyPort ? parseInt(trimmedProxyPort, 10) : undefined,
         );
       } else {
         await updateAccount(

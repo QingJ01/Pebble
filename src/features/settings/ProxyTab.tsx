@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   getAccountProxySetting,
@@ -42,7 +42,7 @@ export default function ProxyTab() {
   const [proxyError, setProxyError] = useState<string | null>(null);
   const [accountProxyDrafts, setAccountProxyDrafts] = useState<Record<string, AccountProxyDraft>>({});
   const accountIdsKey = accounts.map((account) => `${account.id}:${account.provider}`).join("|");
-  const proxyAccounts = useMemo(() => accounts, [accountIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const proxyAccounts = accounts;
 
   const modeOptions: Array<{ mode: AccountProxyMode; label: string }> = [
     { mode: "inherit", label: t("settings.accountProxyModeInherit", "Inherit global proxy") },
@@ -131,7 +131,7 @@ export default function ProxyTab() {
     return () => {
       cancelled = true;
     };
-  }, [proxyAccounts]);
+  }, [accountIdsKey]);
 
   const saveGlobalProxy = useCallback(async () => {
     setProxySaving(true);
