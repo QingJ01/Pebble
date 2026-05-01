@@ -1,3 +1,4 @@
+use crate::account_colors::default_account_color;
 use crate::commands::network::{
     account_proxy_setting_from_parts, get_global_proxy_raw, http_proxy_from_mail_proxy,
     is_inherit_proxy_mode, mail_proxy_from_http, normalize_account_proxy_setting,
@@ -290,11 +291,12 @@ pub async fn add_account(
     validate_connection_security("IMAP", &request.imap_host, &request.imap_security)?;
     validate_connection_security("SMTP", &request.smtp_host, &request.smtp_security)?;
 
+    let existing_accounts = state.store.list_accounts()?;
     let account = Account {
         id: new_id(),
         email: request.email.clone(),
         display_name: request.display_name.clone(),
-        color: None,
+        color: Some(default_account_color(&existing_accounts, &request.email)),
         provider: provider.clone(),
         created_at: now,
         updated_at: now,

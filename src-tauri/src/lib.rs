@@ -1,3 +1,4 @@
+mod account_colors;
 mod commands;
 mod events;
 mod realtime;

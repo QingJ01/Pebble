@@ -3,6 +3,7 @@ use super::network::{
     proxy_config_from_parts, resolve_effective_proxy, resolve_effective_proxy_setting,
     AccountProxyMode, AccountProxySetting,
 };
+use crate::account_colors::default_account_color;
 use crate::state::AppState;
 use pebble_core::{
     new_id, now_timestamp, Account, HttpProxyConfig, OAuthTokens, PebbleError, ProviderType,
@@ -677,11 +678,13 @@ pub async fn complete_oauth_flow(
 
     // Create the account
     let now = now_timestamp();
+    let existing_accounts = state.store.list_accounts()?;
+    let account_color = Some(default_account_color(&existing_accounts, &final_email));
     let account = Account {
         id: new_id(),
         email: final_email,
         display_name: final_name,
-        color: None,
+        color: account_color,
         provider: provider_type(&provider)?,
         created_at: now,
         updated_at: now,

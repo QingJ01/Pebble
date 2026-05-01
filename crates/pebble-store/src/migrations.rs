@@ -1,7 +1,12 @@
 use pebble_core::{PebbleError, Result};
 use rusqlite::Connection;
+use std::collections::HashSet;
 
 const CURRENT_VERSION: u32 = 11;
+const ACCOUNT_COLOR_PRESETS: [&str; 12] = [
+    "#0ea5e9", "#22c55e", "#f59e0b", "#8b5cf6", "#f43f5e", "#14b8a6", "#6366f1", "#f97316",
+    "#06b6d4", "#ec4899", "#84cc16", "#3b82f6",
+];
 
 fn get_schema_version(conn: &Connection) -> u32 {
     conn.pragma_query_value(None, "user_version", |row| row.get(0))
@@ -11,6 +16,61 @@ fn get_schema_version(conn: &Connection) -> u32 {
 fn set_schema_version(conn: &Connection, version: u32) -> Result<()> {
     conn.pragma_update(None, "user_version", version)
         .map_err(|e| PebbleError::Storage(format!("Failed to set schema version: {e}")))
+}
+
+fn is_valid_account_color(color: &str) -> bool {
+    color.len() == 7
+        && color.as_bytes()[0] == b'#'
+        && color.as_bytes()[1..].iter().all(|b| b.is_ascii_hexdigit())
+}
+
+fn derive_account_color(seed: &str) -> String {
+    let mut hash = 0u32;
+    for byte in seed.bytes() {
+        hash = hash.wrapping_mul(31).wrapping_add(byte as u32);
+    }
+    ACCOUNT_COLOR_PRESETS[(hash as usize) % ACCOUNT_COLOR_PRESETS.len()].to_string()
+}
+
+fn backfill_account_colors(conn: &Connection) -> Result<()> {
+    let accounts = {
+        let mut stmt =
+            conn.prepare("SELECT id, color FROM accounts ORDER BY created_at ASC, id ASC")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })?;
+        let mut accounts = Vec::new();
+        for row in rows {
+            accounts.push(row?);
+        }
+        accounts
+    };
+
+    let mut used_colors: HashSet<String> = accounts
+        .iter()
+        .filter_map(|(_, color)| color.as_deref())
+        .filter(|color| is_valid_account_color(color))
+        .map(str::to_ascii_lowercase)
+        .collect();
+
+    for (id, color) in accounts {
+        if color.as_deref().is_some_and(is_valid_account_color) {
+            continue;
+        }
+
+        let selected = ACCOUNT_COLOR_PRESETS
+            .iter()
+            .find(|candidate| !used_colors.contains(**candidate))
+            .map(|color| (*color).to_string())
+            .unwrap_or_else(|| derive_account_color(&id));
+        used_colors.insert(selected.clone());
+        conn.execute(
+            "UPDATE accounts SET color = ?1 WHERE id = ?2",
+            rusqlite::params![selected, id],
+        )?;
+    }
+
+    Ok(())
 }
 
 pub fn run_migrations(conn: &Connection) -> Result<()> {
@@ -205,7 +265,7 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
                  ON pending_mail_ops(status, next_retry_at, updated_at);",
         )
         .map_err(|e| PebbleError::Storage(format!("Migration V10 failed: {e}")))?;
-        set_schema_version(&tx, CURRENT_VERSION)?;
+        set_schema_version(&tx, 10)?;
         tx.commit()
             .map_err(|e| PebbleError::Storage(format!("Migration V10 commit failed: {e}")))?;
     }
@@ -219,7 +279,8 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
             tx.execute_batch("ALTER TABLE accounts ADD COLUMN color TEXT;")
                 .map_err(|e| PebbleError::Storage(format!("Migration V11 failed: {e}")))?;
         }
-        set_schema_version(&tx, 10)?;
+        backfill_account_colors(&tx)?;
+        set_schema_version(&tx, CURRENT_VERSION)?;
         tx.commit()
             .map_err(|e| PebbleError::Storage(format!("Migration V11 commit failed: {e}")))?;
     }
@@ -366,3 +427,70 @@ CREATE TABLE IF NOT EXISTS translate_config (
     updated_at INTEGER NOT NULL
 );
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migration_v11_adds_account_color_and_sets_schema_version() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE accounts (
+                id TEXT PRIMARY KEY,
+                email TEXT NOT NULL,
+                display_name TEXT NOT NULL DEFAULT '',
+                provider TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            PRAGMA user_version = 10;",
+        )
+        .unwrap();
+
+        run_migrations(&conn).unwrap();
+
+        let version: u32 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 11);
+        conn.prepare("SELECT color FROM accounts LIMIT 0")
+            .expect("accounts.color should exist after V11");
+    }
+
+    #[test]
+    fn migration_v11_backfills_existing_account_colors() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE accounts (
+                id TEXT PRIMARY KEY,
+                email TEXT NOT NULL,
+                display_name TEXT NOT NULL DEFAULT '',
+                provider TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            INSERT INTO accounts (id, email, display_name, provider, created_at, updated_at)
+            VALUES
+                ('account-1', 'one@example.com', 'One', 'gmail', 1, 1),
+                ('account-2', 'two@example.com', 'Two', 'gmail', 2, 2);
+            PRAGMA user_version = 10;",
+        )
+        .unwrap();
+
+        run_migrations(&conn).unwrap();
+
+        let mut stmt = conn
+            .prepare("SELECT color FROM accounts ORDER BY created_at ASC")
+            .unwrap();
+        let colors = stmt
+            .query_map([], |row| row.get::<_, Option<String>>(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            colors,
+            vec![Some("#0ea5e9".to_string()), Some("#22c55e".to_string())]
+        );
+    }
+}
