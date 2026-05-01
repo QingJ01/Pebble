@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, useId } from "react";
 import { useTranslation } from "react-i18next";
 import { searchContacts, type KnownContact } from "@/lib/api";
 import { useToastStore } from "@/stores/toast.store";
+import { isValidEmailAddress } from "@/features/compose/recipient-utils";
 
 interface ContactAutocompleteProps {
   value: string[];
@@ -12,6 +13,8 @@ interface ContactAutocompleteProps {
   ariaLabelledBy?: string;
   autoComplete?: string;
   placeholder?: string;
+  inputValue?: string;
+  onInputValueChange?: (value: string) => void;
 }
 
 export default function ContactAutocomplete({
@@ -23,10 +26,13 @@ export default function ContactAutocomplete({
   ariaLabelledBy,
   autoComplete = "email",
   placeholder,
+  inputValue: controlledInputValue,
+  onInputValueChange,
 }: ContactAutocompleteProps) {
   const { t } = useTranslation();
   const instanceId = useId();
-  const [inputValue, setInputValue] = useState("");
+  const [uncontrolledInputValue, setUncontrolledInputValue] = useState("");
+  const inputValue = controlledInputValue ?? uncontrolledInputValue;
   const [suggestions, setSuggestions] = useState<KnownContact[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -34,6 +40,16 @@ export default function ContactAutocomplete({
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const setInputValue = useCallback(
+    (nextValue: string) => {
+      if (controlledInputValue === undefined) {
+        setUncontrolledInputValue(nextValue);
+      }
+      onInputValueChange?.(nextValue);
+    },
+    [controlledInputValue, onInputValueChange],
+  );
 
   const fetchSuggestions = useCallback(
     async (query: string) => {
@@ -84,10 +100,9 @@ export default function ContactAutocomplete({
   const addRawAddress = (text: string) => {
     const trimmed = text.trim();
     if (!trimmed) { setInputValue(""); return; }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (emailRegex.test(trimmed) && !value.includes(trimmed)) {
+    if (isValidEmailAddress(trimmed) && !value.includes(trimmed)) {
       onChange([...value, trimmed]);
-    } else if (!emailRegex.test(trimmed)) {
+    } else if (!isValidEmailAddress(trimmed)) {
       useToastStore.getState().addToast({
         message: t("compose.invalidEmail", "Invalid email address"),
         type: "error",

@@ -23,6 +23,7 @@ import { useToastStore } from "@/stores/toast.store";
 import type { Account } from "@/lib/ipc-types";
 import type { ComposeAttachment } from "./compose-draft";
 import { ModeButton, EditorToolbar, MarkdownToolbar, composeStyles } from "./ComposeToolbar";
+import { isValidEmailAddress, mergePendingRecipient } from "./recipient-utils";
 
 export default function ComposeView() {
   const composeMode = useComposeStore((s) => s.composeMode);
@@ -59,6 +60,9 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
     composeMode, composeReplyTo, accounts, activeAccountId,
     restoredDraft: restoredDraft.current,
   });
+  const [toInputValue, setToInputValue] = useState("");
+  const [ccInputValue, setCcInputValue] = useState("");
+  const [bccInputValue, setBccInputValue] = useState("");
 
   // ─── Subject ─────────────────────────────────────────────────────────────────
   const [subject, setSubject] = useState(() => {
@@ -149,7 +153,18 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
   }, [sendError]);
 
   async function handleSend() {
-    if (!fromAccountId || to.length === 0) return;
+    const finalTo = mergePendingRecipient(to, toInputValue).filter(Boolean);
+    const finalCc = mergePendingRecipient(cc, ccInputValue).filter(Boolean);
+    const finalBcc = mergePendingRecipient(bcc, bccInputValue).filter(Boolean);
+
+    if (!fromAccountId || finalTo.length === 0) return;
+
+    setTo(finalTo);
+    setCc(finalCc);
+    setBcc(finalBcc);
+    if (isValidEmailAddress(toInputValue)) setToInputValue("");
+    if (isValidEmailAddress(ccInputValue)) setCcInputValue("");
+    if (isValidEmailAddress(bccInputValue)) setBccInputValue("");
 
     if (!subject.trim()) {
       const confirmed = await useConfirmStore.getState().confirm({
@@ -190,9 +205,9 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
     sendMutation.mutate(
       {
         accountId: fromAccountId,
-        to: to.filter(Boolean),
-        cc: cc.filter(Boolean),
-        bcc: bcc.filter(Boolean),
+        to: finalTo,
+        cc: finalCc,
+        bcc: finalBcc,
         subject,
         bodyText,
         bodyHtml: outgoingBodyHtml || undefined,
@@ -239,6 +254,8 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
         : composeMode === "forward"
           ? t("compose.forward", "Forward")
           : t("compose.newMessage", "New Message");
+  const hasToRecipient = to.some(Boolean) || isValidEmailAddress(toInputValue);
+  const sendDisabled = sendMutation.isPending || !fromAccountId || !hasToRecipient;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -267,14 +284,14 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
         </div>
         <button
           onClick={handleSend}
-          disabled={sendMutation.isPending || to.length === 0}
+          disabled={sendDisabled}
           style={{
             display: "flex", alignItems: "center", gap: "6px",
             padding: "7px 20px",
             backgroundColor: sendMutation.isPending ? "var(--color-text-secondary)" : "var(--color-accent, #2563eb)",
             color: "#fff", border: "none", borderRadius: "6px",
-            cursor: sendMutation.isPending || to.length === 0 ? "default" : "pointer",
-            opacity: to.length === 0 ? 0.5 : 1,
+            cursor: sendDisabled ? "default" : "pointer",
+            opacity: hasToRecipient ? 1 : 0.5,
             fontSize: "13px", fontWeight: 500,
           }}
         >
@@ -346,6 +363,8 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
               value={to}
               onChange={setTo}
               accountId={fromAccountId}
+              inputValue={toInputValue}
+              onInputValueChange={setToInputValue}
               placeholder="recipient@example.com"
             />
             <div style={{ display: "flex", gap: "4px", padding: "0 8px", flexShrink: 0 }}>
@@ -366,6 +385,8 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
                 value={cc}
                 onChange={setCc}
                 accountId={fromAccountId}
+                inputValue={ccInputValue}
+                onInputValueChange={setCcInputValue}
                 placeholder="cc@example.com"
               />
             </div>
@@ -383,6 +404,8 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
                 value={bcc}
                 onChange={setBcc}
                 accountId={fromAccountId}
+                inputValue={bccInputValue}
+                onInputValueChange={setBccInputValue}
                 placeholder="bcc@example.com"
               />
             </div>

@@ -10,6 +10,11 @@ const mocks = vi.hoisted(() => ({
   addToast: vi.fn(),
   loadDraftFromStorage: vi.fn(),
   quotedReplyHtml: "",
+  recipients: {
+    to: ["to@example.com"] as string[],
+    cc: [] as string[],
+    bcc: [] as string[],
+  },
 }));
 
 vi.mock("react-i18next", () => ({
@@ -62,11 +67,11 @@ vi.mock("../../../src/hooks/useComposeRecipients", () => ({
   useComposeRecipients: () => ({
     fromAccountId: "account-1",
     setFromAccountId: vi.fn(),
-    to: ["to@example.com"],
+    to: mocks.recipients.to,
     setTo: vi.fn(),
-    cc: [],
+    cc: mocks.recipients.cc,
     setCc: vi.fn(),
-    bcc: [],
+    bcc: mocks.recipients.bcc,
     setBcc: vi.fn(),
     showCc: false,
     setShowCc: vi.fn(),
@@ -106,7 +111,31 @@ vi.mock("../../../src/hooks/useComposeEditor", () => ({
 }));
 
 vi.mock("../../../src/components/ContactAutocomplete", () => ({
-  default: () => <input aria-label="To" value="to@example.com" readOnly />,
+  default: ({
+    id,
+    name,
+    ariaLabelledBy,
+    inputValue,
+    placeholder,
+    onInputValueChange,
+  }: {
+    id?: string;
+    name?: string;
+    ariaLabelledBy?: string;
+    inputValue?: string;
+    placeholder?: string;
+    onInputValueChange?: (value: string) => void;
+  }) => (
+    <input
+      id={id}
+      name={name}
+      role="combobox"
+      aria-labelledby={ariaLabelledBy}
+      value={inputValue ?? ""}
+      placeholder={placeholder}
+      onChange={(event) => onInputValueChange?.(event.currentTarget.value)}
+    />
+  ),
 }));
 
 vi.mock("../../../src/features/compose/ComposeToolbar", () => ({
@@ -156,6 +185,9 @@ describe("ComposeView", () => {
     mocks.addToast.mockReset();
     mocks.loadDraftFromStorage.mockReset();
     mocks.quotedReplyHtml = "";
+    mocks.recipients.to = ["to@example.com"];
+    mocks.recipients.cc = [];
+    mocks.recipients.bcc = [];
     mocks.loadDraftFromStorage.mockReturnValue(null);
     vi.mocked(deleteDraft).mockReset();
   });
@@ -181,6 +213,27 @@ describe("ComposeView", () => {
     render(<ComposeView />);
 
     expect(mocks.loadDraftFromStorage).toHaveBeenCalledWith(["account-1"]);
+  });
+
+  it("sends a typed valid recipient without requiring Enter first", async () => {
+    mocks.recipients.to = [];
+
+    render(<ComposeView />);
+
+    const sendButton = screen.getByRole("button", { name: "Send" }) as HTMLButtonElement;
+    expect(sendButton.disabled).toBe(true);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "To" }), {
+      target: { value: "typed@example.com" },
+    });
+
+    await waitFor(() => expect(sendButton.disabled).toBe(false));
+    fireEvent.click(sendButton);
+
+    await waitFor(() => expect(mocks.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ to: ["typed@example.com"] }),
+      expect.any(Object),
+    ));
   });
 
   it("keeps quoted replies collapsed until the user expands them", () => {
