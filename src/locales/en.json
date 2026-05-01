@@ -120,6 +120,8 @@
       "hidePreview": "Hide preview",
       "preview": "Preview"
     },
+    "showQuotedReply": "Show quoted message",
+    "hideQuotedReply": "Hide quoted message",
     "deleteTemplate": "Delete template",
     "removeAttachment": "Remove attachment",
     "noSubjectTitle": "No subject",

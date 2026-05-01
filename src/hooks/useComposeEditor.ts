@@ -34,6 +34,11 @@ interface BuildComposeEditorContentArgs {
   t: TFunction;
 }
 
+interface BuildReplyQuoteHtmlArgs {
+  composeReplyTo: Message | null;
+  t: TFunction;
+}
+
 interface ShouldApplyInitialEditorContentArgs {
   editorExists: boolean;
   initialized: boolean;
@@ -88,13 +93,7 @@ export function buildComposeEditorContent({
 }: BuildComposeEditorContentArgs) {
   try {
     if (isReply && composeReplyTo) {
-      const sender = escapeHtml(composeReplyTo.from_name || composeReplyTo.from_address || "");
-      const dateStr = escapeHtml(new Date((composeReplyTo.date || 0) * 1000).toLocaleString());
-      const body = composeReplyTo.body_html_raw
-        ? extractComposeBodyHtml(composeReplyTo.body_html_raw)
-        : `<p>${escapeHtml(composeReplyTo.body_text || "")}</p>`;
-      const attribution = t("compose.quoteAttribution", { date: dateStr, sender });
-      return `${signatureHtml}<br/><br/><blockquote><p>${escapeHtml(attribution)}</p>${body}</blockquote>`;
+      return `<p><br></p>${signatureHtml}`;
     }
     if (composeMode === "forward" && composeReplyTo) {
       const sender = escapeHtml(composeReplyTo.from_name || composeReplyTo.from_address || "");
@@ -109,6 +108,26 @@ export function buildComposeEditorContent({
     console.error("[ComposeView] Failed to build editor content:", err);
     return "";
   }
+}
+
+export function buildReplyQuoteHtml({ composeReplyTo, t }: BuildReplyQuoteHtmlArgs) {
+  if (!composeReplyTo) return "";
+
+  const sender = escapeHtml(composeReplyTo.from_name || composeReplyTo.from_address || "");
+  const dateStr = escapeHtml(new Date((composeReplyTo.date || 0) * 1000).toLocaleString());
+  const body = composeReplyTo.body_html_raw
+    ? extractComposeBodyHtml(composeReplyTo.body_html_raw)
+    : `<p>${escapeHtml(composeReplyTo.body_text || "")}</p>`;
+  const attribution = t("compose.quoteAttribution", { date: dateStr, sender });
+
+  return `<blockquote class="compose-original-quote"><p>${escapeHtml(attribution)}</p>${body}</blockquote>`;
+}
+
+export function appendReplyQuoteHtml(bodyHtml: string, quotedReplyHtml: string) {
+  const quote = quotedReplyHtml.trim();
+  if (!quote) return bodyHtml;
+  const body = bodyHtml.trim() || "<p><br></p>";
+  return `${body}<br/><br/>${quote}`;
 }
 
 export function shouldApplyInitialEditorContent({
@@ -171,6 +190,9 @@ export function useComposeEditor({
   const editorContent = useMemo(() => {
     return buildComposeEditorContent({ composeMode, composeReplyTo, isReply, signatureHtml, t });
   }, [composeMode, composeReplyTo, isReply, t, signatureHtml]);
+  const quotedReplyHtml = useMemo(() => {
+    return isReply ? buildReplyQuoteHtml({ composeReplyTo, t }) : "";
+  }, [composeReplyTo, isReply, t]);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -196,8 +218,11 @@ export function useComposeEditor({
     } else if (editorContent) {
       editor.commands.setContent(editorContent);
     }
+    if (isReply && !restoredDraft) {
+      requestAnimationFrame(() => editor.commands.focus("start"));
+    }
     contentInitializedRef.current = true;
-  }, [editor, editorContent, restoredDraft, signatureReady]);
+  }, [editor, editorContent, isReply, restoredDraft, signatureReady]);
 
   useEffect(() => {
     if (!editor) {
@@ -254,5 +279,6 @@ export function useComposeEditor({
     setHtmlPreview,
     switchMode,
     textareaRef,
+    quotedReplyHtml,
   };
 }

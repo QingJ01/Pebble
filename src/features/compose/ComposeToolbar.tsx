@@ -14,19 +14,10 @@ export function ModeButton({ icon: Icon, label, active, onClick }: {
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       title={label}
-      style={{
-        display: "flex", alignItems: "center", gap: "4px",
-        padding: "4px 8px", borderRadius: "4px",
-        border: "none", cursor: "pointer",
-        fontSize: "11px", fontWeight: active ? 600 : 400,
-        backgroundColor: active ? "var(--color-bg-secondary, rgba(0,0,0,0.08))" : "transparent",
-        color: active ? "var(--color-accent, #2563eb)" : "var(--color-text-secondary)",
-        transition: "background-color 0.1s ease",
-      }}
-      onMouseEnter={(e) => { if (!active) e.currentTarget.style.backgroundColor = "var(--color-bg-hover, rgba(0,0,0,0.04))"; }}
-      onMouseLeave={(e) => { if (!active) e.currentTarget.style.backgroundColor = "transparent"; }}
+      className={`compose-mode-button${active ? " is-active" : ""}`}
     >
       <Icon size={13} />
       {label}
@@ -74,25 +65,17 @@ export function EditorToolbar({ editor }: { editor: Editor }) {
   ];
 
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "2px", padding: "6px 8px" }}>
+    <div className="compose-format-toolbar">
       {items.map((item, i) => {
         const Icon = item.icon;
         return (
           <button
             key={i}
+            type="button"
             onClick={item.action}
             title={item.label}
             aria-label={item.label}
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center",
-              width: "28px", height: "28px", borderRadius: "4px",
-              border: "none", cursor: "pointer",
-              backgroundColor: item.active ? "var(--color-bg-secondary, rgba(0,0,0,0.08))" : "transparent",
-              color: item.active ? "var(--color-accent, #2563eb)" : "var(--color-text-secondary)",
-              transition: "background-color 0.1s ease, color 0.1s ease",
-            }}
-            onMouseEnter={(e) => { if (!item.active) e.currentTarget.style.backgroundColor = "var(--color-bg-hover, rgba(0,0,0,0.04))"; }}
-            onMouseLeave={(e) => { if (!item.active) e.currentTarget.style.backgroundColor = "transparent"; }}
+            className={`compose-format-button${item.active ? " is-active" : ""}`}
           >
             <Icon size={15} />
           </button>
@@ -146,25 +129,17 @@ export function MarkdownToolbar({ textareaRef, onInsert, source }: {
   ];
 
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "2px", padding: "6px 8px" }}>
+    <div className="compose-format-toolbar">
       {items.map((item, i) => {
         const Icon = item.icon;
         return (
           <button
             key={i}
+            type="button"
             onClick={item.action}
             title={item.label}
             aria-label={item.label}
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center",
-              width: "28px", height: "28px", borderRadius: "4px",
-              border: "none", cursor: "pointer",
-              backgroundColor: "transparent",
-              color: "var(--color-text-secondary)",
-              transition: "background-color 0.1s ease",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--color-bg-hover, rgba(0,0,0,0.04))"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
+            className="compose-format-button"
           >
             <Icon size={15} />
           </button>

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildComposeEditorContent, shouldApplyInitialEditorContent } from "../../src/hooks/useComposeEditor";
+import {
+  appendReplyQuoteHtml,
+  buildComposeEditorContent,
+  buildReplyQuoteHtml,
+  shouldApplyInitialEditorContent,
+} from "../../src/hooks/useComposeEditor";
 import type { Message } from "../../src/lib/ipc-types";
 import type { TFunction } from "i18next";
 
@@ -52,7 +57,7 @@ function makeMessage(overrides: Partial<Message>): Message {
 }
 
 describe("buildComposeEditorContent", () => {
-  it("renders entity-encoded HTML bodies as quoted HTML when replying", () => {
+  it("keeps quoted reply content out of the editable reply body", () => {
     const content = buildComposeEditorContent({
       composeMode: "reply",
       composeReplyTo: makeMessage({
@@ -64,9 +69,31 @@ describe("buildComposeEditorContent", () => {
       t,
     });
 
-    expect(content).toContain("<blockquote>");
-    expect(content).toContain("<strong>Hello</strong> team");
+    expect(content).toContain("<p><br></p>");
+    expect(content).not.toContain("<blockquote");
+    expect(content).not.toContain("<strong>Hello</strong> team");
     expect(content).not.toContain("&lt;strong&gt;");
+  });
+
+  it("builds the original reply as separate quoted HTML", () => {
+    const quote = buildReplyQuoteHtml({
+      composeReplyTo: makeMessage({
+        body_html_raw:
+          "&lt;html&gt;&lt;body&gt;&lt;p&gt;&lt;strong&gt;Hello&lt;/strong&gt; team&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;",
+      }),
+      t,
+    });
+
+    expect(quote).toContain("<blockquote");
+    expect(quote).toContain("Sender wrote");
+    expect(quote).toContain("<strong>Hello</strong> team");
+    expect(quote).not.toContain("&lt;strong&gt;");
+  });
+
+  it("appends the quoted reply only when sending", () => {
+    expect(appendReplyQuoteHtml("<p>Reply</p>", "<blockquote><p>Original</p></blockquote>"))
+      .toBe("<p>Reply</p><br/><br/><blockquote><p>Original</p></blockquote>");
+    expect(appendReplyQuoteHtml("<p>Reply</p>", "")).toBe("<p>Reply</p>");
   });
 
   it("does not re-apply generated content after the editor was initialized", () => {

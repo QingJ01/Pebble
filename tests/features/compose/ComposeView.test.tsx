@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   setComposeDirty: vi.fn(),
   addToast: vi.fn(),
   loadDraftFromStorage: vi.fn(),
+  quotedReplyHtml: "",
 }));
 
 vi.mock("react-i18next", () => ({
@@ -98,7 +99,10 @@ vi.mock("../../../src/hooks/useComposeEditor", () => ({
     setHtmlPreview: vi.fn(),
     switchMode: vi.fn(),
     textareaRef: { current: null },
+    quotedReplyHtml: mocks.quotedReplyHtml,
   }),
+  appendReplyQuoteHtml: (bodyHtml: string, quotedReplyHtml: string) =>
+    quotedReplyHtml.trim() ? `${bodyHtml}<br/><br/>${quotedReplyHtml.trim()}` : bodyHtml,
 }));
 
 vi.mock("../../../src/components/ContactAutocomplete", () => ({
@@ -151,6 +155,7 @@ describe("ComposeView", () => {
     mocks.setComposeDirty.mockReset();
     mocks.addToast.mockReset();
     mocks.loadDraftFromStorage.mockReset();
+    mocks.quotedReplyHtml = "";
     mocks.loadDraftFromStorage.mockReturnValue(null);
     vi.mocked(deleteDraft).mockReset();
   });
@@ -176,5 +181,18 @@ describe("ComposeView", () => {
     render(<ComposeView />);
 
     expect(mocks.loadDraftFromStorage).toHaveBeenCalledWith(["account-1"]);
+  });
+
+  it("keeps quoted replies collapsed until the user expands them", () => {
+    mocks.quotedReplyHtml = "<blockquote><p>Original message body</p></blockquote>";
+
+    render(<ComposeView />);
+
+    expect(screen.getByRole("button", { name: "Show quoted message" })).toBeTruthy();
+    expect(screen.queryByText("Original message body")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show quoted message" }));
+
+    expect(screen.getByText("Original message body")).toBeTruthy();
   });
 });

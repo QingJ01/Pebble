@@ -241,6 +241,361 @@ textarea:focus-visible {
 
 /* Tiptap editor uses the global :focus-visible ring. */
 
+/* Compose */
+
+.compose-form-shell {
+  width: 100%;
+  max-width: 920px;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  margin: 0 auto;
+}
+
+.compose-editor-toolbar-row {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-bg) 96%, var(--color-bg-secondary));
+}
+
+.compose-toolbar-tools {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.compose-toolbar-actions,
+.compose-format-toolbar,
+.compose-format-toolbar-slot,
+.compose-mode-tabs {
+  display: flex;
+  align-items: center;
+}
+
+.compose-toolbar-actions,
+.compose-format-toolbar {
+  gap: 2px;
+}
+
+.compose-format-toolbar {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.compose-format-toolbar-slot {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.compose-toolbar-divider {
+  width: 1px;
+  height: 22px;
+  flex: 0 0 auto;
+  background: var(--color-border);
+}
+
+.compose-format-button,
+.compose-toolbar-icon-button,
+.compose-toolbar-text-button,
+.compose-mode-button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.compose-format-button,
+.compose-toolbar-icon-button {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 28px;
+  padding: 0;
+  border-radius: 6px;
+}
+
+.compose-toolbar-text-button {
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.compose-format-button:hover,
+.compose-toolbar-icon-button:hover,
+.compose-toolbar-text-button:hover,
+.compose-mode-button:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.compose-format-button.is-active,
+.compose-toolbar-icon-button.is-active,
+.compose-toolbar-text-button.is-active,
+.compose-mode-button.is-active {
+  border-color: color-mix(in srgb, var(--color-accent) 24%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  color: var(--color-accent);
+}
+
+.compose-mode-tabs {
+  flex: 0 0 auto;
+  gap: 2px;
+  margin-left: auto;
+  padding: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg);
+}
+
+.compose-mode-button {
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.compose-inline-panel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 9px 20px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.compose-editor-area {
+  position: relative;
+  min-height: 340px;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px 20px;
+  box-sizing: border-box;
+  background: color-mix(in srgb, var(--color-bg) 98%, var(--color-bg-secondary));
+}
+
+.compose-editor-surface {
+  min-height: 320px;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-border) 86%, transparent);
+  border-radius: 8px;
+  background: var(--color-bg);
+  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.compose-editor-surface:focus-within {
+  border-color: color-mix(in srgb, var(--color-accent) 48%, var(--color-border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 13%, transparent);
+}
+
+.compose-editor-content,
+.compose-source-input,
+.compose-preview-split {
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+  box-sizing: border-box;
+}
+
+.compose-editor-content {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  padding: 18px 22px;
+  color: var(--color-text-primary);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.compose-editor-content .ProseMirror {
+  flex: 1 1 auto;
+  min-height: 284px;
+  outline: 0;
+}
+
+.compose-editor-content .ProseMirror:focus,
+.compose-editor-content .ProseMirror:focus-visible {
+  outline: 0;
+}
+
+.compose-editor-content .ProseMirror > :first-child {
+  margin-top: 0;
+}
+
+.compose-source-input {
+  flex: 1 1 auto;
+  display: block;
+  padding: 18px 22px;
+  border: 0;
+  resize: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.compose-source-input:focus,
+.compose-source-input:focus-visible {
+  outline: 0;
+}
+
+.compose-source-input.is-code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+.compose-preview-split {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.compose-source-input--split {
+  border-right: 1px solid var(--color-border);
+}
+
+.compose-html-preview {
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+  border: 0;
+  background: #fff;
+}
+
+.compose-drop-overlay {
+  position: absolute;
+  inset: 16px 20px 20px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 2px dashed var(--color-accent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-accent) 9%, transparent);
+  color: var(--color-accent);
+  font-size: 14px;
+  font-weight: 500;
+  pointer-events: none;
+}
+
+.compose-quoted-reply {
+  flex: 0 0 auto;
+  margin-top: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-bg) 94%, var(--color-bg-secondary));
+  overflow: hidden;
+}
+
+.compose-quoted-reply-toggle {
+  width: 100%;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.compose-quoted-reply-toggle:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.compose-quoted-reply-toggle svg {
+  flex: 0 0 auto;
+}
+
+.compose-quoted-reply-content {
+  max-height: 240px;
+  overflow: auto;
+  padding: 12px 14px;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+  user-select: text;
+}
+
+.compose-quoted-reply-content blockquote {
+  margin: 0;
+  padding-left: 12px;
+  border-left: 3px solid color-mix(in srgb, var(--color-text-secondary) 24%, transparent);
+}
+
+.compose-quoted-reply-content p {
+  margin: 0 0 10px;
+}
+
+.compose-quoted-reply-content p:last-child {
+  margin-bottom: 0;
+}
+
+@media (max-width: 720px) {
+  .compose-editor-toolbar-row,
+  .compose-toolbar-tools {
+    flex-wrap: wrap;
+  }
+
+  .compose-toolbar-tools,
+  .compose-mode-tabs {
+    flex-basis: 100%;
+  }
+
+  .compose-mode-tabs {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .compose-mode-button {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+
+  .compose-editor-area {
+    padding: 12px;
+  }
+
+  .compose-drop-overlay {
+    inset: 12px;
+  }
+}
+
 /* ─── Search Controls ───────────────────────────────────── */
 
 .search-toolbar {

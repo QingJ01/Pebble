@@ -120,6 +120,8 @@
       "hidePreview": "隐藏预览",
       "preview": "预览"
     },
+    "showQuotedReply": "显示引用原文",
+    "hideQuotedReply": "隐藏引用原文",
     "deleteTemplate": "删除模板",
     "removeAttachment": "移除附件",
     "noSubjectTitle": "无主题",

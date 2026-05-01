@@ -4,6 +4,7 @@ import {
   ArrowLeft, Send, X, AlertCircle,
   Type, FileCode2, Hash, Eye, EyeOff,
   Paperclip, FileText, Trash2, BookTemplate,
+  ChevronDown, ChevronRight,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useMailStore } from "@/stores/mail.store";
@@ -16,7 +17,7 @@ import type { EmailTemplate } from "@/lib/templates";
 import { useComposeRecipients } from "@/hooks/useComposeRecipients";
 import { useComposeDraft, loadDraftFromStorage, clearDraftStorage } from "@/hooks/useComposeDraft";
 import { deleteDraft, stageComposeAttachment } from "@/lib/api";
-import { useComposeEditor } from "@/hooks/useComposeEditor";
+import { appendReplyQuoteHtml, useComposeEditor } from "@/hooks/useComposeEditor";
 import { useConfirmStore } from "@/stores/confirm.store";
 import { useToastStore } from "@/stores/toast.store";
 import type { Account } from "@/lib/ipc-types";
@@ -74,7 +75,7 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
   const {
     editor, editorMode, rawSource, setRawSource,
     richTextHtml, htmlPreview, setHtmlPreview,
-    switchMode, textareaRef,
+    switchMode, textareaRef, quotedReplyHtml,
   } = useComposeEditor({
     fromAccountId, composeMode, composeReplyTo, isReply, t,
     restoredDraft: restoredDraft.current,
@@ -109,6 +110,7 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [showSaveTemplate, setShowSaveTemplate] = useState(false);
   const [templateName, setTemplateName] = useState("");
+  const [showQuotedReply, setShowQuotedReply] = useState(false);
 
   async function refreshTemplates() {
     try {
@@ -178,6 +180,7 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
         bodyText = rawSource;
       }
     }
+    const outgoingBodyHtml = appendReplyQuoteHtml(bodyHtml, quotedReplyHtml);
 
     const inReplyTo =
       isReply && composeReplyTo?.message_id_header
@@ -192,7 +195,7 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
         bcc: bcc.filter(Boolean),
         subject,
         bodyText,
-        bodyHtml: bodyHtml || undefined,
+        bodyHtml: outgoingBodyHtml || undefined,
         inReplyTo: inReplyTo || undefined,
         attachmentPaths: attachments.length > 0 ? attachments.map((a) => a.path) : undefined,
       },
@@ -303,8 +306,8 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
       )}
 
       {/* Fields + Editor */}
-      <div className="scroll-region compose-scroll" style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "auto" }}>
-        <div style={{ maxWidth: "768px", width: "100%", margin: "0 auto", display: "flex", flexDirection: "column", flex: 1 }}>
+      <div className="scroll-region compose-scroll" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflow: "auto" }}>
+        <div className="compose-form-shell">
           {/* From */}
           {accounts.length > 1 && (
             <div style={composeStyles.fieldRow}>
@@ -394,188 +397,166 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
                 id="compose-subject"
                 name="subject"
                 type="text" value={subject} onChange={(e) => setSubject(e.target.value)}
-                placeholder={t("compose.subject", "Subject")}
+                placeholder=""
                 autoComplete="off"
                 style={{ flex: 1, padding: "8px 0", border: "none", backgroundColor: "transparent", fontSize: "13px", color: "var(--color-text-primary)" }}
               />
           </div>
 
-          {/* Mode switcher + Toolbar */}
-          <div style={{
-            display: "flex", alignItems: "center", gap: "0",
-            borderBottom: "1px solid var(--color-border)",
-          }}>
-            {/* Attach + Template buttons */}
-            <div style={{ display: "flex", alignItems: "center", gap: "2px", padding: "4px 8px" }}>
-              <button
-                type="button"
-                onClick={() => attachInputRef.current?.click()}
-                title={t("compose.attach", "Attach file")}
-                aria-label={t("compose.attach", "Attach file")}
-                style={{
-                  display: "flex", alignItems: "center", gap: "4px",
-                  padding: "4px 8px", borderRadius: "4px",
-                  border: "none", cursor: "pointer", fontSize: "11px",
-                  backgroundColor: "transparent", color: "var(--color-text-secondary)",
-                }}
-              >
-                <Paperclip size={13} />
-              </button>
-              <input
-                ref={attachInputRef}
-                type="file"
-                multiple
-                style={{ position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clip: "rect(0,0,0,0)", border: 0 }}
-                tabIndex={-1}
-                aria-hidden="true"
-                onChange={(e) => {
-                  const files = e.target.files;
-                  if (!files) return;
-                  void stageAttachmentFiles(files).catch((err) => {
-                    console.warn("Failed to stage attachment:", err);
-                    setSendError(t("compose.attachmentStageError", "Failed to attach file"));
-                  });
-                  e.target.value = "";
-                }}
-              />
-              <div style={{ position: "relative" }}>
+          {/* Toolbar */}
+          <div className="compose-editor-toolbar-row">
+            <div className="compose-toolbar-tools">
+              <div className="compose-toolbar-actions">
                 <button
-                  onClick={() => { void refreshTemplates(); setShowTemplates((v) => !v); }}
-                  aria-haspopup="listbox"
-                  aria-expanded={showTemplates}
-                  aria-label={t("compose.templates", "Templates")}
-                  title={t("compose.templates", "Templates")}
-                  style={{
-                    display: "flex", alignItems: "center", gap: "4px",
-                    padding: "4px 8px", borderRadius: "4px",
-                    border: "none", cursor: "pointer", fontSize: "11px",
-                    backgroundColor: showTemplates ? "var(--color-bg-secondary)" : "transparent",
-                    color: showTemplates ? "var(--color-accent)" : "var(--color-text-secondary)",
-                  }}
+                  type="button"
+                  onClick={() => attachInputRef.current?.click()}
+                  title={t("compose.attach", "Attach file")}
+                  aria-label={t("compose.attach", "Attach file")}
+                  className="compose-toolbar-icon-button"
                 >
-                  <BookTemplate size={13} />
+                  <Paperclip size={13} />
                 </button>
-                {showTemplates && (
-                  <div className="scroll-region compose-template-scroll" style={{
-                    position: "absolute", top: "100%", left: 0, zIndex: 100,
-                    backgroundColor: "var(--color-bg)", border: "1px solid var(--color-border)",
-                    borderRadius: "8px", boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-                    minWidth: "220px", maxHeight: "300px", overflowY: "auto",
-                  }}>
-                    <div style={{ padding: "8px", borderBottom: "1px solid var(--color-border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span id="compose-templates-label" style={{ fontSize: "12px", fontWeight: 600 }}>{t("compose.templates", "Templates")}</span>
-                      <button
-                        onClick={() => { setShowSaveTemplate(true); setShowTemplates(false); }}
-                        style={{ fontSize: "11px", border: "none", background: "none", cursor: "pointer", color: "var(--color-accent)" }}
-                      >
-                        {t("compose.saveAsTemplate", "Save current")}
-                      </button>
-                    </div>
-                    {templates.length === 0 ? (
-                      <div style={{ padding: "16px", textAlign: "center", fontSize: "12px", color: "var(--color-text-secondary)" }}>
-                        {t("compose.noTemplates", "No templates saved")}
+                <input
+                  ref={attachInputRef}
+                  type="file"
+                  multiple
+                  style={{ position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clip: "rect(0,0,0,0)", border: 0 }}
+                  tabIndex={-1}
+                  aria-hidden="true"
+                  onChange={(e) => {
+                    const files = e.target.files;
+                    if (!files) return;
+                    void stageAttachmentFiles(files).catch((err) => {
+                      console.warn("Failed to stage attachment:", err);
+                      setSendError(t("compose.attachmentStageError", "Failed to attach file"));
+                    });
+                    e.target.value = "";
+                  }}
+                />
+                <div style={{ position: "relative" }}>
+                  <button
+                    type="button"
+                    onClick={() => { void refreshTemplates(); setShowTemplates((v) => !v); }}
+                    aria-haspopup="listbox"
+                    aria-expanded={showTemplates}
+                    aria-label={t("compose.templates", "Templates")}
+                    title={t("compose.templates", "Templates")}
+                    className={`compose-toolbar-icon-button${showTemplates ? " is-active" : ""}`}
+                  >
+                    <BookTemplate size={13} />
+                  </button>
+                  {showTemplates && (
+                    <div className="scroll-region compose-template-scroll" style={{
+                      position: "absolute", top: "100%", left: 0, zIndex: 100,
+                      backgroundColor: "var(--color-bg)", border: "1px solid var(--color-border)",
+                      borderRadius: "8px", boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                      minWidth: "220px", maxHeight: "300px", overflowY: "auto",
+                    }}>
+                      <div style={{ padding: "8px", borderBottom: "1px solid var(--color-border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span id="compose-templates-label" style={{ fontSize: "12px", fontWeight: 600 }}>{t("compose.templates", "Templates")}</span>
+                        <button
+                          type="button"
+                          onClick={() => { setShowSaveTemplate(true); setShowTemplates(false); }}
+                          style={{ fontSize: "11px", border: "none", background: "none", cursor: "pointer", color: "var(--color-accent)" }}
+                        >
+                          {t("compose.saveAsTemplate", "Save current")}
+                        </button>
                       </div>
-                    ) : (
-                      <ul
-                        role="listbox"
-                        aria-labelledby="compose-templates-label"
-                        style={{ listStyle: "none", margin: 0, padding: 0 }}
-                      >
-                        {templates.map((tpl) => {
-                          const applyTemplate = () => {
-                            setSubject(tpl.subject);
-                            setRawSource(tpl.body);
-                            if (editor) editor.commands.setContent(tpl.body);
-                            setShowTemplates(false);
-                          };
-                          return (
-                            <li
-                              key={tpl.id}
-                              role="option"
-                              aria-selected={false}
-                              tabIndex={0}
-                              onClick={applyTemplate}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter" || e.key === " ") {
-                                  e.preventDefault();
-                                  applyTemplate();
-                                }
-                              }}
-                              style={{
-                                display: "flex", alignItems: "center", padding: "8px",
-                                borderBottom: "1px solid var(--color-border)", cursor: "pointer",
-                                fontSize: "12px",
-                              }}
-                            >
-                              <div style={{ flex: 1, overflow: "hidden" }}>
-                                <div style={{ fontWeight: 500 }}>{tpl.name}</div>
-                                <div style={{ color: "var(--color-text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tpl.subject}</div>
-                              </div>
-                              <button
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  const confirmed = await useConfirmStore.getState().confirm({
-                                    title: t("compose.deleteTemplate", "Delete template"),
-                                    message: t("compose.deleteTemplate", "Delete template") + ` "${tpl.name}"?`,
-                                    destructive: true,
-                                  });
-                                  if (confirmed) {
-                                    await deleteTemplate(tpl.id);
-                                    void refreshTemplates();
+                      {templates.length === 0 ? (
+                        <div style={{ padding: "16px", textAlign: "center", fontSize: "12px", color: "var(--color-text-secondary)" }}>
+                          {t("compose.noTemplates", "No templates saved")}
+                        </div>
+                      ) : (
+                        <ul
+                          role="listbox"
+                          aria-labelledby="compose-templates-label"
+                          style={{ listStyle: "none", margin: 0, padding: 0 }}
+                        >
+                          {templates.map((tpl) => {
+                            const applyTemplate = () => {
+                              setSubject(tpl.subject);
+                              setRawSource(tpl.body);
+                              if (editor) editor.commands.setContent(tpl.body);
+                              setShowTemplates(false);
+                            };
+                            return (
+                              <li
+                                key={tpl.id}
+                                role="option"
+                                aria-selected={false}
+                                tabIndex={0}
+                                onClick={applyTemplate}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" || e.key === " ") {
+                                    e.preventDefault();
+                                    applyTemplate();
                                   }
                                 }}
-                                aria-label={t("compose.deleteTemplate", "Delete template")}
-                                title={t("compose.deleteTemplate", "Delete template")}
-                                style={{ border: "none", background: "none", cursor: "pointer", color: "var(--color-text-secondary)", padding: "2px" }}
+                                style={{
+                                  display: "flex", alignItems: "center", padding: "8px",
+                                  borderBottom: "1px solid var(--color-border)", cursor: "pointer",
+                                  fontSize: "12px",
+                                }}
                               >
-                                <Trash2 size={12} />
-                              </button>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </div>
+                                <div style={{ flex: 1, overflow: "hidden" }}>
+                                  <div style={{ fontWeight: 500 }}>{tpl.name}</div>
+                                  <div style={{ color: "var(--color-text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tpl.subject}</div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    const confirmed = await useConfirmStore.getState().confirm({
+                                      title: t("compose.deleteTemplate", "Delete template"),
+                                      message: t("compose.deleteTemplate", "Delete template") + ` "${tpl.name}"?`,
+                                      destructive: true,
+                                    });
+                                    if (confirmed) {
+                                      await deleteTemplate(tpl.id);
+                                      void refreshTemplates();
+                                    }
+                                  }}
+                                  aria-label={t("compose.deleteTemplate", "Delete template")}
+                                  title={t("compose.deleteTemplate", "Delete template")}
+                                  style={{ border: "none", background: "none", cursor: "pointer", color: "var(--color-text-secondary)", padding: "2px" }}
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="compose-toolbar-divider" />
+
+              {/* Formatting toolbar */}
+              <div className="compose-format-toolbar-slot">
+                {editorMode === "rich" && editor && (
+                  <EditorToolbar editor={editor} />
+                )}
+                {editorMode === "markdown" && (
+                  <MarkdownToolbar textareaRef={textareaRef} onInsert={setRawSource} source={rawSource} />
+                )}
+                {editorMode === "html" && (
+                  <button
+                    type="button"
+                    onClick={() => setHtmlPreview((v) => !v)}
+                    title={htmlPreview ? t("compose.mode.hidePreview", "Hide preview") : t("compose.mode.showPreview", "Show preview")}
+                    className={`compose-toolbar-text-button${htmlPreview ? " is-active" : ""}`}
+                  >
+                    {htmlPreview ? <EyeOff size={13} /> : <Eye size={13} />}
+                    {htmlPreview ? t("compose.mode.hidePreview", "Hide preview") : t("compose.mode.showPreview", "Show preview")}
+                  </button>
                 )}
               </div>
             </div>
-          </div>
-          <div style={{
-            display: "flex", alignItems: "center", gap: "0",
-            borderBottom: "1px solid var(--color-border)",
-          }}>
-            {/* Formatting toolbar */}
-            {editorMode === "rich" && editor && (
-              <div style={{ flex: 1 }}>
-                <EditorToolbar editor={editor} />
-              </div>
-            )}
-            {editorMode === "markdown" && (
-              <div style={{ flex: 1 }}>
-                <MarkdownToolbar textareaRef={textareaRef} onInsert={setRawSource} source={rawSource} />
-              </div>
-            )}
-            {editorMode === "html" && (
-              <div style={{ flex: 1, display: "flex", alignItems: "center", padding: "6px 8px" }}>
-                <button
-                  onClick={() => setHtmlPreview((v) => !v)}
-                  title={htmlPreview ? t("compose.mode.hidePreview", "Hide preview") : t("compose.mode.showPreview", "Show preview")}
-                  style={{
-                    display: "flex", alignItems: "center", gap: "4px",
-                    padding: "4px 8px", borderRadius: "4px",
-                    border: "none", cursor: "pointer", fontSize: "11px",
-                    backgroundColor: htmlPreview ? "var(--color-bg-secondary, rgba(0,0,0,0.08))" : "transparent",
-                    color: htmlPreview ? "var(--color-accent, #2563eb)" : "var(--color-text-secondary)",
-                  }}
-                >
-                  {htmlPreview ? <EyeOff size={13} /> : <Eye size={13} />}
-                  {htmlPreview ? t("compose.mode.hidePreview", "Hide preview") : t("compose.mode.showPreview", "Show preview")}
-                </button>
-              </div>
-            )}
 
             {/* Mode tabs */}
-            <div style={{ display: "flex", gap: "2px", padding: "4px 8px", flexShrink: 0 }}>
+            <div className="compose-mode-tabs" role="group" aria-label={t("compose.mode.label", "Editor mode")}>
               <ModeButton icon={Type} label={t("compose.mode.rich", "Rich Text")} active={editorMode === "rich"} onClick={() => switchMode("rich")} />
               <ModeButton icon={Hash} label={t("compose.mode.markdown", "Markdown")} active={editorMode === "markdown"} onClick={() => switchMode("markdown")} />
               <ModeButton icon={FileCode2} label={t("compose.mode.html", "HTML")} active={editorMode === "html"} onClick={() => switchMode("html")} />
@@ -584,7 +565,7 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
 
           {/* Attachment list */}
           {attachments.length > 0 && (
-            <div style={{ padding: "8px 60px", borderBottom: "1px solid var(--color-border)", display: "flex", flexWrap: "wrap", gap: "6px" }}>
+            <div className="compose-inline-panel">
               {attachments.map((att, i) => (
                 <div key={i} style={{
                   display: "flex", alignItems: "center", gap: "4px",
@@ -597,6 +578,7 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
                     {att.size < 1024 * 1024 ? `${(att.size / 1024).toFixed(0)} KB` : `${(att.size / (1024 * 1024)).toFixed(1)} MB`}
                   </span>
                   <button
+                    type="button"
                     onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
                     aria-label={t("compose.removeAttachment", "Remove attachment {{name}}", { name: att.name })}
                     title={t("compose.removeAttachment", "Remove attachment {{name}}", { name: att.name })}
@@ -611,10 +593,7 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
 
           {/* Save template dialog */}
           {showSaveTemplate && (
-            <div style={{
-              padding: "8px 60px", borderBottom: "1px solid var(--color-border)",
-              display: "flex", alignItems: "center", gap: "8px",
-            }}>
+            <div className="compose-inline-panel">
               <input
                 type="text" value={templateName} onChange={(e) => setTemplateName(e.target.value)}
                 placeholder={t("compose.templateName", "Template name")}
@@ -632,6 +611,7 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
                 }}
               />
               <button
+                type="button"
                 onClick={() => {
                   if (!templateName.trim()) return;
                   void handleSaveTemplate();
@@ -645,6 +625,7 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
                 {t("common.save")}
               </button>
               <button
+                type="button"
                 onClick={() => setShowSaveTemplate(false)}
                 style={{
                   padding: "5px 8px", fontSize: "12px", border: "1px solid var(--color-border)",
@@ -659,7 +640,7 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
 
           {/* Editor area */}
           <div
-            style={{ flex: 1, minHeight: "300px", position: "relative" }}
+            className="compose-editor-area"
             onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
             onDragLeave={() => setIsDragging(false)}
             onDrop={async (e) => {
@@ -675,73 +656,68 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
               }
             }}
           >
-            {isDragging && (
-              <div style={{
-                position: "absolute", inset: 0, zIndex: 10,
-                backgroundColor: "rgba(37, 99, 235, 0.08)",
-                border: "2px dashed var(--color-accent)",
-                borderRadius: "8px",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                color: "var(--color-accent)", fontSize: "14px", fontWeight: 500,
-              }}>
-                <Paperclip size={20} style={{ marginRight: "8px" }} />
-                {t("compose.dropFiles", "Drop files to attach")}
-              </div>
-            )}
-            {editorMode === "rich" ? (
-              <EditorContent
-                editor={editor}
-                style={{
-                  padding: "16px 60px", fontSize: "14px",
-                  color: "var(--color-text-primary)", minHeight: "300px", lineHeight: 1.7,
-                }}
-              />
-            ) : editorMode === "html" && htmlPreview ? (
-              <div style={{ display: "flex", height: "100%", minHeight: "300px" }}>
+            <div className="compose-editor-surface">
+              {editorMode === "rich" ? (
+                <EditorContent
+                  editor={editor}
+                  className="compose-editor-content"
+                />
+              ) : editorMode === "html" && htmlPreview ? (
+                <div className="compose-preview-split">
+                  <textarea
+                    ref={textareaRef}
+                    value={rawSource}
+                    onChange={(e) => setRawSource(e.target.value)}
+                    placeholder={t("compose.mode.htmlPlaceholder", "Write HTML source...")}
+                    spellCheck={false}
+                    className="compose-source-input compose-source-input--split is-code"
+                  />
+                  <iframe
+                    sandbox="allow-same-origin"
+                    srcDoc={rawSource}
+                    title={t("compose.mode.preview", "Preview")}
+                    className="compose-html-preview"
+                  />
+                </div>
+              ) : (
                 <textarea
                   ref={textareaRef}
                   value={rawSource}
                   onChange={(e) => setRawSource(e.target.value)}
-                  placeholder={t("compose.mode.htmlPlaceholder", "Write HTML source...")}
-                  spellCheck={false}
-                  style={{
-                    width: "50%", height: "100%", minHeight: "300px",
-                    padding: "16px 20px", border: "none", resize: "none",
-                    backgroundColor: "transparent",
-                    fontSize: "13px", lineHeight: 1.6,
-                    color: "var(--color-text-primary)",
-                    fontFamily: "monospace",
-                    borderRight: "1px solid var(--color-border)",
-                  }}
+                  placeholder={editorMode === "markdown"
+                    ? t("compose.mode.markdownPlaceholder", "Write in Markdown...")
+                    : t("compose.mode.htmlPlaceholder", "Write HTML source...")}
+                  spellCheck={editorMode === "markdown"}
+                  className={`compose-source-input${editorMode === "html" ? " is-code" : ""}`}
                 />
-                <iframe
-                  sandbox="allow-same-origin"
-                  srcDoc={rawSource}
-                  title={t("compose.mode.preview", "Preview")}
-                  style={{
-                    width: "50%", height: "100%", minHeight: "300px",
-                    border: "none",
-                  }}
-                />
+              )}
+            </div>
+            {quotedReplyHtml && (
+              <div className="compose-quoted-reply">
+                <button
+                  type="button"
+                  className="compose-quoted-reply-toggle"
+                  aria-expanded={showQuotedReply}
+                  onClick={() => setShowQuotedReply((value) => !value)}
+                >
+                  {showQuotedReply ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  {showQuotedReply
+                    ? t("compose.hideQuotedReply", "Hide quoted message")
+                    : t("compose.showQuotedReply", "Show quoted message")}
+                </button>
+                {showQuotedReply && (
+                  <div
+                    className="scroll-region compose-quoted-reply-content"
+                    dangerouslySetInnerHTML={{ __html: quotedReplyHtml }}
+                  />
+                )}
               </div>
-            ) : (
-              <textarea
-                ref={textareaRef}
-                value={rawSource}
-                onChange={(e) => setRawSource(e.target.value)}
-                placeholder={editorMode === "markdown"
-                  ? t("compose.mode.markdownPlaceholder", "Write in Markdown...")
-                  : t("compose.mode.htmlPlaceholder", "Write HTML source...")}
-                spellCheck={editorMode === "markdown"}
-                style={{
-                  width: "100%", height: "100%", minHeight: "300px",
-                  padding: "16px 60px", border: "none", resize: "none",
-                  backgroundColor: "transparent",
-                  fontSize: "13px", lineHeight: 1.6,
-                  color: "var(--color-text-primary)",
-                  fontFamily: editorMode === "html" ? "monospace" : "inherit",
-                }}
-              />
+            )}
+            {isDragging && (
+              <div className="compose-drop-overlay">
+                <Paperclip size={20} />
+                {t("compose.dropFiles", "Drop files to attach")}
+              </div>
             )}
           </div>
         </div>
