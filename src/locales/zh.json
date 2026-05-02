@@ -126,7 +126,11 @@
     "removeAttachment": "移除附件",
     "noSubjectTitle": "无主题",
     "noSubjectConfirm": "确定不填写主题直接发送？",
-    "invalidEmail": "邮箱地址格式无效"
+    "invalidEmail": "邮箱地址格式无效",
+    "mailtoReplaceDraftTitle": "打开邮件链接？",
+    "mailtoReplaceDraftConfirm": "打开这个邮件链接会丢弃当前未保存的草稿，是否继续？",
+    "mailtoSkippedLinks": "已打开第一个邮件链接，另有 {{count}} 个链接已跳过。",
+    "mailtoSkippedLinks_other": "已打开第一个邮件链接，另有 {{count}} 个链接已跳过。"
   },
   "settings": {
     "accounts": "账户",

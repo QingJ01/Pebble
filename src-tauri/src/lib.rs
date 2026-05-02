@@ -227,9 +227,8 @@ pub fn run() {
 
     #[cfg(desktop)]
     {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             restore_main_window(app);
-            record_mailto_urls(app, mailto_urls_from_args(&args));
         }));
     }
 

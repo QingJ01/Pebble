@@ -126,7 +126,11 @@
     "removeAttachment": "Remove attachment",
     "noSubjectTitle": "No subject",
     "noSubjectConfirm": "Send without a subject?",
-    "invalidEmail": "Invalid email address"
+    "invalidEmail": "Invalid email address",
+    "mailtoReplaceDraftTitle": "Open mail link?",
+    "mailtoReplaceDraftConfirm": "Opening this mail link will discard your unsaved draft. Continue?",
+    "mailtoSkippedLinks": "Opened the first mail link. {{count}} additional link was skipped.",
+    "mailtoSkippedLinks_other": "Opened the first mail link. {{count}} additional links were skipped."
   },
   "settings": {
     "accounts": "Accounts",

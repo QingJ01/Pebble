@@ -23,4 +23,10 @@ describe("mailto deep-link integration", () => {
     expect(source).toContain("deep-link://new-url");
     expect(source).toContain("take_pending_mailto_urls");
   });
+
+  it("lets the deep-link plugin own single-instance URL dispatch", () => {
+    const source = readFileSync(resolve(process.cwd(), "src-tauri", "src", "lib.rs"), "utf8");
+
+    expect(source).not.toContain("record_mailto_urls(app, mailto_urls_from_args(&args))");
+  });
 });

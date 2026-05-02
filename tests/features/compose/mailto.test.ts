@@ -24,6 +24,26 @@ describe("parseMailtoUrl", () => {
     });
   });
 
+  it("preserves plus aliases in query recipients and fields", () => {
+    expect(parseMailtoUrl(
+      "mailto:?to=foo+tag@example.com&cc=team+mail@example.com&subject=A+B&body=C+D",
+    )).toMatchObject({
+      to: ["foo+tag@example.com"],
+      cc: ["team+mail@example.com"],
+      subject: "A+B",
+      body: "C+D",
+    });
+  });
+
+  it("handles case-insensitive repeated address headers without duplicates", () => {
+    expect(parseMailtoUrl(
+      "mailto:alice@example.com?TO=bob%40example.com&to=alice@example.com&Cc=carol%40example.com&cc=carol%40example.com",
+    )).toMatchObject({
+      to: ["alice@example.com", "bob@example.com"],
+      cc: ["carol@example.com"],
+    });
+  });
+
   it("ignores non-mailto urls", () => {
     expect(parseMailtoUrl("https://example.com")).toBeNull();
   });
