@@ -14,7 +14,7 @@ describe("macOS release configuration", () => {
     const releaseWorkflow = readFileSync(resolve(process.cwd(), ".github", "workflows", "release.yml"), "utf8");
     const cargoVersion = cargoToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
 
-    expect(packageJson.version).toBe("0.0.4");
+    expect(packageJson.version).toBe("0.0.5");
     expect(tauriConfig.version).toBe(packageJson.version);
     expect(cargoVersion).toBe(packageJson.version);
     expect(changelog).toContain(`## [${packageJson.version}] - `);

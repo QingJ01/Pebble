@@ -6,6 +6,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-05-04
+
+### Added
+
+- Added `mailto:` deep-link support so email links can open Pebble compose with parsed recipients, subject, and body.
+- Linkified plain-text URLs and email addresses in rendered message bodies.
+- Added Linux AppImage packaging, Ubuntu CI package builds, tagged-release AppImage uploads, and Linux native credential storage support.
+
+### Changed
+
+- Improved desktop notification setup and status reporting, including Windows toast environment handling and development loading behavior.
+- Refined the sidebar account selector width, alignment, and spacing.
+
+### Fixed
+
+- Fixed sending compose messages while contact recipient selection is still pending.
+- Fixed opening links from rendered email bodies, including browser links and email-address links.
+- Kept the new-notification red dot on the tray icon only.
+- Clarified invalid WebDAV backup errors when a server returns an empty or HTML response instead of a Pebble backup file.
+- Fixed CI issues that blocked Linux AppImage artifact generation.
+
 ## [0.0.4] - 2026-05-01
 
 ### Added
@@ -111,7 +132,8 @@ This release includes:
 - Windows installers are not code-signed yet, so Windows SmartScreen may show a warning.
 - Outlook support is still experimental and depends on Microsoft Graph permissions configured by the user.
 
-[Unreleased]: https://github.com/QingJ01/Pebble/compare/v0.0.4...HEAD
+[Unreleased]: https://github.com/QingJ01/Pebble/compare/v0.0.5...HEAD
+[0.0.5]: https://github.com/QingJ01/Pebble/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/QingJ01/Pebble/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/QingJ01/Pebble/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/QingJ01/Pebble/compare/v0.0.1...v0.0.2
