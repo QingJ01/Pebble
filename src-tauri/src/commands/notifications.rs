@@ -3,7 +3,7 @@ use pebble_core::PebbleError;
 use serde::Serialize;
 use std::sync::atomic::Ordering;
 use tauri::image::Image;
-use tauri::{AppHandle, Manager, Runtime, State, UserAttentionType};
+use tauri::{AppHandle, Manager, Runtime, State};
 #[cfg(not(windows))]
 use tauri_plugin_notification::NotificationExt;
 use tracing::warn;
@@ -181,14 +181,6 @@ fn draw_dot(
     }
 }
 
-pub fn attention_overlay_icon() -> Image<'static> {
-    let width = 16usize;
-    let height = 16usize;
-    let mut rgba = vec![0u8; width * height * 4];
-    draw_dot(&mut rgba, width, height, 8.0, 8.0, 4.8, 1.2);
-    Image::new_owned(rgba, width as u32, height as u32)
-}
-
 pub fn tray_attention_icon(base: &Image<'_>) -> Image<'static> {
     let width = base.width() as usize;
     let height = base.height() as usize;
@@ -229,27 +221,6 @@ fn set_attention_indicator<R: Runtime>(app: &AppHandle<R>, active: bool) {
         if previous == active {
             return;
         }
-    }
-
-    if let Some(window) = app.get_webview_window("main") {
-        #[cfg(windows)]
-        {
-            let _ = window.set_overlay_icon(if active {
-                Some(attention_overlay_icon())
-            } else {
-                None
-            });
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = window.set_badge_count(if active { Some(1) } else { None });
-        }
-
-        let _ = window.request_user_attention(if active {
-            Some(UserAttentionType::Informational)
-        } else {
-            None
-        });
     }
 
     if let Some(tray) = app.tray_by_id("main") {
@@ -342,19 +313,6 @@ mod tests {
         assert!(!status.attention_active);
         assert_eq!(status.platform, "windows");
         assert_eq!(status.app_id.as_deref(), Some("com.qingj01.pebble"));
-    }
-
-    #[test]
-    fn attention_overlay_icon_is_transparent_with_a_red_dot() {
-        let icon = attention_overlay_icon();
-
-        assert_eq!(icon.width(), 16);
-        assert_eq!(icon.height(), 16);
-        assert!(icon
-            .rgba()
-            .chunks_exact(4)
-            .any(|px| { px[0] > 220 && px[1] < 80 && px[2] < 80 && px[3] > 220 }));
-        assert!(icon.rgba().chunks_exact(4).any(|px| px[3] == 0));
     }
 
     #[test]

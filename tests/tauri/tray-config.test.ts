@@ -33,4 +33,16 @@ describe("Tauri tray config", () => {
     expect(source).toContain("hide_label");
     expect(source).toContain("set_tray_menu_labels,");
   });
+
+  it("keeps new-mail red-dot attention on the tray icon instead of the taskbar", () => {
+    const notificationsSource = readFileSync(
+      resolve(process.cwd(), "src-tauri", "src", "commands", "notifications.rs"),
+      "utf8",
+    );
+
+    expect(notificationsSource).toContain("tray_attention_icon");
+    expect(notificationsSource).not.toContain("set_overlay_icon");
+    expect(notificationsSource).not.toContain("set_badge_count");
+    expect(notificationsSource).not.toContain("attention_overlay_icon");
+  });
 });
