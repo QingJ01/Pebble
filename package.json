@@ -11,6 +11,7 @@
     "build": "node scripts/build-tauri.mjs",
     "build:windows": "tauri build --bundles nsis",
     "build:macos": "tauri build --bundles app,dmg",
+    "build:linux": "tauri build --bundles appimage",
     "test": "vitest run",
     "test:watch": "vitest"
   },

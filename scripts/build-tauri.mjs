@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 const BUNDLE_TARGETS_BY_PLATFORM = {
   win32: "nsis",
   darwin: "app,dmg",
+  linux: "appimage",
 };
 
 export function bundleTargetsForPlatform(platform = process.platform) {

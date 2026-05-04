@@ -181,6 +181,165 @@ jobs:
             Invoke-Gh release create $tag release-artifacts/* --title $title --notes-file $notesFile
           }
 
+  linux:
+    name: Linux AppImage Release
+    needs: windows
+    runs-on: ubuntu-latest
+    environment: action
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            pkg-config \
+            libgtk-3-dev \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libdbus-1-dev \
+            libkeyutils-dev \
+            patchelf
+
+      - name: Validate release version
+        run: |
+          set -euo pipefail
+
+          tag="${{ inputs.tag || github.ref_name }}"
+          if [[ ! "$tag" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "Release tags must use vMAJOR.MINOR.PATCH, got '$tag'." >&2
+            exit 1
+          fi
+          version="${BASH_REMATCH[1]}"
+
+          package_version="$(node -e "const fs = require('node:fs'); console.log(JSON.parse(fs.readFileSync('package.json', 'utf8')).version)")"
+          tauri_version="$(node -e "const fs = require('node:fs'); console.log(JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8')).version)")"
+          cargo_version="$(sed -nE 's/^version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' src-tauri/Cargo.toml | head -n 1)"
+
+          if [[ "$package_version" != "$version" ]]; then
+            echo "package.json version '$package_version' does not match tag '$tag'." >&2
+            exit 1
+          fi
+          if [[ "$tauri_version" != "$version" ]]; then
+            echo "src-tauri/tauri.conf.json version '$tauri_version' does not match tag '$tag'." >&2
+            exit 1
+          fi
+          if [[ "$cargo_version" != "$version" ]]; then
+            echo "src-tauri/Cargo.toml version '$cargo_version' does not match tag '$tag'." >&2
+            exit 1
+          fi
+
+          echo "PEBBLE_VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Validate OAuth build config
+        env:
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          MICROSOFT_CLIENT_ID: ${{ vars.MICROSOFT_CLIENT_ID }}
+          MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          for name in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET MICROSOFT_CLIENT_ID; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "$name is not configured in the 'action' GitHub environment." >&2
+              exit 1
+            fi
+          done
+          echo "OAuth client IDs and Google client secret are configured for this release build."
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Linux AppImage
+        env:
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          MICROSOFT_CLIENT_ID: ${{ vars.MICROSOFT_CLIENT_ID }}
+          MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
+        run: pnpm build:linux
+
+      - name: Collect release artifacts
+        run: |
+          set -euo pipefail
+          artifact_dir="release-artifacts"
+          mkdir -p "$artifact_dir"
+
+          search_dirs=(
+            "target/release/bundle/appimage"
+            "src-tauri/target/release/bundle/appimage"
+          )
+
+          found=()
+          for dir in "${search_dirs[@]}"; do
+            if [[ -d "$dir" ]]; then
+              while IFS= read -r -d '' appimage; do
+                found+=("$appimage")
+              done < <(find "$dir" -maxdepth 1 -type f -name "*.AppImage" -print0)
+            fi
+          done
+
+          if [[ "${#found[@]}" -eq 0 ]]; then
+            echo "No AppImage found in expected Linux bundle directories." >&2
+            exit 1
+          fi
+
+          for appimage in "${found[@]}"; do
+            cp "$appimage" "$artifact_dir/$(basename "$appimage")"
+          done
+
+          for file in "$artifact_dir"/*; do
+            hash="$(sha256sum "$file" | awk '{print $1}')"
+            printf '%s  %s\n' "$hash" "$(basename "$file")" > "$file.sha256"
+          done
+
+          ls -lh "$artifact_dir"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pebble-linux-appimage-${{ env.PEBBLE_VERSION }}
+          path: release-artifacts/*
+          if-no-files-found: error
+
+      - name: Upload Linux assets to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag || github.ref_name }}"
+          gh release upload "$tag" release-artifacts/* --clobber
+
   macos:
     name: macOS Release (${{ matrix.arch }})
     needs: windows

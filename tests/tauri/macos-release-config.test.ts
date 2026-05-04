@@ -22,13 +22,15 @@ describe("macOS release configuration", () => {
     expect(releaseWorkflow).toContain(`default: v${packageJson.version}`);
   });
 
-  it("defines explicit desktop build scripts for Windows and macOS bundles", () => {
+  it("defines explicit desktop build scripts for Windows, macOS, and Linux bundles", () => {
     const packageJson = JSON.parse(readFileSync(resolve(process.cwd(), "package.json"), "utf8"));
 
     expect(packageJson.scripts["build:windows"]).toBeTypeOf("string");
     expect(packageJson.scripts["build:macos"]).toBeTypeOf("string");
+    expect(packageJson.scripts["build:linux"]).toBeTypeOf("string");
     expect(packageJson.scripts["build:windows"]).toContain("--bundles nsis");
     expect(packageJson.scripts["build:macos"]).toContain("--bundles app,dmg");
+    expect(packageJson.scripts["build:linux"]).toContain("--bundles appimage");
   });
 
   it("routes the generic build command to platform-specific bundles", async () => {
@@ -41,7 +43,7 @@ describe("macOS release configuration", () => {
     expect(buildScriptSource).not.toMatch(/^#!/);
     expect(buildScript.bundleTargetsForPlatform("win32")).toBe("nsis");
     expect(buildScript.bundleTargetsForPlatform("darwin")).toBe("app,dmg");
-    expect(() => buildScript.bundleTargetsForPlatform("linux")).toThrow("Unsupported desktop package platform");
+    expect(buildScript.bundleTargetsForPlatform("linux")).toBe("appimage");
   });
 
   it("keeps Windows notification click helpers out of non-Windows builds", () => {
@@ -68,20 +70,28 @@ describe("macOS release configuration", () => {
     expect(existsSync(resolve(process.cwd(), "src-tauri", "icons", "icon.icns"))).toBe(true);
   });
 
-  it("enables native credential storage backends for Windows and macOS", () => {
+  it("enables native credential storage backends for Windows, macOS, and Linux", () => {
     const cargoToml = readFileSync(resolve(process.cwd(), "Cargo.toml"), "utf8");
 
-    expect(cargoToml).toContain('features = ["apple-native", "windows-native"]');
+    expect(cargoToml).toContain('"apple-native"');
+    expect(cargoToml).toContain('"windows-native"');
+    expect(cargoToml).toContain('"linux-native-sync-persistent"');
+    expect(cargoToml).toContain('"crypto-rust"');
   });
 
-  it("runs package builds on Windows and macOS in CI", () => {
+  it("runs package builds on Windows, macOS, and Linux in CI", () => {
     const ciWorkflow = readFileSync(resolve(process.cwd(), ".github", "workflows", "ci.yml"), "utf8");
 
     expect(ciWorkflow).toContain("windows-latest");
     expect(ciWorkflow).toContain("macos-15");
+    expect(ciWorkflow).toContain("ubuntu-latest");
+    expect(ciWorkflow).toContain("Install Linux system dependencies");
     expect(ciWorkflow).toContain("pnpm ${{ matrix.build_script }}");
+    expect(ciWorkflow).toContain("Upload Linux AppImage artifact");
+    expect(ciWorkflow).toContain("target/release/bundle/appimage/*.AppImage");
     expect(ciWorkflow).toContain("build:windows");
     expect(ciWorkflow).toContain("build:macos");
+    expect(ciWorkflow).toContain("build:linux");
   });
 
   it("uploads unsigned macOS DMG artifacts during tagged releases", () => {
@@ -99,5 +109,20 @@ describe("macOS release configuration", () => {
     expect(releaseWorkflow).toContain("pnpm tauri build --target ${{ matrix.target }} --bundles app,dmg");
     expect(releaseWorkflow).toContain("target/${{ matrix.target }}/release/bundle/dmg");
     expect(releaseWorkflow).toContain("pebble-macos-${{ matrix.arch }}-${{ env.PEBBLE_VERSION }}");
+  });
+
+  it("uploads Linux AppImage artifacts during tagged releases", () => {
+    const releaseWorkflow = readFileSync(
+      resolve(process.cwd(), ".github", "workflows", "release.yml"),
+      "utf8",
+    );
+
+    expect(releaseWorkflow).toContain("Linux AppImage Release");
+    expect(releaseWorkflow).toContain("runs-on: ubuntu-latest");
+    expect(releaseWorkflow).toContain("Install Linux system dependencies");
+    expect(releaseWorkflow).toContain("pnpm build:linux");
+    expect(releaseWorkflow).toContain("target/release/bundle/appimage");
+    expect(releaseWorkflow).toContain("*.AppImage");
+    expect(releaseWorkflow).toContain("pebble-linux-appimage-${{ env.PEBBLE_VERSION }}");
   });
 });

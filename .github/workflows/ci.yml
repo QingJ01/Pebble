@@ -21,6 +21,8 @@ jobs:
             build_script: build:windows
           - os: macos-15
             build_script: build:macos
+          - os: ubuntu-latest
+            build_script: build:linux
 
     steps:
       - name: Checkout
@@ -45,6 +47,26 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
 
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            pkg-config \
+            libgtk-3-dev \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libdbus-1-dev \
+            libkeyutils-dev \
+            patchelf
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -65,3 +87,13 @@ jobs:
 
       - name: Build desktop package
         run: pnpm ${{ matrix.build_script }}
+
+      - name: Upload Linux AppImage artifact
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pebble-linux-appimage
+          path: |
+            target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
