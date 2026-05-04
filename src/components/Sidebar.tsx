@@ -206,7 +206,7 @@ export default function Sidebar() {
 
       {/* Account switcher */}
       {!sidebarCollapsed && accounts.length > 1 && (
-        <div style={{ padding: "0 10px 4px" }}>
+        <div style={{ padding: "0 14px 4px 6px" }}>
           <select
             aria-label={t("settings.emailAccounts", "Email Accounts")}
             value={activeAccountId || ALL_ACCOUNTS_SELECT_VALUE}
