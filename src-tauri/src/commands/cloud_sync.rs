@@ -3,10 +3,10 @@ use crate::commands::kanban::{
 };
 use crate::state::AppState;
 use pebble_core::PebbleError;
-use pebble_store::cloud_sync::{preview_backup, BackupPreview, SettingsBackup, WebDavClient};
+use pebble_store::cloud_sync::{
+    preview_backup, BackupPreview, SettingsBackup, WebDavClient, SETTINGS_BACKUP_FILENAME,
+};
 use tauri::State;
-
-const BACKUP_FILENAME: &str = "pebble-settings-backup.json";
 
 #[tauri::command]
 pub async fn test_webdav_connection(
@@ -33,7 +33,7 @@ pub async fn backup_to_webdav(
     let data = serde_json::to_vec_pretty(&backup)
         .map_err(|e| PebbleError::Internal(format!("Failed to serialize backup payload: {e}")))?;
     let client = WebDavClient::new(url, username, password)?;
-    client.upload(BACKUP_FILENAME, &data).await?;
+    client.upload(SETTINGS_BACKUP_FILENAME, &data).await?;
     Ok("Settings backup completed successfully".to_string())
 }
 
@@ -47,7 +47,7 @@ pub async fn preview_webdav_backup(
     password: String,
 ) -> std::result::Result<BackupPreview, PebbleError> {
     let client = WebDavClient::new(url, username, password)?;
-    let data = client.download(BACKUP_FILENAME).await?;
+    let data = client.download(SETTINGS_BACKUP_FILENAME).await?;
     preview_backup(&data)
 }
 
@@ -59,7 +59,7 @@ pub async fn restore_from_webdav(
     password: String,
 ) -> std::result::Result<String, PebbleError> {
     let client = WebDavClient::new(url, username, password)?;
-    let data = client.download(BACKUP_FILENAME).await?;
+    let data = client.download(SETTINGS_BACKUP_FILENAME).await?;
     // Re-validate before import; `import_settings` enforces size + version too.
     let _ = preview_backup(&data)?;
     let backup_value: serde_json::Value = serde_json::from_slice(&data)

@@ -12,6 +12,30 @@ pub const MAX_BACKUP_SIZE_BYTES: usize = 16 * 1024 * 1024;
 
 /// Highest backup schema version this build understands.
 pub const BACKUP_SCHEMA_VERSION: u32 = 1;
+pub const SETTINGS_BACKUP_FILENAME: &str = "pebble-settings-backup.json";
+
+fn validate_backup_payload_shape(data: &[u8]) -> Result<()> {
+    let data = data.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(data);
+    let Some(first) = data.iter().copied().find(|b| !b.is_ascii_whitespace()) else {
+        return Err(PebbleError::Validation(
+            "Remote WebDAV backup file is empty. Check that the WebDAV URL points to the same directory used for backup and run a settings backup first.".to_string(),
+        ));
+    };
+
+    if first == b'<' {
+        return Err(PebbleError::Validation(format!(
+            "WebDAV returned a page or directory listing instead of a Pebble settings backup. Check that {SETTINGS_BACKUP_FILENAME} exists and that the WebDAV URL points to the backup directory, not a browser share page."
+        )));
+    }
+
+    if first != b'{' {
+        return Err(PebbleError::Validation(format!(
+            "Remote WebDAV file does not look like a Pebble settings backup. Check that {SETTINGS_BACKUP_FILENAME} was created by Pebble and that the WebDAV URL points to the backup directory."
+        )));
+    }
+
+    Ok(())
+}
 
 fn provider_slug(provider: &pebble_core::ProviderType) -> &'static str {
     match provider {
@@ -44,6 +68,7 @@ pub fn preview_backup(data: &[u8]) -> Result<BackupPreview> {
             MAX_BACKUP_SIZE_BYTES
         )));
     }
+    validate_backup_payload_shape(data)?;
     let backup: SettingsBackup = serde_json::from_slice(data).map_err(|e| {
         PebbleError::Validation(format!("Backup file is not a valid settings backup: {e}"))
     })?;
@@ -153,7 +178,7 @@ impl WebDavClient {
             .client
             .put(&url)
             .basic_auth(&self.username, Some(&self.password))
-            .header("Content-Type", "application/octet-stream")
+            .header("Content-Type", "application/json")
             .body(data.to_vec())
             .send()
             .await
@@ -272,6 +297,7 @@ impl Store {
                 MAX_BACKUP_SIZE_BYTES
             )));
         }
+        validate_backup_payload_shape(data)?;
         let backup: SettingsBackup = serde_json::from_slice(data)
             .map_err(|e| PebbleError::Validation(format!("Failed to deserialize settings: {e}")))?;
         if backup.version == 0 || backup.version > BACKUP_SCHEMA_VERSION {
@@ -444,6 +470,26 @@ mod tests {
         // Translate config should NOT be imported when config is redacted
         let tc_loaded = store2.get_translate_config().unwrap();
         assert!(tc_loaded.is_none());
+    }
+
+    #[test]
+    fn preview_backup_rejects_empty_webdav_response_with_actionable_message() {
+        let err = preview_backup(b"").unwrap_err().to_string();
+
+        assert!(err.contains("Remote WebDAV backup file is empty"));
+        assert!(err.contains("run a settings backup first"));
+    }
+
+    #[test]
+    fn preview_backup_rejects_webdav_page_response_with_actionable_message() {
+        let err = preview_backup(
+            br#"<?xml version="1.0"?><d:multistatus xmlns:d="DAV:"></d:multistatus>"#,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("WebDAV returned a page or directory listing"));
+        assert!(err.contains("pebble-settings-backup.json"));
     }
 
     #[test]
