@@ -1,4 +1,6 @@
 import { useRef, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { openMailtoUrl } from "@/app/useMailtoOpen";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
 
 interface ShadowDomEmailProps {
@@ -65,6 +67,32 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
       </style>
       <div class="pebble-email-content">${safeHtml}</div>
     `;
+
+    const handleClick = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+
+      const anchor = target.closest<HTMLAnchorElement>("a[href]");
+      const href = anchor?.getAttribute("href")?.trim();
+      if (!href) return;
+
+      if (/^mailto:/i.test(href)) {
+        event.preventDefault();
+        void openMailtoUrl(href);
+        return;
+      }
+
+      if (/^https?:\/\//i.test(href)) {
+        event.preventDefault();
+        void invoke("open_external_url", { url: href })
+          .catch((err) => console.warn("Failed to open email body link", err));
+      }
+    };
+
+    shadow.addEventListener("click", handleClick);
+    return () => {
+      shadow.removeEventListener("click", handleClick);
+    };
   }, [html]);
 
   return <div ref={hostRef} className={className} />;
