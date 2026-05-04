@@ -886,7 +886,13 @@ mod tests {
             &PrivacyMode::Strict,
         );
 
-        assert_eq!(result.html.matches(r#"<a href="https://example.com""#).count(), 1);
+        assert_eq!(
+            result
+                .html
+                .matches(r#"<a href="https://example.com""#)
+                .count(),
+            1
+        );
         assert!(result
             .html
             .contains(r#"<a href="mailto:support@example.com" target="_blank" rel="noopener noreferrer">support@example.com</a>"#));
