@@ -543,6 +543,28 @@ impl TantivySearch {
 mod tests {
     use super::*;
     use pebble_core::EmailAddress;
+    use std::time::Duration;
+
+    fn remove_test_index_dir(path: &Path) {
+        let mut last_error = None;
+        for _ in 0..5 {
+            match std::fs::remove_dir_all(path) {
+                Ok(()) => return,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => return,
+                Err(err) => {
+                    last_error = Some(err);
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+        }
+
+        if let Some(err) = last_error {
+            eprintln!(
+                "failed to remove search test index dir {}: {err}",
+                path.display()
+            );
+        }
+    }
 
     fn make_test_message(id: &str, subject: &str, body: &str, from: &str) -> Message {
         Message {
@@ -686,7 +708,7 @@ mod tests {
             );
         }
 
-        std::fs::remove_dir_all(&index_dir).unwrap();
+        remove_test_index_dir(&index_dir);
     }
 
     #[test]

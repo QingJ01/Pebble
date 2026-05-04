@@ -131,12 +131,12 @@ pub fn show_desktop_notification<R: Runtime>(
 
     #[cfg(windows)]
     {
-        return tauri_winrt_notification::Toast::new(&windows_notification_app_id(app))
+        tauri_winrt_notification::Toast::new(&windows_notification_app_id(app))
             .title(title)
             .text1(body)
             .duration(tauri_winrt_notification::Duration::Short)
             .show()
-            .map_err(|e| format!("{e:?}"));
+            .map_err(|e| format!("{e:?}"))
     }
 
     #[cfg(not(windows))]
