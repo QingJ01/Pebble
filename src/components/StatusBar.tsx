@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { listen } from "@tauri-apps/api/event";
@@ -29,6 +29,17 @@ interface MailNewPayload {
   received_at?: number;
 }
 
+interface SyncProgressPayload {
+  account_id?: string;
+  status?: "started" | "completed" | "error";
+  phase?: string;
+  message?: string | null;
+}
+
+interface SyncCompletePayload {
+  account_id?: string;
+}
+
 export default function StatusBar() {
   const { t } = useTranslation();
   const syncStatus = useUIStore((s) => s.syncStatus);
@@ -45,6 +56,16 @@ export default function StatusBar() {
   const syncMutation = useSyncMutation();
   const queryClient = useQueryClient();
   const { data: pendingOpsSummary } = usePendingMailOpsSummary(activeAccountId);
+  const syncStatusRef = useRef(syncStatus);
+
+  useEffect(() => {
+    syncStatusRef.current = syncStatus;
+  }, [syncStatus]);
+
+  function updateSyncStatus(status: typeof syncStatus) {
+    syncStatusRef.current = status;
+    setSyncStatus(status);
+  }
 
   // Listen for mail:error events from Rust backend
   useEffect(() => {
@@ -58,16 +79,48 @@ export default function StatusBar() {
     };
   }, [setLastMailError]);
 
-  // Listen for sync-complete: set idle + refresh data
+  function refreshMailQueries() {
+    queryClient.invalidateQueries({ queryKey: ["folders"] });
+    queryClient.invalidateQueries({ queryKey: ["messages"] });
+    queryClient.invalidateQueries({ queryKey: ["threads"] });
+  }
+
+  function isActiveAccountEvent(accountId?: string | null) {
+    return !accountId || !activeAccountId || accountId === activeAccountId;
+  }
+
+  // Listen for sync-complete: legacy worker-exit event used by one-shot syncs.
   useEffect(() => {
-    const unlisten = listen("mail:sync-complete", () => {
-      setSyncStatus("idle");
-      queryClient.invalidateQueries({ queryKey: ["folders"] });
-      queryClient.invalidateQueries({ queryKey: ["messages"] });
-      queryClient.invalidateQueries({ queryKey: ["threads"] });
+    const unlisten = listen<SyncCompletePayload>("mail:sync-complete", (event) => {
+      if (!isActiveAccountEvent(event.payload?.account_id)) return;
+      if (syncStatusRef.current !== "error") {
+        updateSyncStatus("idle");
+      }
+      refreshMailQueries();
     });
     return () => { unlisten.then((fn) => fn()); };
-  }, [setSyncStatus, queryClient]);
+  }, [activeAccountId, setSyncStatus, queryClient]);
+
+  // Listen for per-pass sync progress. Background workers are long-lived, so
+  // UI "syncing" must track a concrete pass rather than worker lifetime.
+  useEffect(() => {
+    const unlisten = listen<SyncProgressPayload>("mail:sync-progress", (event) => {
+      const { account_id, status, message } = event.payload;
+      if (!isActiveAccountEvent(account_id)) return;
+      if (status === "started") {
+        updateSyncStatus("syncing");
+      } else if (status === "completed") {
+        updateSyncStatus("idle");
+        refreshMailQueries();
+      } else if (status === "error") {
+        updateSyncStatus("error");
+        if (message) {
+          setLastMailError(message);
+        }
+      }
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, [activeAccountId, setLastMailError, setSyncStatus, queryClient]);
 
   // Listen for new mail events: incremental data refresh
   useEffect(() => {
@@ -105,14 +158,13 @@ export default function StatusBar() {
     if (!activeAccountId) return;
     if (syncStatus === "syncing") {
       try { await stopSync(activeAccountId); } catch {}
-      setSyncStatus("idle");
+      updateSyncStatus("idle");
     } else {
-      setSyncStatus("syncing");
+      updateSyncStatus("syncing");
       try {
         await syncMutation.mutateAsync(activeAccountId);
-        setSyncStatus("idle");
       } catch {
-        setSyncStatus("error");
+        updateSyncStatus("error");
       }
     }
   }

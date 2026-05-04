@@ -1,6 +1,9 @@
+use std::fmt::Display;
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use async_imap::Client;
 use futures::TryStreamExt;
@@ -275,6 +278,25 @@ impl AsyncWrite for InnerStream {
 /// of whether the underlying transport is TLS or plain TCP.
 type ImapSession = async_imap::Session<PrefixedStream<InnerStream>>;
 
+const IMAP_CONNECT_TIMEOUT_SECS: u64 = 15;
+const IMAP_COMMAND_TIMEOUT_SECS: u64 = 45;
+
+fn imap_timeout_error(operation: &str, seconds: u64) -> PebbleError {
+    PebbleError::Network(format!("{operation} timed out after {seconds}s"))
+}
+
+async fn with_imap_timeout<T, E, Fut>(operation: &str, seconds: u64, future: Fut) -> Result<T>
+where
+    E: Display,
+    Fut: Future<Output = std::result::Result<T, E>>,
+{
+    match tokio::time::timeout(Duration::from_secs(seconds), future).await {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(error)) => Err(PebbleError::Network(format!("{operation} failed: {error}"))),
+        Err(_) => Err(imap_timeout_error(operation, seconds)),
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ImapMailboxStatus {
     pub uid_validity: Option<u32>,
@@ -306,10 +328,12 @@ async fn tls_connect(host: &str, tcp: TcpStream) -> Result<TlsStream<TcpStream>>
     let server_name = rustls::pki_types::ServerName::try_from(host)
         .map_err(|e| PebbleError::Network(format!("Invalid server name '{}': {}", host, e)))?
         .to_owned();
-    connector
-        .connect(server_name, tcp)
-        .await
-        .map_err(|e| PebbleError::Network(format!("TLS handshake with {}: {}", host, e)))
+    with_imap_timeout(
+        &format!("TLS handshake with {host}"),
+        IMAP_CONNECT_TIMEOUT_SECS,
+        connector.connect(server_name, tcp),
+    )
+    .await
 }
 
 impl ImapProvider {
@@ -346,32 +370,35 @@ impl ImapProvider {
     ) -> Result<Vec<u8>> {
         // Read server greeting (e.g. "* OK Coremail ...")
         let mut greeting = vec![0u8; 8192];
-        let n = stream
-            .read(&mut greeting)
-            .await
-            .map_err(|e| PebbleError::Network(format!("Read greeting: {e}")))?;
+        let n = with_imap_timeout(
+            "Read greeting",
+            IMAP_COMMAND_TIMEOUT_SECS,
+            stream.read(&mut greeting),
+        )
+        .await?;
         greeting.truncate(n);
 
         // Send ID command
-        stream
-            .write_all(
+        with_imap_timeout(
+            "Send ID",
+            IMAP_COMMAND_TIMEOUT_SECS,
+            stream.write_all(
                 b"A000 ID (\"name\" \"Pebble\" \"version\" \"1.0\" \"vendor\" \"Pebble\")\r\n",
-            )
-            .await
-            .map_err(|e| PebbleError::Network(format!("Send ID: {e}")))?;
-        stream
-            .flush()
-            .await
-            .map_err(|e| PebbleError::Network(format!("Flush ID: {e}")))?;
+            ),
+        )
+        .await?;
+        with_imap_timeout("Flush ID", IMAP_COMMAND_TIMEOUT_SECS, stream.flush()).await?;
 
         // Read ID response until we see the tagged response (A000 OK/NO/BAD)
         let mut resp = Vec::new();
         let mut buf = [0u8; 4096];
         loop {
-            let n = stream
-                .read(&mut buf)
-                .await
-                .map_err(|e| PebbleError::Network(format!("Read ID response: {e}")))?;
+            let n = with_imap_timeout(
+                "Read ID response",
+                IMAP_COMMAND_TIMEOUT_SECS,
+                stream.read(&mut buf),
+            )
+            .await?;
             if n == 0 {
                 return Err(PebbleError::Network("Connection closed during ID".into()));
             }
@@ -395,21 +422,24 @@ impl ImapProvider {
         let mut tcp = tcp;
 
         // Send STARTTLS command
-        tcp.write_all(b"A001 STARTTLS\r\n")
-            .await
-            .map_err(|e| PebbleError::Network(format!("Send STARTTLS: {e}")))?;
-        tcp.flush()
-            .await
-            .map_err(|e| PebbleError::Network(format!("Flush STARTTLS: {e}")))?;
+        with_imap_timeout(
+            "Send STARTTLS",
+            IMAP_COMMAND_TIMEOUT_SECS,
+            tcp.write_all(b"A001 STARTTLS\r\n"),
+        )
+        .await?;
+        with_imap_timeout("Flush STARTTLS", IMAP_COMMAND_TIMEOUT_SECS, tcp.flush()).await?;
 
         // Read STARTTLS response
         let mut resp = Vec::new();
         let mut buf = [0u8; 4096];
         loop {
-            let n = tcp
-                .read(&mut buf)
-                .await
-                .map_err(|e| PebbleError::Network(format!("Read STARTTLS response: {e}")))?;
+            let n = with_imap_timeout(
+                "Read STARTTLS response",
+                IMAP_COMMAND_TIMEOUT_SECS,
+                tcp.read(&mut buf),
+            )
+            .await?;
             if n == 0 {
                 return Err(PebbleError::Network(
                     "Connection closed during STARTTLS".into(),
@@ -445,14 +475,12 @@ impl ImapProvider {
                 "Connecting to {} via SOCKS5 proxy {} (security={:?})...",
                 addr, proxy_addr, self.config.security
             );
-            let stream =
-                tokio_socks::tcp::Socks5Stream::connect(proxy_addr.as_str(), addr.as_str())
-                    .await
-                    .map_err(|e| {
-                        PebbleError::Network(format!(
-                            "SOCKS5 proxy connect to {addr} via {proxy_addr}: {e}"
-                        ))
-                    })?;
+            let stream = with_imap_timeout(
+                &format!("SOCKS5 proxy connect to {addr} via {proxy_addr}"),
+                IMAP_CONNECT_TIMEOUT_SECS,
+                tokio_socks::tcp::Socks5Stream::connect(proxy_addr.as_str(), addr.as_str()),
+            )
+            .await?;
             let tcp = stream.into_inner();
             if let Ok(peer) = tcp.peer_addr() {
                 debug!("SOCKS5 connected to {} (proxy peer: {})", addr, peer);
@@ -463,9 +491,12 @@ impl ImapProvider {
                 "Resolving and connecting to {} (security={:?})...",
                 addr, self.config.security
             );
-            let tcp = TcpStream::connect(&addr)
-                .await
-                .map_err(|e| PebbleError::Network(format!("TCP connect to {addr}: {e}")))?;
+            let tcp = with_imap_timeout(
+                &format!("TCP connect to {addr}"),
+                IMAP_CONNECT_TIMEOUT_SECS,
+                TcpStream::connect(&addr),
+            )
+            .await?;
             if let Ok(peer) = tcp.peer_addr() {
                 debug!("TCP connected to {} (resolved IP: {})", addr, peer);
             }
@@ -499,10 +530,13 @@ impl ImapProvider {
                     PrefixedStream::with_prefix(prefix, InnerStream::Tls(Box::new(tls_stream)));
 
                 let client = Client::new(stream);
-                client
-                    .login(&self.config.username, &self.config.password)
-                    .await
-                    .map_err(|(e, _)| PebbleError::Auth(format!("IMAP login failed: {e}")))?
+                tokio::time::timeout(
+                    Duration::from_secs(IMAP_COMMAND_TIMEOUT_SECS),
+                    client.login(&self.config.username, &self.config.password),
+                )
+                .await
+                .map_err(|_| imap_timeout_error("IMAP login", IMAP_COMMAND_TIMEOUT_SECS))?
+                .map_err(|(e, _)| PebbleError::Auth(format!("IMAP login failed: {e}")))?
             }
             ConnectionSecurity::StartTls => {
                 // Connect plain, read greeting, optionally send ID, then STARTTLS upgrade
@@ -510,28 +544,33 @@ impl ImapProvider {
 
                 // Read greeting
                 let mut greeting = vec![0u8; 8192];
-                let n = tcp
-                    .read(&mut greeting)
-                    .await
-                    .map_err(|e| PebbleError::Network(format!("Read greeting: {e}")))?;
+                let n = with_imap_timeout(
+                    "Read greeting",
+                    IMAP_COMMAND_TIMEOUT_SECS,
+                    tcp.read(&mut greeting),
+                )
+                .await?;
                 greeting.truncate(n);
 
                 // Send ID command before STARTTLS if needed (on plain connection)
                 if needs_id {
-                    tcp.write_all(b"A000 ID (\"name\" \"Pebble\" \"version\" \"1.0\" \"vendor\" \"Pebble\")\r\n")
-                        .await
-                        .map_err(|e| PebbleError::Network(format!("Send ID: {e}")))?;
-                    tcp.flush()
-                        .await
-                        .map_err(|e| PebbleError::Network(format!("Flush ID: {e}")))?;
+                    with_imap_timeout(
+                        "Send ID",
+                        IMAP_COMMAND_TIMEOUT_SECS,
+                        tcp.write_all(b"A000 ID (\"name\" \"Pebble\" \"version\" \"1.0\" \"vendor\" \"Pebble\")\r\n"),
+                    )
+                    .await?;
+                    with_imap_timeout("Flush ID", IMAP_COMMAND_TIMEOUT_SECS, tcp.flush()).await?;
 
                     let mut resp = Vec::new();
                     let mut buf = [0u8; 4096];
                     loop {
-                        let n = tcp
-                            .read(&mut buf)
-                            .await
-                            .map_err(|e| PebbleError::Network(format!("Read ID response: {e}")))?;
+                        let n = with_imap_timeout(
+                            "Read ID response",
+                            IMAP_COMMAND_TIMEOUT_SECS,
+                            tcp.read(&mut buf),
+                        )
+                        .await?;
                         if n == 0 {
                             return Err(PebbleError::Network("Connection closed during ID".into()));
                         }
@@ -555,10 +594,13 @@ impl ImapProvider {
                 let stream =
                     PrefixedStream::with_prefix(greeting, InnerStream::Tls(Box::new(tls_stream)));
                 let client = Client::new(stream);
-                client
-                    .login(&self.config.username, &self.config.password)
-                    .await
-                    .map_err(|(e, _)| PebbleError::Auth(format!("IMAP login failed: {e}")))?
+                tokio::time::timeout(
+                    Duration::from_secs(IMAP_COMMAND_TIMEOUT_SECS),
+                    client.login(&self.config.username, &self.config.password),
+                )
+                .await
+                .map_err(|_| imap_timeout_error("IMAP login", IMAP_COMMAND_TIMEOUT_SECS))?
+                .map_err(|(e, _)| PebbleError::Auth(format!("IMAP login failed: {e}")))?
             }
             ConnectionSecurity::Plain => {
                 // Plain TCP — no encryption
@@ -571,10 +613,13 @@ impl ImapProvider {
                 let stream = PrefixedStream::with_prefix(prefix, InnerStream::Plain(tcp));
 
                 let client = Client::new(stream);
-                client
-                    .login(&self.config.username, &self.config.password)
-                    .await
-                    .map_err(|(e, _)| PebbleError::Auth(format!("IMAP login failed: {e}")))?
+                tokio::time::timeout(
+                    Duration::from_secs(IMAP_COMMAND_TIMEOUT_SECS),
+                    client.login(&self.config.username, &self.config.password),
+                )
+                .await
+                .map_err(|_| imap_timeout_error("IMAP login", IMAP_COMMAND_TIMEOUT_SECS))?
+                .map_err(|(e, _)| PebbleError::Auth(format!("IMAP login failed: {e}")))?
             }
         };
 
@@ -831,10 +876,9 @@ impl ImapProvider {
 
         macro_rules! do_fetch {
             ($s:expr) => {{
-                let mailbox_info = $s
-                    .select(mailbox)
-                    .await
-                    .map_err(|e| PebbleError::Network(format!("SELECT failed: {e}")))?;
+                let mailbox_info =
+                    with_imap_timeout("SELECT", IMAP_COMMAND_TIMEOUT_SECS, $s.select(mailbox))
+                        .await?;
 
                 let exists = mailbox_info.exists;
                 if exists == 0 {
@@ -849,13 +893,18 @@ impl ImapProvider {
                         None => return Ok(Vec::new()),
                     };
                     let uid_set = format!("{next_uid}:*");
-                    let fetches: Vec<async_imap::types::Fetch> = $s
-                        .uid_fetch(&uid_set, "(UID BODY.PEEK[])")
-                        .await
-                        .map_err(|e| PebbleError::Network(format!("UID FETCH failed: {e}")))?
-                        .try_collect()
-                        .await
-                        .map_err(|e| PebbleError::Network(format!("UID FETCH collect: {e}")))?;
+                    let fetches = with_imap_timeout(
+                        "UID FETCH",
+                        IMAP_COMMAND_TIMEOUT_SECS,
+                        $s.uid_fetch(&uid_set, "(UID BODY.PEEK[])"),
+                    )
+                    .await?;
+                    let fetches: Vec<async_imap::types::Fetch> = with_imap_timeout(
+                        "UID FETCH collect",
+                        IMAP_COMMAND_TIMEOUT_SECS,
+                        fetches.try_collect(),
+                    )
+                    .await?;
                     for fetch in fetches {
                         if let Some(uid) = fetch.uid {
                             if let Some(body) = fetch.body() {
@@ -872,13 +921,18 @@ impl ImapProvider {
                         1
                     };
                     let seq_set = format!("{start}:{exists}");
-                    let fetches: Vec<async_imap::types::Fetch> = $s
-                        .fetch(&seq_set, "(UID BODY.PEEK[])")
-                        .await
-                        .map_err(|e| PebbleError::Network(format!("FETCH failed: {e}")))?
-                        .try_collect()
-                        .await
-                        .map_err(|e| PebbleError::Network(format!("FETCH collect: {e}")))?;
+                    let fetches = with_imap_timeout(
+                        "FETCH",
+                        IMAP_COMMAND_TIMEOUT_SECS,
+                        $s.fetch(&seq_set, "(UID BODY.PEEK[])"),
+                    )
+                    .await?;
+                    let fetches: Vec<async_imap::types::Fetch> = with_imap_timeout(
+                        "FETCH collect",
+                        IMAP_COMMAND_TIMEOUT_SECS,
+                        fetches.try_collect(),
+                    )
+                    .await?;
                     for fetch in fetches {
                         if let Some(uid) = fetch.uid {
                             if let Some(body) = fetch.body() {
@@ -918,17 +972,20 @@ impl ImapProvider {
 
         macro_rules! do_flags {
             ($s:expr) => {{
-                $s.select(mailbox)
-                    .await
-                    .map_err(|e| PebbleError::Network(format!("SELECT failed: {e}")))?;
+                with_imap_timeout("SELECT", IMAP_COMMAND_TIMEOUT_SECS, $s.select(mailbox)).await?;
 
-                let fetches: Vec<async_imap::types::Fetch> = $s
-                    .uid_fetch(&uid_set, "FLAGS")
-                    .await
-                    .map_err(|e| PebbleError::Network(format!("UID FETCH FLAGS failed: {e}")))?
-                    .try_collect()
-                    .await
-                    .map_err(|e| PebbleError::Network(format!("FLAGS collect: {e}")))?;
+                let fetches = with_imap_timeout(
+                    "UID FETCH FLAGS",
+                    IMAP_COMMAND_TIMEOUT_SECS,
+                    $s.uid_fetch(&uid_set, "FLAGS"),
+                )
+                .await?;
+                let fetches: Vec<async_imap::types::Fetch> = with_imap_timeout(
+                    "FLAGS collect",
+                    IMAP_COMMAND_TIMEOUT_SECS,
+                    fetches.try_collect(),
+                )
+                .await?;
 
                 fetches
                     .into_iter()
@@ -968,9 +1025,7 @@ impl ImapProvider {
 
         macro_rules! do_store {
             ($s:expr) => {{
-                $s.select(mailbox)
-                    .await
-                    .map_err(|e| PebbleError::Network(format!("SELECT failed: {e}")))?;
+                with_imap_timeout("SELECT", IMAP_COMMAND_TIMEOUT_SECS, $s.select(mailbox)).await?;
 
                 if let Some(read) = is_read {
                     let flag_cmd = if read {
@@ -978,13 +1033,18 @@ impl ImapProvider {
                     } else {
                         format!("-FLAGS (\\Seen)")
                     };
-                    let _: Vec<async_imap::types::Fetch> = $s
-                        .uid_store(&uid_str, &flag_cmd)
-                        .await
-                        .map_err(|e| PebbleError::Network(format!("STORE \\Seen failed: {e}")))?
-                        .try_collect()
-                        .await
-                        .map_err(|e| PebbleError::Network(format!("STORE \\Seen collect: {e}")))?;
+                    let store_result = with_imap_timeout(
+                        "STORE \\Seen",
+                        IMAP_COMMAND_TIMEOUT_SECS,
+                        $s.uid_store(&uid_str, &flag_cmd),
+                    )
+                    .await?;
+                    let _: Vec<async_imap::types::Fetch> = with_imap_timeout(
+                        "STORE \\Seen collect",
+                        IMAP_COMMAND_TIMEOUT_SECS,
+                        store_result.try_collect(),
+                    )
+                    .await?;
                 }
 
                 if let Some(starred) = is_starred {
@@ -993,15 +1053,18 @@ impl ImapProvider {
                     } else {
                         format!("-FLAGS (\\Flagged)")
                     };
-                    let _: Vec<async_imap::types::Fetch> = $s
-                        .uid_store(&uid_str, &flag_cmd)
-                        .await
-                        .map_err(|e| PebbleError::Network(format!("STORE \\Flagged failed: {e}")))?
-                        .try_collect()
-                        .await
-                        .map_err(|e| {
-                            PebbleError::Network(format!("STORE \\Flagged collect: {e}"))
-                        })?;
+                    let store_result = with_imap_timeout(
+                        "STORE \\Flagged",
+                        IMAP_COMMAND_TIMEOUT_SECS,
+                        $s.uid_store(&uid_str, &flag_cmd),
+                    )
+                    .await?;
+                    let _: Vec<async_imap::types::Fetch> = with_imap_timeout(
+                        "STORE \\Flagged collect",
+                        IMAP_COMMAND_TIMEOUT_SECS,
+                        store_result.try_collect(),
+                    )
+                    .await?;
                 }
             }};
         }
@@ -1029,12 +1092,21 @@ impl ImapProvider {
 
         macro_rules! do_move {
             ($s:expr) => {{
-                $s.select(source_mailbox)
-                    .await
-                    .map_err(|e| PebbleError::Network(format!("SELECT failed: {e}")))?;
+                with_imap_timeout(
+                    "SELECT",
+                    IMAP_COMMAND_TIMEOUT_SECS,
+                    $s.select(source_mailbox),
+                )
+                .await?;
 
                 // Try MOVE extension first
-                match $s.uid_mv(&uid_str, dest_mailbox).await {
+                match with_imap_timeout(
+                    "UID MOVE",
+                    IMAP_COMMAND_TIMEOUT_SECS,
+                    $s.uid_mv(&uid_str, dest_mailbox),
+                )
+                .await
+                {
                     Ok(_) => {
                         debug!(
                             "MOVE UID {} from {} to {} succeeded",
@@ -1049,33 +1121,42 @@ impl ImapProvider {
                         );
 
                         // Re-select in case MOVE attempt changed state
-                        $s.select(source_mailbox)
-                            .await
-                            .map_err(|e| PebbleError::Network(format!("SELECT failed: {e}")))?;
+                        with_imap_timeout(
+                            "SELECT",
+                            IMAP_COMMAND_TIMEOUT_SECS,
+                            $s.select(source_mailbox),
+                        )
+                        .await?;
 
-                        $s.uid_copy(&uid_str, dest_mailbox)
-                            .await
-                            .map_err(|e| PebbleError::Network(format!("UID COPY failed: {e}")))?;
+                        with_imap_timeout(
+                            "UID COPY",
+                            IMAP_COMMAND_TIMEOUT_SECS,
+                            $s.uid_copy(&uid_str, dest_mailbox),
+                        )
+                        .await?;
 
-                        let _: Vec<async_imap::types::Fetch> = $s
-                            .uid_store(&uid_str, "+FLAGS (\\Deleted)")
-                            .await
-                            .map_err(|e| {
-                                PebbleError::Network(format!("STORE \\Deleted failed: {e}"))
-                            })?
-                            .try_collect()
-                            .await
-                            .map_err(|e| {
-                                PebbleError::Network(format!("STORE \\Deleted collect: {e}"))
-                            })?;
+                        let store_result = with_imap_timeout(
+                            "STORE \\Deleted",
+                            IMAP_COMMAND_TIMEOUT_SECS,
+                            $s.uid_store(&uid_str, "+FLAGS (\\Deleted)"),
+                        )
+                        .await?;
+                        let _: Vec<async_imap::types::Fetch> = with_imap_timeout(
+                            "STORE \\Deleted collect",
+                            IMAP_COMMAND_TIMEOUT_SECS,
+                            store_result.try_collect(),
+                        )
+                        .await?;
 
-                        let _: Vec<u32> = $s
-                            .expunge()
-                            .await
-                            .map_err(|e| PebbleError::Network(format!("EXPUNGE failed: {e}")))?
-                            .try_collect()
-                            .await
-                            .map_err(|e| PebbleError::Network(format!("EXPUNGE collect: {e}")))?;
+                        let expunge_result =
+                            with_imap_timeout("EXPUNGE", IMAP_COMMAND_TIMEOUT_SECS, $s.expunge())
+                                .await?;
+                        let _: Vec<u32> = with_imap_timeout(
+                            "EXPUNGE collect",
+                            IMAP_COMMAND_TIMEOUT_SECS,
+                            expunge_result.try_collect(),
+                        )
+                        .await?;
 
                         debug!(
                             "COPY+DELETE UID {} from {} to {} succeeded",
@@ -1102,25 +1183,29 @@ impl ImapProvider {
 
         macro_rules! do_delete {
             ($s:expr) => {{
-                $s.select(mailbox)
-                    .await
-                    .map_err(|e| PebbleError::Network(format!("SELECT failed: {e}")))?;
+                with_imap_timeout("SELECT", IMAP_COMMAND_TIMEOUT_SECS, $s.select(mailbox)).await?;
 
-                let _: Vec<async_imap::types::Fetch> = $s
-                    .uid_store(&uid_str, "+FLAGS (\\Deleted)")
-                    .await
-                    .map_err(|e| PebbleError::Network(format!("STORE \\Deleted failed: {e}")))?
-                    .try_collect()
-                    .await
-                    .map_err(|e| PebbleError::Network(format!("STORE \\Deleted collect: {e}")))?;
+                let store_result = with_imap_timeout(
+                    "STORE \\Deleted",
+                    IMAP_COMMAND_TIMEOUT_SECS,
+                    $s.uid_store(&uid_str, "+FLAGS (\\Deleted)"),
+                )
+                .await?;
+                let _: Vec<async_imap::types::Fetch> = with_imap_timeout(
+                    "STORE \\Deleted collect",
+                    IMAP_COMMAND_TIMEOUT_SECS,
+                    store_result.try_collect(),
+                )
+                .await?;
 
-                let _: Vec<u32> = $s
-                    .expunge()
-                    .await
-                    .map_err(|e| PebbleError::Network(format!("EXPUNGE failed: {e}")))?
-                    .try_collect()
-                    .await
-                    .map_err(|e| PebbleError::Network(format!("EXPUNGE collect: {e}")))?;
+                let expunge_result =
+                    with_imap_timeout("EXPUNGE", IMAP_COMMAND_TIMEOUT_SECS, $s.expunge()).await?;
+                let _: Vec<u32> = with_imap_timeout(
+                    "EXPUNGE collect",
+                    IMAP_COMMAND_TIMEOUT_SECS,
+                    expunge_result.try_collect(),
+                )
+                .await?;
 
                 debug!("Deleted UID {} from {}", uid, mailbox);
             }};
@@ -1140,16 +1225,16 @@ impl ImapProvider {
 
         macro_rules! do_search {
             ($s:expr) => {{
-                $s.select(mailbox)
-                    .await
-                    .map_err(|e| PebbleError::Network(format!("SELECT failed: {e}")))?;
+                with_imap_timeout("SELECT", IMAP_COMMAND_TIMEOUT_SECS, $s.select(mailbox)).await?;
 
-                let uids: Vec<u32> = $s
-                    .uid_search("ALL")
-                    .await
-                    .map_err(|e| PebbleError::Network(format!("UID SEARCH ALL failed: {e}")))?
-                    .into_iter()
-                    .collect();
+                let uids: Vec<u32> = with_imap_timeout(
+                    "UID SEARCH ALL",
+                    IMAP_COMMAND_TIMEOUT_SECS,
+                    $s.uid_search("ALL"),
+                )
+                .await?
+                .into_iter()
+                .collect();
                 uids
             }};
         }
@@ -1166,10 +1251,8 @@ impl ImapProvider {
             .as_mut()
             .ok_or_else(|| PebbleError::Network("Not connected".to_string()))?;
 
-        let mbox = sess
-            .select(mailbox)
-            .await
-            .map_err(|e| PebbleError::Network(format!("SELECT failed: {e}")))?;
+        let mbox =
+            with_imap_timeout("SELECT", IMAP_COMMAND_TIMEOUT_SECS, sess.select(mailbox)).await?;
 
         Ok(mbox.exists)
     }
@@ -1182,7 +1265,8 @@ impl ImapProvider {
             None => return false,
         };
 
-        match sess.capabilities().await {
+        match with_imap_timeout("CAPABILITY", IMAP_COMMAND_TIMEOUT_SECS, sess.capabilities()).await
+        {
             Ok(caps) => caps.has_str("CONDSTORE"),
             Err(_) => false,
         }
@@ -1203,10 +1287,9 @@ impl ImapProvider {
 
         macro_rules! do_select {
             ($s:expr) => {{
-                let mailbox_info = $s
-                    .select(mailbox)
-                    .await
-                    .map_err(|e| PebbleError::Network(format!("SELECT failed: {e}")))?;
+                let mailbox_info =
+                    with_imap_timeout("SELECT", IMAP_COMMAND_TIMEOUT_SECS, $s.select(mailbox))
+                        .await?;
                 ImapMailboxStatus {
                     uid_validity: mailbox_info.uid_validity,
                     highest_modseq: mailbox_info.highest_modseq,
@@ -1244,19 +1327,20 @@ impl ImapProvider {
 
         macro_rules! do_flags_modseq {
             ($s:expr) => {{
-                $s.select(mailbox)
-                    .await
-                    .map_err(|e| PebbleError::Network(format!("SELECT failed: {e}")))?;
+                with_imap_timeout("SELECT", IMAP_COMMAND_TIMEOUT_SECS, $s.select(mailbox)).await?;
 
-                let fetches: Vec<async_imap::types::Fetch> = $s
-                    .uid_fetch(&uid_set, "(FLAGS MODSEQ)")
-                    .await
-                    .map_err(|e| {
-                        PebbleError::Network(format!("UID FETCH FLAGS MODSEQ failed: {e}"))
-                    })?
-                    .try_collect()
-                    .await
-                    .map_err(|e| PebbleError::Network(format!("FLAGS MODSEQ collect: {e}")))?;
+                let fetches = with_imap_timeout(
+                    "UID FETCH FLAGS MODSEQ",
+                    IMAP_COMMAND_TIMEOUT_SECS,
+                    $s.uid_fetch(&uid_set, "(FLAGS MODSEQ)"),
+                )
+                .await?;
+                let fetches: Vec<async_imap::types::Fetch> = with_imap_timeout(
+                    "FLAGS MODSEQ collect",
+                    IMAP_COMMAND_TIMEOUT_SECS,
+                    fetches.try_collect(),
+                )
+                .await?;
 
                 let mut highest = 0u64;
                 let results: Vec<(u32, bool, bool)> = fetches
@@ -1296,7 +1380,8 @@ impl ImapProvider {
             None => return false,
         };
 
-        match sess.capabilities().await {
+        match with_imap_timeout("CAPABILITY", IMAP_COMMAND_TIMEOUT_SECS, sess.capabilities()).await
+        {
             Ok(caps) => caps.has_str("IDLE"),
             Err(_) => false,
         }
@@ -1322,15 +1407,19 @@ impl ImapProvider {
 
         // Select the mailbox first.
         let mut session = sess;
-        if let Err(e) = session.select(mailbox).await {
+        if let Err(e) =
+            with_imap_timeout("SELECT", IMAP_COMMAND_TIMEOUT_SECS, session.select(mailbox)).await
+        {
             // Restore session before returning error.
             let mut guard = self.session.lock().await;
             *guard = Some(session);
-            return Err(PebbleError::Network(format!("SELECT failed: {e}")));
+            return Err(e);
         }
 
         let mut idle_handle = session.idle();
-        if let Err(e) = idle_handle.init().await {
+        if let Err(e) =
+            with_imap_timeout("IDLE init", IMAP_COMMAND_TIMEOUT_SECS, idle_handle.init()).await
+        {
             // init() failed; the handle still owns the session.
             // Call done() to recover the session.
             match idle_handle.done().await {
@@ -1342,7 +1431,7 @@ impl ImapProvider {
                     // Session is lost; caller will need to reconnect.
                 }
             }
-            return Err(PebbleError::Network(format!("IDLE init failed: {e}")));
+            return Err(e);
         }
 
         let (wait_fut, _stop_source) = idle_handle.wait_with_timeout(timeout_dur);
@@ -1448,10 +1537,20 @@ pub fn folder_sort_order(role: &Option<FolderRole>) -> i32 {
 
 #[cfg(test)]
 mod tls_config_tests {
-    use super::build_tls_connector;
+    use super::{build_tls_connector, imap_timeout_error};
 
     #[test]
     fn build_tls_connector_returns_result() {
         assert!(build_tls_connector().is_ok());
+    }
+
+    #[test]
+    fn imap_timeout_error_names_operation_and_seconds() {
+        let error = imap_timeout_error("UID FETCH", 30);
+
+        assert_eq!(
+            error.to_string(),
+            "Network error: UID FETCH timed out after 30s"
+        );
     }
 }

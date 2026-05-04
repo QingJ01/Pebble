@@ -16,6 +16,43 @@ pub struct SyncError {
     pub timestamp: u64,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SyncProgress {
+    pub account_id: String,
+    pub status: String,
+    pub phase: String,
+    pub message: Option<String>,
+}
+
+impl SyncProgress {
+    fn started(account_id: &str, phase: &str) -> Self {
+        Self {
+            account_id: account_id.to_string(),
+            status: "started".to_string(),
+            phase: phase.to_string(),
+            message: None,
+        }
+    }
+
+    fn completed(account_id: &str, phase: &str) -> Self {
+        Self {
+            account_id: account_id.to_string(),
+            status: "completed".to_string(),
+            phase: phase.to_string(),
+            message: None,
+        }
+    }
+
+    fn error(account_id: &str, phase: &str, message: &str) -> Self {
+        Self {
+            account_id: account_id.to_string(),
+            status: "error".to_string(),
+            phase: phase.to_string(),
+            message: Some(message.to_string()),
+        }
+    }
+}
+
 use crate::parser::{parse_raw_email, AttachmentData, ParsedMessage};
 use crate::provider::imap_provider::ImapMailProvider;
 use crate::realtime_policy::{RealtimePollPolicy, RealtimeRuntimeState, SyncTrigger};
@@ -309,6 +346,7 @@ fn is_retryable_imap_connection_error(error: &PebbleError) -> bool {
         || lower.contains("broken pipe")
         || lower.contains("connection closed")
         || lower.contains("unexpected eof")
+        || lower.contains("timed out")
         || lower == "not connected"
 }
 
@@ -326,6 +364,28 @@ fn is_missing_imap_mailbox_error(error: &PebbleError) -> bool {
 
 fn should_attempt_imap_remote_folder(folder: &pebble_core::Folder) -> bool {
     !folder.remote_id.starts_with("__local_")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImapPollScope {
+    Realtime,
+    Full,
+}
+
+fn should_poll_imap_folder_for_scope(folder: &pebble_core::Folder, scope: ImapPollScope) -> bool {
+    if !should_attempt_imap_remote_folder(folder) {
+        return false;
+    }
+
+    match scope {
+        ImapPollScope::Realtime => folder.role == Some(pebble_core::FolderRole::Inbox),
+        ImapPollScope::Full => true,
+    }
+}
+
+#[cfg(test)]
+fn should_poll_imap_folder_for_realtime(folder: &pebble_core::Folder) -> bool {
+    should_poll_imap_folder_for_scope(folder, ImapPollScope::Realtime)
 }
 
 /// Configuration for the sync worker.
@@ -357,6 +417,10 @@ impl SyncConfig {
 
 fn imap_poll_policy(config: &SyncConfig) -> RealtimePollPolicy {
     RealtimePollPolicy::from_foreground_interval_secs(config.poll_interval_secs)
+}
+
+fn first_reconcile_deadline(now: Instant, interval: Duration) -> Instant {
+    now + interval
 }
 
 fn should_notify_imap_startup_fetch(since_uid: Option<u32>) -> bool {
@@ -400,6 +464,7 @@ pub(crate) struct SyncWorkerBase {
     pub(crate) error_tx: Option<mpsc::UnboundedSender<SyncError>>,
     pub(crate) message_tx: Option<mpsc::UnboundedSender<StoredMessage>>,
     pub(crate) runtime_status_tx: Option<mpsc::UnboundedSender<SyncRuntimeStatus>>,
+    pub(crate) progress_tx: Option<mpsc::UnboundedSender<SyncProgress>>,
 }
 
 impl SyncWorkerBase {
@@ -424,6 +489,24 @@ impl SyncWorkerBase {
     pub(crate) fn emit_runtime_status(&self, status: SyncRuntimeStatus) {
         if let Some(tx) = &self.runtime_status_tx {
             let _ = tx.send(status);
+        }
+    }
+
+    pub(crate) fn emit_sync_started(&self, phase: &str) {
+        if let Some(tx) = &self.progress_tx {
+            let _ = tx.send(SyncProgress::started(&self.account_id, phase));
+        }
+    }
+
+    pub(crate) fn emit_sync_completed(&self, phase: &str) {
+        if let Some(tx) = &self.progress_tx {
+            let _ = tx.send(SyncProgress::completed(&self.account_id, phase));
+        }
+    }
+
+    pub(crate) fn emit_sync_error(&self, phase: &str, message: &str) {
+        if let Some(tx) = &self.progress_tx {
+            let _ = tx.send(SyncProgress::error(&self.account_id, phase, message));
         }
     }
 }
@@ -454,6 +537,7 @@ impl SyncWorker {
                 error_tx: None,
                 message_tx: None,
                 runtime_status_tx: None,
+                progress_tx: None,
             },
             provider,
             idle_provider,
@@ -475,6 +559,11 @@ impl SyncWorker {
 
     pub fn with_runtime_status_tx(mut self, tx: mpsc::UnboundedSender<SyncRuntimeStatus>) -> Self {
         self.base.runtime_status_tx = Some(tx);
+        self
+    }
+
+    pub fn with_progress_tx(mut self, tx: mpsc::UnboundedSender<SyncProgress>) -> Self {
+        self.base.progress_tx = Some(tx);
         self
     }
 
@@ -870,13 +959,36 @@ impl SyncWorker {
 
     /// Poll all folders for new messages since the highest known UID.
     pub async fn poll_new_messages(&self) -> Result<()> {
+        self.poll_new_messages_for_scope("poll", ImapPollScope::Realtime)
+            .await
+    }
+
+    async fn poll_all_new_messages(&self, phase: &str) -> Result<()> {
+        self.poll_new_messages_for_scope(phase, ImapPollScope::Full)
+            .await
+    }
+
+    async fn poll_new_messages_for_scope(&self, phase: &str, scope: ImapPollScope) -> Result<()> {
+        self.base.emit_sync_started(phase);
+        let result = self.poll_new_messages_inner(scope).await;
+        match &result {
+            Ok(()) => self.base.emit_sync_completed(phase),
+            Err(e) => self.base.emit_sync_error(phase, &e.to_string()),
+        }
+        result
+    }
+
+    async fn poll_new_messages_inner(&self, scope: ImapPollScope) -> Result<()> {
         let folders = self.base.store.list_folders(&self.base.account_id)?;
         if folders.is_empty() {
             return Ok(());
         }
 
         let mut first_recovered_error = None;
-        for folder in &folders {
+        for folder in folders
+            .iter()
+            .filter(|folder| should_poll_imap_folder_for_scope(folder, scope))
+        {
             if let Some(e) = self.poll_imap_folder_with_reconnect(folder).await {
                 if first_recovered_error.is_none() {
                     first_recovered_error = Some(e);
@@ -1262,9 +1374,11 @@ impl SyncWorker {
             );
             self.base
                 .emit_error("connection", &format!("Failed to connect: {}", e));
+            self.base.emit_sync_error("connection", &e.to_string());
             return;
         }
 
+        self.base.emit_sync_started("initial");
         if let Err(e) = self.initial_sync().await {
             error!(
                 "Initial sync failed for account {}: {}",
@@ -1272,6 +1386,9 @@ impl SyncWorker {
             );
             self.base
                 .emit_error("sync", &format!("Initial sync failed: {}", e));
+            self.base.emit_sync_error("initial", &e.to_string());
+        } else {
+            self.base.emit_sync_completed("initial");
         }
 
         if config.manual_only() {
@@ -1283,7 +1400,14 @@ impl SyncWorker {
         let poll_policy = imap_poll_policy(&config);
         let reconcile_interval = tokio::time::Duration::from_secs(config.reconcile_interval_secs);
 
-        let mut reconcile_ticker = tokio::time::interval(reconcile_interval);
+        let mut reconcile_ticker = tokio::time::interval_at(
+            tokio::time::Instant::from_std(first_reconcile_deadline(
+                Instant::now(),
+                reconcile_interval,
+            )),
+            reconcile_interval,
+        );
+        reconcile_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         let supports_idle = self.provider.inner().supports_idle().await;
         if supports_idle {
@@ -1357,16 +1481,10 @@ impl SyncWorker {
             tokio::select! {
                 _ = tokio::time::sleep(next_poll_delay), if !idle_watcher_active => {
                     if backoff.is_circuit_open() {
-                        let delay = backoff.current_delay();
                         warn!(
-                            "Circuit open for account {} ({} consecutive failures), waiting {:?}",
-                            self.base.account_id, backoff.failure_count(), delay
+                            "Circuit open for account {} ({} consecutive failures); attempting half-open poll after scheduled delay",
+                            self.base.account_id, backoff.failure_count()
                         );
-                        match tokio::time::timeout(delay, stop_rx.changed()).await {
-                            Ok(Ok(())) if *stop_rx.borrow() => break,
-                            _ => {}
-                        }
-                        continue;
                     }
 
                     // Quick check if mailbox has changes before doing full poll
@@ -1471,14 +1589,21 @@ impl SyncWorker {
                             if !trigger.should_sync_now() {
                                 continue;
                             }
-                            if backoff.is_circuit_open() {
+                            if backoff.is_circuit_open()
+                                && !trigger.bypasses_circuit_backoff()
+                            {
                                 debug!(
                                     "Ignoring realtime trigger while circuit is open for account {}",
                                     self.base.account_id
                                 );
                                 continue;
                             }
-                            if let Err(e) = self.poll_new_messages().await {
+                            let poll_result = if trigger == SyncTrigger::Manual {
+                                self.poll_all_new_messages("manual").await
+                            } else {
+                                self.poll_new_messages().await
+                            };
+                            if let Err(e) = poll_result {
                                 warn!("Triggered poll error for account {}: {}", self.base.account_id, e);
                                 self.base.emit_error("poll", &format!("Triggered poll error: {}", e));
                                 backoff.record_failure();
@@ -1493,9 +1618,12 @@ impl SyncWorker {
                 }
                 _ = reconcile_ticker.tick() => {
                     // Full reconcile: poll new messages + flag diff + deletion detection
-                    if let Err(e) = self.poll_new_messages().await {
+                    self.base.emit_sync_started("reconcile");
+                    let mut reconcile_failed = false;
+                    if let Err(e) = self.poll_new_messages_inner(ImapPollScope::Full).await {
                         warn!("Reconcile poll error for account {}: {}", self.base.account_id, e);
                         self.base.emit_error("reconcile", &format!("Reconcile poll error: {}", e));
+                        self.base.emit_sync_error("reconcile", &e.to_string());
                         backoff.record_failure();
                         continue;
                     } else {
@@ -1506,6 +1634,7 @@ impl SyncWorker {
                         Err(e) => {
                             warn!("Reconcile list folders error: {}", e);
                             self.base.emit_error("reconcile", &format!("List folders error: {}", e));
+                            self.base.emit_sync_error("reconcile", &e.to_string());
                             continue;
                         }
                     };
@@ -1513,7 +1642,13 @@ impl SyncWorker {
                         if let Err(e) = self.reconcile_folder(folder).await {
                             warn!("Reconcile folder {} error: {}", folder.name, e);
                             self.base.emit_error("reconcile", &format!("Reconcile {} error: {}", folder.name, e));
+                            reconcile_failed = true;
                         }
+                    }
+                    if reconcile_failed {
+                        self.base.emit_sync_error("reconcile", "One or more folders failed to reconcile");
+                    } else {
+                        self.base.emit_sync_completed("reconcile");
                     }
                 }
                 Ok(()) = stop_rx.changed() => {
@@ -1660,6 +1795,14 @@ mod tests {
     }
 
     #[test]
+    fn first_reconcile_deadline_is_delayed_by_interval() {
+        let now = Instant::now();
+        let interval = Duration::from_secs(900);
+
+        assert_eq!(first_reconcile_deadline(now, interval), now + interval);
+    }
+
+    #[test]
     fn idle_check_disconnect_does_not_surface_when_recovery_succeeds() {
         let message = idle_check_recovery_user_error(None, None);
 
@@ -1726,5 +1869,63 @@ mod tests {
         };
 
         assert!(!should_attempt_imap_remote_folder(&folder));
+    }
+
+    fn test_folder(role: Option<pebble_core::FolderRole>, remote_id: &str) -> pebble_core::Folder {
+        pebble_core::Folder {
+            id: format!("folder-{remote_id}"),
+            account_id: "account-1".to_string(),
+            remote_id: remote_id.to_string(),
+            name: remote_id.to_string(),
+            folder_type: pebble_core::FolderType::Folder,
+            role,
+            parent_id: None,
+            color: None,
+            is_system: true,
+            sort_order: 0,
+        }
+    }
+
+    #[test]
+    fn imap_realtime_poll_targets_inbox_only() {
+        let inbox = test_folder(Some(pebble_core::FolderRole::Inbox), "INBOX");
+        let sent = test_folder(Some(pebble_core::FolderRole::Sent), "Sent");
+        let spam = test_folder(Some(pebble_core::FolderRole::Spam), "Spam");
+        let custom = test_folder(None, "Newsletters");
+
+        assert!(should_poll_imap_folder_for_realtime(&inbox));
+        assert!(!should_poll_imap_folder_for_realtime(&sent));
+        assert!(!should_poll_imap_folder_for_realtime(&spam));
+        assert!(!should_poll_imap_folder_for_realtime(&custom));
+    }
+
+    #[test]
+    fn imap_full_poll_targets_all_remote_folders() {
+        let inbox = test_folder(Some(pebble_core::FolderRole::Inbox), "INBOX");
+        let sent = test_folder(Some(pebble_core::FolderRole::Sent), "Sent");
+        let spam = test_folder(Some(pebble_core::FolderRole::Spam), "Spam");
+        let custom = test_folder(None, "Newsletters");
+        let local = test_folder(Some(pebble_core::FolderRole::Archive), "__local_archive__");
+
+        assert!(should_poll_imap_folder_for_scope(
+            &inbox,
+            ImapPollScope::Full
+        ));
+        assert!(should_poll_imap_folder_for_scope(
+            &sent,
+            ImapPollScope::Full
+        ));
+        assert!(should_poll_imap_folder_for_scope(
+            &spam,
+            ImapPollScope::Full
+        ));
+        assert!(should_poll_imap_folder_for_scope(
+            &custom,
+            ImapPollScope::Full
+        ));
+        assert!(!should_poll_imap_folder_for_scope(
+            &local,
+            ImapPollScope::Full
+        ));
     }
 }

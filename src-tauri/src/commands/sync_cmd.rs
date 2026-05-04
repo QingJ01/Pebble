@@ -141,6 +141,14 @@ async fn start_sync_inner(
         }
     });
 
+    let (progress_tx, mut progress_rx) = mpsc::unbounded_channel();
+    let app_for_sync_progress = app.clone();
+    tokio::spawn(async move {
+        while let Some(sync_progress) = progress_rx.recv().await {
+            let _ = app_for_sync_progress.emit(events::MAIL_SYNC_PROGRESS, &sync_progress);
+        }
+    });
+
     // Channel for newly stored messages — used to populate the search index and emit events
     let (message_tx, mut message_rx) = mpsc::unbounded_channel();
     let search = Arc::clone(&state.search);
@@ -169,6 +177,7 @@ async fn start_sync_inner(
         stop_rx,
         trigger_rx,
         error_tx,
+        progress_tx,
         message_tx,
         app_for_progress,
         account_id_for_progress,
@@ -365,6 +374,7 @@ fn build_sync_task(
     stop_rx: watch::Receiver<bool>,
     trigger_rx: mpsc::UnboundedReceiver<SyncTrigger>,
     error_tx: mpsc::UnboundedSender<pebble_mail::SyncError>,
+    progress_tx: mpsc::UnboundedSender<pebble_mail::SyncProgress>,
     message_tx: mpsc::UnboundedSender<pebble_mail::StoredMessage>,
     app_for_progress: tauri::AppHandle,
     account_id_for_progress: String,
@@ -411,10 +421,6 @@ fn build_sync_task(
                 if let Some(interval) = poll_interval_secs {
                     config.poll_interval_secs = interval;
                 }
-                let _ = app_for_progress.emit(
-                    events::MAIL_SYNC_PROGRESS,
-                    serde_json::json!({ "account_id": &account_id_for_progress, "status": "started" }),
-                );
                 emit_realtime_status(
                     &app_for_progress,
                     realtime_status_payload(
@@ -435,6 +441,7 @@ fn build_sync_task(
                 )
                 .with_error_tx(error_tx)
                 .with_message_tx(message_tx)
+                .with_progress_tx(progress_tx)
                 .with_token_refresher(refresher, expires_at);
                 worker.run(config, Some(trigger_rx)).await;
                 let _ = app_for_progress.emit(
@@ -483,10 +490,6 @@ fn build_sync_task(
                 if let Some(interval) = poll_interval_secs {
                     config.poll_interval_secs = interval;
                 }
-                let _ = app_for_progress.emit(
-                    events::MAIL_SYNC_PROGRESS,
-                    serde_json::json!({ "account_id": &account_id_for_progress, "status": "started" }),
-                );
                 emit_realtime_status(
                     &app_for_progress,
                     realtime_status_payload(
@@ -506,6 +509,7 @@ fn build_sync_task(
                 )
                 .with_error_tx(error_tx)
                 .with_message_tx(message_tx)
+                .with_progress_tx(progress_tx)
                 .with_token_refresher(refresher, expires_at);
                 worker.run(config, stop_rx, Some(trigger_rx)).await;
                 let _ = app_for_progress.emit(
@@ -548,10 +552,6 @@ fn build_sync_task(
                 if let Some(interval) = poll_interval_secs {
                     config.poll_interval_secs = interval;
                 }
-                let _ = app_for_progress.emit(
-                    events::MAIL_SYNC_PROGRESS,
-                    serde_json::json!({ "account_id": &account_id_for_progress, "status": "started" }),
-                );
                 emit_realtime_status(
                     &app_for_progress,
                     realtime_status_payload(
@@ -599,6 +599,7 @@ fn build_sync_task(
                 )
                 .with_error_tx(error_tx)
                 .with_message_tx(message_tx)
+                .with_progress_tx(progress_tx)
                 .with_runtime_status_tx(runtime_status_tx);
                 worker.run(config, Some(trigger_rx)).await;
                 let _ = app_for_progress.emit(

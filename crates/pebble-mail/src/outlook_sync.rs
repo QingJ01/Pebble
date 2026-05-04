@@ -239,6 +239,7 @@ impl OutlookSyncWorker {
                 error_tx: None,
                 message_tx: None,
                 runtime_status_tx: None,
+                progress_tx: None,
             },
             provider,
             token_refresher: None,
@@ -253,6 +254,14 @@ impl OutlookSyncWorker {
 
     pub fn with_message_tx(mut self, tx: mpsc::UnboundedSender<StoredMessage>) -> Self {
         self.base.message_tx = Some(tx);
+        self
+    }
+
+    pub fn with_progress_tx(
+        mut self,
+        tx: mpsc::UnboundedSender<crate::sync::SyncProgress>,
+    ) -> Self {
+        self.base.progress_tx = Some(tx);
         self
     }
 
@@ -445,14 +454,16 @@ impl OutlookSyncWorker {
                         SyncWaitOutcome::ContextChanged => continue,
                     }
                 }
-                continue;
             }
+
+            self.base.emit_sync_started("poll");
 
             // Refresh token if needed
             if let Err(e) = self.ensure_valid_token().await {
                 warn!("Outlook token validation failed: {}", e);
                 self.base
                     .emit_error("auth", &format!("Token validation failed: {e}"));
+                self.base.emit_sync_error("poll", &e.to_string());
                 let _ = backoff.record_failure();
                 if backoff.is_circuit_open() {
                     let delay = backoff.current_delay();
@@ -481,6 +492,7 @@ impl OutlookSyncWorker {
                     warn!("Outlook folder list failed: {e}");
                     self.base
                         .emit_error("sync", &format!("Outlook folder list failed: {e}"));
+                    self.base.emit_sync_error("poll", &e.to_string());
                     let delay = backoff.record_failure();
                     if backoff.is_circuit_open() {
                         warn!(
@@ -617,10 +629,26 @@ impl OutlookSyncWorker {
             }
 
             if config.manual_only() {
+                if sync_failure_count == 0 {
+                    self.base.emit_sync_completed("poll");
+                } else {
+                    self.base.emit_sync_error(
+                        "poll",
+                        &format!("Outlook sync had {sync_failure_count} failure(s)"),
+                    );
+                }
                 break;
             }
 
             update_outlook_backoff_after_sync(&mut backoff, sync_failure_count);
+            if sync_failure_count == 0 {
+                self.base.emit_sync_completed("poll");
+            } else {
+                self.base.emit_sync_error(
+                    "poll",
+                    &format!("Outlook sync had {sync_failure_count} failure(s)"),
+                );
+            }
 
             if wait_for_outlook_policy_delay(
                 &policy,

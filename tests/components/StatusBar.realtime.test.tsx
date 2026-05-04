@@ -129,13 +129,125 @@ describe("StatusBar realtime mail events", () => {
     expect(document.body.textContent).toContain("Manual only");
   });
 
-  it("returns the status to idle after a manual sync request is accepted", async () => {
+  it("keeps manual sync active until the backend reports the pass completed", async () => {
     render(<StatusBar />);
 
     fireEvent.click(screen.getByLabelText("Sync now"));
 
     expect(mocks.uiState.setSyncStatus).toHaveBeenCalledWith("syncing");
     await waitFor(() => expect(mocks.syncMutateAsync).toHaveBeenCalledWith("account-1"));
+    expect(mocks.uiState.setSyncStatus).not.toHaveBeenCalledWith("idle");
+  });
+
+  it("returns to idle and refreshes data when a sync pass completes", async () => {
+    render(<StatusBar />);
+
+    await waitFor(() => expect(mocks.listeners.has("mail:sync-progress")).toBe(true));
+
+    mocks.listeners.get("mail:sync-progress")?.({
+      payload: {
+        account_id: "account-1",
+        status: "completed",
+        phase: "poll",
+      },
+    });
+
     expect(mocks.uiState.setSyncStatus).toHaveBeenCalledWith("idle");
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folders"] });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["messages"] });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["threads"] });
+  });
+
+  it("ignores sync progress from another account", async () => {
+    render(<StatusBar />);
+
+    await waitFor(() => expect(mocks.listeners.has("mail:sync-progress")).toBe(true));
+
+    mocks.listeners.get("mail:sync-progress")?.({
+      payload: {
+        account_id: "account-2",
+        status: "completed",
+        phase: "poll",
+      },
+    });
+
+    expect(mocks.uiState.setSyncStatus).not.toHaveBeenCalledWith("idle");
+    expect(mocks.invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ["folders"] });
+    expect(mocks.invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ["messages"] });
+    expect(mocks.invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ["threads"] });
+  });
+
+  it("ignores sync-complete from another account", async () => {
+    render(<StatusBar />);
+
+    await waitFor(() => expect(mocks.listeners.has("mail:sync-complete")).toBe(true));
+
+    mocks.listeners.get("mail:sync-complete")?.({
+      payload: {
+        account_id: "account-2",
+      },
+    });
+
+    expect(mocks.uiState.setSyncStatus).not.toHaveBeenCalledWith("idle");
+    expect(mocks.invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ["folders"] });
+    expect(mocks.invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ["messages"] });
+    expect(mocks.invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ["threads"] });
+  });
+
+  it("does not hide an error state when the failed worker exits", async () => {
+    mocks.uiState.syncStatus = "error";
+    render(<StatusBar />);
+
+    await waitFor(() => expect(mocks.listeners.has("mail:sync-complete")).toBe(true));
+
+    mocks.listeners.get("mail:sync-complete")?.({
+      payload: {
+        account_id: "account-1",
+      },
+    });
+
+    expect(mocks.uiState.setSyncStatus).not.toHaveBeenCalledWith("idle");
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folders"] });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["messages"] });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["threads"] });
+  });
+
+  it("does not hide a sync progress error when worker exit follows immediately", async () => {
+    render(<StatusBar />);
+
+    await waitFor(() => expect(mocks.listeners.has("mail:sync-progress")).toBe(true));
+    await waitFor(() => expect(mocks.listeners.has("mail:sync-complete")).toBe(true));
+
+    mocks.listeners.get("mail:sync-progress")?.({
+      payload: {
+        account_id: "account-1",
+        status: "error",
+        phase: "poll",
+      },
+    });
+    mocks.listeners.get("mail:sync-complete")?.({
+      payload: {
+        account_id: "account-1",
+      },
+    });
+
+    expect(mocks.uiState.setSyncStatus).toHaveBeenCalledWith("error");
+    expect(mocks.uiState.setSyncStatus).not.toHaveBeenCalledWith("idle");
+  });
+
+  it("reports a sync error when a sync pass fails", async () => {
+    render(<StatusBar />);
+
+    await waitFor(() => expect(mocks.listeners.has("mail:sync-progress")).toBe(true));
+
+    mocks.listeners.get("mail:sync-progress")?.({
+      payload: {
+        account_id: "account-1",
+        status: "error",
+        phase: "poll",
+      },
+    });
+
+    expect(mocks.uiState.setSyncStatus).toHaveBeenCalledWith("error");
   });
 });
