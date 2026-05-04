@@ -24,6 +24,7 @@ pub struct AppState {
     pub snooze_stop_tx: std::sync::mpsc::Sender<()>,
     pub attachments_dir: PathBuf,
     pub notifications_enabled: Arc<AtomicBool>,
+    pub notification_attention_active: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -42,6 +43,7 @@ impl AppState {
             snooze_stop_tx,
             attachments_dir,
             notifications_enabled: Arc::new(AtomicBool::new(true)),
+            notification_attention_active: Arc::new(AtomicBool::new(false)),
         }
     }
 }

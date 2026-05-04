@@ -4,6 +4,7 @@
 //! Tantivy, and applies rule-engine actions. Split out of `sync_cmd.rs`
 //! so the sync lifecycle and the indexing pipeline can evolve independently.
 
+use crate::commands::notifications;
 use crate::commands::pending_mail_ops::queue_pending_mail_op;
 use crate::events;
 use crate::state::AppState;
@@ -129,6 +130,7 @@ fn notification_open_payload(account_id: &str, message_id: &str) -> serde_json::
 
 #[cfg(windows)]
 fn open_message_from_notification(app: &tauri::AppHandle, account_id: &str, message_id: &str) {
+    notifications::clear_attention_indicator(app);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
         let _ = window.show();
@@ -150,35 +152,17 @@ fn show_default_new_mail_notification(app: &tauri::AppHandle, body: &str) -> Res
 }
 
 #[cfg(windows)]
-fn windows_notification_app_id(app: &tauri::AppHandle) -> String {
-    use std::path::MAIN_SEPARATOR as SEP;
-
-    let is_dev_build_dir = tauri::utils::platform::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|parent| parent.display().to_string()))
-        .is_some_and(|curr_dir| {
-            curr_dir.ends_with(format!("{SEP}target{SEP}debug").as_str())
-                || curr_dir.ends_with(format!("{SEP}target{SEP}release").as_str())
-        });
-
-    if is_dev_build_dir {
-        tauri_winrt_notification::Toast::POWERSHELL_APP_ID.to_string()
-    } else {
-        app.config().identifier.clone()
-    }
-}
-
-#[cfg(windows)]
 fn show_windows_new_mail_notification(
     app: &tauri::AppHandle,
     body: &str,
     account_id: &str,
     message_id: &str,
 ) -> Result<(), String> {
+    notifications::ensure_notification_environment(app)?;
     let app_handle = app.clone();
     let account_id = account_id.to_string();
     let message_id = message_id.to_string();
-    tauri_winrt_notification::Toast::new(&windows_notification_app_id(app))
+    tauri_winrt_notification::Toast::new(&notifications::windows_notification_app_id(app))
         .title("Pebble - New Mail")
         .text1(body)
         .duration(tauri_winrt_notification::Duration::Short)
@@ -236,6 +220,7 @@ fn maybe_send_new_mail_notification(
             if let Err(e) = show_new_mail_notification(app, stored) {
                 warn!("Failed to show new mail notification: {e}");
             }
+            notifications::mark_attention_indicator(app);
         }
         Ok(false) => {}
         Err(e) => warn!(

@@ -3338,6 +3338,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "windows-registry",
 ]
 
 [[package]]

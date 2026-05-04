@@ -5,15 +5,15 @@ mod realtime;
 mod snooze_watcher;
 mod state;
 
-use state::AppState;
 use serde::Serialize;
+use state::AppState;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 use tauri::{
     menu::{Menu, MenuBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Listener, Manager, Runtime,
+    AppHandle, Emitter, Listener, Manager, Runtime, WindowEvent,
 };
 use tracing_subscriber::prelude::*;
 
@@ -79,6 +79,7 @@ fn get_index_path(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error
 }
 
 fn restore_main_window<R: Runtime>(app: &AppHandle<R>) {
+    commands::notifications::clear_attention_indicator(app);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.unminimize();
@@ -93,7 +94,10 @@ fn hide_main_window<R: Runtime>(app: &AppHandle<R>) {
 }
 
 fn is_mailto_url(value: &str) -> bool {
-    value.trim_start().to_ascii_lowercase().starts_with("mailto:")
+    value
+        .trim_start()
+        .to_ascii_lowercase()
+        .starts_with("mailto:")
 }
 
 fn unique_mailto_urls(values: impl IntoIterator<Item = String>) -> Vec<String> {
@@ -146,7 +150,10 @@ fn record_mailto_urls<R: Runtime>(app: &AppHandle<R>, urls: Vec<String>) {
     }
 
     restore_main_window(app);
-    let _ = app.emit(events::APP_OPEN_MAILTO, OpenMailtoPayload { urls: urls_to_emit });
+    let _ = app.emit(
+        events::APP_OPEN_MAILTO,
+        OpenMailtoPayload { urls: urls_to_emit },
+    );
 }
 
 fn build_tray_menu<R: Runtime, M: Manager<R>>(
@@ -235,6 +242,11 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_notification::init())
+        .on_window_event(|window, event| {
+            if window.label() == "main" && matches!(event, WindowEvent::Focused(true)) {
+                commands::notifications::clear_attention_indicator(window.app_handle());
+            }
+        })
         .setup(|app| {
             let app_data = app.path().app_data_dir()?;
             std::fs::create_dir_all(&app_data)?;
@@ -512,6 +524,9 @@ pub fn run() {
             commands::advanced_search::advanced_search,
             commands::sync_cmd::reindex_search,
             commands::notifications::set_notifications_enabled,
+            commands::notifications::get_notification_status,
+            commands::notifications::show_test_notification,
+            commands::notifications::clear_notification_attention,
             commands::pending_mail_ops::get_pending_mail_ops_summary,
             commands::pending_mail_ops::list_pending_mail_ops,
             commands::drafts::save_draft,

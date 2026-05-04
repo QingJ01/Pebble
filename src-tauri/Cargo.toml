@@ -33,6 +33,7 @@ semver = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 tauri-winrt-notification = "0.7"
+windows-registry = "0.5"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }

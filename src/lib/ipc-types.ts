@@ -112,6 +112,14 @@ export interface AppLogSnapshot {
   truncated: boolean;
 }
 
+/** @rust src-tauri/src/commands/notifications.rs -> NotificationStatus */
+export interface NotificationStatus {
+  enabled: boolean;
+  attention_active: boolean;
+  platform: string;
+  app_id: string | null;
+}
+
 /** @rust pebble-core/src/types.rs → RenderedHtml */
 export interface RenderedHtml {
   html: string;

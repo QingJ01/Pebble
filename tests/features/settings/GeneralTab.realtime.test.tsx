@@ -1,7 +1,12 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import GeneralTab from "../../../src/features/settings/GeneralTab";
+import { showTestNotification } from "../../../src/lib/api";
 import { useUIStore } from "../../../src/stores/ui.store";
+
+vi.mock("../../../src/lib/api", () => ({
+  showTestNotification: vi.fn().mockResolvedValue(undefined),
+}));
 
 vi.mock("react-i18next", () => ({
   initReactI18next: {
@@ -25,6 +30,9 @@ vi.mock("react-i18next", () => ({
         "settings.syncIntervalDesc": "How often to check for new messages (seconds)",
         "settings.notifications": "Notifications",
         "settings.enableNotifications": "Enable desktop notifications",
+        "settings.testNotification": "Send test notification",
+        "settings.testNotificationSent": "Test notification sent",
+        "settings.testNotificationFailed": "Failed to send test notification",
         "settings.closeBehavior": "Close Behavior",
         "settings.quitOnClose": "Quit app when window is closed",
         "settings.folderCounts": "Folder Counts",
@@ -80,6 +88,16 @@ describe("GeneralTab realtime mode", () => {
 
     expect(useUIStore.getState().notificationsEnabled).toBe(false);
     expect(localStorage.getItem("pebble-notifications-enabled")).toBe("false");
+  });
+
+  it("sends a desktop test notification from the notifications section", async () => {
+    render(<GeneralTab />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Send test notification" }));
+
+    await waitFor(() => {
+      expect(showTestNotification).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("shows close-window behavior and persists quit-on-close through the UI store", () => {

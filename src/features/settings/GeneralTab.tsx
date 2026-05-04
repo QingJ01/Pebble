@@ -1,5 +1,7 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { showTestNotification } from "@/lib/api";
+import { useToastStore } from "@/stores/toast.store";
 import { useUIStore, type RealtimePreference } from "@/stores/ui.store";
 
 const REALTIME_OPTIONS: Array<{
@@ -41,6 +43,8 @@ const REALTIME_OPTIONS: Array<{
 
 export default function GeneralTab() {
   const { t } = useTranslation();
+  const addToast = useToastStore((s) => s.addToast);
+  const [testingNotification, setTestingNotification] = useState(false);
   const realtimeMode = useUIStore((s) => s.realtimeMode);
   const setRealtimeMode = useUIStore((s) => s.setRealtimeMode);
   const notificationsEnabled = useUIStore((s) => s.notificationsEnabled);
@@ -51,6 +55,24 @@ export default function GeneralTab() {
   const toggleNotifications = useCallback(() => {
     setNotificationsEnabled(!notificationsEnabled);
   }, [notificationsEnabled, setNotificationsEnabled]);
+
+  const handleTestNotification = useCallback(async () => {
+    setTestingNotification(true);
+    try {
+      await showTestNotification();
+      addToast({
+        message: t("settings.testNotificationSent", "Test notification sent"),
+        type: "success",
+      });
+    } catch {
+      addToast({
+        message: t("settings.testNotificationFailed", "Failed to send test notification"),
+        type: "error",
+      });
+    } finally {
+      setTestingNotification(false);
+    }
+  }, [addToast, t]);
 
   const quitOnClose = !keepRunningInBackground;
   const toggleQuitOnClose = useCallback(() => {
@@ -126,6 +148,26 @@ export default function GeneralTab() {
         <input type="checkbox" checked={notificationsEnabled} onChange={toggleNotifications} />
         <span>{t("settings.enableNotifications")}</span>
       </label>
+      <button
+        type="button"
+        aria-label={t("settings.testNotification", "Send test notification")}
+        onClick={handleTestNotification}
+        disabled={!notificationsEnabled || testingNotification}
+        style={{
+          marginTop: "12px",
+          padding: "8px 12px",
+          borderRadius: "6px",
+          border: "1px solid var(--color-border)",
+          backgroundColor: notificationsEnabled ? "var(--color-bg)" : "var(--color-bg-hover)",
+          color: notificationsEnabled ? "var(--color-text-primary)" : "var(--color-text-secondary)",
+          cursor: notificationsEnabled && !testingNotification ? "pointer" : "not-allowed",
+          fontSize: "13px",
+        }}
+      >
+        {testingNotification
+          ? t("settings.testNotificationSending", "Sending test notification...")
+          : t("settings.testNotification", "Send test notification")}
+      </button>
 
       <h3 style={{ fontSize: "14px", fontWeight: 600, marginBottom: "16px", marginTop: "32px" }}>
         {t("settings.closeBehavior", "Close Behavior")}

@@ -20,7 +20,14 @@ export default defineConfig({
     host: host || "127.0.0.1",
     hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,
     watch: {
-      ignored: ["**/src-tauri/**"],
+      ignored: [
+        "**/.git/**",
+        "**/.worktrees/**",
+        "**/dist/**",
+        "**/node_modules/**",
+        "**/src-tauri/**",
+        "**/target/**",
+      ],
     },
   },
   test: {
