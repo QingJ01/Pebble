@@ -21,6 +21,8 @@ use tauri_plugin_notification::NotificationExt;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
+const NOTIFICATION_OPEN_ACTION: &str = "open";
+
 /// Rebuild the search index from all messages in the store.
 ///
 /// Iterates messages per account (not per folder) so that a Gmail message
@@ -120,7 +122,6 @@ fn new_mail_notification_body(stored: &pebble_mail::StoredMessage) -> String {
     }
 }
 
-#[cfg(any(windows, test))]
 fn notification_open_payload(account_id: &str, message_id: &str) -> serde_json::Value {
     serde_json::json!({
         "account_id": account_id,
@@ -128,7 +129,10 @@ fn notification_open_payload(account_id: &str, message_id: &str) -> serde_json::
     })
 }
 
-#[cfg(windows)]
+fn is_notification_open_action(action: &str) -> bool {
+    matches!(action, "default" | NOTIFICATION_OPEN_ACTION)
+}
+
 fn open_message_from_notification(app: &tauri::AppHandle, account_id: &str, message_id: &str) {
     notifications::clear_attention_indicator(app);
     if let Some(window) = app.get_webview_window("main") {
@@ -151,6 +155,94 @@ fn show_default_new_mail_notification(app: &tauri::AppHandle, body: &str) -> Res
         .map_err(|e| e.to_string())
 }
 
+#[cfg(target_os = "linux")]
+fn show_linux_new_mail_notification(
+    app: &tauri::AppHandle,
+    body: &str,
+    account_id: &str,
+    message_id: &str,
+) -> Result<(), String> {
+    notifications::ensure_notification_environment(app)?;
+
+    let mut notification = notify_rust::Notification::new();
+    notification
+        .summary("Pebble - New Mail")
+        .body(body)
+        .appname("Pebble")
+        .auto_icon()
+        .action("default", "Open");
+
+    let handle = notification.show().map_err(|e| e.to_string())?;
+    let app_handle = app.clone();
+    let account_id = account_id.to_string();
+    let message_id = message_id.to_string();
+
+    std::thread::Builder::new()
+        .name("pebble-notification-open".to_string())
+        .spawn(move || {
+            handle.wait_for_action(|action| {
+                if is_notification_open_action(action) {
+                    open_message_from_notification(&app_handle, &account_id, &message_id);
+                }
+            });
+        })
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn is_macos_notification_open_response(
+    response: &mac_notification_sys::NotificationResponse,
+) -> bool {
+    matches!(
+        response,
+        mac_notification_sys::NotificationResponse::Click
+            | mac_notification_sys::NotificationResponse::ActionButton(_)
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn show_macos_new_mail_notification(
+    app: &tauri::AppHandle,
+    body: &str,
+    account_id: &str,
+    message_id: &str,
+) -> Result<(), String> {
+    notifications::ensure_notification_environment(app)?;
+
+    let app_handle = app.clone();
+    let account_id = account_id.to_string();
+    let message_id = message_id.to_string();
+    let body = body.to_string();
+    let app_id = if tauri::is_dev() {
+        "com.apple.Terminal".to_string()
+    } else {
+        app.config().identifier.clone()
+    };
+
+    std::thread::Builder::new()
+        .name("pebble-notification-open".to_string())
+        .spawn(move || {
+            let _ = mac_notification_sys::set_application(&app_id);
+            let mut notification = mac_notification_sys::Notification::new();
+            notification
+                .title("Pebble - New Mail")
+                .message(&body)
+                .main_button(mac_notification_sys::MainButton::SingleAction("Open"))
+                .wait_for_click(true);
+
+            match notification.send() {
+                Ok(response) if is_macos_notification_open_response(&response) => {
+                    open_message_from_notification(&app_handle, &account_id, &message_id);
+                }
+                Ok(_) => {}
+                Err(e) => warn!("Failed to show clickable macOS notification: {e}"),
+            }
+        })
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 #[cfg(windows)]
 fn show_windows_new_mail_notification(
     app: &tauri::AppHandle,
@@ -166,8 +258,15 @@ fn show_windows_new_mail_notification(
         .title("Pebble - New Mail")
         .text1(body)
         .duration(tauri_winrt_notification::Duration::Short)
-        .on_activated(move |_action| {
-            open_message_from_notification(&app_handle, &account_id, &message_id);
+        .add_button("Open", NOTIFICATION_OPEN_ACTION)
+        .on_activated(move |action| {
+            if action
+                .as_deref()
+                .map(is_notification_open_action)
+                .unwrap_or(true)
+            {
+                open_message_from_notification(&app_handle, &account_id, &message_id);
+            }
             Ok(())
         })
         .show()
@@ -182,7 +281,7 @@ fn show_new_mail_notification(
 
     #[cfg(windows)]
     {
-        match show_windows_new_mail_notification(
+        return match show_windows_new_mail_notification(
             app,
             &body,
             &stored.message.account_id,
@@ -193,12 +292,32 @@ fn show_new_mail_notification(
                 warn!("Failed to show clickable Windows notification, falling back: {e}");
                 show_default_new_mail_notification(app, &body)
             }
-        }
+        };
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     {
-        show_default_new_mail_notification(app, &body)
+        return show_linux_new_mail_notification(
+            app,
+            &body,
+            &stored.message.account_id,
+            &stored.message.id,
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        return show_macos_new_mail_notification(
+            app,
+            &body,
+            &stored.message.account_id,
+            &stored.message.id,
+        );
+    }
+
+    #[cfg(all(not(windows), not(target_os = "linux"), not(target_os = "macos")))]
+    {
+        return show_default_new_mail_notification(app, &body);
     }
 }
 
@@ -557,8 +676,8 @@ fn queue_remote_rule_action(
 #[cfg(test)]
 mod rule_writeback_tests {
     use super::{
-        apply_rule_action, new_mail_event_payload, notification_open_payload,
-        should_send_new_mail_notification,
+        apply_rule_action, is_notification_open_action, new_mail_event_payload,
+        notification_open_payload, should_send_new_mail_notification,
     };
     use pebble_core::*;
     use pebble_rules::types::RuleAction;
@@ -728,6 +847,14 @@ mod rule_writeback_tests {
 
         assert_eq!(payload["account_id"], "account-2");
         assert_eq!(payload["message_id"], "message-1");
+    }
+
+    #[test]
+    fn notification_open_action_accepts_desktop_clicks_only() {
+        assert!(is_notification_open_action("default"));
+        assert!(is_notification_open_action("open"));
+        assert!(!is_notification_open_action("__closed"));
+        assert!(!is_notification_open_action("dismissed"));
     }
 
     #[test]

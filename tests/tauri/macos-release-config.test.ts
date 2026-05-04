@@ -46,7 +46,7 @@ describe("macOS release configuration", () => {
     expect(buildScript.bundleTargetsForPlatform("linux")).toBe("appimage");
   });
 
-  it("keeps Windows notification click helpers out of non-Windows builds", () => {
+  it("keeps desktop notification clicks routable to the target message", () => {
     const indexingSource = readFileSync(
       resolve(process.cwd(), "src-tauri", "src", "commands", "indexing.rs"),
       "utf8",
@@ -55,10 +55,22 @@ describe("macOS release configuration", () => {
       /\r\n/g,
       "\n",
     );
+    const cargoToml = readFileSync(resolve(process.cwd(), "src-tauri", "Cargo.toml"), "utf8");
 
-    expect(indexingSource).toContain("#[cfg(any(windows, test))]\nfn notification_open_payload");
-    expect(indexingSource).toContain("#[cfg(windows)]\nfn open_message_from_notification");
-    expect(eventsSource).toContain("#[cfg(windows)]\npub const MAIL_NOTIFICATION_OPEN");
+    expect(eventsSource).toContain('pub const MAIL_NOTIFICATION_OPEN: &str = "mail:notification-open";');
+    expect(eventsSource).not.toContain('#[cfg(windows)]\npub const MAIL_NOTIFICATION_OPEN');
+    expect(indexingSource).toContain("fn notification_open_payload");
+    expect(indexingSource).not.toContain("#[cfg(any(windows, test))]\nfn notification_open_payload");
+    expect(indexingSource).toContain("fn open_message_from_notification");
+    expect(indexingSource).not.toContain("#[cfg(windows)]\nfn open_message_from_notification");
+    expect(indexingSource).toContain("fn show_linux_new_mail_notification");
+    expect(indexingSource).toContain("wait_for_action");
+    expect(indexingSource).toContain("fn show_macos_new_mail_notification");
+    expect(indexingSource).toContain("wait_for_click(true)");
+    expect(cargoToml).toContain('[target.\'cfg(target_os = "linux")\'.dependencies]');
+    expect(cargoToml).toContain('notify-rust = "4"');
+    expect(cargoToml).toContain('[target.\'cfg(target_os = "macos")\'.dependencies]');
+    expect(cargoToml).toContain('mac-notification-sys = "0.6"');
   });
 
   it("includes a macOS icon in the Tauri bundle config", () => {
