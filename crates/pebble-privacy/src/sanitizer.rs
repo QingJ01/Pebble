@@ -12,6 +12,26 @@ impl PrivacyGuard {
         Self
     }
 
+    pub fn render_message_html(
+        &self,
+        raw_html: &str,
+        body_text: &str,
+        mode: &PrivacyMode,
+    ) -> RenderedHtml {
+        let source_html = if raw_html.trim().is_empty() && !body_text.is_empty() {
+            format!(
+                r#"<pre class="pebble-plain-text-email">{}</pre>"#,
+                html_escape(body_text)
+            )
+        } else {
+            raw_html.to_string()
+        };
+
+        let mut rendered = self.render_safe_html(&source_html, mode);
+        rendered.html = linkify_html_text_nodes(&rendered.html);
+        rendered
+    }
+
     pub fn render_safe_html(&self, raw_html: &str, mode: &PrivacyMode) -> RenderedHtml {
         let mut trackers_blocked: Vec<TrackerInfo> = Vec::new();
         let mut images_blocked: u32 = 0;
@@ -427,6 +447,211 @@ fn html_escape(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+fn linkify_html_text_nodes(html: &str) -> String {
+    use lol_html::html_content::ContentType;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let anchor_depth = Rc::new(RefCell::new(0usize));
+    let anchor_depth_for_element = Rc::clone(&anchor_depth);
+    let anchor_depth_for_text = Rc::clone(&anchor_depth);
+
+    lol_html::rewrite_str(
+        html,
+        lol_html::RewriteStrSettings {
+            element_content_handlers: vec![lol_html::element!("a", move |el| {
+                *anchor_depth_for_element.borrow_mut() += 1;
+                let anchor_depth = Rc::clone(&anchor_depth_for_element);
+                if let Some(handlers) = el.end_tag_handlers() {
+                    handlers.push(Box::new(move |_| {
+                        let mut depth = anchor_depth.borrow_mut();
+                        *depth = depth.saturating_sub(1);
+                        Ok(())
+                    }));
+                }
+                Ok(())
+            })],
+            document_content_handlers: vec![lol_html::doc_text!(move |text| {
+                if *anchor_depth_for_text.borrow() == 0 {
+                    if let Some(linked) = linkify_text_to_html(text.as_str()) {
+                        text.replace(&linked, ContentType::Html);
+                    }
+                }
+                Ok(())
+            })],
+            ..lol_html::RewriteStrSettings::default()
+        },
+    )
+    .unwrap_or_else(|_| html.to_string())
+}
+
+fn linkify_text_to_html(text: &str) -> Option<String> {
+    let mut output = String::new();
+    let mut last_copied = 0usize;
+    let mut index = 0usize;
+    let mut changed = false;
+
+    while index < text.len() {
+        if starts_with_http_url(text, index) {
+            let raw_end = scan_url_end(text, index);
+            let link_end = trim_url_end(text, raw_end);
+            if link_end > index {
+                output.push_str(&html_escape(&text[last_copied..index]));
+                append_anchor(&mut output, &text[index..link_end], &text[index..link_end]);
+                last_copied = link_end;
+                index = link_end;
+                changed = true;
+                continue;
+            }
+        }
+
+        if let Some(email_end) = scan_email_end(text, index) {
+            let email = &text[index..email_end];
+            output.push_str(&html_escape(&text[last_copied..index]));
+            append_anchor(&mut output, &format!("mailto:{email}"), email);
+            last_copied = email_end;
+            index = email_end;
+            changed = true;
+            continue;
+        }
+
+        index = next_char_index(text, index);
+    }
+
+    if changed {
+        output.push_str(&html_escape(&text[last_copied..]));
+        Some(output)
+    } else {
+        None
+    }
+}
+
+fn append_anchor(output: &mut String, href: &str, label: &str) {
+    output.push_str(r#"<a href=""#);
+    output.push_str(&html_escape(href));
+    output.push_str(r#"" target="_blank" rel="noopener noreferrer">"#);
+    output.push_str(&html_escape(label));
+    output.push_str("</a>");
+}
+
+fn starts_with_http_url(text: &str, index: usize) -> bool {
+    text[index..].starts_with("http://") || text[index..].starts_with("https://")
+}
+
+fn scan_url_end(text: &str, start: usize) -> usize {
+    let mut end = start;
+    for (offset, ch) in text[start..].char_indices() {
+        if ch.is_whitespace() || matches!(ch, '<' | '>' | '"' | '\'') {
+            break;
+        }
+        end = start + offset + ch.len_utf8();
+    }
+    end
+}
+
+fn trim_url_end(text: &str, mut end: usize) -> usize {
+    while let Some(ch) = text[..end].chars().last() {
+        if matches!(ch, '.' | ',' | '!' | '?' | ':' | ';' | ')' | ']' | '}') {
+            end -= ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+    end
+}
+
+fn scan_email_end(text: &str, start: usize) -> Option<usize> {
+    if start > 0 {
+        let previous = text[..start].chars().last()?;
+        if is_email_local_char(previous) || previous == '@' {
+            return None;
+        }
+    }
+
+    let mut index = start;
+    let mut local_len = 0usize;
+    while index < text.len() {
+        let ch = text[index..].chars().next()?;
+        if !is_email_local_char(ch) {
+            break;
+        }
+        local_len += ch.len_utf8();
+        index += ch.len_utf8();
+    }
+
+    if local_len == 0 || !text[index..].starts_with('@') {
+        return None;
+    }
+    index += 1;
+
+    let domain_start = index;
+    let mut has_dot = false;
+    while index < text.len() {
+        let ch = text[index..].chars().next()?;
+        if !is_email_domain_char(ch) {
+            break;
+        }
+        if ch == '.' {
+            has_dot = true;
+        }
+        index += ch.len_utf8();
+    }
+
+    while index > domain_start {
+        let ch = text[..index].chars().last()?;
+        if matches!(ch, '.' | '-') {
+            index -= ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+
+    let domain = &text[domain_start..index];
+    if !has_dot || !domain_has_valid_labels(domain) {
+        return None;
+    }
+
+    Some(index)
+}
+
+fn domain_has_valid_labels(domain: &str) -> bool {
+    let mut labels = domain.split('.');
+    let Some(first) = labels.next() else {
+        return false;
+    };
+    if first.is_empty() {
+        return false;
+    }
+    let mut saw_tld = false;
+    for label in labels {
+        if label.is_empty() {
+            return false;
+        }
+        saw_tld = true;
+        if label.len() >= 2 && label.chars().all(|ch| ch.is_ascii_alphabetic()) {
+            return true;
+        }
+    }
+    saw_tld
+}
+
+fn is_email_local_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '%' | '+' | '-')
+}
+
+fn is_email_domain_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-')
+}
+
+fn next_char_index(text: &str, index: usize) -> usize {
+    index
+        + text[index..]
+            .chars()
+            .next()
+            .map(char::len_utf8)
+            .unwrap_or(1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -615,5 +840,55 @@ mod tests {
             1,
             "expected real src to be detected"
         );
+    }
+
+    #[test]
+    fn render_message_html_linkifies_plain_text_urls_and_emails() {
+        let guard = PrivacyGuard::new();
+        let result = guard.render_message_html(
+            "",
+            "Visit https://example.com/path and contact support@example.com.",
+            &PrivacyMode::Strict,
+        );
+
+        assert!(result
+            .html
+            .contains(r#"<a href="https://example.com/path" target="_blank" rel="noopener noreferrer">https://example.com/path</a>"#));
+        assert!(result
+            .html
+            .contains(r#"<a href="mailto:support@example.com" target="_blank" rel="noopener noreferrer">support@example.com</a>"#));
+        assert!(result.html.contains("<pre"));
+    }
+
+    #[test]
+    fn render_message_html_linkifies_html_text_nodes() {
+        let guard = PrivacyGuard::new();
+        let result = guard.render_message_html(
+            "<p>Open https://example.com or mail team@example.org</p>",
+            "",
+            &PrivacyMode::Strict,
+        );
+
+        assert!(result
+            .html
+            .contains(r#"<a href="https://example.com" target="_blank" rel="noopener noreferrer">https://example.com</a>"#));
+        assert!(result
+            .html
+            .contains(r#"<a href="mailto:team@example.org" target="_blank" rel="noopener noreferrer">team@example.org</a>"#));
+    }
+
+    #[test]
+    fn render_message_html_does_not_wrap_existing_links_again() {
+        let guard = PrivacyGuard::new();
+        let result = guard.render_message_html(
+            r#"<p><a href="https://example.com">https://example.com</a> support@example.com</p>"#,
+            "",
+            &PrivacyMode::Strict,
+        );
+
+        assert_eq!(result.html.matches(r#"<a href="https://example.com""#).count(), 1);
+        assert!(result
+            .html
+            .contains(r#"<a href="mailto:support@example.com" target="_blank" rel="noopener noreferrer">support@example.com</a>"#));
     }
 }

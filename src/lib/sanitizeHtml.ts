@@ -70,6 +70,22 @@ function filterInlineStyles(html: string): string {
   return template.innerHTML;
 }
 
+function normalizeLinkAttributes(html: string): string {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  template.content.querySelectorAll<HTMLAnchorElement>("a[href]").forEach((anchor) => {
+    const href = anchor.getAttribute("href")?.trim() ?? "";
+    if (/^(https?:|mailto:)/i.test(href)) {
+      anchor.setAttribute("target", "_blank");
+      anchor.setAttribute("rel", "noopener noreferrer");
+    } else {
+      anchor.removeAttribute("target");
+      anchor.removeAttribute("rel");
+    }
+  });
+  return template.innerHTML;
+}
+
 /** Sanitize HTML to prevent XSS while preserving email formatting. */
 export function sanitizeHtml(html: string): string {
   const sanitized = DOMPurify.sanitize(html, {
@@ -85,11 +101,12 @@ export function sanitizeHtml(html: string): string {
     ],
     ALLOWED_ATTR: [
       "href", "src", "alt", "title", "width", "height", "class",
+      "target", "rel",
       "dir", "id", "lang", "colspan", "rowspan", "border", "cellpadding",
       "cellspacing", "align", "valign", "bgcolor", "color", "face", "size",
       "style",
     ],
     ALLOW_DATA_ATTR: false,
   });
-  return filterInlineStyles(sanitized);
+  return normalizeLinkAttributes(filterInlineStyles(sanitized));
 }

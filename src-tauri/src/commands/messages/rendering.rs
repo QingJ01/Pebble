@@ -18,7 +18,7 @@ pub async fn get_rendered_html(
 
         let effective_mode = resolve_privacy_mode(&store, &message, privacy_mode)?;
         let guard = PrivacyGuard::new();
-        Ok(guard.render_safe_html(&message.body_html_raw, &effective_mode))
+        Ok(guard.render_message_html(&message.body_html_raw, &message.body_text, &effective_mode))
     })
     .await
     .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))?
@@ -39,7 +39,8 @@ pub async fn get_message_with_html(
 
         let effective_mode = resolve_privacy_mode(&store, &message, privacy_mode)?;
         let guard = PrivacyGuard::new();
-        let rendered = guard.render_safe_html(&message.body_html_raw, &effective_mode);
+        let rendered =
+            guard.render_message_html(&message.body_html_raw, &message.body_text, &effective_mode);
         Ok(Some((message, rendered)))
     })
     .await

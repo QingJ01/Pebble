@@ -29,4 +29,26 @@ describe("sanitizeHtml", () => {
     expect(sanitized).not.toContain("evil.example");
     expect(sanitized).not.toContain("u\\72l");
   });
+
+  it("preserves safe link attributes for email body links", () => {
+    const sanitized = sanitizeHtml(
+      '<a href="https://example.com" target="_blank" rel="noopener noreferrer">https://example.com</a>',
+    );
+
+    expect(sanitized).toContain('href="https://example.com"');
+    expect(sanitized).toContain('target="_blank"');
+    expect(sanitized).toContain('rel="noopener noreferrer"');
+  });
+
+  it("normalizes existing email links to safe external navigation attributes", () => {
+    const sanitized = sanitizeHtml(
+      '<a href="mailto:support@example.com" target="_top" rel="opener">support@example.com</a>',
+    );
+
+    expect(sanitized).toContain('href="mailto:support@example.com"');
+    expect(sanitized).toContain('target="_blank"');
+    expect(sanitized).toContain('rel="noopener noreferrer"');
+    expect(sanitized).not.toContain("_top");
+    expect(sanitized).not.toContain('rel="opener"');
+  });
 });
