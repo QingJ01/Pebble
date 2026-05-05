@@ -51,6 +51,18 @@ describe("sanitizeHtml", () => {
     expect(sanitized).toContain('height="1"');
   });
 
+  it("preserves hidden preheader clipping styles", () => {
+    const sanitized = sanitizeHtml(
+      '<div style="max-width:0px;max-height:0px;overflow:hidden;visibility:hidden;opacity:0">马凯，为您推荐 2 条新动态</div>',
+    );
+
+    expect(sanitized).toContain("max-width:0px");
+    expect(sanitized).toContain("max-height:0px");
+    expect(sanitized).toContain("overflow:hidden");
+    expect(sanitized).toContain("visibility:hidden");
+    expect(sanitized).toContain("opacity:0");
+  });
+
   it("uses only body content from full html documents", () => {
     const sanitized = sanitizeHtml(
       "<html><head><title>Leaked subject</title><style>p{color:red}</style></head><body><p>Visible body</p></body></html>",

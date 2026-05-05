@@ -31,6 +31,10 @@ const SAFE_STYLE_PROPERTIES = new Set([
   "max-width",
   "min-height",
   "min-width",
+  "opacity",
+  "overflow",
+  "overflow-x",
+  "overflow-y",
   "padding",
   "padding-bottom",
   "padding-left",
@@ -39,6 +43,7 @@ const SAFE_STYLE_PROPERTIES = new Set([
   "text-align",
   "text-decoration",
   "vertical-align",
+  "visibility",
   "white-space",
   "width",
 ]);

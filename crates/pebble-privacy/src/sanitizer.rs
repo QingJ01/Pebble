@@ -172,7 +172,10 @@ fn filter_css_properties(style: &str) -> String {
         "max-height",
         "min-height",
         "display",
+        "opacity",
         "overflow",
+        "overflow-x",
+        "overflow-y",
         "visibility",
         "float",
         "clear",
@@ -967,6 +970,20 @@ mod tests {
         let result = guard.render_safe_html(html, &PrivacyMode::Strict);
         assert!(result.html.contains("background: #f38020"));
         assert!(result.html.contains("color: #ffffff"));
+    }
+
+    #[test]
+    fn test_preserves_hidden_preheader_clipping_styles() {
+        let guard = PrivacyGuard::new();
+        let html = r#"<div style="max-width:0px;max-height:0px;overflow-x:hidden;overflow-y:hidden;visibility:hidden;opacity:0">马凯，为您推荐 2 条新动态</div>"#;
+        let result = guard.render_safe_html(html, &PrivacyMode::Strict);
+
+        assert!(result.html.contains("max-width:0px"));
+        assert!(result.html.contains("max-height:0px"));
+        assert!(result.html.contains("overflow-x:hidden"));
+        assert!(result.html.contains("overflow-y:hidden"));
+        assert!(result.html.contains("visibility:hidden"));
+        assert!(result.html.contains("opacity:0"));
     }
 
     #[test]
