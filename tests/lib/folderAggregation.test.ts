@@ -77,6 +77,26 @@ describe("folder aggregation", () => {
     ).toBe(5);
   });
 
+  it("sums all-account Sent counts only from Sent role folders", () => {
+    const folders = [
+      folder("a1-sent", "a1", "sent"),
+      folder("a2-sent", "a2", "sent"),
+      folder("a1-inbox", "a1", "inbox"),
+      folder("a2-archive", "a2", "archive"),
+      folder("a3-custom-sent", "a3", null, "Sent reports"),
+    ];
+
+    expect(
+      unreadCountForFolder(allAccountsFolderId("sent"), folders, {
+        "a1-sent": 4,
+        "a2-sent": 6,
+        "a1-inbox": 3,
+        "a2-archive": 8,
+        "a3-custom-sent": 10,
+      }),
+    ).toBe(10);
+  });
+
   it("sorts single-account system folders in the same stable sidebar order", () => {
     const folders = [
       { ...folder("drafts", "a1", "drafts"), sort_order: 1 },
