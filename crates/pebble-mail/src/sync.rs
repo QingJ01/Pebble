@@ -323,6 +323,21 @@ fn can_refresh_imap_polling_baseline_after_idle_fallback(catch_up_succeeded: boo
     catch_up_succeeded
 }
 
+fn apply_inbox_uid_count_baseline(
+    last_exists: &mut Option<u32>,
+    current_count: Option<u32>,
+    has_unresolved_failures: bool,
+) -> bool {
+    if has_unresolved_failures {
+        return false;
+    }
+    let Some(current_count) = current_count else {
+        return false;
+    };
+    *last_exists = Some(current_count);
+    true
+}
+
 fn idle_check_recovery_user_error(
     reconnect_error: Option<String>,
     poll_error: Option<String>,
@@ -598,16 +613,45 @@ impl SyncWorker {
             return false;
         };
 
+        let has_unresolved_failures = match self
+            .base
+            .store
+            .has_sync_failures_for_folder(&self.base.account_id, &inbox.id)
+        {
+            Ok(has_failures) => has_failures,
+            Err(e) => {
+                warn!(
+                    "Failed to check Inbox sync failures while seeding IMAP polling baseline for account {} folder {}: {}",
+                    self.base.account_id, inbox.remote_id, e
+                );
+                return false;
+            }
+        };
+        if has_unresolved_failures {
+            let _ = apply_inbox_uid_count_baseline(last_exists, None, has_unresolved_failures);
+            debug!(
+                "Skipping IMAP polling baseline seed for account {} folder {} because Inbox has unresolved sync failures",
+                self.base.account_id, inbox.remote_id
+            );
+            return false;
+        }
+
         match self.provider.inner().fetch_all_uids(&inbox.remote_id).await {
             Ok(uids) => {
-                *last_exists = Some(uids.len() as u32);
-                debug!(
-                    "Seeded IMAP polling baseline for account {} folder {} with {} messages",
-                    self.base.account_id,
-                    inbox.remote_id,
-                    uids.len()
+                let seeded = apply_inbox_uid_count_baseline(
+                    last_exists,
+                    Some(uids.len() as u32),
+                    has_unresolved_failures,
                 );
-                true
+                if seeded {
+                    debug!(
+                        "Seeded IMAP polling baseline for account {} folder {} with {} messages",
+                        self.base.account_id,
+                        inbox.remote_id,
+                        uids.len()
+                    );
+                }
+                seeded
             }
             Err(e) => {
                 warn!(
@@ -1907,6 +1951,26 @@ mod tests {
         assert!(!can_refresh_imap_polling_baseline_after_idle_fallback(
             false
         ));
+    }
+
+    #[test]
+    fn imap_polling_baseline_refuses_unresolved_inbox_failures() {
+        let mut last_exists = Some(7);
+
+        let seeded = apply_inbox_uid_count_baseline(&mut last_exists, Some(12), true);
+
+        assert!(!seeded);
+        assert_eq!(last_exists, Some(7));
+    }
+
+    #[test]
+    fn imap_polling_baseline_seeds_without_unresolved_inbox_failures() {
+        let mut last_exists = Some(7);
+
+        let seeded = apply_inbox_uid_count_baseline(&mut last_exists, Some(12), false);
+
+        assert!(seeded);
+        assert_eq!(last_exists, Some(12));
     }
 
     #[test]
