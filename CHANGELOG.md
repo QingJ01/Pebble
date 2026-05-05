@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed IMAP realtime polling fallback so background sync does not miss new mail after empty Inbox baselines, UIDVALIDITY resets, or same-count mailbox changes.
+- Refreshed folder unread counts immediately after read-state changes, message moves, batch actions, and sync completion events.
+- Made unread message and thread rows more visible in dark mode.
+
 ## [0.0.5] - 2026-05-04
 
 ### Added
