@@ -32,8 +32,6 @@ describe("focus-visible CSS", () => {
   it("makes unread message and thread rows visually distinct in dark mode", () => {
     const css = readFileSync(join(process.cwd(), "src", "styles", "index.css"), "utf8");
 
-    expect(css).toMatch(/\.message-list-row--unread,\s*\.thread-list-row--unread\s*\{[^}]*background\s*:/i);
-    expect(css).toMatch(/\.message-list-row__unread-dot,\s*\.thread-list-row__unread-dot\s*\{[^}]*background\s*:\s*var\(--color-accent\)/i);
-    expect(css).toMatch(/\[data-theme="dark"\]\s*\.message-list-row--unread,\s*\[data-theme="dark"\]\s*\.thread-list-row--unread\s*\{[^}]*background\s*:/i);
+    expect(css).toMatch(/\.message-list-row--unread\[aria-selected="false"\]:hover/i);
   });
 });

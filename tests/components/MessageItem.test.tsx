@@ -253,8 +253,8 @@ describe("MessageItem", () => {
     expect(marker.style.backgroundColor).toBe("rgb(34, 197, 94)");
   });
 
-  it("marks unread rows with a row class and unread dot", () => {
-    const { container } = render(
+  it("marks unread rows with a row class", () => {
+    render(
       <MessageItem
         message={makeMessage({ is_read: false })}
         isSelected={false}
@@ -263,11 +263,10 @@ describe("MessageItem", () => {
     );
 
     expect(screen.getByRole("option").className).toContain("message-list-row--unread");
-    expect(container.querySelector(".message-list-row__unread-dot")).not.toBeNull();
   });
 
   it("does not add unread row treatment to read rows", () => {
-    const { container } = render(
+    render(
       <MessageItem
         message={makeMessage({ is_read: true })}
         isSelected={false}
@@ -276,6 +275,5 @@ describe("MessageItem", () => {
     );
 
     expect(screen.getByRole("option").className).not.toContain("message-list-row--unread");
-    expect(container.querySelector(".message-list-row__unread-dot")).toBeNull();
   });
 });

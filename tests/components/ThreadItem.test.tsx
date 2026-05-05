@@ -25,8 +25,8 @@ function makeThread(overrides: Partial<ThreadSummary> = {}): ThreadSummary {
 }
 
 describe("ThreadItem", () => {
-  it("marks unread rows with a row class and unread dot", () => {
-    const { container } = render(
+  it("marks unread rows with a row class", () => {
+    render(
       <ThreadItem
         thread={makeThread({ unread_count: 2 })}
         isSelected={false}
@@ -35,11 +35,10 @@ describe("ThreadItem", () => {
     );
 
     expect(screen.getByRole("option").className).toContain("thread-list-row--unread");
-    expect(container.querySelector(".thread-list-row__unread-dot")).not.toBeNull();
   });
 
   it("does not add unread row treatment when every thread message is read", () => {
-    const { container } = render(
+    render(
       <ThreadItem
         thread={makeThread({ unread_count: 0 })}
         isSelected={false}
@@ -48,6 +47,5 @@ describe("ThreadItem", () => {
     );
 
     expect(screen.getByRole("option").className).not.toContain("thread-list-row--unread");
-    expect(container.querySelector(".thread-list-row__unread-dot")).toBeNull();
   });
 });

@@ -114,9 +114,6 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
           }}
         />
       )}
-      {!message.is_read && (
-        <span className="message-list-row__unread-dot" aria-hidden="true" />
-      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2px" }}>
         {batchMode && (
           <input
@@ -133,15 +130,23 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
         )}
         <span
           style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
             fontSize: "13px",
             overflow: "hidden",
-            textOverflow: "ellipsis",
             whiteSpace: "nowrap",
             flex: 1,
             marginRight: "8px",
+            minWidth: 0,
           }}
         >
-          {message.from_name || message.from_address}
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+            {message.from_name || message.from_address}
+          </span>
+          {!message.is_read && (
+            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--color-accent)", flexShrink: 0 }} />
+          )}
         </span>
         <div style={{ display: "flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
           {inKanban && (
