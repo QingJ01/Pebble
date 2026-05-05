@@ -75,11 +75,14 @@ export function useUpdateFlagsMutation() {
         restoreMessagesCache(queryClient, context.previousLists);
       }
     },
-    onSettled: (_data, _err, params) => {
+    onSettled: (_data, err, params) => {
       queryClient.invalidateQueries({ queryKey: ["messages"] });
       queryClient.invalidateQueries({ queryKey: ["threads"] });
       queryClient.invalidateQueries({ queryKey: ["starred-messages"] });
       queryClient.invalidateQueries({ queryKey: ["message", params.messageId] });
+      if (!err && params.isRead !== undefined) {
+        queryClient.invalidateQueries({ queryKey: ["folder-unread-counts"] });
+      }
     },
   });
 }
