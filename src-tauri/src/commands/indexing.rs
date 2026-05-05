@@ -676,9 +676,11 @@ fn queue_remote_rule_action(
 
 #[cfg(test)]
 mod rule_writeback_tests {
+    #[cfg(any(target_os = "linux", windows))]
+    use super::is_notification_open_action;
     use super::{
-        apply_rule_action, is_notification_open_action, new_mail_event_payload,
-        notification_open_payload, should_send_new_mail_notification,
+        apply_rule_action, new_mail_event_payload, notification_open_payload,
+        should_send_new_mail_notification,
     };
     use pebble_core::*;
     use pebble_rules::types::RuleAction;
@@ -850,6 +852,7 @@ mod rule_writeback_tests {
         assert_eq!(payload["message_id"], "message-1");
     }
 
+    #[cfg(any(target_os = "linux", windows))]
     #[test]
     fn notification_open_action_accepts_desktop_clicks_only() {
         assert!(is_notification_open_action("default"));
