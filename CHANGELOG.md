@@ -6,11 +6,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-05-05
+
+### Added
+
+- Added the receiving account to the message detail header so all-account views show which mailbox received the selected email.
+
+### Changed
+
+- Polished the compose leave confirmation flow.
+- Simplified unread row indicators while keeping unread messages visually distinct.
+
 ### Fixed
 
-- Fixed IMAP realtime polling fallback so background sync does not miss new mail after empty Inbox baselines, UIDVALIDITY resets, or same-count mailbox changes.
-- Refreshed folder unread counts immediately after read-state changes, message moves, batch actions, and sync completion events.
+- Fixed notification clicks so they route directly to the target message.
+- Improved mail sync reliability, including IMAP realtime polling fallback handling for empty Inbox baselines, UIDVALIDITY resets, same-count mailbox changes, sync failures, and local UID baselines.
+- Refreshed folder unread counts immediately after read-state changes, message moves, batch actions, secondary message actions, command read changes, and sync completion events.
 - Made unread message and thread rows more visible in dark mode.
+- Preserved sanitized HTML email layouts and stabilized Shadow DOM rendering so full-height wrappers, gray canvases, and delayed layout jumps do not obscure message content.
+- Preserved hidden email preheader clipping styles so preview text remains hidden instead of rendering as one character per line.
+- Honored fully trusted senders in privacy rendering so trusted senders can load images and tracker resources according to the selected trust level.
+- Stabilized the sidebar bottom navigation so Snoozed, Kanban, and Settings remain clickable when wide message content is visible.
 
 ## [0.0.5] - 2026-05-04
 
@@ -138,7 +154,8 @@ This release includes:
 - Windows installers are not code-signed yet, so Windows SmartScreen may show a warning.
 - Outlook support is still experimental and depends on Microsoft Graph permissions configured by the user.
 
-[Unreleased]: https://github.com/QingJ01/Pebble/compare/v0.0.5...HEAD
+[Unreleased]: https://github.com/QingJ01/Pebble/compare/v0.0.6...HEAD
+[0.0.6]: https://github.com/QingJ01/Pebble/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/QingJ01/Pebble/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/QingJ01/Pebble/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/QingJ01/Pebble/compare/v0.0.2...v0.0.3
