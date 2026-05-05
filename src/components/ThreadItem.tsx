@@ -31,13 +31,15 @@ function ThreadItem({ thread, isSelected, onClick }: Props) {
 
   return (
     <div
+      className={`thread-list-row${hasUnread ? " thread-list-row--unread" : ""}`}
       role="option"
       aria-selected={isSelected}
       tabIndex={0}
       onClick={onClick}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
       style={{
-        backgroundColor: isSelected ? "var(--color-sidebar-active)" : "transparent",
+        position: "relative",
+        backgroundColor: isSelected ? "var(--color-sidebar-active)" : undefined,
         color: "var(--color-text-primary)",
         fontWeight,
         cursor: "pointer",
@@ -48,13 +50,10 @@ function ThreadItem({ thread, isSelected, onClick }: Props) {
         overflow: "hidden",
         transition: "background-color 0.12s ease",
       }}
-      onMouseEnter={(e) => {
-        if (!isSelected) e.currentTarget.style.backgroundColor = "var(--color-bg-hover)";
-      }}
-      onMouseLeave={(e) => {
-        if (!isSelected) e.currentTarget.style.backgroundColor = "transparent";
-      }}
     >
+      {hasUnread && (
+        <span className="thread-list-row__unread-dot" aria-hidden="true" />
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2px" }}>
         <span
           style={{

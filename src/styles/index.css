@@ -196,6 +196,54 @@ option {
   color: var(--color-text-secondary);
 }
 
+.message-list-row,
+.thread-list-row {
+  background: transparent;
+}
+
+.message-list-row[aria-selected="false"]:hover,
+.message-list-row[aria-selected="false"]:focus,
+.thread-list-row[aria-selected="false"]:hover,
+.thread-list-row[aria-selected="false"]:focus {
+  background: var(--color-bg-hover);
+}
+
+.message-list-row--unread,
+.thread-list-row--unread {
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+
+.message-list-row--unread[aria-selected="false"]:hover,
+.message-list-row--unread[aria-selected="false"]:focus,
+.thread-list-row--unread[aria-selected="false"]:hover,
+.thread-list-row--unread[aria-selected="false"]:focus {
+  background: color-mix(in srgb, var(--color-accent) 13%, var(--color-bg-hover));
+}
+
+.message-list-row__unread-dot,
+.thread-list-row__unread-dot {
+  position: absolute;
+  top: 17px;
+  left: 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+
+[data-theme="dark"] .message-list-row--unread,
+[data-theme="dark"] .thread-list-row--unread {
+  background: color-mix(in srgb, var(--color-accent) 17%, transparent);
+}
+
+[data-theme="dark"] .message-list-row--unread[aria-selected="false"]:hover,
+[data-theme="dark"] .message-list-row--unread[aria-selected="false"]:focus,
+[data-theme="dark"] .thread-list-row--unread[aria-selected="false"]:hover,
+[data-theme="dark"] .thread-list-row--unread[aria-selected="false"]:focus {
+  background: color-mix(in srgb, var(--color-accent) 24%, var(--color-bg-hover));
+}
+
 /* Staggered fade-in for list items */
 .fade-in-item { animation: fadeIn 0.25s ease-out both; }
 .fade-in-item:nth-child(1)  { animation-delay: 0ms; }

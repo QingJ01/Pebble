@@ -59,13 +59,14 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
 
   return (
     <div
+      className={`message-list-row${message.is_read ? "" : " message-list-row--unread"}`}
       onClick={onClick}
       tabIndex={0}
       role="option"
       aria-selected={isSelected}
       style={{
         position: "relative",
-        backgroundColor: isSelected ? "var(--color-sidebar-active)" : "transparent",
+        backgroundColor: isSelected ? "var(--color-sidebar-active)" : undefined,
         color: "var(--color-text-primary)",
         fontWeight,
         cursor: "pointer",
@@ -76,23 +77,19 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
         overflow: "hidden",
         transition: "background-color 0.12s ease",
       }}
-      onMouseEnter={(e) => {
+      onMouseEnter={() => {
         setShowActions(true);
-        if (!isSelected) e.currentTarget.style.backgroundColor = "var(--color-bg-hover)";
       }}
-      onMouseLeave={(e) => {
+      onMouseLeave={() => {
         setShowActions(false);
-        if (!isSelected) e.currentTarget.style.backgroundColor = "transparent";
       }}
-      onFocus={(e) => {
+      onFocus={() => {
         setShowActions(true);
-        if (!isSelected) e.currentTarget.style.backgroundColor = "var(--color-bg-hover)";
       }}
       onBlur={(e) => {
         // Only hide if focus leaves this element entirely (not moving to a child)
         if (!e.currentTarget.contains(e.relatedTarget as Node)) {
           setShowActions(false);
-          if (!isSelected) e.currentTarget.style.backgroundColor = "transparent";
         }
       }}
       onKeyDown={(e) => {
@@ -116,6 +113,9 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
             backgroundColor: accountColor,
           }}
         />
+      )}
+      {!message.is_read && (
+        <span className="message-list-row__unread-dot" aria-hidden="true" />
       )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2px" }}>
         {batchMode && (

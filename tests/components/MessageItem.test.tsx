@@ -60,7 +60,7 @@ vi.mock("../../src/stores/toast.store", () => ({
 
 import MessageItem from "../../src/components/MessageItem";
 
-function makeMessage(): MessageSummary {
+function makeMessage(overrides: Partial<MessageSummary> = {}): MessageSummary {
   return {
     id: "message-1",
     account_id: "account-1",
@@ -86,6 +86,7 @@ function makeMessage(): MessageSummary {
     deleted_at: null,
     created_at: 1_700_000_000,
     updated_at: 1_700_000_000,
+    ...overrides,
   };
 }
 
@@ -250,5 +251,31 @@ describe("MessageItem", () => {
 
     expect(marker.getAttribute("aria-label")).toBe("Work <work@example.com>");
     expect(marker.style.backgroundColor).toBe("rgb(34, 197, 94)");
+  });
+
+  it("marks unread rows with a row class and unread dot", () => {
+    const { container } = render(
+      <MessageItem
+        message={makeMessage({ is_read: false })}
+        isSelected={false}
+        onClick={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("option").className).toContain("message-list-row--unread");
+    expect(container.querySelector(".message-list-row__unread-dot")).not.toBeNull();
+  });
+
+  it("does not add unread row treatment to read rows", () => {
+    const { container } = render(
+      <MessageItem
+        message={makeMessage({ is_read: true })}
+        isSelected={false}
+        onClick={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("option").className).not.toContain("message-list-row--unread");
+    expect(container.querySelector(".message-list-row__unread-dot")).toBeNull();
   });
 });
