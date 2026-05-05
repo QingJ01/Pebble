@@ -157,6 +157,39 @@ describe("MessageItem", () => {
     await waitFor(() => expect(mocks.restoreMessagesCache).toHaveBeenCalledWith(mocks.queryClient, snapshot));
   });
 
+  it("refreshes folder unread counts after a successful archive action", async () => {
+    render(
+      <MessageItem
+        message={makeMessage()}
+        isSelected={false}
+        onClick={vi.fn()}
+      />,
+    );
+
+    fireEvent.mouseEnter(screen.getByRole("option"));
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+
+    await waitFor(() => expect(mocks.archiveMessage).toHaveBeenCalledWith("message-1"));
+    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
+  });
+
+  it("refreshes folder unread counts after a successful spam action", async () => {
+    render(
+      <MessageItem
+        message={makeMessage()}
+        isSelected={false}
+        onClick={vi.fn()}
+        spamFolderId="folder-spam"
+      />,
+    );
+
+    fireEvent.mouseEnter(screen.getByRole("option"));
+    fireEvent.click(screen.getByRole("button", { name: "Report spam" }));
+
+    await waitFor(() => expect(mocks.moveToFolder).toHaveBeenCalledWith("message-1", "folder-spam"));
+    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
+  });
+
   it("refreshes derived queries after starring from row actions", async () => {
     render(
       <MessageItem

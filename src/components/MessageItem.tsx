@@ -49,6 +49,14 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
     : t("messageActions.archive", "Archive");
   const ArchiveActionIcon = folderRole === "archive" ? RotateCcw : Archive;
 
+  function invalidateMessageViews(includeUnreadCounts = false) {
+    queryClient.invalidateQueries({ queryKey: ["messages"] });
+    queryClient.invalidateQueries({ queryKey: ["threads"] });
+    if (includeUnreadCounts) {
+      queryClient.invalidateQueries({ queryKey: ["folder-unread-counts"] });
+    }
+  }
+
   return (
     <div
       onClick={onClick}
@@ -228,8 +236,7 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
                     restoreMessagesCache(queryClient, previousLists);
                     return;
                   }
-                  queryClient.invalidateQueries({ queryKey: ["messages"] });
-                  queryClient.invalidateQueries({ queryKey: ["threads"] });
+                  invalidateMessageViews(true);
                   const msg = result === "unarchived"
                     ? t("messageActions.unarchiveSuccess", "Message moved to inbox")
                     : t("messageActions.archiveSuccess", "Message archived");
@@ -267,8 +274,7 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
                 patchMessagesCache(queryClient, (page) => page.filter((m) => m.id !== message.id));
                 moveToFolder(message.id, spamFolderId)
                   .then(() => {
-                    queryClient.invalidateQueries({ queryKey: ["messages"] });
-                    queryClient.invalidateQueries({ queryKey: ["threads"] });
+                    invalidateMessageViews(true);
                     useToastStore.getState().addToast({ message: t("messageActions.spamSuccess", "Marked as spam"), type: "success" });
                   })
                   .catch(() => {
@@ -324,8 +330,7 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
               e.stopPropagation();
               updateMessageFlags(message.id, undefined, !message.is_starred)
                 .then(() => {
-                  queryClient.invalidateQueries({ queryKey: ["messages"] });
-                  queryClient.invalidateQueries({ queryKey: ["threads"] });
+                  invalidateMessageViews();
                   queryClient.invalidateQueries({ queryKey: ["starred-messages"] });
                   queryClient.invalidateQueries({ queryKey: ["message", message.id] });
                 })

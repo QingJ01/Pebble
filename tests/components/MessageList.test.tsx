@@ -347,6 +347,51 @@ describe("MessageList", () => {
     expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["messages"] });
     expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["threads"] });
     expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["starred-messages"] });
+    expect(mocks.queryClient.invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
+  });
+
+  it("refreshes folder unread counts after a successful batch archive action", async () => {
+    mocks.batchArchive.mockResolvedValueOnce(2);
+    useMailStore.setState({
+      selectedMessageIds: new Set(["m-1", "m-2"]),
+      batchMode: true,
+    });
+
+    render(
+      <MessageList
+        messages={[makeMessage("m-1"), makeMessage("m-2")]}
+        selectedMessageId={null}
+        onSelectMessage={vi.fn()}
+        loading={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "messageActions.archive" }));
+
+    await waitFor(() => expect(mocks.batchArchive).toHaveBeenCalledWith(["m-1", "m-2"]));
+    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
+  });
+
+  it("refreshes folder unread counts after a successful batch read-state action", async () => {
+    mocks.batchMarkRead.mockResolvedValueOnce(2);
+    useMailStore.setState({
+      selectedMessageIds: new Set(["m-1", "m-2"]),
+      batchMode: true,
+    });
+
+    render(
+      <MessageList
+        messages={[makeMessage("m-1"), makeMessage("m-2")]}
+        selectedMessageId={null}
+        onSelectMessage={vi.fn()}
+        loading={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "batch.markRead" }));
+
+    await waitFor(() => expect(mocks.batchMarkRead).toHaveBeenCalledWith(["m-1", "m-2"], true));
+    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
   });
 
   it("uses the custom checkbox control for select all", () => {

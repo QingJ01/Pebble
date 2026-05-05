@@ -83,6 +83,7 @@ export default function StatusBar() {
     queryClient.invalidateQueries({ queryKey: ["folders"] });
     queryClient.invalidateQueries({ queryKey: ["messages"] });
     queryClient.invalidateQueries({ queryKey: ["threads"] });
+    queryClient.invalidateQueries({ queryKey: ["folder-unread-counts"] });
   }
 
   function isActiveAccountEvent(accountId?: string | null) {

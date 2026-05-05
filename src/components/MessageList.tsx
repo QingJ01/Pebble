@@ -122,6 +122,10 @@ export default function MessageList({
     queryClient.invalidateQueries({ queryKey: ["starred-messages"] });
   }
 
+  function batchActionChangesUnreadCounts(action: "archive" | "delete" | "markRead" | "markUnread" | "star" | "unstar") {
+    return action !== "star" && action !== "unstar";
+  }
+
   async function handleBatchAction(action: "archive" | "delete" | "markRead" | "markUnread" | "star" | "unstar") {
     const ids = [...selectedMessageIds];
     if (ids.length === 0) return;
@@ -148,6 +152,9 @@ export default function MessageList({
       else if (action === "star") count = await batchStar(ids, true);
       else count = await batchStar(ids, false);
       invalidateMessageViews();
+      if (batchActionChangesUnreadCounts(action)) {
+        queryClient.invalidateQueries({ queryKey: ["folder-unread-counts"] });
+      }
       addToast({ message: t("batch.success", { count }), type: "success" });
       clearSelection();
     } catch {

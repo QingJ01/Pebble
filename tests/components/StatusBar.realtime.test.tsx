@@ -156,6 +156,7 @@ describe("StatusBar realtime mail events", () => {
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folders"] });
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["messages"] });
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["threads"] });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
   });
 
   it("ignores sync progress from another account", async () => {
@@ -210,6 +211,7 @@ describe("StatusBar realtime mail events", () => {
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folders"] });
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["messages"] });
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["threads"] });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
   });
 
   it("does not hide a sync progress error when worker exit follows immediately", async () => {
