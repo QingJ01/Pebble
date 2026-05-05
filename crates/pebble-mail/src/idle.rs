@@ -20,6 +20,24 @@ pub fn recommended_idle_wait_secs(configured_secs: u64) -> u64 {
     configured_secs.clamp(60, 1740)
 }
 
+fn observe_uid_count(last_exists: &mut Option<u32>, current_count: u32) -> IdleEvent {
+    match *last_exists {
+        None => {
+            *last_exists = Some(current_count);
+            IdleEvent::Timeout
+        }
+        Some(previous_count) if previous_count != current_count => {
+            debug!(
+                "Mailbox count changed: {} -> {}",
+                previous_count, current_count
+            );
+            *last_exists = Some(current_count);
+            IdleEvent::NewMail
+        }
+        Some(_) => IdleEvent::Timeout,
+    }
+}
+
 /// Check if a mailbox has new messages by comparing UID count.
 ///
 /// This is a lightweight fallback for servers that do not advertise the
@@ -28,25 +46,12 @@ pub fn recommended_idle_wait_secs(configured_secs: u64) -> u64 {
 pub async fn check_for_changes(
     provider: &super::imap::ImapProvider,
     mailbox: &str,
-    last_exists: &mut u32,
+    last_exists: &mut Option<u32>,
 ) -> Result<IdleEvent> {
     match provider.fetch_all_uids(mailbox).await {
         Ok(uids) => {
             let current_count = uids.len() as u32;
-            if *last_exists == 0 {
-                // First check — record the baseline without triggering a sync.
-                *last_exists = current_count;
-                Ok(IdleEvent::Timeout)
-            } else if current_count != *last_exists {
-                debug!(
-                    "Mailbox {} count changed: {} -> {}",
-                    mailbox, *last_exists, current_count
-                );
-                *last_exists = current_count;
-                Ok(IdleEvent::NewMail)
-            } else {
-                Ok(IdleEvent::Timeout)
-            }
+            Ok(observe_uid_count(last_exists, current_count))
         }
         Err(e) => Ok(IdleEvent::Error(e.to_string())),
     }
@@ -57,7 +62,7 @@ pub async fn check_for_changes(
 pub async fn check_for_changes_with_idle(
     provider: &super::imap::ImapProvider,
     mailbox: &str,
-    last_exists: &mut u32,
+    last_exists: &mut Option<u32>,
     use_idle: bool,
 ) -> Result<IdleEvent> {
     if use_idle {
@@ -89,6 +94,36 @@ pub async fn check_for_changes_with_idle(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn first_uid_count_observation_seeds_empty_baseline() {
+        let mut last_exists = None;
+
+        let event = observe_uid_count(&mut last_exists, 0);
+
+        assert!(matches!(event, IdleEvent::Timeout));
+        assert_eq!(last_exists, Some(0));
+    }
+
+    #[test]
+    fn new_mail_after_empty_baseline_is_detected() {
+        let mut last_exists = Some(0);
+
+        let event = observe_uid_count(&mut last_exists, 1);
+
+        assert!(matches!(event, IdleEvent::NewMail));
+        assert_eq!(last_exists, Some(1));
+    }
+
+    #[test]
+    fn first_unknown_non_empty_observation_only_seeds_baseline() {
+        let mut last_exists = None;
+
+        let event = observe_uid_count(&mut last_exists, 4);
+
+        assert!(matches!(event, IdleEvent::Timeout));
+        assert_eq!(last_exists, Some(4));
+    }
 
     #[test]
     fn test_idle_event_variants() {

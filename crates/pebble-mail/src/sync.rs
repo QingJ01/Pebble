@@ -567,6 +567,44 @@ impl SyncWorker {
         self
     }
 
+    async fn refresh_inbox_uid_count_baseline(&self, last_exists: &mut Option<u32>) {
+        let folders = match self.base.store.list_folders(&self.base.account_id) {
+            Ok(folders) => folders,
+            Err(e) => {
+                warn!(
+                    "Failed to load folders while seeding IMAP polling baseline for account {}: {}",
+                    self.base.account_id, e
+                );
+                return;
+            }
+        };
+
+        let Some(inbox) = folders
+            .iter()
+            .find(|folder| folder.role == Some(pebble_core::FolderRole::Inbox))
+        else {
+            return;
+        };
+
+        match self.provider.inner().fetch_all_uids(&inbox.remote_id).await {
+            Ok(uids) => {
+                *last_exists = Some(uids.len() as u32);
+                debug!(
+                    "Seeded IMAP polling baseline for account {} folder {} with {} messages",
+                    self.base.account_id,
+                    inbox.remote_id,
+                    uids.len()
+                );
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to seed IMAP polling baseline for account {} folder {}: {}",
+                    self.base.account_id, inbox.remote_id, e
+                );
+            }
+        }
+    }
+
     fn stored_imap_folder_cursor(&self, folder: &pebble_core::Folder) -> ImapFolderCursor {
         let state = self
             .base
@@ -1434,7 +1472,7 @@ impl SyncWorker {
         }
 
         let mut stop_rx = self.stop_rx.clone();
-        let mut last_exists: u32 = 0;
+        let mut last_exists: Option<u32> = None;
         let mut backoff = SyncBackoff::new();
         let mut trigger_rx = trigger_rx;
         let mut runtime = RealtimeRuntimeState::new(Duration::from_secs(60), Instant::now());
@@ -1473,6 +1511,10 @@ impl SyncWorker {
         }
         drop(idle_trigger_tx);
         let mut idle_watcher_active = idle_watcher.is_some();
+        if !idle_watcher_active {
+            self.refresh_inbox_uid_count_baseline(&mut last_exists)
+                .await;
+        }
 
         loop {
             let next_poll_delay =
@@ -1579,6 +1621,7 @@ impl SyncWorker {
                                 self.base.account_id
                             );
                             idle_watcher_active = false;
+                            self.refresh_inbox_uid_count_baseline(&mut last_exists).await;
                         }
                     }
                 }
