@@ -17,6 +17,7 @@ import { defaultPrivacyMode } from "@/lib/privacyMode";
 import { useKanbanStore } from "@/stores/kanban.store";
 import { useToastStore } from "@/stores/toast.store";
 import { useUIStore } from "@/stores/ui.store";
+import { useAccountsQuery } from "@/hooks/queries";
 import SelectionActionPopover from "./SelectionActionPopover";
 
 interface Props {
@@ -48,6 +49,8 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
 
   const { message, setMessage, rendered, loading, error } = useMessageLoader(messageId, privacyMode);
   const { bilingualMode, bilingualResult, bilingualLoading, handleBilingualToggle, resetBilingual } = useBilingualTranslation(messageId, rendered, message);
+  const { data: accounts } = useAccountsQuery();
+  const receivingAccount = accounts?.find((a) => a.id === message?.account_id);
 
   useClickOutside(snoozeRef, showSnooze, () => setShowSnooze(false));
   useClickOutside(selectionActionsRef, !!showSelectionActions, () => setShowSelectionActions(null));
@@ -319,6 +322,11 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
             {message.from_name && (
               <span style={{ color: "var(--color-text-secondary)", marginLeft: "6px" }}>
                 &lt;{message.from_address}&gt;
+              </span>
+            )}
+            {receivingAccount && (
+              <span style={{ color: "var(--color-text-secondary)", marginLeft: "6px", fontSize: "12px" }}>
+                to&nbsp;&lt;{receivingAccount.email}&gt;
               </span>
             )}
           </div>

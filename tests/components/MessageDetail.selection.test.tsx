@@ -55,6 +55,12 @@ vi.mock("../../src/hooks/useMessageLoader", () => ({
   }),
 }));
 
+vi.mock("../../src/hooks/queries", () => ({
+  useAccountsQuery: () => ({
+    data: [{ id: "account-1", email: "recipient@example.com" }],
+  }),
+}));
+
 vi.mock("../../src/hooks/useBilingualTranslation", () => ({
   useBilingualTranslation: () => ({
     bilingualMode: false,
