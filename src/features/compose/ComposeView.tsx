@@ -765,24 +765,31 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
             aria-modal="true"
             aria-labelledby="compose-leave-title"
             style={{
-              backgroundColor: "var(--color-bg-primary, #fff)",
-              borderRadius: "8px", padding: "24px", minWidth: "320px",
-              boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
+              width: "380px",
+              backgroundColor: "var(--color-sidebar-bg)",
+              color: "var(--color-text-primary)",
+              border: "1px solid var(--color-border)",
+              borderRadius: "8px",
+              padding: "24px",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+              display: "flex",
+              flexDirection: "column" as const,
+              gap: "16px",
             }}
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => { if (e.key === "Escape") cancelCloseCompose(); }}
           >
-            <h3 id="compose-leave-title" style={{ margin: "0 0 8px", fontSize: "15px", fontWeight: 600 }}>
+            <h3 id="compose-leave-title" style={{ margin: 0, fontSize: "15px", fontWeight: 600 }}>
               {t("compose.leaveTitle", "Discard draft?")}
             </h3>
-            <p style={{ margin: "0 0 20px", fontSize: "13px", color: "var(--color-text-secondary)" }}>
+            <p style={{ margin: 0, fontSize: "13px", color: "var(--color-text-secondary)", lineHeight: 1.5 }}>
               {t("compose.leaveMessage", "You have unsaved changes. Are you sure you want to leave?")}
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
               <button
                 onClick={cancelCloseCompose}
                 style={{
-                  padding: "6px 16px", borderRadius: "6px", fontSize: "13px",
+                  padding: "7px 16px", borderRadius: "6px", fontSize: "13px",
                   border: "1px solid var(--color-border)", cursor: "pointer",
                   backgroundColor: "transparent", color: "var(--color-text-primary)",
                 }}
@@ -792,9 +799,9 @@ function ComposeViewInner({ accounts }: { accounts: Account[] }) {
               <button
                 onClick={confirmCloseCompose}
                 style={{
-                  padding: "6px 16px", borderRadius: "6px", fontSize: "13px",
+                  padding: "7px 16px", borderRadius: "6px", fontSize: "13px", fontWeight: 600,
                   border: "none", cursor: "pointer",
-                  backgroundColor: "var(--color-danger, #ef4444)", color: "#fff",
+                  backgroundColor: "#ef4444", color: "#fff",
                 }}
               >
                 {t("compose.leaveConfirm", "Discard")}
