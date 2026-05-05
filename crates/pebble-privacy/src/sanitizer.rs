@@ -35,10 +35,11 @@ impl PrivacyGuard {
     pub fn render_safe_html(&self, raw_html: &str, mode: &PrivacyMode) -> RenderedHtml {
         let mut trackers_blocked: Vec<TrackerInfo> = Vec::new();
         let mut images_blocked: u32 = 0;
+        let body_html = extract_body_fragment(raw_html);
 
         // Pre-process images before ammonia sanitization
         let preprocessed =
-            preprocess_images(raw_html, mode, &mut trackers_blocked, &mut images_blocked);
+            preprocess_images(&body_html, mode, &mut trackers_blocked, &mut images_blocked);
 
         // Sanitize with ammonia
         let sanitizer = build_sanitizer(mode);
@@ -58,10 +59,76 @@ impl Default for PrivacyGuard {
     }
 }
 
+fn extract_body_fragment(raw_html: &str) -> String {
+    if !looks_like_html_document(raw_html) {
+        return raw_html.to_string();
+    }
+
+    if let Some(body_start) = find_ascii_case_insensitive(raw_html, "<body") {
+        if let Some(open_end) = find_tag_end(&raw_html[body_start..]) {
+            let content_start = body_start + open_end + 1;
+            if let Some(close_start) =
+                find_ascii_case_insensitive(&raw_html[content_start..], "</body")
+            {
+                return raw_html[content_start..content_start + close_start].to_string();
+            }
+            return raw_html[content_start..].to_string();
+        }
+    }
+
+    strip_head_element(raw_html)
+}
+
+fn looks_like_html_document(html: &str) -> bool {
+    find_ascii_case_insensitive(html, "<html").is_some()
+        || find_ascii_case_insensitive(html, "<head").is_some()
+        || find_ascii_case_insensitive(html, "<body").is_some()
+}
+
+fn strip_head_element(html: &str) -> String {
+    let Some(head_start) = find_ascii_case_insensitive(html, "<head") else {
+        return html.to_string();
+    };
+    let Some(close_start_rel) = find_ascii_case_insensitive(&html[head_start..], "</head") else {
+        return html.to_string();
+    };
+    let close_start = head_start + close_start_rel;
+    let Some(close_end_rel) = find_tag_end(&html[close_start..]) else {
+        return html.to_string();
+    };
+    let close_end = close_start + close_end_rel + 1;
+
+    let mut stripped = String::with_capacity(html.len().saturating_sub(close_end - head_start));
+    stripped.push_str(&html[..head_start]);
+    stripped.push_str(&html[close_end..]);
+    stripped
+}
+
+fn find_ascii_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
+    haystack
+        .to_ascii_lowercase()
+        .find(&needle.to_ascii_lowercase())
+}
+
+fn find_tag_end(html: &str) -> Option<usize> {
+    let mut quote: Option<char> = None;
+    for (idx, ch) in html.char_indices() {
+        match quote {
+            Some(current) if ch == current => quote = None,
+            Some(_) => {}
+            None if ch == '"' || ch == '\'' => quote = Some(ch),
+            None if ch == '>' => return Some(idx),
+            None => {}
+        }
+    }
+    None
+}
+
 /// Parse a CSS style string and keep only properties from the safe allowlist.
 fn filter_css_properties(style: &str) -> String {
     const SAFE_PROPERTIES: &[&str] = &[
         "color",
+        "background",
         "background-color",
         "font-family",
         "font-size",
@@ -127,11 +194,21 @@ fn filter_css_properties(style: &str) -> String {
             if !SAFE_PROPERTIES.contains(&prop.as_str()) {
                 return None;
             }
+            if prop == "background" && !is_safe_background_shorthand_value(&value) {
+                return None;
+            }
             // Reject URL/script-bearing values and CSS escapes that can hide them.
             if value.contains("url(")
+                || value.contains("image-set(")
+                || value.contains("-webkit-image-set(")
+                || value.contains("cross-fade(")
+                || value.contains("element(")
+                || value.contains("paint(")
                 || value.contains("expression(")
                 || value.contains("javascript:")
                 || value.contains("vbscript:")
+                || value.contains("data:")
+                || value.contains("@import")
                 || value.contains('\\')
             {
                 return None;
@@ -140,6 +217,59 @@ fn filter_css_properties(style: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("; ")
+}
+
+fn is_safe_background_shorthand_value(value: &str) -> bool {
+    let trimmed = value.trim();
+    let without_important = trimmed
+        .strip_suffix("!important")
+        .map(str::trim)
+        .unwrap_or(trimmed);
+    let value = without_important.to_lowercase();
+    if value.is_empty()
+        || value.contains("url(")
+        || value.contains("image-set(")
+        || value.contains("-webkit-image-set(")
+        || value.contains("cross-fade(")
+        || value.contains("element(")
+        || value.contains("paint(")
+        || value.contains("expression(")
+        || value.contains("javascript:")
+        || value.contains("vbscript:")
+        || value.contains("data:")
+        || value.contains("@import")
+        || value.contains('\\')
+    {
+        return false;
+    }
+
+    matches!(value.as_str(), "none" | "transparent" | "currentcolor")
+        || is_hex_color(&value)
+        || is_css_color_function(&value)
+        || value.chars().all(|c| c.is_ascii_alphabetic())
+}
+
+fn is_hex_color(value: &str) -> bool {
+    let Some(hex) = value.strip_prefix('#') else {
+        return false;
+    };
+    matches!(hex.len(), 3 | 4 | 6 | 8) && hex.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn is_css_color_function(value: &str) -> bool {
+    let Some(open_paren) = value.find('(') else {
+        return false;
+    };
+    if !value.ends_with(')') {
+        return false;
+    }
+    let function = &value[..open_paren];
+    if !matches!(function, "rgb" | "rgba" | "hsl" | "hsla") {
+        return false;
+    }
+    value[open_paren + 1..value.len() - 1]
+        .chars()
+        .all(|c| c.is_ascii_digit() || matches!(c, ' ' | '\t' | '.' | ',' | '%' | '/' | '+' | '-'))
 }
 
 /// Build an ammonia sanitizer configured for safe email HTML rendering.
@@ -334,11 +464,18 @@ fn preprocess_images(
                     }
                     ImgAction::BlockedPlaceholder => {
                         let src_val = src.as_deref().unwrap_or("");
-                        let escaped = html_escape(src_val);
+                        let alt_val = el.get_attribute("alt").unwrap_or_default();
+                        let label = if alt_val.trim().is_empty() {
+                            "Image blocked for privacy".to_string()
+                        } else {
+                            alt_val
+                        };
+                        let escaped_src = html_escape(src_val);
+                        let escaped_label = html_escape(&label);
                         el.replace(
                             &format!(
-                                r#"<div class="blocked-image" data-src="{}">Image blocked for privacy</div>"#,
-                                escaped
+                                r#"<div class="blocked-image" data-src="{}">{}</div>"#,
+                                escaped_src, escaped_label
                             ),
                             lol_html::html_content::ContentType::Html,
                         );
@@ -795,6 +932,26 @@ mod tests {
         let result = guard.render_safe_html(html, &PrivacyMode::Strict);
         assert!(result.html.contains("color: red"));
         assert!(result.html.contains("font-size: 14px"));
+    }
+
+    #[test]
+    fn test_allows_safe_background_shorthand_for_email_buttons() {
+        let guard = PrivacyGuard::new();
+        let html = r##"<a style="background: #f38020; color: #ffffff; border: 1px solid #f38020">Open dashboard</a>"##;
+        let result = guard.render_safe_html(html, &PrivacyMode::Strict);
+        assert!(result.html.contains("background: #f38020"));
+        assert!(result.html.contains("color: #ffffff"));
+    }
+
+    #[test]
+    fn render_safe_html_uses_body_fragment_from_full_documents() {
+        let guard = PrivacyGuard::new();
+        let html = r#"<html><head><title>Leaked subject</title><style>p{color:red}</style></head><body><p>Visible body</p></body></html>"#;
+        let result = guard.render_safe_html(html, &PrivacyMode::Strict);
+
+        assert!(result.html.contains("Visible body"));
+        assert!(!result.html.contains("Leaked subject"));
+        assert!(!result.html.contains("p{color:red}"));
     }
 
     #[test]

@@ -1,6 +1,7 @@
 import DOMPurify from "dompurify";
 
 const SAFE_STYLE_PROPERTIES = new Set([
+  "background",
   "background-color",
   "border",
   "border-bottom",
@@ -26,7 +27,9 @@ const SAFE_STYLE_PROPERTIES = new Set([
   "margin-left",
   "margin-right",
   "margin-top",
+  "max-height",
   "max-width",
+  "min-height",
   "min-width",
   "padding",
   "padding-bottom",
@@ -40,6 +43,27 @@ const SAFE_STYLE_PROPERTIES = new Set([
   "width",
 ]);
 
+function isSafeBackgroundShorthandValue(value: string): boolean {
+  const normalized = value
+    .trim()
+    .replace(/\s*!important\s*$/i, "")
+    .trim()
+    .toLowerCase();
+
+  if (!normalized) return false;
+  if (
+    /(url\s*\(|image-set\s*\(|-webkit-image-set\s*\(|cross-fade\s*\(|element\s*\(|paint\s*\(|expression\s*\(|javascript:|vbscript:|data:|@import|\\)/i.test(
+      normalized,
+    )
+  ) {
+    return false;
+  }
+  if (["none", "transparent", "currentcolor"].includes(normalized)) return true;
+  if (/^#[0-9a-f]{3,8}$/i.test(normalized)) return true;
+  if (/^(rgb|rgba|hsl|hsla)\([\d\s.,%/+-]+\)$/i.test(normalized)) return true;
+  return /^[a-z]+$/.test(normalized);
+}
+
 function filterStyleAttribute(style: string): string {
   return style
     .split(";")
@@ -50,8 +74,9 @@ function filterStyleAttribute(style: string): string {
       const name = rawName.trim().toLowerCase();
       const value = rawValue.join(":").trim().toLowerCase();
       if (!SAFE_STYLE_PROPERTIES.has(name) || !value) return false;
+      if (name === "background") return isSafeBackgroundShorthandValue(value);
       if (value.includes("\\")) return false;
-      return !/(url\s*\(|expression\s*\(|javascript:|data:)/i.test(value);
+      return !/(url\s*\(|expression\s*\(|javascript:|vbscript:|data:|@import)/i.test(value);
     })
     .join("; ");
 }
