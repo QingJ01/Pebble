@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { useRef, useLayoutEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openMailtoUrl } from "@/app/useMailtoOpen";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
@@ -11,7 +11,9 @@ interface ShadowDomEmailProps {
 export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
   const hostRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  // The shadow body must be ready before paint; otherwise the reader can flash
+  // from the fallback text into the sanitized HTML a frame later.
+  useLayoutEffect(() => {
     if (!hostRef.current) return;
     const shadow = hostRef.current.shadowRoot
       || hostRef.current.attachShadow({ mode: "open" });
@@ -33,6 +35,7 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
         .pebble-email-content {
           box-sizing: border-box;
           max-width: 100%;
+          overflow-x: auto;
           color: inherit;
           background: transparent;
         }
@@ -62,8 +65,39 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
         pre:hover::-webkit-scrollbar-thumb {
           background-color: var(--color-scrollbar-thumb-hover);
         }
-        table { max-width: 100%; border-collapse: collapse; }
+        table { border-collapse: collapse; }
+        .pebble-email-content > table[height="100%"],
+        .pebble-email-content > div[height="100%"],
+        .pebble-email-content > center[height="100%"],
+        .pebble-email-content > table[style*="height:100%" i],
+        .pebble-email-content > table[style*="height: 100%" i],
+        .pebble-email-content > table[style*="height:100vh" i],
+        .pebble-email-content > table[style*="height: 100vh" i],
+        .pebble-email-content > div[style*="height:100%" i],
+        .pebble-email-content > div[style*="height: 100%" i],
+        .pebble-email-content > div[style*="height:100vh" i],
+        .pebble-email-content > div[style*="height: 100vh" i],
+        .pebble-email-content > center[style*="height:100%" i],
+        .pebble-email-content > center[style*="height: 100%" i],
+        .pebble-email-content > center[style*="height:100vh" i],
+        .pebble-email-content > center[style*="height: 100vh" i] {
+          height: auto !important;
+          min-height: 0 !important;
+        }
+        td, th { word-break: normal; overflow-wrap: normal; }
         body, div { word-wrap: break-word; overflow-wrap: break-word; }
+        .blocked-image {
+          display: inline-block;
+          padding: 6px 12px;
+          font-size: 12px;
+          color: #888;
+          background: #f5f5f5;
+          border: 1px dashed #ccc;
+          border-radius: 4px;
+          text-align: center;
+          max-width: 100%;
+          box-sizing: border-box;
+        }
       </style>
       <div class="pebble-email-content">${safeHtml}</div>
     `;

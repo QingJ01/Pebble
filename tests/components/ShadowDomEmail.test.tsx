@@ -72,6 +72,27 @@ describe("ShadowDomEmail", () => {
     expect(shadowMarkup).toContain("color: #202124");
   });
 
+  it("prevents full-height email wrappers from painting a gray viewport canvas", async () => {
+    const html = `
+      <table height="100%" style="height: 100%; background: #f1f1f1">
+        <tbody><tr><td>Cloudflare content</td></tr></tbody>
+      </table>
+    `;
+
+    const { container } = render(<ShadowDomEmail html={html} />);
+    const host = container.firstChild as HTMLDivElement | null;
+
+    await waitFor(() => {
+      expect(host?.shadowRoot?.querySelector(".pebble-email-content")).not.toBeNull();
+    });
+
+    const shadowMarkup = host!.shadowRoot!.innerHTML;
+    expect(shadowMarkup).toContain('.pebble-email-content > table[height="100%"]');
+    expect(shadowMarkup).toContain('style="height: 100%; background: #f1f1f1"');
+    expect(shadowMarkup).toContain("height: auto !important");
+    expect(shadowMarkup).toContain("min-height: 0 !important");
+  });
+
   it("opens http and https links through the external URL command", async () => {
     const { container } = render(
       <ShadowDomEmail html={'<a href="http://pebble.byebug.cn/">Pebble</a>'} />,
