@@ -513,8 +513,8 @@ fn process_img_tag(
     trackers_blocked: &mut Vec<TrackerInfo>,
     images_blocked: &mut u32,
 ) -> ImgAction {
-    // Off mode: no blocking at all
-    if matches!(mode, PrivacyMode::Off) {
+    // Off mode and fully trusted senders bypass image/tracker blocking.
+    if matches!(mode, PrivacyMode::Off | PrivacyMode::TrustSender(_)) {
         return ImgAction::Keep;
     }
 
@@ -888,6 +888,32 @@ mod tests {
         let result = guard.render_safe_html(html, &PrivacyMode::LoadOnce);
         assert!(!result.html.contains("mailchimp.com"));
         assert_eq!(result.trackers_blocked.len(), 1);
+    }
+
+    #[test]
+    fn test_trust_sender_all_allows_tracking_pixels() {
+        let guard = PrivacyGuard::new();
+        let html = r#"<p>Hello</p><img src="https://tracker.example.com/pixel.gif" width="1" height="1"><p>World</p>"#;
+        let result = guard.render_safe_html(
+            html,
+            &PrivacyMode::TrustSender("trusted@example.com".to_string()),
+        );
+        assert!(result.html.contains("tracker.example.com"));
+        assert_eq!(result.trackers_blocked.len(), 0);
+        assert_eq!(result.images_blocked, 0);
+    }
+
+    #[test]
+    fn test_trust_sender_all_allows_known_tracker_domains() {
+        let guard = PrivacyGuard::new();
+        let html = r#"<p>Hello</p><img src="https://tracking.mailchimp.com/open.gif" width="100" height="50"><p>World</p>"#;
+        let result = guard.render_safe_html(
+            html,
+            &PrivacyMode::TrustSender("trusted@example.com".to_string()),
+        );
+        assert!(result.html.contains("mailchimp.com"));
+        assert_eq!(result.trackers_blocked.len(), 0);
+        assert_eq!(result.images_blocked, 0);
     }
 
     #[test]

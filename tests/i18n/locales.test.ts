@@ -82,4 +82,26 @@ describe("locale files", () => {
     expect(zh.status.remoteWritesPending).not.toBe(en.status.remoteWritesPending);
     expect(zh.status.remoteWritesQueued).not.toBe(en.status.remoteWritesQueued);
   });
+
+  it("translates privacy settings failure and off-mode labels in English and Chinese", () => {
+    const en = readLocale("en");
+    const zh = readLocale("zh");
+
+    expect(en.privacy.loadTrustedFailed).toBe("Failed to load trusted senders");
+    expect(en.privacy.removeTrustFailed).toBe("Failed to remove trusted sender");
+    expect(en.privacy.trackerBlockingDesc).toBe(
+      "Known tracking pixels and tracker domains are blocked unless privacy is Off or the sender is fully trusted.",
+    );
+    expect(en.privacy.trackerBlockingOff).toBe(
+      "Tracker blocking is disabled in Off mode. All images and trackers are loaded directly.",
+    );
+    expect(zh.privacy.loadTrustedFailed).toBeTruthy();
+    expect(zh.privacy.removeTrustFailed).toBeTruthy();
+    expect(zh.privacy.trackerBlockingDesc).toBeTruthy();
+    expect(zh.privacy.trackerBlockingOff).toBeTruthy();
+    expect(zh.privacy.loadTrustedFailed).not.toBe(en.privacy.loadTrustedFailed);
+    expect(zh.privacy.removeTrustFailed).not.toBe(en.privacy.removeTrustFailed);
+    expect(zh.privacy.trackerBlockingDesc).not.toBe(en.privacy.trackerBlockingDesc);
+    expect(zh.privacy.trackerBlockingOff).not.toBe(en.privacy.trackerBlockingOff);
+  });
 });

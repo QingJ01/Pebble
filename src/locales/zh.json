@@ -510,7 +510,10 @@
     "off": "无限制",
     "offDesc": "不做任何隐私处理，所有外部图片和跟踪器均直接加载。",
     "trackerBlocking": "跟踪器拦截",
-    "trackerBlockingDesc": "无论隐私模式如何，已知的跟踪像素和跟踪器域名始终会被拦截。",
+    "trackerBlockingDesc": "除非隐私模式为无限制或已完全信任发件人，否则会拦截已知的跟踪像素和跟踪器域名。",
+    "trackerBlockingOff": "无限制模式下不会拦截跟踪器，所有图片和跟踪器都会直接加载。",
+    "loadTrustedFailed": "加载受信任发件人失败",
+    "removeTrustFailed": "移除受信任发件人失败",
     "trustedSenders": "受信任的发件人",
     "noTrustedSenders": "暂无受信任的发件人。可在邮件的隐私横幅中信任发件人。"
   },
