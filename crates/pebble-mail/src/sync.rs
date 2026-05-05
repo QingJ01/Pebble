@@ -315,6 +315,14 @@ fn should_run_imap_deletion_diff(_server_exists: u32, local_count: usize) -> boo
     local_count > 0
 }
 
+fn can_seed_imap_polling_baseline_after_startup(initial_sync_succeeded: bool) -> bool {
+    initial_sync_succeeded
+}
+
+fn can_refresh_imap_polling_baseline_after_idle_fallback(catch_up_succeeded: bool) -> bool {
+    catch_up_succeeded
+}
+
 fn idle_check_recovery_user_error(
     reconnect_error: Option<String>,
     poll_error: Option<String>,
@@ -567,7 +575,7 @@ impl SyncWorker {
         self
     }
 
-    async fn refresh_inbox_uid_count_baseline(&self, last_exists: &mut Option<u32>) {
+    async fn refresh_inbox_uid_count_baseline(&self, last_exists: &mut Option<u32>) -> bool {
         let folders = match self.base.store.list_folders(&self.base.account_id) {
             Ok(folders) => folders,
             Err(e) => {
@@ -575,7 +583,7 @@ impl SyncWorker {
                     "Failed to load folders while seeding IMAP polling baseline for account {}: {}",
                     self.base.account_id, e
                 );
-                return;
+                return false;
             }
         };
 
@@ -583,7 +591,7 @@ impl SyncWorker {
             .iter()
             .find(|folder| folder.role == Some(pebble_core::FolderRole::Inbox))
         else {
-            return;
+            return false;
         };
 
         match self.provider.inner().fetch_all_uids(&inbox.remote_id).await {
@@ -595,12 +603,14 @@ impl SyncWorker {
                     inbox.remote_id,
                     uids.len()
                 );
+                true
             }
             Err(e) => {
                 warn!(
                     "Failed to seed IMAP polling baseline for account {} folder {}: {}",
                     self.base.account_id, inbox.remote_id, e
                 );
+                false
             }
         }
     }
@@ -1417,17 +1427,22 @@ impl SyncWorker {
         }
 
         self.base.emit_sync_started("initial");
-        if let Err(e) = self.initial_sync().await {
-            error!(
-                "Initial sync failed for account {}: {}",
-                self.base.account_id, e
-            );
-            self.base
-                .emit_error("sync", &format!("Initial sync failed: {}", e));
-            self.base.emit_sync_error("initial", &e.to_string());
-        } else {
-            self.base.emit_sync_completed("initial");
-        }
+        let initial_sync_succeeded = match self.initial_sync().await {
+            Ok(()) => {
+                self.base.emit_sync_completed("initial");
+                true
+            }
+            Err(e) => {
+                error!(
+                    "Initial sync failed for account {}: {}",
+                    self.base.account_id, e
+                );
+                self.base
+                    .emit_error("sync", &format!("Initial sync failed: {}", e));
+                self.base.emit_sync_error("initial", &e.to_string());
+                false
+            }
+        };
 
         if config.manual_only() {
             info!("Manual sync completed for account {}", self.base.account_id);
@@ -1511,8 +1526,12 @@ impl SyncWorker {
         }
         drop(idle_trigger_tx);
         let mut idle_watcher_active = idle_watcher.is_some();
-        if !idle_watcher_active {
-            self.refresh_inbox_uid_count_baseline(&mut last_exists)
+        let mut polling_baseline_trusted = false;
+        if !idle_watcher_active
+            && can_seed_imap_polling_baseline_after_startup(initial_sync_succeeded)
+        {
+            polling_baseline_trusted = self
+                .refresh_inbox_uid_count_baseline(&mut last_exists)
                 .await;
         }
 
@@ -1527,6 +1546,23 @@ impl SyncWorker {
                             "Circuit open for account {} ({} consecutive failures); attempting half-open poll after scheduled delay",
                             self.base.account_id, backoff.failure_count()
                         );
+                    }
+
+                    if !polling_baseline_trusted {
+                        match self.poll_new_messages().await {
+                            Ok(()) => {
+                                backoff.record_success();
+                                polling_baseline_trusted = self
+                                    .refresh_inbox_uid_count_baseline(&mut last_exists)
+                                    .await;
+                            }
+                            Err(e) => {
+                                warn!("Catch-up poll before IMAP baseline refresh failed for account {}: {}", self.base.account_id, e);
+                                self.base.emit_error("poll", &format!("Catch-up poll before IMAP baseline refresh failed: {}", e));
+                                backoff.record_failure();
+                            }
+                        }
+                        continue;
                     }
 
                     // Quick check if mailbox has changes before doing full poll
@@ -1621,7 +1657,25 @@ impl SyncWorker {
                                 self.base.account_id
                             );
                             idle_watcher_active = false;
-                            self.refresh_inbox_uid_count_baseline(&mut last_exists).await;
+                            let catch_up_succeeded = match self.poll_new_messages().await {
+                                Ok(()) => {
+                                    backoff.record_success();
+                                    true
+                                }
+                                Err(e) => {
+                                    warn!("Catch-up poll after IMAP IDLE watcher exit failed for account {}: {}", self.base.account_id, e);
+                                    self.base.emit_error("poll", &format!("Catch-up poll after IMAP IDLE watcher exit failed: {}", e));
+                                    backoff.record_failure();
+                                    false
+                                }
+                            };
+                            if can_refresh_imap_polling_baseline_after_idle_fallback(catch_up_succeeded) {
+                                polling_baseline_trusted = self
+                                    .refresh_inbox_uid_count_baseline(&mut last_exists)
+                                    .await;
+                            } else {
+                                polling_baseline_trusted = false;
+                            }
                         }
                     }
                 }
@@ -1835,6 +1889,20 @@ mod tests {
             }),
             std::time::Duration::from_secs(120)
         );
+    }
+
+    #[test]
+    fn startup_baseline_seed_requires_successful_initial_sync() {
+        assert!(can_seed_imap_polling_baseline_after_startup(true));
+        assert!(!can_seed_imap_polling_baseline_after_startup(false));
+    }
+
+    #[test]
+    fn idle_fallback_baseline_refresh_requires_successful_catch_up() {
+        assert!(can_refresh_imap_polling_baseline_after_idle_fallback(true));
+        assert!(!can_refresh_imap_polling_baseline_after_idle_fallback(
+            false
+        ));
     }
 
     #[test]
