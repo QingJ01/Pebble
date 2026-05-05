@@ -169,6 +169,7 @@ export default function Sidebar() {
       aria-label={t("sidebar.navigation", "Sidebar")}
       style={{
         width: sidebarCollapsed ? "48px" : "200px",
+        flexShrink: 0,
         backgroundColor: "var(--color-sidebar-bg)",
         borderRight: "1px solid var(--color-border)",
         transition: "width 150ms ease",
@@ -374,10 +375,12 @@ function SidebarButton({
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       aria-label={collapsed ? label : undefined}
       aria-current={isActive ? "page" : undefined}
       title={collapsed ? label : undefined}
+      disabled={disabled}
       style={{
         ...style,
         backgroundColor: isActive
