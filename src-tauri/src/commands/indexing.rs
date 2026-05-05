@@ -21,6 +21,7 @@ use tauri_plugin_notification::NotificationExt;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
+#[cfg(any(target_os = "linux", windows))]
 const NOTIFICATION_OPEN_ACTION: &str = "open";
 
 /// Rebuild the search index from all messages in the store.
@@ -129,6 +130,7 @@ fn notification_open_payload(account_id: &str, message_id: &str) -> serde_json::
     })
 }
 
+#[cfg(any(target_os = "linux", windows))]
 fn is_notification_open_action(action: &str) -> bool {
     matches!(action, "default" | NOTIFICATION_OPEN_ACTION)
 }
@@ -146,6 +148,10 @@ fn open_message_from_notification(app: &tauri::AppHandle, account_id: &str, mess
     );
 }
 
+#[cfg(any(
+    windows,
+    all(not(windows), not(target_os = "linux"), not(target_os = "macos"))
+))]
 fn show_default_new_mail_notification(app: &tauri::AppHandle, body: &str) -> Result<(), String> {
     app.notification()
         .builder()
@@ -281,7 +287,7 @@ fn show_new_mail_notification(
 
     #[cfg(windows)]
     {
-        return match show_windows_new_mail_notification(
+        match show_windows_new_mail_notification(
             app,
             &body,
             &stored.message.account_id,
@@ -292,32 +298,22 @@ fn show_new_mail_notification(
                 warn!("Failed to show clickable Windows notification, falling back: {e}");
                 show_default_new_mail_notification(app, &body)
             }
-        };
+        }
     }
 
     #[cfg(target_os = "linux")]
     {
-        return show_linux_new_mail_notification(
-            app,
-            &body,
-            &stored.message.account_id,
-            &stored.message.id,
-        );
+        show_linux_new_mail_notification(app, &body, &stored.message.account_id, &stored.message.id)
     }
 
     #[cfg(target_os = "macos")]
     {
-        return show_macos_new_mail_notification(
-            app,
-            &body,
-            &stored.message.account_id,
-            &stored.message.id,
-        );
+        show_macos_new_mail_notification(app, &body, &stored.message.account_id, &stored.message.id)
     }
 
     #[cfg(all(not(windows), not(target_os = "linux"), not(target_os = "macos")))]
     {
-        return show_default_new_mail_notification(app, &body);
+        show_default_new_mail_notification(app, &body)
     }
 }
 
