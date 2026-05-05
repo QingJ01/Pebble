@@ -323,19 +323,23 @@ fn can_refresh_imap_polling_baseline_after_idle_fallback(catch_up_succeeded: boo
     catch_up_succeeded
 }
 
-fn apply_inbox_uid_count_baseline(
+fn apply_local_inbox_uid_baseline(
     last_exists: &mut Option<u32>,
-    current_count: Option<u32>,
+    local_max_uid: Option<u32>,
     has_unresolved_failures: bool,
 ) -> bool {
     if has_unresolved_failures {
         return false;
     }
-    let Some(current_count) = current_count else {
-        return false;
-    };
-    *last_exists = Some(current_count);
+    *last_exists = Some(local_max_uid.unwrap_or(0));
     true
+}
+
+fn should_fail_initial_sync_for_folder_error(
+    folder_role: Option<pebble_core::FolderRole>,
+    is_retryable: bool,
+) -> bool {
+    folder_role == Some(pebble_core::FolderRole::Inbox) || is_retryable
 }
 
 fn idle_check_recovery_user_error(
@@ -590,12 +594,12 @@ impl SyncWorker {
         self
     }
 
-    async fn refresh_inbox_uid_count_baseline(&self, last_exists: &mut Option<u32>) -> bool {
+    fn refresh_inbox_local_uid_baseline(&self, last_exists: &mut Option<u32>) -> bool {
         let folders = match self.base.store.list_folders(&self.base.account_id) {
             Ok(folders) => folders,
             Err(e) => {
                 warn!(
-                    "Failed to load folders while seeding IMAP polling baseline for account {}: {}",
+                    "Failed to load folders while refreshing IMAP polling baseline for account {}: {}",
                     self.base.account_id, e
                 );
                 return false;
@@ -607,7 +611,7 @@ impl SyncWorker {
             .find(|folder| folder.role == Some(pebble_core::FolderRole::Inbox))
         else {
             warn!(
-                "Failed to seed IMAP polling baseline for account {}: no Inbox folder found",
+                "Failed to refresh IMAP polling baseline for account {}: no Inbox folder found",
                 self.base.account_id
             );
             return false;
@@ -621,46 +625,45 @@ impl SyncWorker {
             Ok(has_failures) => has_failures,
             Err(e) => {
                 warn!(
-                    "Failed to check Inbox sync failures while seeding IMAP polling baseline for account {} folder {}: {}",
+                    "Failed to check Inbox sync failures while refreshing IMAP polling baseline for account {} folder {}: {}",
                     self.base.account_id, inbox.remote_id, e
                 );
                 return false;
             }
         };
         if has_unresolved_failures {
-            let _ = apply_inbox_uid_count_baseline(last_exists, None, has_unresolved_failures);
             debug!(
-                "Skipping IMAP polling baseline seed for account {} folder {} because Inbox has unresolved sync failures",
+                "Skipping IMAP polling baseline refresh for account {} folder {} because Inbox has unresolved sync failures",
                 self.base.account_id, inbox.remote_id
             );
             return false;
         }
 
-        match self.provider.inner().fetch_all_uids(&inbox.remote_id).await {
-            Ok(uids) => {
-                let seeded = apply_inbox_uid_count_baseline(
-                    last_exists,
-                    Some(uids.len() as u32),
-                    has_unresolved_failures,
-                );
-                if seeded {
-                    debug!(
-                        "Seeded IMAP polling baseline for account {} folder {} with {} messages",
-                        self.base.account_id,
-                        inbox.remote_id,
-                        uids.len()
-                    );
-                }
-                seeded
-            }
+        let local_max_uid = match self
+            .base
+            .store
+            .get_max_remote_id(&self.base.account_id, &inbox.id)
+        {
+            Ok(remote_id) => remote_id.and_then(|uid| uid.parse::<u32>().ok()),
             Err(e) => {
                 warn!(
-                    "Failed to seed IMAP polling baseline for account {} folder {}: {}",
+                    "Failed to load local Inbox max UID while refreshing IMAP polling baseline for account {} folder {}: {}",
                     self.base.account_id, inbox.remote_id, e
                 );
-                false
+                return false;
             }
+        };
+        let refreshed =
+            apply_local_inbox_uid_baseline(last_exists, local_max_uid, has_unresolved_failures);
+        if refreshed {
+            debug!(
+                "Refreshed IMAP polling baseline for account {} folder {} to local max UID {}",
+                self.base.account_id,
+                inbox.remote_id,
+                last_exists.unwrap_or(0)
+            );
         }
+        refreshed
     }
 
     fn stored_imap_folder_cursor(&self, folder: &pebble_core::Folder) -> ImapFolderCursor {
@@ -798,17 +801,20 @@ impl SyncWorker {
             }
         }
 
-        let mut first_recovered_error = None;
+        let mut first_initial_sync_error = None;
         for folder in &ordered {
             if let Err(e) = self.initial_sync_folder_with_reconnect(folder).await {
                 warn!("Initial sync folder {} failed: {}", folder.name, e);
-                if is_retryable_imap_connection_error(&e) && first_recovered_error.is_none() {
-                    first_recovered_error = Some(e);
+                let is_retryable = is_retryable_imap_connection_error(&e);
+                if should_fail_initial_sync_for_folder_error(folder.role.clone(), is_retryable)
+                    && first_initial_sync_error.is_none()
+                {
+                    first_initial_sync_error = Some(e);
                 }
             }
         }
 
-        if let Some(e) = first_recovered_error {
+        if let Some(e) = first_initial_sync_error {
             return Err(e);
         }
 
@@ -1578,9 +1584,7 @@ impl SyncWorker {
         if !idle_watcher_active
             && can_seed_imap_polling_baseline_after_startup(initial_sync_succeeded)
         {
-            polling_baseline_trusted = self
-                .refresh_inbox_uid_count_baseline(&mut last_exists)
-                .await;
+            polling_baseline_trusted = self.refresh_inbox_local_uid_baseline(&mut last_exists);
         }
 
         loop {
@@ -1600,9 +1604,8 @@ impl SyncWorker {
                         match self.poll_new_messages().await {
                             Ok(()) => {
                                 backoff.record_success();
-                                polling_baseline_trusted = self
-                                    .refresh_inbox_uid_count_baseline(&mut last_exists)
-                                    .await;
+                                polling_baseline_trusted =
+                                    self.refresh_inbox_local_uid_baseline(&mut last_exists);
                             }
                             Err(e) => {
                                 warn!("Catch-up poll before IMAP baseline refresh failed for account {}: {}", self.base.account_id, e);
@@ -1630,6 +1633,8 @@ impl SyncWorker {
                                     backoff.record_failure();
                                 } else {
                                     backoff.record_success();
+                                    polling_baseline_trusted =
+                                        self.refresh_inbox_local_uid_baseline(&mut last_exists);
                                 }
                             }
                             Ok(crate::idle::IdleEvent::Timeout) => {
@@ -1641,7 +1646,11 @@ impl SyncWorker {
                                 let _ = self.provider.disconnect().await;
                                 let recovery_error = match self.provider.connect().await {
                                     Ok(()) => match self.poll_new_messages().await {
-                                        Ok(()) => None,
+                                        Ok(()) => {
+                                            polling_baseline_trusted = self
+                                                .refresh_inbox_local_uid_baseline(&mut last_exists);
+                                            None
+                                        }
                                         Err(poll_error) => {
                                             warn!(
                                                 "Poll after idle check reconnect failed for account {}: {}",
@@ -1718,9 +1727,8 @@ impl SyncWorker {
                                 }
                             };
                             if can_refresh_imap_polling_baseline_after_idle_fallback(catch_up_succeeded) {
-                                polling_baseline_trusted = self
-                                    .refresh_inbox_uid_count_baseline(&mut last_exists)
-                                    .await;
+                                polling_baseline_trusted =
+                                    self.refresh_inbox_local_uid_baseline(&mut last_exists);
                             } else {
                                 polling_baseline_trusted = false;
                             }
@@ -1754,6 +1762,10 @@ impl SyncWorker {
                                 backoff.record_failure();
                             } else {
                                 backoff.record_success();
+                                if !idle_watcher_active {
+                                    polling_baseline_trusted =
+                                        self.refresh_inbox_local_uid_baseline(&mut last_exists);
+                                }
                             }
                         }
                         None => {
@@ -1773,6 +1785,10 @@ impl SyncWorker {
                         continue;
                     } else {
                         backoff.record_success();
+                        if !idle_watcher_active {
+                            polling_baseline_trusted =
+                                self.refresh_inbox_local_uid_baseline(&mut last_exists);
+                        }
                     }
                     let folders = match self.base.store.list_folders(&self.base.account_id) {
                         Ok(f) => f,
@@ -1957,20 +1973,51 @@ mod tests {
     fn imap_polling_baseline_refuses_unresolved_inbox_failures() {
         let mut last_exists = Some(7);
 
-        let seeded = apply_inbox_uid_count_baseline(&mut last_exists, Some(12), true);
+        let seeded = apply_local_inbox_uid_baseline(&mut last_exists, Some(12), true);
 
         assert!(!seeded);
         assert_eq!(last_exists, Some(7));
     }
 
     #[test]
-    fn imap_polling_baseline_seeds_without_unresolved_inbox_failures() {
+    fn imap_polling_baseline_seeds_local_max_uid_without_unresolved_inbox_failures() {
         let mut last_exists = Some(7);
 
-        let seeded = apply_inbox_uid_count_baseline(&mut last_exists, Some(12), false);
+        let seeded = apply_local_inbox_uid_baseline(&mut last_exists, Some(12), false);
 
         assert!(seeded);
         assert_eq!(last_exists, Some(12));
+    }
+
+    #[test]
+    fn imap_polling_baseline_seeds_zero_for_clean_empty_local_inbox() {
+        let mut last_exists = Some(7);
+
+        let seeded = apply_local_inbox_uid_baseline(&mut last_exists, None, false);
+
+        assert!(seeded);
+        assert_eq!(last_exists, Some(0));
+    }
+
+    #[test]
+    fn inbox_initial_sync_folder_failure_fails_initial_sync() {
+        assert!(should_fail_initial_sync_for_folder_error(
+            Some(pebble_core::FolderRole::Inbox),
+            false
+        ));
+    }
+
+    #[test]
+    fn non_inbox_non_retryable_initial_sync_folder_failure_does_not_fail_initial_sync() {
+        assert!(!should_fail_initial_sync_for_folder_error(
+            Some(pebble_core::FolderRole::Sent),
+            false
+        ));
+    }
+
+    #[test]
+    fn non_inbox_retryable_initial_sync_folder_failure_fails_initial_sync() {
+        assert!(should_fail_initial_sync_for_folder_error(None, true));
     }
 
     #[test]

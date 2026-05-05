@@ -20,29 +20,28 @@ pub fn recommended_idle_wait_secs(configured_secs: u64) -> u64 {
     configured_secs.clamp(60, 1740)
 }
 
-fn observe_uid_count(last_exists: &mut Option<u32>, current_count: u32) -> IdleEvent {
+fn observe_highest_uid(last_exists: &mut Option<u32>, current_highest_uid: u32) -> IdleEvent {
     match *last_exists {
         None => {
-            *last_exists = Some(current_count);
+            *last_exists = Some(current_highest_uid);
             IdleEvent::Timeout
         }
-        Some(previous_count) if previous_count != current_count => {
+        Some(previous_highest_uid) if current_highest_uid > previous_highest_uid => {
             debug!(
-                "Mailbox count changed: {} -> {}",
-                previous_count, current_count
+                "Mailbox highest UID advanced: {} -> {}",
+                previous_highest_uid, current_highest_uid
             );
-            *last_exists = Some(current_count);
             IdleEvent::NewMail
         }
         Some(_) => IdleEvent::Timeout,
     }
 }
 
-/// Check if a mailbox has new messages by comparing UID count.
+/// Check if a mailbox has new messages by comparing highest UID.
 ///
 /// This is a lightweight fallback for servers that do not advertise the
-/// IDLE capability. It does a quick UID SEARCH ALL and compares the
-/// message count against the previously observed value.
+/// IDLE capability. It does a quick UID SEARCH ALL and compares the highest
+/// server UID against the last trusted local high-water mark.
 pub async fn check_for_changes(
     provider: &super::imap::ImapProvider,
     mailbox: &str,
@@ -50,8 +49,8 @@ pub async fn check_for_changes(
 ) -> Result<IdleEvent> {
     match provider.fetch_all_uids(mailbox).await {
         Ok(uids) => {
-            let current_count = uids.len() as u32;
-            Ok(observe_uid_count(last_exists, current_count))
+            let current_highest_uid = uids.into_iter().max().unwrap_or(0);
+            Ok(observe_highest_uid(last_exists, current_highest_uid))
         }
         Err(e) => Ok(IdleEvent::Error(e.to_string())),
     }
@@ -96,30 +95,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn first_uid_count_observation_seeds_empty_baseline() {
+    fn first_highest_uid_observation_seeds_empty_baseline() {
         let mut last_exists = None;
 
-        let event = observe_uid_count(&mut last_exists, 0);
+        let event = observe_highest_uid(&mut last_exists, 0);
 
         assert!(matches!(event, IdleEvent::Timeout));
         assert_eq!(last_exists, Some(0));
     }
 
     #[test]
-    fn new_mail_after_empty_baseline_is_detected() {
+    fn new_mail_after_empty_local_uid_baseline_is_detected() {
         let mut last_exists = Some(0);
 
-        let event = observe_uid_count(&mut last_exists, 1);
+        let event = observe_highest_uid(&mut last_exists, 1);
 
         assert!(matches!(event, IdleEvent::NewMail));
-        assert_eq!(last_exists, Some(1));
+        assert_eq!(last_exists, Some(0));
+    }
+
+    #[test]
+    fn same_count_replacement_is_detected_by_highest_uid_without_advancing_baseline() {
+        let mut last_exists = Some(10);
+
+        let event = observe_highest_uid(&mut last_exists, 11);
+
+        assert!(matches!(event, IdleEvent::NewMail));
+        assert_eq!(last_exists, Some(10));
     }
 
     #[test]
     fn first_unknown_non_empty_observation_only_seeds_baseline() {
         let mut last_exists = None;
 
-        let event = observe_uid_count(&mut last_exists, 4);
+        let event = observe_highest_uid(&mut last_exists, 4);
 
         assert!(matches!(event, IdleEvent::Timeout));
         assert_eq!(last_exists, Some(4));
