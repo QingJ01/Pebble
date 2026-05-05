@@ -17,9 +17,14 @@ use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
-use tauri_plugin_notification::NotificationExt;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
+
+#[cfg(any(
+    windows,
+    all(not(windows), not(target_os = "linux"), not(target_os = "macos"))
+))]
+use tauri_plugin_notification::NotificationExt;
 
 #[cfg(any(target_os = "linux", windows))]
 const NOTIFICATION_OPEN_ACTION: &str = "open";
