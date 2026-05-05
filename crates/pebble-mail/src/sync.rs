@@ -591,6 +591,10 @@ impl SyncWorker {
             .iter()
             .find(|folder| folder.role == Some(pebble_core::FolderRole::Inbox))
         else {
+            warn!(
+                "Failed to seed IMAP polling baseline for account {}: no Inbox folder found",
+                self.base.account_id
+            );
             return false;
         };
 
