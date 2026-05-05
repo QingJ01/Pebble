@@ -324,15 +324,25 @@ fn can_refresh_imap_polling_baseline_after_idle_fallback(catch_up_succeeded: boo
 }
 
 fn apply_local_inbox_uid_baseline(
-    last_exists: &mut Option<u32>,
+    last_exists: &mut Option<crate::idle::MailboxUidState>,
+    uidvalidity: Option<u64>,
     local_max_uid: Option<u32>,
     has_unresolved_failures: bool,
 ) -> bool {
     if has_unresolved_failures {
         return false;
     }
-    *last_exists = Some(local_max_uid.unwrap_or(0));
+    *last_exists = Some(crate::idle::MailboxUidState {
+        uidvalidity,
+        highest_uid: local_max_uid.unwrap_or(0),
+    });
     true
+}
+
+fn should_skip_missing_imap_mailbox_during_initial_sync(
+    folder_role: Option<pebble_core::FolderRole>,
+) -> bool {
+    folder_role != Some(pebble_core::FolderRole::Inbox)
 }
 
 fn should_fail_initial_sync_for_folder_error(
@@ -594,7 +604,10 @@ impl SyncWorker {
         self
     }
 
-    fn refresh_inbox_local_uid_baseline(&self, last_exists: &mut Option<u32>) -> bool {
+    fn refresh_inbox_local_uid_baseline(
+        &self,
+        last_exists: &mut Option<crate::idle::MailboxUidState>,
+    ) -> bool {
         let folders = match self.base.store.list_folders(&self.base.account_id) {
             Ok(folders) => folders,
             Err(e) => {
@@ -639,6 +652,22 @@ impl SyncWorker {
             return false;
         }
 
+        let folder_sync_state = match self
+            .base
+            .store
+            .get_folder_sync_state(&self.base.account_id, &inbox.id)
+        {
+            Ok(state) => state,
+            Err(e) => {
+                warn!(
+                    "Failed to load local Inbox cursor while refreshing IMAP polling baseline for account {} folder {}: {}",
+                    self.base.account_id, inbox.remote_id, e
+                );
+                return false;
+            }
+        };
+        let cursor = parse_imap_folder_cursor(folder_sync_state.as_deref());
+
         let local_max_uid = match self
             .base
             .store
@@ -653,14 +682,18 @@ impl SyncWorker {
                 return false;
             }
         };
-        let refreshed =
-            apply_local_inbox_uid_baseline(last_exists, local_max_uid, has_unresolved_failures);
+        let refreshed = apply_local_inbox_uid_baseline(
+            last_exists,
+            cursor.uidvalidity,
+            local_max_uid,
+            has_unresolved_failures,
+        );
         if refreshed {
             debug!(
                 "Refreshed IMAP polling baseline for account {} folder {} to local max UID {}",
                 self.base.account_id,
                 inbox.remote_id,
-                last_exists.unwrap_or(0)
+                last_exists.map(|state| state.highest_uid).unwrap_or(0)
             );
         }
         refreshed
@@ -824,7 +857,12 @@ impl SyncWorker {
     async fn initial_sync_folder_with_reconnect(&self, folder: &pebble_core::Folder) -> Result<()> {
         match self.initial_sync_folder_once(folder).await {
             Ok(()) => Ok(()),
-            Err(e) if is_missing_imap_mailbox_error(&e) => {
+            Err(e)
+                if is_missing_imap_mailbox_error(&e)
+                    && should_skip_missing_imap_mailbox_during_initial_sync(
+                        folder.role.clone(),
+                    ) =>
+            {
                 debug!(
                     "Skipping unavailable IMAP folder {} ({}) for account {}: {}",
                     folder.name, folder.remote_id, self.base.account_id, e
@@ -1541,7 +1579,7 @@ impl SyncWorker {
         }
 
         let mut stop_rx = self.stop_rx.clone();
-        let mut last_exists: Option<u32> = None;
+        let mut last_exists: Option<crate::idle::MailboxUidState> = None;
         let mut backoff = SyncBackoff::new();
         let mut trigger_rx = trigger_rx;
         let mut runtime = RealtimeRuntimeState::new(Duration::from_secs(60), Instant::now());
@@ -1971,32 +2009,73 @@ mod tests {
 
     #[test]
     fn imap_polling_baseline_refuses_unresolved_inbox_failures() {
-        let mut last_exists = Some(7);
+        let mut last_exists = Some(crate::idle::MailboxUidState {
+            uidvalidity: Some(42),
+            highest_uid: 7,
+        });
 
-        let seeded = apply_local_inbox_uid_baseline(&mut last_exists, Some(12), true);
+        let seeded = apply_local_inbox_uid_baseline(&mut last_exists, Some(42), Some(12), true);
 
         assert!(!seeded);
-        assert_eq!(last_exists, Some(7));
+        assert_eq!(
+            last_exists,
+            Some(crate::idle::MailboxUidState {
+                uidvalidity: Some(42),
+                highest_uid: 7,
+            })
+        );
     }
 
     #[test]
     fn imap_polling_baseline_seeds_local_max_uid_without_unresolved_inbox_failures() {
-        let mut last_exists = Some(7);
+        let mut last_exists = Some(crate::idle::MailboxUidState {
+            uidvalidity: Some(42),
+            highest_uid: 7,
+        });
 
-        let seeded = apply_local_inbox_uid_baseline(&mut last_exists, Some(12), false);
+        let seeded = apply_local_inbox_uid_baseline(&mut last_exists, Some(43), Some(12), false);
 
         assert!(seeded);
-        assert_eq!(last_exists, Some(12));
+        assert_eq!(
+            last_exists,
+            Some(crate::idle::MailboxUidState {
+                uidvalidity: Some(43),
+                highest_uid: 12,
+            })
+        );
     }
 
     #[test]
     fn imap_polling_baseline_seeds_zero_for_clean_empty_local_inbox() {
-        let mut last_exists = Some(7);
+        let mut last_exists = Some(crate::idle::MailboxUidState {
+            uidvalidity: Some(42),
+            highest_uid: 7,
+        });
 
-        let seeded = apply_local_inbox_uid_baseline(&mut last_exists, None, false);
+        let seeded = apply_local_inbox_uid_baseline(&mut last_exists, Some(43), None, false);
 
         assert!(seeded);
-        assert_eq!(last_exists, Some(0));
+        assert_eq!(
+            last_exists,
+            Some(crate::idle::MailboxUidState {
+                uidvalidity: Some(43),
+                highest_uid: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn inbox_missing_mailbox_is_not_skipped_during_initial_sync() {
+        assert!(!should_skip_missing_imap_mailbox_during_initial_sync(Some(
+            pebble_core::FolderRole::Inbox
+        )));
+    }
+
+    #[test]
+    fn non_inbox_missing_mailbox_can_be_skipped_during_initial_sync() {
+        assert!(should_skip_missing_imap_mailbox_during_initial_sync(Some(
+            pebble_core::FolderRole::Sent
+        )));
     }
 
     #[test]
