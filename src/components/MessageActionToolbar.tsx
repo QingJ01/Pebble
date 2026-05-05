@@ -36,6 +36,14 @@ export default function MessageActionToolbar({
   const [showKanbanPicker, setShowKanbanPicker] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+  function invalidateMessageViews(includeUnreadCounts = false) {
+    queryClient.invalidateQueries({ queryKey: ["messages"] });
+    queryClient.invalidateQueries({ queryKey: ["threads"] });
+    if (includeUnreadCounts) {
+      queryClient.invalidateQueries({ queryKey: ["folder-unread-counts"] });
+    }
+  }
+
   useEffect(() => {
     if (!showKanbanPicker) return;
     function handleClick() { setShowKanbanPicker(false); }
@@ -97,8 +105,7 @@ export default function MessageActionToolbar({
         try {
           const result = await archiveMessage(message.id);
           if (result === "skipped") return;
-          queryClient.invalidateQueries({ queryKey: ["messages"] });
-          queryClient.invalidateQueries({ queryKey: ["threads"] });
+          invalidateMessageViews(true);
           if (result === "unarchived") {
             useToastStore.getState().addToast({
               message: t("messageActions.unarchiveSuccess", "Message moved to inbox"),
@@ -130,7 +137,7 @@ export default function MessageActionToolbar({
         patchMessagesCache(queryClient, (page) => page.filter((m) => m.id !== message.id));
         try {
           await restoreMessage(message.id);
-          queryClient.invalidateQueries({ queryKey: ["messages"] });
+          invalidateMessageViews(true);
           useToastStore.getState().addToast({
             message: t("messageActions.restoreSuccess", "Message restored to inbox"),
             type: "success",
@@ -262,8 +269,7 @@ export default function MessageActionToolbar({
             patchMessagesCache(queryClient, (page) => page.filter((m) => m.id !== message.id));
             try {
               await deleteMessage(message.id);
-              queryClient.invalidateQueries({ queryKey: ["messages"] });
-              queryClient.invalidateQueries({ queryKey: ["threads"] });
+              invalidateMessageViews(true);
               useToastStore.getState().addToast({
                 message: t("messageActions.deleteSuccess", "Message deleted"),
                 type: "success",
