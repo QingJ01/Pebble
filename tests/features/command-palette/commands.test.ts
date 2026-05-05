@@ -97,10 +97,19 @@ describe("command palette mail commands", () => {
     });
   });
 
-  it("refreshes folder unread counts after mark read", async () => {
+  it("refreshes unread-derived queries after mark read", async () => {
     await command("mail:mark-read").execute();
 
     expect(mocks.updateMessageFlags).toHaveBeenCalledWith("message-1", true);
+    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["threads"] });
+    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
+  });
+
+  it("refreshes unread-derived queries after mark unread", async () => {
+    await command("mail:mark-unread").execute();
+
+    expect(mocks.updateMessageFlags).toHaveBeenCalledWith("message-1", false);
+    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["threads"] });
     expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
   });
 

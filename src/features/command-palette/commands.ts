@@ -55,6 +55,7 @@ export function buildCommands(t: (key: string, defaultValue: string) => string):
         if (id) {
           await updateMessageFlags(id, true);
           queryClient.invalidateQueries({ queryKey: ["messages"] });
+          queryClient.invalidateQueries({ queryKey: ["threads"] });
           queryClient.invalidateQueries({ queryKey: ["folder-unread-counts"] });
         }
       },
@@ -68,6 +69,7 @@ export function buildCommands(t: (key: string, defaultValue: string) => string):
         if (id) {
           await updateMessageFlags(id, false);
           queryClient.invalidateQueries({ queryKey: ["messages"] });
+          queryClient.invalidateQueries({ queryKey: ["threads"] });
           queryClient.invalidateQueries({ queryKey: ["folder-unread-counts"] });
         }
       },
