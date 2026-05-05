@@ -5,6 +5,7 @@ node_modules/
 target/
 dist/
 docs/
+.worktrees/
 
 # Environment / secrets
 .env
