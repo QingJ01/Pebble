@@ -20,25 +20,25 @@ impl KeyStore {
             .map_err(|e| PebbleError::Auth(format!("Keyring entry error: {e}")))?;
 
         match entry.get_secret() {
+            Ok(secret) if secret.len() == DEK_LEN => {
+                // Legacy raw 32-byte DEK — migrate to hex encoding so the
+                // key can round-trip through string-based keychain backends.
+                let mut key = Zeroizing::new([0u8; DEK_LEN]);
+                key.copy_from_slice(&secret);
+                let hex_key = Zeroizing::new(hex::encode(&*key));
+                let _ = entry.set_secret(hex_key.as_bytes());
+                return Ok(key);
+            }
             Ok(hex_secret) => {
                 let hex_secret = Zeroizing::new(hex_secret);
-                match decode_hex(&hex_secret) {
-                    Ok(key) => {
-                        // Re-encode on read so stale binary-format entries get
-                        // transparently migrated to hex next time.
-                        if hex_secret.len() != DEK_LEN * 2 {
-                            let _ = entry.set_secret(hex::encode(&*key).as_bytes());
-                        }
-                        return Ok(key);
-                    }
-                    Err(_) => {
-                        warn!(
-                            "DEK stored with unexpected format (len={}), regenerating",
-                            hex_secret.len()
-                        );
-                        let _ = entry.delete_credential();
-                    }
+                if let Ok(key) = decode_hex(&hex_secret) {
+                    return Ok(key);
                 }
+                warn!(
+                    "DEK stored with unexpected format (len={}), regenerating",
+                    hex_secret.len()
+                );
+                let _ = entry.delete_credential();
             }
             Err(keyring::Error::NoEntry) => {
                 // expected first-run path
@@ -49,7 +49,7 @@ impl KeyStore {
         info!("No usable DEK found, generating new one");
         let mut key = Zeroizing::new([0u8; DEK_LEN]);
         rand::thread_rng().fill_bytes(&mut *key);
-        let hex_key = hex::encode(&*key);
+        let hex_key = Zeroizing::new(hex::encode(&*key));
         entry
             .set_secret(hex_key.as_bytes())
             .map_err(|e| PebbleError::Auth(format!("Failed to store DEK: {e}")))?;
@@ -70,9 +70,8 @@ impl KeyStore {
 
 /// Decode a 32-byte key from its hex representation.
 fn decode_hex(hex_data: &[u8]) -> std::result::Result<Zeroizing<[u8; DEK_LEN]>, ()> {
-    let hex_str =
-        std::str::from_utf8(hex_data).map_err(|_| ())?;
-    let bytes = hex::decode(hex_str).map_err(|_| ())?;
+    let hex_str = std::str::from_utf8(hex_data).map_err(|_| ())?;
+    let bytes = Zeroizing::new(hex::decode(hex_str).map_err(|_| ())?);
     if bytes.len() != DEK_LEN {
         return Err(());
     }
