@@ -3506,6 +3506,7 @@ name = "pebble-crypto"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
+ "hex",
  "keyring",
  "pebble-core",
  "rand 0.8.5",

@@ -230,6 +230,17 @@ fn take_pending_mailto_urls(state: tauri::State<PendingMailtoUrls>) -> Vec<Strin
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Prefer native Wayland when a compositor is available and no backend
+    // has been explicitly configured.  The AppImage GTK plugin hardcodes
+    // GDK_BACKEND=x11 in its AppRun hook (see tauri#8541); in that case
+    // the variable is already set so we won't override it.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty())
+        && std::env::var_os("GDK_BACKEND").is_none()
+    {
+        std::env::set_var("GDK_BACKEND", "wayland");
+    }
+
     let mut builder = tauri::Builder::default();
 
     #[cfg(desktop)]
