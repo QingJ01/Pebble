@@ -1,8 +1,8 @@
 import type { Folder } from "@/lib/api";
 
-export const ALL_ACCOUNTS_SELECT_VALUE = "__all_accounts__";
 export const ALL_ACCOUNTS_ID = "all";
 export const ALL_ACCOUNTS_FOLDER_PREFIX = "all:";
+export const ALL_ACCOUNTS_SELECT_VALUE = "__all_accounts__";
 
 export type FolderRole = NonNullable<Folder["role"]>;
 

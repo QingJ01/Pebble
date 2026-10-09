@@ -53,7 +53,8 @@ vi.mock("react-i18next", () => ({
         "status.remoteWritesRetrying": `${mocks.pendingOpsSummary.in_progress_count} remote writes retrying`,
         "status.realtimeConnected": "Realtime connected",
         "status.keepRunningInBackground": "Keep running in background on close",
-        "status.exitOnClose": "Exit on close",
+        "status.keepRunningBackgroundEnabled": "Keep running in background on close: on",
+        "status.keepRunningBackgroundDisabled": "Keep running in background on close: off",
       };
       return labels[key] ?? fallback ?? key;
     },
@@ -157,9 +158,20 @@ describe("StatusBar accessibility", () => {
 
     const toggle = screen.getByRole("button", { name: "Keep running in background on close" });
     expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(toggle.getAttribute("title")).toBe("Keep running in background on close: off");
 
     fireEvent.click(toggle);
 
     expect(mocks.uiState.setKeepRunningInBackground).toHaveBeenCalledWith(true);
+  });
+
+  it("keeps the toggle name stable and reflects the state in its tooltip", () => {
+    mocks.uiState.keepRunningInBackground = true;
+
+    render(<StatusBar />);
+
+    const toggle = screen.getByRole("button", { name: "Keep running in background on close" });
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(toggle.getAttribute("title")).toBe("Keep running in background on close: on");
   });
 });

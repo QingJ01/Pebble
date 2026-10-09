@@ -48,7 +48,8 @@
         "resizable": true,
         "center": true,
         "visible": false,
-        "backgroundColor": "#1a1a1a"
+        "backgroundColor": "#1a1a1a",
+        "trafficLightPosition": { "x": 12, "y": 12 }
       }
     ]
   }

@@ -48,4 +48,42 @@ describe("ThreadItem", () => {
 
     expect(screen.getByRole("option").className).not.toContain("thread-list-row--unread");
   });
+
+  it("keeps the participants line semibold regardless of read state", () => {
+    render(
+      <ThreadItem
+        thread={makeThread({ unread_count: 0 })}
+        isSelected={false}
+        onClick={vi.fn()}
+      />,
+    );
+
+    const participantsLine = screen.getByText("Sender").parentElement;
+
+    expect(participantsLine?.style.fontWeight).toBe("600");
+  });
+
+  it("renders read subjects regular and unread subjects semibold", () => {
+    const { unmount } = render(
+      <ThreadItem
+        thread={makeThread({ unread_count: 0 })}
+        isSelected={false}
+        onClick={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Thread subject").style.fontWeight).toBe("400");
+
+    unmount();
+
+    render(
+      <ThreadItem
+        thread={makeThread({ unread_count: 1 })}
+        isSelected={false}
+        onClick={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Thread subject").style.fontWeight).toBe("600");
+  });
 });

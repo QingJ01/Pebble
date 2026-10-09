@@ -1,6 +1,6 @@
 import { render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { startSync, stopSync } from "../../src/lib/api";
+import { setKeepRunningInBackground, startSync, stopSync } from "../../src/lib/api";
 
 const mocks = vi.hoisted(() => ({
   accounts: [{ id: "account-1" }, { id: "account-2" }],
@@ -31,6 +31,7 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 vi.mock("../../src/lib/api", () => ({
+  setKeepRunningInBackground: vi.fn().mockResolvedValue(undefined),
   startSync: vi.fn().mockResolvedValue(undefined),
   stopSync: vi.fn().mockResolvedValue(undefined),
 }));
@@ -61,6 +62,15 @@ describe("useCloseToBackground", () => {
     mocks.uiState.keepRunningInBackground = false;
     mocks.uiState.pollInterval = 5;
     mocks.uiState.realtimeMode = "realtime";
+  });
+
+  it("syncs the keep-running preference to the backend guard", async () => {
+    mocks.uiState.keepRunningInBackground = true;
+    render(<Harness />);
+
+    await waitFor(() =>
+      expect(setKeepRunningInBackground).toHaveBeenCalledWith(true),
+    );
   });
 
   it("lets the app close normally when background mode is disabled", async () => {

@@ -1515,6 +1515,171 @@ textarea:focus-visible {
   opacity: 0.42;
 }
 
+.message-participants {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 3px 0;
+}
+
+.message-participants-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+/* Caps the expanded recipient list so large bulk lists scroll in place
+   instead of stretching the message pane past the viewport. The collapse
+   toggle lives outside this container so it always stays reachable. */
+.message-participants-groups--scroll {
+  max-height: 160px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 6px;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar-thumb) transparent;
+}
+
+.message-participants-groups--scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.message-participants-groups--scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background-color: var(--color-scrollbar-thumb);
+}
+
+.message-participants-groups--scroll::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-scrollbar-thumb-hover);
+}
+
+.participant-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.participant-label {
+  flex-shrink: 0;
+}
+
+.participant-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 280px;
+  padding: 1px 3px 1px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-bg);
+}
+
+.participant-chip .participant-name {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-primary);
+}
+
+.participant-chip .contact-address-action {
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+}
+
+.participant-chip .contact-address-action:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--color-bg-hover);
+  color: var(--color-accent);
+}
+
+.participant-toggle {
+  padding: 0 2px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-accent);
+  cursor: pointer;
+}
+
+.participant-toggle:hover {
+  text-decoration: underline;
+}
+
+.attachment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.attachment-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg);
+}
+
+.attachment-card:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
+  background: var(--color-bg-hover);
+}
+
+.attachment-icon-tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.attachment-name {
+  font-size: 13px;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-meta {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.attachment-download {
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.attachment-download:hover:not(:disabled) {
+  background: var(--color-bg);
+  color: var(--color-accent);
+}
+
+.attachment-download:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .contact-primary-button,
 .contact-secondary-button,
 .contact-danger-button {

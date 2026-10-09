@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Image, Trash2, Upload } from "lucide-react";
 import { useUIStore } from "@/stores/ui.store";
-import type { BackgroundImageFit, Language, Theme } from "@/stores/ui.store";
+import type { BackgroundImageFit, Language, SidebarStyle, Theme } from "@/stores/ui.store";
 import { backgroundImageUrl, deleteBackgroundImage, importBackgroundImage } from "@/lib/backgroundImage";
 
 const THEMES: { id: Theme; labelKey: string; descKey: string }[] = [
@@ -22,6 +22,11 @@ const BACKGROUND_FITS: { id: BackgroundImageFit; labelKey: string; fallback: str
   { id: "repeat", labelKey: "settings.backgroundFitRepeat", fallback: "Tile" },
 ];
 
+const SIDEBAR_STYLES: { id: SidebarStyle; labelKey: string; descKey: string }[] = [
+  { id: "grouped", labelKey: "settings.sidebarStyleGrouped", descKey: "settings.sidebarStyleGroupedDesc" },
+  { id: "classic", labelKey: "settings.sidebarStyleClassic", descKey: "settings.sidebarStyleClassicDesc" },
+];
+
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === "string") return error;
@@ -38,6 +43,8 @@ export default function AppearanceTab() {
   const language = useUIStore((s) => s.language);
   const setLanguage = useUIStore((s) => s.setLanguage);
   const backgroundImage = useUIStore((s) => s.backgroundImage);
+  const sidebarStyle = useUIStore((s) => s.sidebarStyle);
+  const setSidebarStyle = useUIStore((s) => s.setSidebarStyle);
   const setBackgroundImage = useUIStore((s) => s.setBackgroundImage);
   const setBackgroundImageFit = useUIStore((s) => s.setBackgroundImageFit);
   const setBackgroundImageOpacity = useUIStore((s) => s.setBackgroundImageOpacity);
@@ -124,6 +131,36 @@ export default function AppearanceTab() {
             }}
           >
             <div style={{ fontWeight: 600, fontSize: "13px" }}>{l.label}</div>
+          </button>
+        ))}
+      </div>
+
+      <h3 style={{ fontSize: "14px", fontWeight: 600, marginBottom: "16px", marginTop: "32px" }}>
+        {t("settings.sidebarStyle", "Sidebar style")}
+      </h3>
+      <div
+        role="group"
+        aria-label={t("settings.sidebarStyle", "Sidebar style")}
+        style={{ display: "flex", gap: "12px" }}
+      >
+        {SIDEBAR_STYLES.map((style) => (
+          <button
+            key={style.id}
+            type="button"
+            onClick={() => setSidebarStyle(style.id)}
+            style={{
+              flex: 1,
+              padding: "16px",
+              borderRadius: "8px",
+              border: sidebarStyle === style.id ? "2px solid var(--color-accent)" : "1px solid var(--color-border)",
+              backgroundColor: sidebarStyle === style.id ? "var(--color-bg-hover)" : "transparent",
+              cursor: "pointer",
+              textAlign: "left",
+              color: "var(--color-text-primary)",
+            }}
+          >
+            <div style={{ fontWeight: 600, fontSize: "13px", marginBottom: "4px" }}>{t(style.labelKey)}</div>
+            <div style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>{t(style.descKey)}</div>
           </button>
         ))}
       </div>

@@ -14,6 +14,7 @@ export type NetworkStatus = "online" | "offline";
 export type RealtimeMode = "realtime" | "polling" | "manual" | "backoff" | "offline" | "auth_required" | "error";
 export type RealtimePreference = "realtime" | "balanced" | "battery" | "manual";
 export type BackgroundImageFit = "cover" | "contain" | "repeat";
+export type SidebarStyle = "grouped" | "classic";
 
 export interface BackgroundImageSettings {
   path: string;
@@ -42,6 +43,11 @@ const DEFAULT_BACKGROUND_IMAGE_FIT: BackgroundImageFit = "cover";
 const DEFAULT_BACKGROUND_IMAGE_OPACITY = 0.35;
 const MIN_BACKGROUND_IMAGE_OPACITY = 0.05;
 const MAX_BACKGROUND_IMAGE_OPACITY = 1;
+const SIDEBAR_STYLE_KEY = "pebble-sidebar-style";
+
+function readSidebarStyle(): SidebarStyle {
+  return profileLocalStorage.getItem(SIDEBAR_STYLE_KEY) === "classic" ? "classic" : "grouped";
+}
 
 function readRealtimePreference(): RealtimePreference {
   const stored = profileLocalStorage.getItem(REALTIME_PREFERENCE_KEY);
@@ -96,6 +102,20 @@ export function readKeepRunningInBackgroundPreference(): boolean {
   return stored === null ? true : stored === "true";
 }
 
+// The status bar once described this toggle by the action a click would
+// perform ("Exit on close") while styling the current state, so users who
+// meant to keep the app in the background often stored "false" by mistake.
+// Correct it once for existing profiles.
+const KEEP_RUNNING_BACKGROUND_RESET_MARKER = "pebble-keep-running-background-reset-v1";
+
+function correctMisleadingKeepRunningPreferenceOnce() {
+  if (profileLocalStorage.getItem(KEEP_RUNNING_BACKGROUND_RESET_MARKER) === "done") return;
+  if (profileLocalStorage.getItem(KEEP_RUNNING_BACKGROUND_KEY) === "false") {
+    profileLocalStorage.setItem(KEEP_RUNNING_BACKGROUND_KEY, "true");
+  }
+  profileLocalStorage.setItem(KEEP_RUNNING_BACKGROUND_RESET_MARKER, "done");
+}
+
 export function realtimePreferenceToPollInterval(mode: RealtimePreference): number {
   switch (mode) {
     case "realtime":
@@ -111,10 +131,12 @@ export function realtimePreferenceToPollInterval(mode: RealtimePreference): numb
 
 const initialRealtimeMode = readRealtimePreference();
 const initialNotificationsEnabled = readNotificationsEnabledPreference();
+correctMisleadingKeepRunningPreferenceOnce();
 const initialKeepRunningInBackground = readKeepRunningInBackgroundPreference();
 const initialStartHiddenToTray = readStartHiddenToTrayPreference();
 const initialLanguage = getInitialLanguage();
 const initialBackgroundImage = readBackgroundImageSettings();
+const initialSidebarStyle = readSidebarStyle();
 
 /** Resolve "system" theme to an actual "dark" | "light" value. */
 export function resolveTheme(theme: Theme): "dark" | "light" {
@@ -158,6 +180,8 @@ interface UIState {
   setBackgroundImageFit: (fit: BackgroundImageFit) => void;
   setBackgroundImageOpacity: (opacity: number) => void;
   clearBackgroundImage: () => void;
+  sidebarStyle: SidebarStyle;
+  setSidebarStyle: (style: SidebarStyle) => void;
   setLanguage: (lang: Language) => void;
   setSyncStatus: (status: "idle" | "syncing" | "error") => void;
   setNetworkStatus: (status: NetworkStatus) => void;
@@ -285,6 +309,11 @@ export const useUIStore = create<UIState>((set) => ({
   clearBackgroundImage: () => {
     persistBackgroundImageSettings(null);
     set({ backgroundImage: null });
+  },
+  sidebarStyle: initialSidebarStyle,
+  setSidebarStyle: (style) => {
+    profileLocalStorage.setItem(SIDEBAR_STYLE_KEY, style);
+    set({ sidebarStyle: style });
   },
   setLanguage: (lang) => {
     i18n.changeLanguage(lang);

@@ -30,6 +30,7 @@ pub struct AppState {
     pub attachments_dir: PathBuf,
     pub notifications_enabled: Arc<AtomicBool>,
     pub notification_attention_active: Arc<AtomicBool>,
+    pub keep_running_in_background: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -51,6 +52,7 @@ impl AppState {
             attachments_dir,
             notifications_enabled: Arc::new(AtomicBool::new(true)),
             notification_attention_active: Arc::new(AtomicBool::new(false)),
+            keep_running_in_background: Arc::new(AtomicBool::new(true)),
         }
     }
 }
