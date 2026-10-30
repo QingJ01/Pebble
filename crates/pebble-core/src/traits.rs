@@ -84,6 +84,10 @@ pub struct SearchHit {
 }
 
 #[async_trait]
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait adds must_use to an already must-use boxed future"
+)]
 pub trait MailTransport: Send + Sync {
     async fn authenticate(&mut self, credentials: &AuthCredentials) -> Result<()>;
     async fn fetch_messages(&self, query: &FetchQuery) -> Result<FetchResult>;
@@ -93,12 +97,20 @@ pub trait MailTransport: Send + Sync {
 }
 
 #[async_trait]
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait adds must_use to an already must-use boxed future"
+)]
 pub trait FolderProvider: Send + Sync {
     async fn list_folders(&self) -> Result<Vec<Folder>>;
     async fn move_message(&self, remote_id: &str, to_folder_id: &str) -> Result<String>;
 }
 
 #[async_trait]
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait adds must_use to an already must-use boxed future"
+)]
 pub trait LabelProvider: Send + Sync {
     async fn list_labels(&self) -> Result<Vec<Folder>>;
     async fn modify_labels(&self, remote_id: &str, add: &[String], remove: &[String])
@@ -106,6 +118,10 @@ pub trait LabelProvider: Send + Sync {
 }
 
 #[async_trait]
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait adds must_use to an already must-use boxed future"
+)]
 pub trait SearchEngine: Send + Sync {
     async fn index_message(&self, message: &Message) -> Result<()>;
     async fn search(&self, query: &SearchQuery) -> Result<Vec<SearchHit>>;
@@ -113,12 +129,20 @@ pub trait SearchEngine: Send + Sync {
 }
 
 #[async_trait]
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait adds must_use to an already must-use boxed future"
+)]
 pub trait CategoryProvider: Send + Sync {
     async fn list_categories(&self) -> Result<Vec<Category>>;
     async fn set_categories(&self, message_id: &str, categories: &[String]) -> Result<()>;
 }
 
 #[async_trait]
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait adds must_use to an already must-use boxed future"
+)]
 pub trait DraftProvider: Send + Sync {
     async fn save_draft(&self, draft: &DraftMessage) -> Result<String>;
     async fn update_draft(&self, draft_id: &str, draft: &DraftMessage) -> Result<()>;
