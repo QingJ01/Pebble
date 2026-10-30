@@ -158,7 +158,7 @@
     "themeSystemDesc": "自动匹配系统设置",
     "sidebarStyle": "侧边栏样式",
     "sidebarStyleGrouped": "按账户分组",
-    "sidebarStyleGroupedDesc": "每个邮箱独立一组，包含收件箱、归档和废纸篓，可折叠",
+    "sidebarStyleGroupedDesc": "每个邮箱独立一组，包含全部系统和自定义文件夹，可折叠",
     "sidebarStyleClassic": "经典模式",
     "sidebarStyleClassicDesc": "下拉切换邮箱，所有邮箱共用一个文件夹列表",
     "backgroundImage": "\u80cc\u666f\u56fe",

@@ -158,7 +158,7 @@
     "themeSystemDesc": "Follows your OS setting",
     "sidebarStyle": "Sidebar style",
     "sidebarStyleGrouped": "Grouped by account",
-    "sidebarStyleGroupedDesc": "Each account is tiled with its own inbox, archive, and trash, and can be collapsed",
+    "sidebarStyleGroupedDesc": "Each account groups its system and custom folders and can be collapsed",
     "sidebarStyleClassic": "Classic",
     "sidebarStyleClassicDesc": "Account dropdown with a single folder list for all accounts",
     "backgroundImage": "Background image",

@@ -182,6 +182,54 @@ describe("Sidebar account groups", () => {
     expect(useUIStore.getState().activeView).toBe("inbox");
   });
 
+  it("renders all system and custom folders in sidebar order", () => {
+    mocks.folders.push(
+      folder("Projects", "account-2", null),
+      folder("a2-spam", "account-2", "spam"),
+      folder("a2-drafts", "account-2", "drafts"),
+      folder("a2-sent", "account-2", "sent"),
+    );
+
+    render(<Sidebar />);
+
+    const labels = within(mailNav()).getAllByRole("button").map((button) => button.textContent);
+    expect(labels.slice(labels.indexOf("second@example.com"))).toEqual([
+      "second@example.com", "Inbox", "Sent", "Drafts", "Trash", "Spam", "Projects",
+    ]);
+  });
+
+  it.each([
+    ["sent", "Sent"],
+    ["drafts", "Drafts"],
+    ["spam", "Spam"],
+    [null, "Projects"],
+  ] as const)("selects a restored %s folder in its own account", async (role, label) => {
+    mocks.folders.push(folder("restored-folder", "account-2", role));
+    mocks.folders[mocks.folders.length - 1].name = label;
+
+    render(<Sidebar />);
+    fireEvent.click(screen.getByRole("button", { name: label }));
+
+    await waitFor(() => {
+      expect(useMailStore.getState().activeAccountId).toBe("account-2");
+      expect(useMailStore.getState().activeFolderId).toBe("restored-folder");
+      expect(useUIStore.getState().activeView).toBe("inbox");
+    });
+  });
+
+  it("keeps custom folders accessible in the collapsed sidebar", async () => {
+    useUIStore.setState({ sidebarCollapsed: true });
+    mocks.folders.push(folder("Projects", "account-2", null));
+
+    render(<Sidebar />);
+    fireEvent.click(screen.getByRole("button", { name: "second@example.com · Projects" }));
+
+    await waitFor(() => {
+      expect(useMailStore.getState().activeAccountId).toBe("account-2");
+      expect(useMailStore.getState().activeFolderId).toBe("Projects");
+    });
+  });
+
   it("collapses an account group via its header and persists the state", async () => {
     render(<Sidebar />);
 
@@ -203,13 +251,14 @@ describe("Sidebar account groups", () => {
 
   it("uses per-folder unread counts for account entries and the merged count for overview", () => {
     useUIStore.setState({ showFolderUnreadCount: true });
-    mocks.unreadCounts = { "a1-inbox": 5, "a2-inbox": 3 };
+    mocks.folders.push(folder("a1-extra-inbox", "account-1", "inbox"));
+    mocks.unreadCounts = { "a1-inbox": 5, "a1-extra-inbox": 1, "a2-inbox": 3 };
 
     render(<Sidebar />);
 
-    expect(within(screen.getByRole("button", { name: /Overview/ })).getByText("8")).toBeTruthy();
+    expect(within(screen.getByRole("button", { name: /Overview/ })).getByText("9")).toBeTruthy();
     const inboxButtons = screen.getAllByRole("button", { name: /Inbox/ });
-    expect(within(inboxButtons[0]).getByText("5")).toBeTruthy();
+    expect(within(inboxButtons[0]).getByText("6")).toBeTruthy();
     expect(within(inboxButtons[1]).getByText("3")).toBeTruthy();
   });
 

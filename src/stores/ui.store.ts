@@ -102,20 +102,6 @@ export function readKeepRunningInBackgroundPreference(): boolean {
   return stored === null ? true : stored === "true";
 }
 
-// The status bar once described this toggle by the action a click would
-// perform ("Exit on close") while styling the current state, so users who
-// meant to keep the app in the background often stored "false" by mistake.
-// Correct it once for existing profiles.
-const KEEP_RUNNING_BACKGROUND_RESET_MARKER = "pebble-keep-running-background-reset-v1";
-
-function correctMisleadingKeepRunningPreferenceOnce() {
-  if (profileLocalStorage.getItem(KEEP_RUNNING_BACKGROUND_RESET_MARKER) === "done") return;
-  if (profileLocalStorage.getItem(KEEP_RUNNING_BACKGROUND_KEY) === "false") {
-    profileLocalStorage.setItem(KEEP_RUNNING_BACKGROUND_KEY, "true");
-  }
-  profileLocalStorage.setItem(KEEP_RUNNING_BACKGROUND_RESET_MARKER, "done");
-}
-
 export function realtimePreferenceToPollInterval(mode: RealtimePreference): number {
   switch (mode) {
     case "realtime":
@@ -131,7 +117,6 @@ export function realtimePreferenceToPollInterval(mode: RealtimePreference): numb
 
 const initialRealtimeMode = readRealtimePreference();
 const initialNotificationsEnabled = readNotificationsEnabledPreference();
-correctMisleadingKeepRunningPreferenceOnce();
 const initialKeepRunningInBackground = readKeepRunningInBackgroundPreference();
 const initialStartHiddenToTray = readStartHiddenToTrayPreference();
 const initialLanguage = getInitialLanguage();

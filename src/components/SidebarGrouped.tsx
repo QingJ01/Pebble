@@ -2,6 +2,10 @@ import { accountOptionLabel } from "@/lib/accountIdentity";
 import { useEffect, useMemo, useState } from "react";
 import {
   Inbox,
+  Send,
+  FileEdit,
+  AlertTriangle,
+  Folder,
   Archive,
   Trash2,
   LayoutGrid,
@@ -24,6 +28,7 @@ import { useFolderUnreadCountsForAccounts } from "../hooks/queries/useFolderUnre
 import {
   allAccountsFolderId,
   buildAllAccountsFolders,
+  sortFoldersForSidebar,
   unreadCountForFolder,
 } from "../lib/folderAggregation";
 import { profileLocalStorage } from "../lib/profileStorage";
@@ -32,11 +37,13 @@ import type { Account, Folder as FolderType } from "../lib/api";
 const EMPTY_ACCOUNTS: Account[] = [];
 const EMPTY_FOLDERS: FolderType[] = [];
 
-const ACCOUNT_GROUP_ROLES = ["inbox", "archive", "trash"] as const;
-type AccountGroupRole = (typeof ACCOUNT_GROUP_ROLES)[number];
+type AccountGroupRole = NonNullable<FolderType["role"]>;
 
 const ROLE_ICONS: Record<AccountGroupRole, React.ReactNode> = {
   inbox: <Inbox size={16} />,
+  sent: <Send size={16} />,
+  drafts: <FileEdit size={16} />,
+  spam: <AlertTriangle size={16} />,
   archive: <Archive size={16} />,
   trash: <Trash2 size={16} />,
 };
@@ -75,19 +82,19 @@ export default function SidebarGrouped() {
 
   const ROLE_LABELS: Record<AccountGroupRole, string> = {
     inbox: t("sidebar.inbox"),
+    sent: t("sidebar.sent"),
+    drafts: t("sidebar.drafts"),
+    spam: t("sidebar.spam"),
     archive: t("sidebar.archive"),
     trash: t("sidebar.trash"),
   };
 
-  // First folder per role, mirroring the single-account sidebar order.
-  const roleFoldersByAccount = useMemo(() => {
-    const byAccount = new Map<string, Map<AccountGroupRole, FolderType>>();
+  const foldersByAccount = useMemo(() => {
+    const byAccount = new Map<string, FolderType[]>();
     for (const folder of folders) {
-      const role = folder.role as AccountGroupRole | null;
-      if (!role || !ACCOUNT_GROUP_ROLES.includes(role)) continue;
-      const roles = byAccount.get(folder.account_id) ?? new Map<AccountGroupRole, FolderType>();
-      if (!roles.has(role)) roles.set(role, folder);
-      byAccount.set(folder.account_id, roles);
+      const accountFolders = byAccount.get(folder.account_id) ?? [];
+      accountFolders.push(folder);
+      byAccount.set(folder.account_id, accountFolders);
     }
     return byAccount;
   }, [folders]);
@@ -258,10 +265,8 @@ export default function SidebarGrouped() {
             />
             {accounts.map((account) => {
               const accountName = accountOptionLabel(account);
-              const entries = ACCOUNT_GROUP_ROLES.flatMap((role) => {
-                const folder = roleFoldersByAccount.get(account.id)?.get(role);
-                return folder ? [{ role, folder }] : [];
-              });
+              const accountFolders = foldersByAccount.get(account.id) ?? EMPTY_FOLDERS;
+              const entries = sortFoldersForSidebar(accountFolders);
               const groupCollapsed = !sidebarCollapsed && collapsedAccountIds.has(account.id);
               return (
                 <div
@@ -290,18 +295,21 @@ export default function SidebarGrouped() {
                     </button>
                   )}
                   {!groupCollapsed && (entries.length > 0
-                    ? entries.map(({ role, folder }) => (
-                        <SidebarButton
-                          key={folder.id}
-                          icon={ROLE_ICONS[role]}
-                          label={sidebarCollapsed ? `${accountName} · ${ROLE_LABELS[role]}` : ROLE_LABELS[role]}
-                          badge={showUnread ? (unreadCounts[folder.id] ?? 0) : undefined}
-                          isActive={activeView === "inbox" && activeAccountId === account.id && activeFolderId === folder.id}
-                          collapsed={sidebarCollapsed}
-                          style={childButtonBase}
-                          onClick={() => handleFolderSelect(account.id, folder.id)}
-                        />
-                      ))
+                    ? entries.map((folder) => {
+                        const label = folder.role ? ROLE_LABELS[folder.role] : folder.name;
+                        return (
+                          <SidebarButton
+                            key={folder.id}
+                            icon={folder.role ? ROLE_ICONS[folder.role] : <Folder size={16} />}
+                            label={sidebarCollapsed ? `${accountName} · ${label}` : label}
+                            badge={showUnread ? unreadCountForFolder(folder.id, accountFolders, unreadCounts) : undefined}
+                            isActive={activeView === "inbox" && activeAccountId === account.id && activeFolderId === folder.id}
+                            collapsed={sidebarCollapsed}
+                            style={childButtonBase}
+                            onClick={() => handleFolderSelect(account.id, folder.id)}
+                          />
+                        );
+                      })
                     : !sidebarCollapsed && foldersFetched && (
                         <div style={{ padding: "4px 8px", fontSize: "12px", color: "var(--color-text-secondary)" }}>
                           {t("sidebar.noFolders", "No folders yet")}

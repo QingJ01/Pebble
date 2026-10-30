@@ -19,22 +19,35 @@ describe("UIStore keep-running-in-background initialization", () => {
     expect(readKeepRunningInBackgroundPreference()).toBe(true);
   });
 
-  it("corrects a stored false once for existing profiles", async () => {
-    localStorage.setItem("pebble-keep-running-background", "false");
+  it.each([false, true])("preserves an explicit background preference of %s on upgrade", async (enabled) => {
+    localStorage.setItem("pebble-keep-running-background", String(enabled));
 
-    const { readKeepRunningInBackgroundPreference } = await import("../../src/stores/ui.store");
+    const { readKeepRunningInBackgroundPreference, useUIStore } = await import("../../src/stores/ui.store");
 
-    expect(readKeepRunningInBackgroundPreference()).toBe(true);
-    expect(localStorage.getItem("pebble-keep-running-background")).toBe("true");
-    expect(localStorage.getItem("pebble-keep-running-background-reset-v1")).toBe("done");
+    expect(readKeepRunningInBackgroundPreference()).toBe(enabled);
+    expect(useUIStore.getState().keepRunningInBackground).toBe(enabled);
+    expect(localStorage.getItem("pebble-keep-running-background")).toBe(String(enabled));
+    expect(localStorage.getItem("pebble-keep-running-background-reset-v1")).toBeNull();
   });
 
-  it("respects a false stored after the one-time correction", async () => {
+  it("preserves false even when an old reset marker exists", async () => {
     localStorage.setItem("pebble-keep-running-background", "false");
     localStorage.setItem("pebble-keep-running-background-reset-v1", "done");
 
     const { readKeepRunningInBackgroundPreference } = await import("../../src/stores/ui.store");
 
     expect(readKeepRunningInBackgroundPreference()).toBe(false);
+  });
+
+  it("preserves a disabled preference migrated into profile-scoped storage", async () => {
+    localStorage.setItem("pebble-keep-running-background", "false");
+    const { initializeProfileStorageNamespace, profileLocalStorage } = await import("../../src/lib/profileStorage");
+    await initializeProfileStorageNamespace(async () => "upgrade-test");
+
+    const { useUIStore } = await import("../../src/stores/ui.store");
+
+    expect(useUIStore.getState().keepRunningInBackground).toBe(false);
+    expect(profileLocalStorage.getItem("pebble-keep-running-background")).toBe("false");
+    expect(localStorage.getItem("pebble-keep-running-background")).toBeNull();
   });
 });
