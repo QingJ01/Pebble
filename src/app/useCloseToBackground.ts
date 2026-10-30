@@ -1,13 +1,23 @@
 import { useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useUIStore } from "@/stores/ui.store";
-import { startSync } from "@/lib/api";
+import { setKeepRunningInBackground, startSync } from "@/lib/api";
 import { useAccountsQuery } from "@/hooks/queries";
 
 export function useCloseToBackground() {
   const { data: accounts } = useAccountsQuery();
   const pollInterval = useUIStore((s) => s.pollInterval);
   const realtimeMode = useUIStore((s) => s.realtimeMode);
+  const keepRunningInBackground = useUIStore((s) => s.keepRunningInBackground);
+
+  // Keep the Rust close guard aligned with the frontend preference source, so
+  // a close request is handled on the Rust side even before the JS listener
+  // below has registered.
+  useEffect(() => {
+    setKeepRunningInBackground(keepRunningInBackground).catch((err) =>
+      console.warn("Failed to sync keep-running preference to backend", err),
+    );
+  }, [keepRunningInBackground]);
 
   useEffect(() => {
     const appWindow = getCurrentWindow();

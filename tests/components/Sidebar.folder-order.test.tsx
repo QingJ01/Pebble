@@ -86,6 +86,7 @@ describe("Sidebar folder order", () => {
       previousView: "inbox",
       showFolderUnreadCount: false,
       backgroundImage: null,
+      sidebarStyle: "classic",
     });
     useMailStore.setState({
       activeAccountId: "account-1",

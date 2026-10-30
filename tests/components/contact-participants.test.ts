@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { uniqueContactParticipants } from "@/components/contact-participants";
+import { uniqueContactParticipants, uniqueParticipants } from "@/components/contact-participants";
+
+describe("uniqueParticipants", () => {
+  it("deduplicates addresses case-insensitively and drops empty ones", () => {
+    expect(uniqueParticipants([
+      { name: "Alice", address: " alice@example.com " },
+      { name: "Alice duplicate", address: "ALICE@example.com" },
+      { name: "Missing", address: "" },
+    ])).toEqual([{ name: "Alice", address: "alice@example.com" }]);
+  });
+});
 
 describe("uniqueContactParticipants", () => {
   it("deduplicates From, To, and Cc addresses case-insensitively", () => {

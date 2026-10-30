@@ -50,6 +50,8 @@
     "search": "Search",
     "mailFolders": "Mail folders",
     "tools": "Tools",
+    "overview": "Overview",
+    "noFolders": "No folders yet",
     "allAccounts": "All accounts"
   },
   "inbox": {
@@ -154,6 +156,11 @@
     "themeDarkDesc": "Easy on the eyes",
     "themeSystem": "System",
     "themeSystemDesc": "Follows your OS setting",
+    "sidebarStyle": "Sidebar style",
+    "sidebarStyleGrouped": "Grouped by account",
+    "sidebarStyleGroupedDesc": "Each account is tiled with its own inbox, archive, and trash, and can be collapsed",
+    "sidebarStyleClassic": "Classic",
+    "sidebarStyleClassicDesc": "Account dropdown with a single folder list for all accounts",
     "backgroundImage": "Background image",
     "backgroundImageDesc": "Stored locally in Pebble's app data folder.",
     "noBackgroundImage": "No background image",
@@ -362,7 +369,8 @@
     "syncNow": "Sync now",
     "stopSync": "Stop sync",
     "keepRunningInBackground": "Keep running in background on close",
-    "exitOnClose": "Exit on close"
+    "keepRunningBackgroundEnabled": "Keep running in background on close: on",
+    "keepRunningBackgroundDisabled": "Keep running in background on close: off"
   },
   "attachments": {
     "title": "Attachments",
@@ -792,5 +800,9 @@
     "body": "Message body",
     "to": "To:",
     "cc": "Cc:"
+  },
+  "participants": {
+    "more": "+{{count}} more",
+    "showLess": "Show less"
   }
 }

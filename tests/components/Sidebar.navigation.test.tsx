@@ -80,6 +80,7 @@ describe("Sidebar navigation", () => {
       activeView: "compose",
       previousView: "inbox",
       showFolderUnreadCount: false,
+      sidebarStyle: "grouped",
     });
     useMailStore.setState({
       activeAccountId: "account-1",

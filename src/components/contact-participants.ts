@@ -3,19 +3,23 @@ export interface ContactParticipant {
   address: string;
 }
 
+export function uniqueParticipants(participants: readonly ContactParticipant[]): ContactParticipant[] {
+  const seen = new Set<string>();
+  const unique: ContactParticipant[] = [];
+  for (const participant of participants) {
+    const address = participant.address.trim();
+    const normalizedAddress = address.toLowerCase();
+    if (!normalizedAddress || seen.has(normalizedAddress)) continue;
+    seen.add(normalizedAddress);
+    unique.push({ name: participant.name, address });
+  }
+  return unique;
+}
+
 export function uniqueContactParticipants(
   sender: ContactParticipant,
   to: readonly ContactParticipant[],
   cc: readonly ContactParticipant[],
 ): ContactParticipant[] {
-  const seen = new Set<string>();
-  const participants: ContactParticipant[] = [];
-  for (const participant of [sender, ...to, ...cc]) {
-    const address = participant.address.trim();
-    const normalizedAddress = address.toLowerCase();
-    if (!normalizedAddress || seen.has(normalizedAddress)) continue;
-    seen.add(normalizedAddress);
-    participants.push({ name: participant.name, address });
-  }
-  return participants;
+  return uniqueParticipants([sender, ...to, ...cc]);
 }

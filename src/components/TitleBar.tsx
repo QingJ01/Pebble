@@ -29,11 +29,9 @@ export default function TitleBar() {
       className="flex items-center justify-between h-9 select-none"
       style={{ backgroundColor: "var(--color-titlebar-bg)" }}
     >
-      <div
-        data-tauri-drag-region
-        className="flex items-center gap-2 px-3"
-        style={isMac ? { paddingLeft: "78px" } : undefined}
-      >
+      {/* Brand block under the native titlebar; the macOS traffic lights sit at
+          the top-left corner via trafficLightPosition in tauri.conf.json. */}
+      <div data-tauri-drag-region className="flex items-center gap-2 px-3">
         <img
           data-tauri-drag-region
           src={iconUrl}

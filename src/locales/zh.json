@@ -50,6 +50,8 @@
     "search": "搜索",
     "mailFolders": "邮件文件夹",
     "tools": "工具",
+    "overview": "总览",
+    "noFolders": "暂无文件夹",
     "allAccounts": "全部邮箱"
   },
   "inbox": {
@@ -154,6 +156,11 @@
     "themeDarkDesc": "保护你的眼睛",
     "themeSystem": "跟随系统",
     "themeSystemDesc": "自动匹配系统设置",
+    "sidebarStyle": "侧边栏样式",
+    "sidebarStyleGrouped": "按账户分组",
+    "sidebarStyleGroupedDesc": "每个邮箱独立一组，包含收件箱、归档和废纸篓，可折叠",
+    "sidebarStyleClassic": "经典模式",
+    "sidebarStyleClassicDesc": "下拉切换邮箱，所有邮箱共用一个文件夹列表",
     "backgroundImage": "\u80cc\u666f\u56fe",
     "backgroundImageDesc": "\u56fe\u7247\u4f1a\u4fdd\u5b58\u5728 Pebble \u7684\u5e94\u7528\u6570\u636e\u76ee\u5f55\u3002",
     "noBackgroundImage": "\u672a\u8bbe\u7f6e\u80cc\u666f\u56fe",
@@ -362,7 +369,8 @@
     "syncNow": "立即同步",
     "stopSync": "停止同步",
     "keepRunningInBackground": "关闭时保持后台运行",
-    "exitOnClose": "关闭时退出应用"
+    "keepRunningBackgroundEnabled": "关闭时保持后台运行：已开启",
+    "keepRunningBackgroundDisabled": "关闭时保持后台运行：已关闭"
   },
   "attachments": {
     "title": "附件",
@@ -792,5 +800,9 @@
     "body": "邮件正文",
     "to": "收件人：",
     "cc": "抄送："
+  },
+  "participants": {
+    "more": "还有 {{count}} 人",
+    "showLess": "收起"
   }
 }

@@ -292,6 +292,44 @@ describe("MessageItem", () => {
     expect(screen.getByRole("option").className).toContain("message-list-row--unread");
   });
 
+  it("keeps the sender line semibold regardless of read state", () => {
+    render(
+      <MessageItem
+        message={makeMessage({ is_read: true })}
+        isSelected={false}
+        onClick={vi.fn()}
+      />,
+    );
+
+    const senderLine = screen.getByText("Sender").parentElement;
+
+    expect(senderLine?.style.fontWeight).toBe("600");
+  });
+
+  it("renders read subjects regular and unread subjects semibold", () => {
+    const { unmount } = render(
+      <MessageItem
+        message={makeMessage({ is_read: true })}
+        isSelected={false}
+        onClick={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Archived message").style.fontWeight).toBe("400");
+
+    unmount();
+
+    render(
+      <MessageItem
+        message={makeMessage({ is_read: false })}
+        isSelected={false}
+        onClick={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Archived message").style.fontWeight).toBe("600");
+  });
+
   it("shows recipients as the primary contact in the sent folder", () => {
     render(
       <MessageItem
