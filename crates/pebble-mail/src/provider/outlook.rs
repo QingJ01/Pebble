@@ -372,6 +372,10 @@ struct GraphAttachmentList {
 }
 
 #[async_trait]
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait adds must_use to an already must-use boxed future"
+)]
 trait GraphAttachmentPageOperations {
     async fn fetch_attachment_page(&mut self, url: &str) -> Result<GraphAttachmentList>;
 }
@@ -462,12 +466,20 @@ async fn collect_graph_attachment_pages<O: GraphAttachmentPageOperations>(
 }
 
 #[async_trait]
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait adds must_use to an already must-use boxed future"
+)]
 trait DraftAttachmentOperations {
     async fn upload(&mut self, attachment: &GraphFileAttachment) -> Result<String>;
     async fn delete(&mut self, attachment_id: &str) -> Result<()>;
 }
 
 #[async_trait]
+#[allow(
+    clippy::double_must_use,
+    reason = "async_trait adds must_use to an already must-use boxed future"
+)]
 trait CreatedDraftCleanupOperations {
     async fn delete_created_draft(&mut self, draft_id: &str) -> Result<()>;
 }
