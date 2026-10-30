@@ -1,5 +1,5 @@
 import { fireEvent, render, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ShadowDomEmail } from "@/components/ShadowDomEmail";
 
 const mocks = vi.hoisted(() => ({
@@ -16,6 +16,10 @@ vi.mock("@/app/useMailtoOpen", () => ({
 }));
 
 describe("ShadowDomEmail", () => {
+  afterEach(() => {
+    document.documentElement.removeAttribute("data-theme");
+  });
+
   beforeEach(() => {
     mocks.invoke.mockReset();
     mocks.openMailtoUrl.mockReset();
@@ -35,7 +39,7 @@ describe("ShadowDomEmail", () => {
 
     const shadowMarkup = host!.shadowRoot!.innerHTML;
     expect(shadowMarkup).toContain("var(--color-text-primary)");
-    expect(shadowMarkup).toContain("var(--color-accent)");
+    expect(shadowMarkup).toContain("a[href] { color: var(--color-email-link); }");
     expect(shadowMarkup).not.toContain("color: #1a1a1a");
   });
 
@@ -66,10 +70,24 @@ describe("ShadowDomEmail", () => {
 
     const shadowMarkup = host!.shadowRoot!.innerHTML;
     expect(shadowMarkup).toContain('class="pebble-email-content"');
-    expect(shadowMarkup).toContain(':host-context([data-theme="dark"]) .pebble-email-content');
-    expect(shadowMarkup).toContain("color-scheme: light");
-    expect(shadowMarkup).toContain("background: #fff");
-    expect(shadowMarkup).toContain("color: #202124");
+    expect(shadowMarkup).not.toContain(":host-context");
+    expect(shadowMarkup).toContain("color-scheme: var(--email-content-color-scheme)");
+    expect(shadowMarkup).toContain("background: var(--email-content-bg)");
+    expect(shadowMarkup).toContain("color: var(--email-content-color)");
+    expect(shadowMarkup).toContain("display: var(--email-content-display)");
+  });
+
+  it("preserves sender-authored link and button colors", () => {
+    const { container } = render(
+      <ShadowDomEmail html={'<a href="https://example.com" style="color: blue">Link</a><a href="https://example.com" style="background: blue; color: white"><span style="color: white">Button</span></a>'} />,
+    );
+    const shadow = (container.firstChild as HTMLDivElement).shadowRoot!;
+    const anchors = shadow.querySelectorAll("a");
+
+    expect(anchors[0].style.color).toBe("blue");
+    expect(anchors[1].style.background).toBe("blue");
+    expect(anchors[1].style.color).toBe("white");
+    expect(anchors[1].querySelector("span")!.style.color).toBe("white");
   });
 
   it("prevents full-height email wrappers from painting a gray viewport canvas", async () => {
