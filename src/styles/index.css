@@ -18,6 +18,11 @@
   --color-scrollbar-track: transparent;
   --color-scrollbar-thumb: rgba(26, 26, 26, 0.22);
   --color-scrollbar-thumb-hover: rgba(26, 26, 26, 0.38);
+  --color-email-link: #1d4ed8;
+  --email-content-display: block;
+  --email-content-color: inherit;
+  --email-content-bg: transparent;
+  --email-content-color-scheme: light;
 }
 
 [data-theme="dark"] {
@@ -37,6 +42,10 @@
   --color-scrollbar-track: transparent;
   --color-scrollbar-thumb: rgba(255, 255, 255, 0.22);
   --color-scrollbar-thumb-hover: rgba(255, 255, 255, 0.38);
+  /* Preserve light-authored email colors on every webview, including WebKit. */
+  --email-content-display: inline-block;
+  --email-content-color: #202124;
+  --email-content-bg: #fff;
 }
 
 html, body, #root {
