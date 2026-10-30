@@ -227,6 +227,13 @@ fn take_pending_mailto_urls(state: tauri::State<PendingMailtoUrls>) -> Vec<Strin
     }
 }
 
+#[tauri::command]
+fn set_keep_running_in_background(state: tauri::State<AppState>, enabled: bool) {
+    state
+        .keep_running_in_background
+        .store(enabled, std::sync::atomic::Ordering::SeqCst);
+}
+
 #[cfg(any(target_os = "linux", test))]
 fn should_prefer_wayland(
     wayland_display: Option<&std::ffi::OsStr>,
@@ -280,8 +287,33 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_notification::init())
         .on_window_event(|window, event| {
-            if window.label() == "main" && matches!(event, WindowEvent::Focused(true)) {
-                commands::notifications::clear_attention_indicator(window.app_handle());
+            if window.label() != "main" {
+                return;
+            }
+            match event {
+                WindowEvent::Focused(true) => {
+                    commands::notifications::clear_attention_indicator(window.app_handle());
+                }
+                WindowEvent::CloseRequested { api, .. } => {
+                    // Hard guard: hide to tray instead of exiting unless the
+                    // frontend explicitly turned background mode off. This also
+                    // covers the window shown before the JS close listener
+                    // registered, so a close during startup cannot kill the app.
+                    let keep_running = window
+                        .app_handle()
+                        .try_state::<AppState>()
+                        .map(|state| {
+                            state
+                                .keep_running_in_background
+                                .load(std::sync::atomic::Ordering::SeqCst)
+                        })
+                        .unwrap_or(true);
+                    if keep_running {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                }
+                _ => {}
             }
         })
         .setup(|app| {
@@ -501,6 +533,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             set_tray_menu_labels,
             take_pending_mailto_urls,
+            set_keep_running_in_background,
             profile::get_profile_storage_namespace,
             commands::autostart::get_autostart_enabled,
             commands::autostart::set_autostart_enabled,

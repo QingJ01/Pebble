@@ -14,6 +14,7 @@ export type NetworkStatus = "online" | "offline";
 export type RealtimeMode = "realtime" | "polling" | "manual" | "backoff" | "offline" | "auth_required" | "error";
 export type RealtimePreference = "realtime" | "balanced" | "battery" | "manual";
 export type BackgroundImageFit = "cover" | "contain" | "repeat";
+export type SidebarStyle = "grouped" | "classic";
 
 export interface BackgroundImageSettings {
   path: string;
@@ -42,6 +43,11 @@ const DEFAULT_BACKGROUND_IMAGE_FIT: BackgroundImageFit = "cover";
 const DEFAULT_BACKGROUND_IMAGE_OPACITY = 0.35;
 const MIN_BACKGROUND_IMAGE_OPACITY = 0.05;
 const MAX_BACKGROUND_IMAGE_OPACITY = 1;
+const SIDEBAR_STYLE_KEY = "pebble-sidebar-style";
+
+function readSidebarStyle(): SidebarStyle {
+  return profileLocalStorage.getItem(SIDEBAR_STYLE_KEY) === "classic" ? "classic" : "grouped";
+}
 
 function readRealtimePreference(): RealtimePreference {
   const stored = profileLocalStorage.getItem(REALTIME_PREFERENCE_KEY);
@@ -115,6 +121,7 @@ const initialKeepRunningInBackground = readKeepRunningInBackgroundPreference();
 const initialStartHiddenToTray = readStartHiddenToTrayPreference();
 const initialLanguage = getInitialLanguage();
 const initialBackgroundImage = readBackgroundImageSettings();
+const initialSidebarStyle = readSidebarStyle();
 
 /** Resolve "system" theme to an actual "dark" | "light" value. */
 export function resolveTheme(theme: Theme): "dark" | "light" {
@@ -158,6 +165,8 @@ interface UIState {
   setBackgroundImageFit: (fit: BackgroundImageFit) => void;
   setBackgroundImageOpacity: (opacity: number) => void;
   clearBackgroundImage: () => void;
+  sidebarStyle: SidebarStyle;
+  setSidebarStyle: (style: SidebarStyle) => void;
   setLanguage: (lang: Language) => void;
   setSyncStatus: (status: "idle" | "syncing" | "error") => void;
   setNetworkStatus: (status: NetworkStatus) => void;
@@ -285,6 +294,11 @@ export const useUIStore = create<UIState>((set) => ({
   clearBackgroundImage: () => {
     persistBackgroundImageSettings(null);
     set({ backgroundImage: null });
+  },
+  sidebarStyle: initialSidebarStyle,
+  setSidebarStyle: (style) => {
+    profileLocalStorage.setItem(SIDEBAR_STYLE_KEY, style);
+    set({ sidebarStyle: style });
   },
   setLanguage: (lang) => {
     i18n.changeLanguage(lang);

@@ -181,9 +181,15 @@ export default function StatusBar() {
   const pendingRemoteWrites = pendingOpsSummary?.total_active_count ?? 0;
   const failedRemoteWrites = pendingOpsSummary?.failed_count ?? 0;
   const retryingRemoteWrites = pendingOpsSummary?.in_progress_count ?? 0;
-  const backgroundLabel = keepRunningInBackground
-    ? t("status.exitOnClose", "Exit on close")
-    : t("status.keepRunningInBackground", "Keep running in background on close");
+  // Constant accessible name plus aria-pressed for the state; the tooltip
+  // spells out whether closing keeps the app running.
+  const backgroundToggleLabel = t(
+    "status.keepRunningInBackground",
+    "Keep running in background on close",
+  );
+  const backgroundToggleTitle = keepRunningInBackground
+    ? t("status.keepRunningBackgroundEnabled", "Keep running in background on close: on")
+    : t("status.keepRunningBackgroundDisabled", "Keep running in background on close: off");
   const pendingRemoteText = retryingRemoteWrites > 0
     ? t("status.remoteWritesRetrying", "{{count}} remote writes retrying", { count: retryingRemoteWrites })
     : failedRemoteWrites > 0
@@ -295,9 +301,9 @@ export default function StatusBar() {
         <button
           type="button"
           onClick={() => setKeepRunningInBackground(!keepRunningInBackground)}
-          aria-label={backgroundLabel}
+          aria-label={backgroundToggleLabel}
           aria-pressed={keepRunningInBackground}
-          title={backgroundLabel}
+          title={backgroundToggleTitle}
           className="inline-flex items-center justify-center"
           style={{
             width: "20px",

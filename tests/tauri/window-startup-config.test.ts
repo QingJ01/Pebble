@@ -14,6 +14,16 @@ describe("Tauri startup window config", () => {
     expect(mainWindow.backgroundColor).toBe("#1a1a1a");
   });
 
+  it("pins the macOS traffic lights to the top-left corner", () => {
+    const configPath = resolve(process.cwd(), "src-tauri", "tauri.conf.json");
+    const config = JSON.parse(readFileSync(configPath, "utf8"));
+    const mainWindow = config.app.windows.find((windowConfig: { label?: string }) => {
+      return windowConfig.label === "main";
+    });
+
+    expect(mainWindow.trafficLightPosition).toEqual({ x: 12, y: 12 });
+  });
+
   it("allows the frontend to show the hidden main window", () => {
     const capabilityPath = resolve(process.cwd(), "src-tauri", "capabilities", "default.json");
     const capability = JSON.parse(readFileSync(capabilityPath, "utf8"));

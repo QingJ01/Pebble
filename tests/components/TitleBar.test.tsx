@@ -47,4 +47,33 @@ describe("TitleBar", () => {
     expect(logo?.className).toContain("bg-transparent");
     expect(logo?.getAttribute("draggable")).toBe("false");
   });
+
+  it("keeps the brand block flush at the top-left on macOS", async () => {
+    const originalUserAgent = navigator.userAgent;
+    Object.defineProperty(navigator, "userAgent", {
+      value: `${originalUserAgent} Macintosh`,
+      configurable: true,
+    });
+    vi.resetModules();
+
+    try {
+      const { default: TitleBarMac } = await import("../../src/components/TitleBar");
+      const { container, unmount } = render(<TitleBarMac />);
+
+      const logo = container.querySelector("img[aria-hidden='true']");
+      expect(logo).not.toBeNull();
+      expect((logo?.parentElement as HTMLElement | null)?.style.paddingLeft).toBe("");
+      expect(screen.queryByLabelText("titleBar.minimize")).toBeNull();
+      expect(screen.queryByLabelText("titleBar.maximize")).toBeNull();
+      expect(screen.queryByLabelText("titleBar.close")).toBeNull();
+
+      unmount();
+    } finally {
+      Object.defineProperty(navigator, "userAgent", {
+        value: originalUserAgent,
+        configurable: true,
+      });
+      vi.resetModules();
+    }
+  });
 });

@@ -443,6 +443,10 @@ export async function setNotificationsEnabled(enabled: boolean): Promise<void> {
   return invoke<void>("set_notifications_enabled", { enabled });
 }
 
+export async function setKeepRunningInBackground(enabled: boolean): Promise<void> {
+  return invoke<void>("set_keep_running_in_background", { enabled });
+}
+
 export async function getNotificationStatus(): Promise<NotificationStatus> {
   return invoke<NotificationStatus>("get_notification_status");
 }

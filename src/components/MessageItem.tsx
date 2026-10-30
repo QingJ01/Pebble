@@ -50,7 +50,6 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [showActions, setShowActions] = useState(false);
-  const fontWeight = message.is_read ? "normal" : "600";
   const inKanban = useKanbanStore((s) => s.cardIdSet.has(message.id));
   const archiveActionLabel = folderRole === "archive"
     ? t("messageActions.unarchive", "Unarchive")
@@ -78,7 +77,6 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
       style={{
         position: "relative",
         color: "var(--color-text-primary)",
-        fontWeight,
         cursor: "pointer",
         padding: "10px 14px",
         borderBottom: "1px solid var(--color-border)",
@@ -144,6 +142,7 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
             alignItems: "center",
             gap: "6px",
             fontSize: "13px",
+            fontWeight: "600",
             overflow: "hidden",
             whiteSpace: "nowrap",
             flex: 1,
@@ -182,6 +181,7 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
       <div
         style={{
           fontSize: "12.5px",
+          fontWeight: message.is_read ? "400" : "600",
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",

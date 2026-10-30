@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import ThreadMessageBubble from "../../src/components/ThreadMessageBubble";
 import type { Message } from "../../src/lib/api";
@@ -6,7 +6,12 @@ import { getRenderedHtml } from "../../src/lib/api";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: string) => fallback ?? key,
+    t: (key: string, options?: unknown) => {
+      if (typeof options === "string") return options;
+      const opts = (options ?? {}) as Record<string, string | number>;
+      const template = typeof opts.defaultValue === "string" ? opts.defaultValue : key;
+      return template.replace(/\{\{(\w+)\}\}/g, (_match, name) => String(opts[name] ?? ""));
+    },
   }),
 }));
 
@@ -61,7 +66,8 @@ describe("ThreadMessageBubble", () => {
   it("shows copied recipients when expanded", () => {
     render(<ThreadMessageBubble message={message} defaultExpanded />);
 
-    expect(document.body.textContent).toContain("Cc: cc@example.com");
+    expect(screen.getByText("Cc:")).toBeTruthy();
+    expect(screen.getAllByText("cc@example.com").length).toBeGreaterThan(0);
   });
 
   it("uses relaxed privacy mode by default when rendering expanded thread messages", async () => {
@@ -78,5 +84,20 @@ describe("ThreadMessageBubble", () => {
     render(<ThreadMessageBubble message={message} defaultExpanded />);
 
     expect(document.querySelectorAll("[data-testid='contact-address-action']")).toHaveLength(3);
+  });
+
+  it("collapses bulk recipient lists when expanded", () => {
+    const bulk: Message = {
+      ...message,
+      to_list: Array.from({ length: 10 }, (_, index) => ({ name: null, address: `bulk${index}@example.com` })),
+      cc_list: [],
+    };
+    render(<ThreadMessageBubble message={bulk} defaultExpanded />);
+
+    expect(document.querySelectorAll("[data-testid='contact-address-action']")).toHaveLength(4);
+
+    fireEvent.click(screen.getByRole("button", { name: "+7 more" }));
+
+    expect(document.querySelectorAll("[data-testid='contact-address-action']")).toHaveLength(11);
   });
 });
