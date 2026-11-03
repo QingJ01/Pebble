@@ -1362,6 +1362,21 @@ impl Store {
         })
     }
 
+    pub fn list_cached_remote_ids_by_account(&self, account_id: &str) -> Result<Vec<String>> {
+        self.with_read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT remote_id FROM messages
+                 WHERE account_id = ?1 AND is_deleted = 0 AND remote_id != ''",
+            )?;
+            let rows = stmt.query_map(params![account_id], |row| row.get::<_, String>(0))?;
+            let mut remote_ids = Vec::new();
+            for row in rows {
+                remote_ids.push(row?);
+            }
+            Ok(remote_ids)
+        })
+    }
+
     /// Get the folder IDs that contain a given message.
     pub fn get_message_folder_ids(&self, message_id: &str) -> Result<Vec<String>> {
         self.with_read(|conn| {
@@ -1930,6 +1945,43 @@ mod remote_id_scope_tests {
 
         assert!(inbox_matches.contains("123"));
         assert!(!sent_matches.contains("123"));
+    }
+
+    #[test]
+    fn cached_remote_ids_include_folderless_messages_and_are_account_scoped() {
+        let store = Store::open_in_memory().unwrap();
+        let mut account = make_account();
+        account.provider = ProviderType::Gmail;
+        let mut other_account = make_account();
+        other_account.provider = ProviderType::Gmail;
+        store.insert_account(&account).unwrap();
+        store.insert_account(&other_account).unwrap();
+        let inbox = make_folder(&account.id, "INBOX", FolderRole::Inbox, 0);
+        store.insert_folder(&inbox).unwrap();
+
+        let folderless = make_message(&account.id, "folderless");
+        let in_folder = make_message(&account.id, "in-folder");
+        let mut deleted = make_message(&account.id, "deleted");
+        deleted.is_deleted = true;
+        let empty_remote_id = make_message(&account.id, "");
+        let other_account_message = make_message(&other_account.id, "other-account");
+
+        store.insert_message(&folderless, &[]).unwrap();
+        store
+            .insert_message(&in_folder, std::slice::from_ref(&inbox.id))
+            .unwrap();
+        store.insert_message(&deleted, &[]).unwrap();
+        store.insert_message(&empty_remote_id, &[]).unwrap();
+        store.insert_message(&other_account_message, &[]).unwrap();
+
+        let mut remote_ids = store
+            .list_cached_remote_ids_by_account(&account.id)
+            .unwrap();
+        remote_ids.sort();
+        assert_eq!(
+            remote_ids,
+            vec!["folderless".to_string(), "in-folder".to_string()]
+        );
     }
 
     #[test]

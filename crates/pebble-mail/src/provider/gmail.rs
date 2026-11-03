@@ -193,6 +193,8 @@ struct GmailAttachmentDescriptor {
 pub struct GmailProvider {
     client: Client,
     access_token: RwLock<String>,
+    #[cfg(test)]
+    test_api_endpoint: RwLock<Option<String>>,
 }
 
 impl GmailProvider {
@@ -200,6 +202,8 @@ impl GmailProvider {
         Self {
             client: http_client_with_proxy(None).expect("failed to build Gmail HTTP client"),
             access_token: RwLock::new(access_token),
+            #[cfg(test)]
+            test_api_endpoint: RwLock::new(None),
         }
     }
 
@@ -207,6 +211,8 @@ impl GmailProvider {
         Ok(Self {
             client: http_client_with_proxy(proxy.as_ref())?,
             access_token: RwLock::new(access_token),
+            #[cfg(test)]
+            test_api_endpoint: RwLock::new(None),
         })
     }
 
@@ -221,7 +227,43 @@ impl GmailProvider {
             .clone()
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_test_api_endpoint(&self, endpoint: String) {
+        *self
+            .test_api_endpoint
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = Some(endpoint);
+    }
+
+    #[cfg(test)]
+    fn test_request_url(&self, url: &str) -> String {
+        let endpoint = self
+            .test_api_endpoint
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let Some(endpoint) = endpoint else {
+            return url.to_string();
+        };
+
+        let mut request_url = reqwest::Url::parse(url).expect("valid Gmail API URL");
+        let endpoint_url = reqwest::Url::parse(&endpoint).expect("valid test API endpoint");
+        request_url
+            .set_scheme(endpoint_url.scheme())
+            .expect("test API endpoint scheme is valid");
+        request_url
+            .set_host(endpoint_url.host_str())
+            .expect("test API endpoint host is valid");
+        request_url
+            .set_port(endpoint_url.port())
+            .expect("test API endpoint port is valid");
+        request_url.to_string()
+    }
+
     pub(crate) async fn get(&self, url: &str) -> Result<reqwest::Response> {
+        #[cfg(test)]
+        let url = self.test_request_url(url);
+
         self.client
             .get(url)
             .bearer_auth(self.token())
