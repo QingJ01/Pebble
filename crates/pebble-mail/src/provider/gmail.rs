@@ -37,6 +37,10 @@ fn gmail_list_messages_url(
     Ok(url)
 }
 
+fn gmail_message_metadata_url(gmail_id: &str) -> String {
+    format!("{GMAIL_API_BASE}/messages/{gmail_id}?format=minimal")
+}
+
 // ---------------------------------------------------------------------------
 // Gmail API response types (internal)
 // ---------------------------------------------------------------------------
@@ -164,6 +168,13 @@ pub struct GmailFetchedMessage {
     pub attachments: Vec<AttachmentData>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct GmailMessageMetadata {
+    pub id: String,
+    #[serde(rename = "labelIds", default)]
+    pub label_ids: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 struct GmailAttachmentDescriptor {
     filename: String,
@@ -262,6 +273,27 @@ impl GmailProvider {
         resp.json()
             .await
             .map_err(|e| PebbleError::Network(format!("Failed to parse message {gmail_id}: {e}")))
+    }
+
+    pub async fn fetch_message_metadata(
+        &self,
+        gmail_id: &str,
+    ) -> Result<Option<GmailMessageMetadata>> {
+        let resp = self.get(&gmail_message_metadata_url(gmail_id)).await?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(PebbleError::Network(format!(
+                "Failed to fetch Gmail message metadata (status {status}): {text}"
+            )));
+        }
+        let metadata = resp.json().await.map_err(|error| {
+            PebbleError::Network(format!("Failed to parse Gmail message metadata: {error}"))
+        })?;
+        Ok(Some(metadata))
     }
 
     async fn fetch_attachment_bytes(&self, gmail_id: &str, attachment_id: &str) -> Result<Vec<u8>> {
@@ -523,6 +555,14 @@ impl GmailProvider {
 mod proxy_tests {
     use super::*;
     use pebble_core::HttpProxyConfig;
+
+    #[test]
+    fn cached_message_recovery_requests_minimal_metadata_only() {
+        assert_eq!(
+            gmail_message_metadata_url("cached-message"),
+            "https://www.googleapis.com/gmail/v1/users/me/messages/cached-message?format=minimal"
+        );
+    }
 
     #[tokio::test]
     async fn gmail_provider_new_ignores_all_proxy() {

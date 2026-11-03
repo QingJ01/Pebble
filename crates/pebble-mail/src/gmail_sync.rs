@@ -14,7 +14,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::backoff::SyncBackoff;
 use crate::provider::gmail::{
-    visible_label_ids, GmailFetchedMessage, GmailMessageRef, GmailProvider,
+    visible_label_ids, GmailFetchedMessage, GmailMessageMetadata, GmailMessageRef, GmailProvider,
 };
 use crate::realtime_policy::{RealtimePollPolicy, RealtimeRuntimeState, SyncTrigger};
 use crate::sync::{
@@ -132,6 +132,61 @@ fn gmail_sync_dispatch(sync_state: &pebble_store::accounts::SyncState) -> GmailS
         }
         _ => GmailSyncDispatch::Bootstrap,
     }
+}
+
+fn saved_gmail_history_cursor(sync_state: &pebble_store::accounts::SyncState) -> Option<String> {
+    sync_state
+        .last_sync_cursor
+        .clone()
+        .filter(|cursor| !cursor.trim().is_empty())
+}
+
+fn apply_gmail_history_mutations(
+    store: &Store,
+    account_id: &str,
+    folders_by_remote: &HashMap<String, String>,
+    entries: &[GmailHistoryEntry],
+) -> Result<Vec<String>> {
+    let mut refreshed = HashSet::new();
+    for change in gmail_history_flag_changes(entries) {
+        if let Some(local_id) = store.find_message_id_by_remote(account_id, &change.remote_id)? {
+            store.update_message_flags(&local_id, change.is_read, change.is_starred)?;
+            refreshed.insert(local_id);
+        }
+    }
+
+    for entry in entries {
+        for deleted in entry.messages_deleted.iter().flatten() {
+            if let Some(local_id) =
+                store.find_message_id_by_remote(account_id, &deleted.message.id)?
+            {
+                store.soft_delete_message(&local_id)?;
+                refreshed.insert(local_id);
+            }
+        }
+    }
+
+    for mutation in gmail_history_label_mutations(entries) {
+        if visible_label_ids(std::slice::from_ref(&mutation.label_id)).is_empty() {
+            continue;
+        }
+        let Some(local_id) = store.find_message_id_by_remote(account_id, &mutation.remote_id)?
+        else {
+            continue;
+        };
+        if let Some(folder_id) = folders_by_remote.get(&mutation.label_id) {
+            match mutation.action {
+                GmailHistoryLabelAction::Add => {
+                    store.add_message_to_folder(&local_id, folder_id)?;
+                }
+                GmailHistoryLabelAction::Remove => {
+                    store.remove_message_from_folder(&local_id, folder_id)?;
+                }
+            }
+        }
+        refreshed.insert(local_id);
+    }
+    Ok(refreshed.into_iter().collect())
 }
 
 async fn collect_paginated_gmail_refs<F, Fut>(
@@ -301,6 +356,48 @@ fn gmail_history_flag_changes(entries: &[GmailHistoryEntry]) -> Vec<GmailHistory
 enum GmailHistoryPageFetch {
     Page(GmailHistoryPage),
     CursorExpired,
+}
+
+enum GmailHistoryReplayOutcome {
+    Applied(Option<String>),
+    CursorExpired,
+}
+
+async fn replay_gmail_history_and_checkpoint<F, Fut>(
+    replay: F,
+    checkpoint: impl FnOnce(&str) -> Result<()>,
+) -> Result<GmailHistoryReplayOutcome>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<GmailHistoryReplayOutcome>>,
+{
+    let outcome = replay().await?;
+    if let GmailHistoryReplayOutcome::Applied(Some(history_id)) = &outcome {
+        checkpoint(history_id)?;
+    }
+    Ok(outcome)
+}
+
+async fn fetch_cached_gmail_metadata<F, Fut>(
+    remote_ids: Vec<String>,
+    fetch: F,
+) -> Result<Vec<(String, Option<GmailMessageMetadata>)>>
+where
+    F: Fn(String) -> Fut + Clone + Send + 'static,
+    Fut: Future<Output = Result<Option<GmailMessageMetadata>>> + Send,
+{
+    use futures::stream::{self, StreamExt};
+    let fetched = stream::iter(remote_ids.into_iter().map(|remote_id| {
+        let fetch = fetch.clone();
+        async move {
+            let metadata = fetch(remote_id.clone()).await?;
+            Ok((remote_id, metadata))
+        }
+    }))
+    .buffer_unordered(10)
+    .collect::<Vec<Result<_>>>()
+    .await;
+    fetched.into_iter().collect()
 }
 
 struct GmailHistoryBatch {
@@ -580,7 +677,7 @@ impl GmailSyncWorker {
         let folders = self.provider.list_folders().await?;
         for mut folder in folders {
             folder.account_id = self.base.account_id.clone();
-            let _ = self.base.store.insert_folder(&folder);
+            self.base.store.insert_folder(&folder)?;
         }
 
         // Clean up any previously-synced hidden Gmail labels from the local store
@@ -596,10 +693,9 @@ impl GmailSyncWorker {
             "CATEGORY_SOCIAL",
         ];
         for label_id in &hidden {
-            let _ = self
-                .base
+            self.base
                 .store
-                .delete_folder_by_remote_id(&self.base.account_id, label_id);
+                .delete_folder_by_remote_id(&self.base.account_id, label_id)?;
         }
 
         // Ensure an Archive folder exists locally
@@ -620,7 +716,7 @@ impl GmailSyncWorker {
                 is_system: true,
                 sort_order: 3,
             };
-            let _ = self.base.store.insert_folder(&archive);
+            self.base.store.insert_folder(&archive)?;
         }
 
         Ok(())
@@ -642,14 +738,20 @@ impl GmailSyncWorker {
             .get_sync_state(&self.base.account_id)?
             .unwrap_or_default();
         let sync_since = sync_state.sync_since;
-        let stored_cursor = match gmail_sync_dispatch(&sync_state) {
-            GmailSyncDispatch::History(cursor) => Some(cursor),
-            GmailSyncDispatch::Bootstrap => None,
-        };
+        let stored_cursor = saved_gmail_history_cursor(&sync_state);
         let notify_new = should_notify_gmail_startup_fetch(stored_cursor.as_deref());
 
-        // Get the user profile for the latest historyId
+        // Capture the history checkpoint before replay or bootstrap so changes
+        // arriving during either operation are replayed on the next poll.
         let (_email, profile_history_id) = self.provider.get_profile().await?;
+        if let Some(cursor) = stored_cursor.as_deref() {
+            match self.replay_gmail_history(cursor).await? {
+                GmailHistoryReplayOutcome::Applied(_) => {}
+                GmailHistoryReplayOutcome::CursorExpired => {
+                    self.reconcile_cached_gmail_metadata().await?;
+                }
+            }
+        }
 
         // Sync every visible remote label, prioritizing system folders first.
         let all_folders = self.base.store.list_folders(&self.base.account_id)?;
@@ -659,11 +761,7 @@ impl GmailSyncWorker {
             .map(|f| (f.remote_id, f.id))
             .collect();
         let limit = if stored_cursor.is_some() { 50 } else { 200 };
-        let mut thread_mappings = self
-            .base
-            .store
-            .get_thread_mappings(&self.base.account_id)
-            .unwrap_or_default();
+        let mut thread_mappings = self.base.store.get_thread_mappings(&self.base.account_id)?;
         let mut failure_count = 0usize;
 
         for label_id in &labels_to_sync {
@@ -714,6 +812,92 @@ impl GmailSyncWorker {
         Ok(())
     }
 
+    async fn reconcile_cached_gmail_metadata(&self) -> Result<()> {
+        let folders = self.base.store.list_folders(&self.base.account_id)?;
+        let visible_folders = folders
+            .iter()
+            .filter(|folder| {
+                !folder.remote_id.starts_with("__local_")
+                    && !visible_label_ids(std::slice::from_ref(&folder.remote_id)).is_empty()
+            })
+            .map(|folder| (folder.remote_id.clone(), folder.id.clone()))
+            .collect::<HashMap<_, _>>();
+        let folders_by_id = folders
+            .iter()
+            .map(|folder| (folder.id.clone(), folder.clone()))
+            .collect::<HashMap<_, _>>();
+
+        let mut remote_ids = HashSet::new();
+        for folder in &folders {
+            for (_, remote_id, _, _, _) in self
+                .base
+                .store
+                .list_remote_ids_by_folder(&self.base.account_id, &folder.id)?
+            {
+                if !remote_id.is_empty() {
+                    remote_ids.insert(remote_id);
+                }
+            }
+        }
+
+        let provider = Arc::clone(&self.provider);
+        let fetched =
+            fetch_cached_gmail_metadata(remote_ids.into_iter().collect(), move |remote_id| {
+                let provider = Arc::clone(&provider);
+                async move { provider.fetch_message_metadata(&remote_id).await }
+            })
+            .await?;
+
+        for (remote_id, metadata) in fetched {
+            let Some(local_id) = self
+                .base
+                .store
+                .find_message_id_by_remote(&self.base.account_id, &remote_id)?
+            else {
+                continue;
+            };
+            let Some(metadata) = metadata else {
+                self.base.store.soft_delete_message(&local_id)?;
+                self.emit_message_refresh(&local_id);
+                continue;
+            };
+            if metadata.id != remote_id {
+                return Err(PebbleError::Network(format!(
+                    "Mismatched Gmail metadata for {remote_id}"
+                )));
+            }
+
+            self.base.store.update_message_flags(
+                &local_id,
+                Some(!metadata.label_ids.iter().any(|label| label == "UNREAD")),
+                Some(metadata.label_ids.iter().any(|label| label == "STARRED")),
+            )?;
+            let desired_labels: HashSet<_> =
+                visible_label_ids(&metadata.label_ids).into_iter().collect();
+            let existing_folder_ids = self.base.store.get_message_folder_ids(&local_id)?;
+            for folder_id in existing_folder_ids {
+                if folders_by_id.get(&folder_id).is_some_and(|folder| {
+                    !folder.remote_id.starts_with("__local_")
+                        && !visible_label_ids(std::slice::from_ref(&folder.remote_id)).is_empty()
+                        && !desired_labels.contains(&folder.remote_id)
+                }) {
+                    self.base
+                        .store
+                        .remove_message_from_folder(&local_id, &folder_id)?;
+                }
+            }
+            for label_id in &desired_labels {
+                if let Some(folder_id) = visible_folders.get(label_id) {
+                    self.base
+                        .store
+                        .add_message_to_folder(&local_id, folder_id)?;
+                }
+            }
+            self.emit_message_refresh(&local_id);
+        }
+        Ok(())
+    }
+
     /// Sync messages for a specific Gmail label.
     async fn sync_label(
         &self,
@@ -752,8 +936,7 @@ impl GmailSyncWorker {
         let existing = self
             .base
             .store
-            .get_existing_message_map_by_remote_ids(&self.base.account_id, &remote_ids)
-            .unwrap_or_default();
+            .get_existing_message_map_by_remote_ids(&self.base.account_id, &remote_ids)?;
         let incomplete = self
             .base
             .store
@@ -761,8 +944,7 @@ impl GmailSyncWorker {
                 &self.base.account_id,
                 None,
                 &remote_ids,
-            )
-            .unwrap_or_default();
+            )?;
 
         let mut outcome = GmailLabelSyncOutcome::default();
 
@@ -838,24 +1020,10 @@ impl GmailSyncWorker {
         Ok(outcome)
     }
 
-    /// Poll for new messages using the Gmail History API (delta sync).
-    async fn poll_changes(&self) -> Result<()> {
-        let sync_state = self
-            .base
-            .store
-            .get_sync_state(&self.base.account_id)?
-            .unwrap_or_default();
-        let history_id = match gmail_sync_dispatch(&sync_state) {
-            GmailSyncDispatch::History(id) => id,
-            GmailSyncDispatch::Bootstrap => {
-                debug!("No history cursor, doing full re-sync");
-                return self.initial_sync().await;
-            }
-        };
-
-        let history_cursor = history_id.clone();
+    async fn replay_gmail_history(&self, history_id: &str) -> Result<GmailHistoryReplayOutcome> {
+        let history_cursor = history_id.to_string();
         let provider = Arc::clone(&self.provider);
-        let history = collect_paginated_gmail_history(&history_id, move |page_token| {
+        let history = collect_paginated_gmail_history(history_id, move |page_token| {
             let provider = Arc::clone(&provider);
             let history_cursor = history_cursor.clone();
             async move {
@@ -893,23 +1061,12 @@ impl GmailSyncWorker {
         .await?;
 
         if history.cursor_expired {
-            warn!(
-                "Gmail history cursor expired for account {}; running a full resync",
-                self.base.account_id
-            );
-            self.base
-                .store
-                .update_sync_state(&self.base.account_id, |state| {
-                    state.last_sync_cursor = None;
-                })?;
-            return self.initial_sync().await;
+            return Ok(GmailHistoryReplayOutcome::CursorExpired);
         }
 
         let mut new_ids = Vec::new();
         let mut deleted_ids = Vec::new();
         let mut failure_count = 0usize;
-        let label_mutations = gmail_history_label_mutations(&history.entries);
-        let flag_changes = gmail_history_flag_changes(&history.entries);
 
         for entry in &history.entries {
             if let Some(ref added) = entry.messages_added {
@@ -931,111 +1088,16 @@ impl GmailSyncWorker {
             .into_iter()
             .map(|folder| (folder.remote_id, folder.id))
             .collect();
-
-        for change in flag_changes {
-            match self
-                .base
-                .store
-                .find_message_id_by_remote(&self.base.account_id, &change.remote_id)
-            {
-                Ok(Some(local_id)) => {
-                    match self.base.store.update_message_flags(
-                        &local_id,
-                        change.is_read,
-                        change.is_starred,
-                    ) {
-                        Ok(()) => self.emit_message_refresh(&local_id),
-                        Err(e) => {
-                            failure_count += 1;
-                            warn!(
-                                "Failed to update Gmail flags for message {}: {}",
-                                change.remote_id, e
-                            );
-                        }
-                    }
-                }
-                Ok(None) => {}
-                Err(e) => {
-                    failure_count += 1;
-                    warn!(
-                        "Failed to look up Gmail flag-change message {}: {}",
-                        change.remote_id, e
-                    );
-                }
-            }
+        for local_id in apply_gmail_history_mutations(
+            &self.base.store,
+            &self.base.account_id,
+            &folders_by_remote,
+            &history.entries,
+        )? {
+            self.emit_message_refresh(&local_id);
         }
-
-        // Handle deletions
         if !deleted_ids.is_empty() {
-            for remote_id in &deleted_ids {
-                match self
-                    .base
-                    .store
-                    .find_message_id_by_remote(&self.base.account_id, remote_id)
-                {
-                    Ok(Some(local_id)) => match self.base.store.soft_delete_message(&local_id) {
-                        Ok(()) => self.emit_message_refresh(&local_id),
-                        Err(e) => {
-                            failure_count += 1;
-                            warn!(
-                                "Failed to soft-delete Gmail history message {}: {}",
-                                remote_id, e
-                            );
-                        }
-                    },
-                    Ok(None) => {}
-                    Err(e) => {
-                        failure_count += 1;
-                        warn!(
-                            "Failed to look up deleted Gmail message {}: {}",
-                            remote_id, e
-                        );
-                    }
-                }
-            }
-            info!("Deleted {} messages via history", deleted_ids.len());
-        }
-
-        for mutation in label_mutations {
-            if visible_label_ids(std::slice::from_ref(&mutation.label_id)).is_empty() {
-                continue;
-            }
-            let remote_id = mutation.remote_id;
-            match self
-                .base
-                .store
-                .find_message_id_by_remote(&self.base.account_id, &remote_id)
-            {
-                Ok(Some(local_id)) => {
-                    if let Some(folder_id) = folders_by_remote.get(&mutation.label_id) {
-                        let result = match mutation.action {
-                            GmailHistoryLabelAction::Add => {
-                                self.base.store.add_message_to_folder(&local_id, folder_id)
-                            }
-                            GmailHistoryLabelAction::Remove => self
-                                .base
-                                .store
-                                .remove_message_from_folder(&local_id, folder_id),
-                        };
-                        if let Err(e) = result {
-                            failure_count += 1;
-                            warn!(
-                                "Failed to apply Gmail label {} {:?} for message {}: {}",
-                                mutation.label_id, mutation.action, remote_id, e
-                            );
-                        }
-                    }
-                    self.emit_message_refresh(&local_id);
-                }
-                Ok(None) => {}
-                Err(e) => {
-                    failure_count += 1;
-                    warn!(
-                        "Failed to look up Gmail label-change message {}: {}",
-                        remote_id, e
-                    );
-                }
-            }
+            info!("Applied {} Gmail history deletions", deleted_ids.len());
         }
 
         let new_ids = filter_deleted_history_additions(new_ids, &deleted_ids);
@@ -1128,8 +1190,7 @@ impl GmailSyncWorker {
                 let mut thread_mappings = self
                     .base
                     .store
-                    .get_thread_mappings_for_refs(&self.base.account_id, &ref_ids)
-                    .unwrap_or_default();
+                    .get_thread_mappings_for_refs(&self.base.account_id, &ref_ids)?;
 
                 // Phase 3: store all fetched messages.
                 for fetched in fetched_messages {
@@ -1151,22 +1212,50 @@ impl GmailSyncWorker {
             }
         }
 
-        // Update cursor
-        if let Some(new_hid) = history.history_id {
-            if can_advance_gmail_cursor(failure_count) {
-                let _ = self
-                    .base
-                    .store
-                    .set_sync_cursor(&self.base.account_id, &new_hid);
-            } else {
-                warn!(
-                    "Gmail history sync had {} failures; keeping previous history cursor",
-                    failure_count
-                );
-            }
+        if failure_count > 0 {
+            return Err(PebbleError::Network(format!(
+                "Gmail history replay had {failure_count} failures"
+            )));
         }
 
-        Ok(())
+        Ok(GmailHistoryReplayOutcome::Applied(history.history_id))
+    }
+
+    /// Poll for new messages using the Gmail History API (delta sync).
+    async fn poll_changes(&self) -> Result<()> {
+        let sync_state = self
+            .base
+            .store
+            .get_sync_state(&self.base.account_id)?
+            .unwrap_or_default();
+        let history_id = match gmail_sync_dispatch(&sync_state) {
+            GmailSyncDispatch::History(id) => id,
+            GmailSyncDispatch::Bootstrap => {
+                debug!("No history cursor or the scope changed; performing bootstrap sync");
+                return self.initial_sync().await;
+            }
+        };
+
+        match replay_gmail_history_and_checkpoint(
+            || self.replay_gmail_history(&history_id),
+            |cursor| {
+                self.base
+                    .store
+                    .set_sync_cursor(&self.base.account_id, cursor)
+            },
+        )
+        .await?
+        {
+            GmailHistoryReplayOutcome::CursorExpired => {
+                warn!(
+                    "Gmail history cursor expired for account {}; running a full resync",
+                    self.base.account_id
+                );
+                self.initial_sync().await
+            }
+            GmailHistoryReplayOutcome::Applied(Some(_)) => Ok(()),
+            GmailHistoryReplayOutcome::Applied(None) => Ok(()),
+        }
     }
 
     async fn run_poll_cycle(&self, backoff: &mut SyncBackoff, allow_circuit_attempt: bool) {
@@ -1308,8 +1397,74 @@ impl GmailSyncWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pebble_core::{Folder, FolderRole, FolderType};
+    use pebble_core::{Account, Folder, FolderRole, FolderType, Message, ProviderType};
     use std::collections::VecDeque;
+
+    fn gmail_test_message(id: &str, remote_id: &str) -> Message {
+        let now = now_timestamp();
+        Message {
+            id: id.to_string(),
+            account_id: "gmail-account".to_string(),
+            remote_id: remote_id.to_string(),
+            message_id_header: None,
+            in_reply_to: None,
+            references_header: None,
+            thread_id: None,
+            subject: id.to_string(),
+            snippet: String::new(),
+            from_address: String::new(),
+            from_name: String::new(),
+            to_list: Vec::new(),
+            cc_list: Vec::new(),
+            bcc_list: Vec::new(),
+            body_text: String::new(),
+            body_html_raw: String::new(),
+            has_attachments: false,
+            is_read: true,
+            is_starred: true,
+            is_draft: false,
+            date: now,
+            remote_version: None,
+            is_deleted: false,
+            deleted_at: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn gmail_test_folder(id: &str, remote_id: &str) -> Folder {
+        Folder {
+            id: id.to_string(),
+            account_id: "gmail-account".to_string(),
+            remote_id: remote_id.to_string(),
+            name: remote_id.to_string(),
+            folder_type: FolderType::Label,
+            role: if remote_id == "INBOX" {
+                Some(FolderRole::Inbox)
+            } else {
+                None
+            },
+            parent_id: None,
+            color: None,
+            is_system: remote_id == "INBOX",
+            sort_order: 0,
+        }
+    }
+
+    fn gmail_test_account() -> Account {
+        let now = now_timestamp();
+        Account {
+            account_label: None,
+            provider_display_name: None,
+            id: "gmail-account".to_string(),
+            email: "gmail@example.com".to_string(),
+            display_name: "Gmail".to_string(),
+            color: None,
+            provider: ProviderType::Gmail,
+            created_at: now,
+            updated_at: now,
+        }
+    }
 
     #[test]
     fn test_build_sync_label_ids_includes_visible_custom_labels() {
@@ -1435,6 +1590,161 @@ mod tests {
         assert!(!should_notify_gmail_startup_fetch(None));
         assert!(!should_notify_gmail_startup_fetch(Some("")));
         assert!(should_notify_gmail_startup_fetch(Some("history-1")));
+    }
+
+    #[test]
+    fn scope_mismatch_bootstrap_replays_pending_flags_deletions_and_labels() {
+        let sync_state = pebble_store::accounts::SyncState {
+            last_sync_cursor: Some("history-old".to_string()),
+            sync_since: Some(86_400),
+            gmail_sync_since: Some(0),
+            has_gmail_sync_scope: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            gmail_sync_dispatch(&sync_state),
+            GmailSyncDispatch::Bootstrap
+        );
+        let history_cursor = saved_gmail_history_cursor(&sync_state);
+        assert_eq!(history_cursor.as_deref(), Some("history-old"));
+
+        let store = Store::open_in_memory().unwrap();
+        store.insert_account(&gmail_test_account()).unwrap();
+        let inbox = gmail_test_folder("gmail-inbox", "INBOX");
+        let projects = gmail_test_folder("gmail-projects", "Label_Projects");
+        let keep = gmail_test_folder("gmail-keep", "Label_Keep");
+        for folder in [&inbox, &projects, &keep] {
+            store.insert_folder(folder).unwrap();
+        }
+        let flag_message = gmail_test_message("local-flag", "flag-message");
+        let deleted_message = gmail_test_message("local-deleted", "deleted-message");
+        let removed_label_message = gmail_test_message("local-removed-label", "removed-label");
+        let added_label_message = gmail_test_message("local-added-label", "added-label");
+        for message in [
+            &flag_message,
+            &deleted_message,
+            &removed_label_message,
+            &added_label_message,
+        ] {
+            store
+                .insert_message(message, std::slice::from_ref(&inbox.id))
+                .unwrap();
+        }
+        store
+            .add_message_to_folder(&removed_label_message.id, &projects.id)
+            .unwrap();
+
+        let page = serde_json::from_value::<GmailHistoryPage>(serde_json::json!({
+            "history": [
+                {"labelsAdded": [
+                    {"message": {"id": "flag-message"}, "labelIds": ["UNREAD"]},
+                    {"message": {"id": "added-label"}, "labelIds": ["Label_Keep"]}
+                ]},
+                {"labelsRemoved": [
+                    {"message": {"id": "flag-message"}, "labelIds": ["STARRED"]},
+                    {"message": {"id": "removed-label"}, "labelIds": ["Label_Projects"]}
+                ]},
+                {"messagesDeleted": [{"message": {"id": "deleted-message"}}]}
+            ]
+        }))
+        .unwrap();
+        let folders_by_remote = HashMap::from([
+            ("INBOX".to_string(), inbox.id.clone()),
+            ("Label_Projects".to_string(), projects.id.clone()),
+            ("Label_Keep".to_string(), keep.id.clone()),
+        ]);
+
+        apply_gmail_history_mutations(
+            &store,
+            "gmail-account",
+            &folders_by_remote,
+            &page.history.unwrap(),
+        )
+        .unwrap();
+
+        let updated_flag = store.get_message(&flag_message.id).unwrap().unwrap();
+        assert!(!updated_flag.is_read);
+        assert!(!updated_flag.is_starred);
+        assert!(
+            store
+                .get_message(&deleted_message.id)
+                .unwrap()
+                .unwrap()
+                .is_deleted
+        );
+        assert!(!store
+            .get_message_folder_ids(&removed_label_message.id)
+            .unwrap()
+            .contains(&projects.id));
+        assert!(store
+            .get_message_folder_ids(&added_label_message.id)
+            .unwrap()
+            .contains(&keep.id));
+    }
+
+    #[tokio::test]
+    async fn failed_gmail_history_replay_does_not_checkpoint_cursor() {
+        let mut checkpoint_count = 0;
+        let result = replay_gmail_history_and_checkpoint(
+            || async {
+                Err(PebbleError::Network(
+                    "history event application failed".to_string(),
+                ))
+            },
+            |_| {
+                checkpoint_count += 1;
+                Ok(())
+            },
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert_eq!(checkpoint_count, 0);
+    }
+
+    #[tokio::test]
+    async fn expired_gmail_history_replay_does_not_checkpoint_cursor() {
+        let mut checkpoint_count = 0;
+        let outcome = replay_gmail_history_and_checkpoint(
+            || async { Ok(GmailHistoryReplayOutcome::CursorExpired) },
+            |_| {
+                checkpoint_count += 1;
+                Ok(())
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(outcome, GmailHistoryReplayOutcome::CursorExpired));
+        assert_eq!(checkpoint_count, 0);
+    }
+
+    #[tokio::test]
+    async fn expired_gmail_metadata_failure_is_retryable_without_checkpoint() {
+        let store = Store::open_in_memory().unwrap();
+        store.insert_account(&gmail_test_account()).unwrap();
+        store
+            .set_sync_cursor("gmail-account", "history-old")
+            .unwrap();
+        store
+            .update_sync_state("gmail-account", |state| {
+                state.gmail_sync_since = Some(86_400);
+                state.has_gmail_sync_scope = true;
+            })
+            .unwrap();
+
+        let error = fetch_cached_gmail_metadata(vec!["cached-message".to_string()], |_| async {
+            Err(PebbleError::Network(
+                "metadata service unavailable".to_string(),
+            ))
+        })
+        .await
+        .unwrap_err();
+
+        assert!(error.to_string().contains("metadata service unavailable"));
+        let state = store.get_sync_state("gmail-account").unwrap().unwrap();
+        assert_eq!(state.last_sync_cursor.as_deref(), Some("history-old"));
+        assert_eq!(state.gmail_sync_since, Some(86_400));
     }
 
     #[test]

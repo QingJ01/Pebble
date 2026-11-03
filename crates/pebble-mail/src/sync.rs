@@ -586,6 +586,13 @@ fn history_page_ranges(exists: u32, page_size: u32) -> Vec<(u32, u32)> {
     ranges
 }
 
+fn imap_uidvalidity_snapshot_plan(
+    exists: u32,
+    uid_next: Option<u32>,
+) -> (Vec<(u32, u32)>, Option<u32>) {
+    (history_page_ranges(exists, HISTORY_PAGE_SIZE), uid_next)
+}
+
 fn should_include_discovered_imap_folder(
     folder: &pebble_core::Folder,
     selected_remote_ids: Option<&HashSet<String>>,
@@ -1299,55 +1306,21 @@ impl SyncWorker {
         &self,
         folder: &pebble_core::Folder,
     ) -> Result<ImapHistorySyncOutcome> {
-        let sync_since = self
-            .base
-            .store
-            .get_sync_state(&self.base.account_id)?
-            .and_then(|state| state.sync_since);
-        let (bounded_uids, ranges, uid_next) = if let Some(cutoff) = sync_since {
-            let (uids, uid_next) = self
-                .provider
-                .inner()
-                .search_uids_since(&folder.remote_id, cutoff, None)
-                .await?;
-            (Some(uids), Vec::new(), uid_next)
-        } else {
-            let status = self
-                .provider
-                .inner()
-                .get_mailbox_status(&folder.remote_id)
-                .await?;
-            (
-                None,
-                history_page_ranges(status.exists, HISTORY_PAGE_SIZE),
-                status.uid_next,
-            )
-        };
-        let page_count = bounded_uids.as_ref().map_or(ranges.len(), |uids| {
-            uids.len().div_ceil(HISTORY_PAGE_SIZE as usize)
-        });
+        let status = self
+            .provider
+            .inner()
+            .get_mailbox_status(&folder.remote_id)
+            .await?;
+        let (ranges, uid_next) = imap_uidvalidity_snapshot_plan(status.exists, status.uid_next);
         let mut snapshot: Vec<pebble_store::messages::ImapFolderSnapshotMessage> = Vec::new();
         let mut thread_mappings = std::collections::HashMap::new();
-        for page_index in 0..page_count {
-            let raw_page_result = if let Some(uids) = bounded_uids.as_ref() {
-                let start = page_index * HISTORY_PAGE_SIZE as usize;
-                let end = (start + HISTORY_PAGE_SIZE as usize).min(uids.len());
-                self.provider
-                    .inner()
-                    .fetch_messages_by_uids(&folder.remote_id, &uids[start..end])
-                    .await
-            } else {
-                let Some((start_seq, end_seq)) = ranges.get(page_index).copied() else {
-                    return Err(PebbleError::Internal(
-                        "IMAP history page range was missing".to_string(),
-                    ));
-                };
-                self.provider
-                    .inner()
-                    .fetch_messages_page(&folder.remote_id, start_seq, end_seq)
-                    .await
-            };
-            let raw_page = match raw_page_result {
+        for (start_seq, end_seq) in ranges {
+            let raw_page = match self
+                .provider
+                .inner()
+                .fetch_messages_page(&folder.remote_id, start_seq, end_seq)
+                .await
+            {
                 Ok(page) => page,
                 Err(error) => {
                     for entry in &snapshot {
@@ -3367,6 +3340,62 @@ mod tests {
             history_page_ranges(450, 200),
             vec![(251, 450), (51, 250), (1, 50)]
         );
+    }
+
+    #[test]
+    fn bounded_uidvalidity_recovery_selects_complete_snapshot_and_retains_local_relations() {
+        let store = test_store_with_message("uidvalidity-stable");
+        let mut old = store.get_message("uidvalidity-stable").unwrap().unwrap();
+        old.remote_id = "42".to_string();
+        old.message_id_header = Some("<stable@example.com>".to_string());
+        old.date = now_timestamp() - 365 * 86_400;
+        store
+            .replace_message_with_attachments(&old, &["folder-1".to_string()], &[])
+            .unwrap();
+        store.add_label(&old.id, "Keep").unwrap();
+        store
+            .update_sync_state("account-1", |state| {
+                state.sync_since = Some(now_timestamp() - 30 * 86_400);
+            })
+            .unwrap();
+
+        let (ranges, uid_next) = imap_uidvalidity_snapshot_plan(2, Some(100));
+        let selected_uids = ranges
+            .into_iter()
+            .flat_map(|(start, end)| start..=end)
+            .collect::<Vec<_>>();
+        assert_eq!(selected_uids, vec![1, 2]);
+        assert_eq!(uid_next, Some(100));
+
+        let snapshot = selected_uids
+            .into_iter()
+            .map(|uid| {
+                let mut fresh = old.clone();
+                fresh.id = new_id();
+                fresh.remote_id = uid.to_string();
+                fresh.message_id_header = Some(if uid == 1 {
+                    "<stable@example.com>".to_string()
+                } else {
+                    "<new@example.com>".to_string()
+                });
+                fresh.subject = format!("replacement {uid}");
+                pebble_store::messages::ImapFolderSnapshotMessage {
+                    message: fresh,
+                    attachments: Vec::new(),
+                }
+            })
+            .collect();
+        store
+            .reconcile_imap_folder_uidvalidity("account-1", "folder-1", snapshot)
+            .unwrap();
+
+        let retained = store.get_message(&old.id).unwrap().unwrap();
+        assert_eq!(retained.remote_id, "1");
+        assert_eq!(
+            store.get_message_folder_ids(&old.id).unwrap(),
+            vec!["folder-1".to_string()]
+        );
+        assert_eq!(store.get_message_labels(&old.id).unwrap().len(), 1);
     }
 
     #[test]
