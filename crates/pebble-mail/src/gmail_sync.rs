@@ -102,10 +102,6 @@ fn should_notify_gmail_startup_fetch(stored_cursor: Option<&str>) -> bool {
     stored_cursor.is_some_and(|cursor| !cursor.trim().is_empty())
 }
 
-fn should_use_gmail_history_sync_on_startup(stored_cursor: Option<&str>) -> bool {
-    stored_cursor.is_some_and(|cursor| !cursor.trim().is_empty())
-}
-
 fn gmail_sync_scope_matches(
     has_saved_scope: bool,
     saved_sync_since: Option<i64>,
@@ -115,6 +111,26 @@ fn gmail_sync_scope_matches(
         saved_sync_since == sync_since
     } else {
         sync_since.is_none()
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum GmailSyncDispatch {
+    Bootstrap,
+    History(String),
+}
+
+fn gmail_sync_dispatch(sync_state: &pebble_store::accounts::SyncState) -> GmailSyncDispatch {
+    let scope_matches = gmail_sync_scope_matches(
+        sync_state.has_gmail_sync_scope,
+        sync_state.gmail_sync_since,
+        sync_state.sync_since,
+    );
+    match (scope_matches, sync_state.last_sync_cursor.as_deref()) {
+        (true, Some(cursor)) if !cursor.trim().is_empty() => {
+            GmailSyncDispatch::History(cursor.to_string())
+        }
+        _ => GmailSyncDispatch::Bootstrap,
     }
 }
 
@@ -626,14 +642,10 @@ impl GmailSyncWorker {
             .get_sync_state(&self.base.account_id)?
             .unwrap_or_default();
         let sync_since = sync_state.sync_since;
-        let scope_matches = gmail_sync_scope_matches(
-            sync_state.has_gmail_sync_scope,
-            sync_state.gmail_sync_since,
-            sync_since,
-        );
-        let stored_cursor = scope_matches
-            .then_some(sync_state.last_sync_cursor)
-            .flatten();
+        let stored_cursor = match gmail_sync_dispatch(&sync_state) {
+            GmailSyncDispatch::History(cursor) => Some(cursor),
+            GmailSyncDispatch::Bootstrap => None,
+        };
         let notify_new = should_notify_gmail_startup_fetch(stored_cursor.as_deref());
 
         // Get the user profile for the latest historyId
@@ -690,6 +702,9 @@ impl GmailSyncWorker {
                 "Gmail initial sync had {} failures; keeping previous history cursor",
                 failure_count
             );
+            return Err(PebbleError::Network(format!(
+                "Gmail initial sync had {failure_count} failed label syncs"
+            )));
         }
 
         info!(
@@ -825,15 +840,14 @@ impl GmailSyncWorker {
 
     /// Poll for new messages using the Gmail History API (delta sync).
     async fn poll_changes(&self) -> Result<()> {
-        let cursor = self
+        let sync_state = self
             .base
             .store
-            .get_sync_cursor(&self.base.account_id)
-            .ok()
-            .flatten();
-        let history_id = match cursor {
-            Some(id) if !id.is_empty() => id,
-            _ => {
+            .get_sync_state(&self.base.account_id)?
+            .unwrap_or_default();
+        let history_id = match gmail_sync_dispatch(&sync_state) {
+            GmailSyncDispatch::History(id) => id,
+            GmailSyncDispatch::Bootstrap => {
                 debug!("No history cursor, doing full re-sync");
                 return self.initial_sync().await;
             }
@@ -1210,24 +1224,23 @@ impl GmailSyncWorker {
             return;
         }
 
-        let stored_cursor = self
+        let startup_dispatch = self
             .base
             .store
-            .get_sync_cursor(&self.base.account_id)
-            .ok()
-            .flatten();
+            .get_sync_state(&self.base.account_id)
+            .map(|state| gmail_sync_dispatch(&state.unwrap_or_default()));
 
         // Initial startup pass. Existing accounts must use Gmail History delta;
         // otherwise startup can skip older changes outside the latest-label fetch
         // window and then incorrectly advance the cursor.
         self.base.emit_sync_started("initial");
-        let startup_result = if should_use_gmail_history_sync_on_startup(stored_cursor.as_deref()) {
-            match self.refresh_folders().await {
+        let startup_result = match startup_dispatch {
+            Ok(GmailSyncDispatch::History(_)) => match self.refresh_folders().await {
                 Ok(()) => self.poll_changes().await,
                 Err(e) => Err(e),
-            }
-        } else {
-            self.initial_sync().await
+            },
+            Ok(GmailSyncDispatch::Bootstrap) => self.initial_sync().await,
+            Err(error) => Err(error),
         };
 
         if let Err(e) = startup_result {
@@ -1425,19 +1438,28 @@ mod tests {
     }
 
     #[test]
-    fn gmail_sync_scope_change_forces_history_bootstrap() {
-        assert!(gmail_sync_scope_matches(false, None, None));
-        assert!(!gmail_sync_scope_matches(false, None, Some(86_400)));
-        assert!(gmail_sync_scope_matches(true, Some(86_400), Some(86_400)));
-        assert!(!gmail_sync_scope_matches(true, Some(86_400), Some(0)));
-        assert!(!gmail_sync_scope_matches(true, Some(86_400), None));
-    }
+    fn gmail_scope_dispatch_retries_partial_backfill_for_expansion_and_all_mail() {
+        let mut state = pebble_store::accounts::SyncState {
+            last_sync_cursor: Some("history-old".to_string()),
+            sync_since: Some(0),
+            gmail_sync_since: Some(86_400),
+            has_gmail_sync_scope: true,
+            ..Default::default()
+        };
 
-    #[test]
-    fn gmail_startup_uses_history_sync_when_cursor_exists() {
-        assert!(!should_use_gmail_history_sync_on_startup(None));
-        assert!(!should_use_gmail_history_sync_on_startup(Some("")));
-        assert!(should_use_gmail_history_sync_on_startup(Some("history-1")));
+        assert_eq!(gmail_sync_dispatch(&state), GmailSyncDispatch::Bootstrap);
+        assert!(!can_advance_gmail_cursor(1));
+        assert_eq!(gmail_sync_dispatch(&state), GmailSyncDispatch::Bootstrap);
+
+        state.sync_since = None;
+        assert_eq!(gmail_sync_dispatch(&state), GmailSyncDispatch::Bootstrap);
+
+        state.gmail_sync_since = None;
+        state.last_sync_cursor = Some("history-new".to_string());
+        assert_eq!(
+            gmail_sync_dispatch(&state),
+            GmailSyncDispatch::History("history-new".to_string())
+        );
     }
 
     #[tokio::test]

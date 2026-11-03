@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::future::Future;
 use std::sync::RwLock;
 
@@ -84,25 +85,67 @@ pub struct OutlookDeltaPage {
     pub delta_link: Option<String>,
 }
 
-fn filter_outlook_delta_scope(mut list: GraphDeltaList, sync_since: Option<i64>) -> GraphDeltaList {
+async fn filter_outlook_delta_scope<F, Fut>(
+    mut list: GraphDeltaList,
+    sync_since: Option<i64>,
+    cached_remote_ids: &HashSet<String>,
+    mut fetch_metadata: F,
+) -> Result<GraphDeltaList>
+where
+    F: FnMut(String) -> Fut,
+    Fut: Future<Output = Result<Option<serde_json::Value>>>,
+{
     let Some(since) = sync_since else {
-        return list;
+        return Ok(list);
     };
-    let (year, month, day) = pebble_core::utc_date_from_unix_seconds(since);
-    let cutoff = format!("{year:04}-{month:02}-{day:02}T00:00:00Z");
-    list.value.retain(|value| {
+    let mut filtered = Vec::with_capacity(list.value.len());
+    for mut value in list.value {
         if value
             .get("@removed")
             .is_some_and(|removed| !removed.is_null())
         {
-            return true;
+            filtered.push(value);
+            continue;
         }
-        value
+        let Some(remote_id) = value.get("id").and_then(serde_json::Value::as_str) else {
+            filtered.push(value);
+            continue;
+        };
+        if cached_remote_ids.contains(remote_id) {
+            filtered.push(value);
+            continue;
+        }
+        let received = value
             .get("receivedDateTime")
             .and_then(serde_json::Value::as_str)
-            .is_none_or(|received| received >= cutoff.as_str())
-    });
-    list
+            .and_then(parse_graph_datetime);
+        let received = if let Some(received) = received {
+            Some(received)
+        } else {
+            let Some(metadata) = fetch_metadata(remote_id.to_string()).await? else {
+                continue;
+            };
+            if metadata.get("id").and_then(serde_json::Value::as_str) != Some(remote_id) {
+                return Err(PebbleError::Network(format!(
+                    "Mismatched Graph date metadata for {remote_id}"
+                )));
+            }
+            let Some(date) = metadata
+                .get("receivedDateTime")
+                .and_then(serde_json::Value::as_str)
+                .and_then(parse_graph_datetime)
+            else {
+                continue;
+            };
+            value["receivedDateTime"] = metadata["receivedDateTime"].clone();
+            Some(date)
+        };
+        if received.is_some_and(|received| received >= since) {
+            filtered.push(value);
+        }
+    }
+    list.value = filtered;
+    Ok(list)
 }
 
 fn outlook_delta_bootstrap_url(folder_id: &str, sync_since: Option<i64>) -> Result<String> {
@@ -232,6 +275,18 @@ fn graph_message_fetch_url(remote_id: &str) -> Result<String> {
         .push(remote_id);
     url.query_pairs_mut()
         .append_pair("$select", GRAPH_MESSAGE_SELECT);
+    Ok(url.to_string())
+}
+
+fn graph_message_date_fetch_url(remote_id: &str) -> Result<String> {
+    let mut url = reqwest::Url::parse(&format!("{GRAPH_API_BASE}/messages/"))
+        .map_err(|error| PebbleError::Network(format!("Invalid Graph message URL: {error}")))?;
+    url.path_segments_mut()
+        .map_err(|_| PebbleError::Network("Invalid Graph message URL base".to_string()))?
+        .pop_if_empty()
+        .push(remote_id);
+    url.query_pairs_mut()
+        .append_pair("$select", "id,receivedDateTime");
     Ok(url.to_string())
 }
 
@@ -772,6 +827,17 @@ impl OutlookProvider {
         cursor: Option<&str>,
         sync_since: Option<i64>,
     ) -> Result<OutlookDeltaPage> {
+        self.fetch_delta_page_since_with_cached_ids(folder_id, cursor, sync_since, HashSet::new())
+            .await
+    }
+
+    pub async fn fetch_delta_page_since_with_cached_ids(
+        &self,
+        folder_id: &str,
+        cursor: Option<&str>,
+        sync_since: Option<i64>,
+        cached_remote_ids: HashSet<String>,
+    ) -> Result<OutlookDeltaPage> {
         let url = match cursor {
             Some(cursor) if !cursor.is_empty() => {
                 validate_graph_continuation_url(cursor)?.to_string()
@@ -790,7 +856,13 @@ impl OutlookProvider {
             .json()
             .await
             .map_err(|e| PebbleError::Network(format!("Failed to parse delta response: {e}")))?;
-        let list = filter_outlook_delta_scope(list, sync_since);
+        let list = filter_outlook_delta_scope(
+            list,
+            sync_since,
+            &cached_remote_ids,
+            |remote_id| async move { self.fetch_graph_message_date_metadata(&remote_id).await },
+        )
+        .await?;
         for continuation in [list.next_link.as_deref(), list.delta_link.as_deref()]
             .into_iter()
             .flatten()
@@ -802,6 +874,27 @@ impl OutlookProvider {
             self.fetch_graph_message(&remote_id).await
         })
         .await
+    }
+
+    async fn fetch_graph_message_date_metadata(
+        &self,
+        remote_id: &str,
+    ) -> Result<Option<serde_json::Value>> {
+        let resp = self.get(&graph_message_date_fetch_url(remote_id)?).await?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(PebbleError::Network(format!(
+                "Graph message date metadata fetch failed ({status}): {text}"
+            )));
+        }
+        let value = resp.json().await.map_err(|error| {
+            PebbleError::Network(format!("Failed to parse Graph date metadata: {error}"))
+        })?;
+        Ok(Some(value))
     }
 
     async fn fetch_graph_message(&self, remote_id: &str) -> Result<Option<serde_json::Value>> {
@@ -1819,20 +1912,108 @@ mod tests {
             }),
         ]);
         let mut fetch_count = 0;
-        let page = resolve_outlook_delta_page(
-            filter_outlook_delta_scope(list, Some(1_704_067_200)),
-            "account-1",
-            |_| {
-                fetch_count += 1;
+        let filtered =
+            filter_outlook_delta_scope(list, Some(1_704_067_200), &HashSet::new(), |_| {
                 std::future::ready(Ok(None))
-            },
-        )
+            })
+            .await
+            .unwrap();
+        let page = resolve_outlook_delta_page(filtered, "account-1", |_| {
+            fetch_count += 1;
+            std::future::ready(Ok(None))
+        })
         .await
         .unwrap();
 
         assert_eq!(fetch_count, 0);
         assert!(page.messages.is_empty());
         assert_eq!(page.deleted_remote_ids, ["deleted-message"]);
+    }
+
+    #[tokio::test]
+    async fn outlook_scope_filter_keeps_fractional_boundary_timestamp() {
+        let filtered = filter_outlook_delta_scope(
+            delta_list(vec![serde_json::json!({
+                "id": "boundary",
+                "receivedDateTime": "2024-01-01T00:00:00.000Z",
+                "isRead": true
+            })]),
+            Some(1_704_067_200),
+            &HashSet::new(),
+            |_| std::future::ready(Ok(None)),
+        )
+        .await
+        .unwrap();
+        assert_eq!(filtered.value.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn outlook_scope_filter_keeps_cached_old_thin_updates() {
+        let cached = HashSet::from(["cached-old".to_string()]);
+        let filtered = filter_outlook_delta_scope(
+            delta_list(vec![serde_json::json!({
+                "id": "cached-old",
+                "receivedDateTime": "2023-12-31T23:59:59Z",
+                "isRead": true
+            })]),
+            Some(1_704_067_200),
+            &cached,
+            |_| std::future::ready(Ok(None)),
+        )
+        .await
+        .unwrap();
+        let mut full_fetches = 0;
+        let page = resolve_outlook_delta_page(filtered, "account-1", |id| {
+            full_fetches += 1;
+            std::future::ready(Ok(Some(complete_delta_message(&id))))
+        })
+        .await
+        .unwrap();
+        assert_eq!(page.messages.len(), 1);
+        assert_eq!(page.messages[0].remote_id, "cached-old");
+        assert_eq!(full_fetches, 1);
+    }
+
+    #[tokio::test]
+    async fn outlook_old_unknown_missing_date_uses_metadata_only_then_skips_body() {
+        let metadata_url =
+            reqwest::Url::parse(&graph_message_date_fetch_url("unknown-old").unwrap()).unwrap();
+        let metadata_query = metadata_url
+            .query_pairs()
+            .into_owned()
+            .collect::<std::collections::HashMap<_, _>>();
+        assert_eq!(
+            metadata_query.get("$select").map(String::as_str),
+            Some("id,receivedDateTime")
+        );
+
+        let mut metadata_fetches = 0;
+        let filtered = filter_outlook_delta_scope(
+            delta_list(vec![
+                serde_json::json!({"id": "unknown-old", "isRead": true}),
+            ]),
+            Some(1_704_067_200),
+            &HashSet::new(),
+            |_| {
+                metadata_fetches += 1;
+                std::future::ready(Ok(Some(serde_json::json!({
+                    "id": "unknown-old",
+                    "receivedDateTime": "2023-12-31T23:59:59Z"
+                }))))
+            },
+        )
+        .await
+        .unwrap();
+        let mut full_fetches = 0;
+        let page = resolve_outlook_delta_page(filtered, "account-1", |_| {
+            full_fetches += 1;
+            std::future::ready(Ok(Some(complete_delta_message("unknown-old"))))
+        })
+        .await
+        .unwrap();
+        assert_eq!(metadata_fetches, 1);
+        assert_eq!(full_fetches, 0);
+        assert!(page.messages.is_empty());
     }
 
     #[tokio::test]
