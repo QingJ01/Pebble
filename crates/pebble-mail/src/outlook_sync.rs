@@ -821,25 +821,69 @@ impl OutlookSyncWorker {
                 .filter(should_sync_outlook_folder)
                 .collect::<Vec<_>>();
             let mut sync_failure_count = 0u32;
-            let sync_since = self
-                .base
-                .store
-                .get_sync_state(&self.base.account_id)
-                .ok()
-                .flatten()
-                .and_then(|state| state.sync_since);
+            let sync_since = match self.base.store.get_sync_state(&self.base.account_id) {
+                Ok(state) => state.and_then(|state| state.sync_since),
+                Err(error) => {
+                    warn!("Failed to read Outlook sync scope: {error}");
+                    self.base.emit_error(
+                        "sync",
+                        &format!("Failed to read Outlook sync scope: {error}"),
+                    );
+                    self.base.emit_sync_error("poll", &error.to_string());
+                    let _ = backoff.record_failure();
+                    if wait_for_outlook_policy_delay(
+                        &policy,
+                        &backoff,
+                        &mut runtime,
+                        &mut stop_rx,
+                        &mut trigger_rx,
+                    )
+                    .await
+                    {
+                        break 'sync_loop;
+                    }
+                    continue 'sync_loop;
+                }
+            };
 
             for folder in &db_folders {
-                let state = self
+                let state = match self
                     .base
                     .store
                     .get_folder_sync_state(&self.base.account_id, &folder.id)
-                    .ok()
-                    .flatten();
+                {
+                    Ok(state) => state,
+                    Err(error) => {
+                        warn!(
+                            "Failed to read Outlook sync cursor for folder {}: {error}",
+                            folder.name
+                        );
+                        sync_failure_count += 1;
+                        continue;
+                    }
+                };
                 let cursor = if outlook_delta_scope_matches(state.as_deref(), sync_since) {
                     parse_outlook_delta_cursor(&folder.remote_id, state.as_deref())
                 } else {
                     None
+                };
+                let cached_remote_ids = match self
+                    .base
+                    .store
+                    .list_remote_ids_by_folder(&self.base.account_id, &folder.id)
+                {
+                    Ok(messages) => messages
+                        .into_iter()
+                        .map(|(_, remote_id, _, _, _)| remote_id)
+                        .collect::<std::collections::HashSet<_>>(),
+                    Err(error) => {
+                        warn!(
+                            "Failed to read cached Outlook message IDs for folder {}: {error}",
+                            folder.name
+                        );
+                        sync_failure_count += 1;
+                        continue;
+                    }
                 };
 
                 match collect_outlook_delta_pages_with_expiry_recovery(
@@ -847,9 +891,15 @@ impl OutlookSyncWorker {
                     cursor.as_deref(),
                     |folder_id, cursor| {
                         let provider = Arc::clone(&self.provider);
+                        let cached_remote_ids = cached_remote_ids.clone();
                         async move {
                             provider
-                                .fetch_delta_page_since(&folder_id, cursor.as_deref(), sync_since)
+                                .fetch_delta_page_since_with_cached_ids(
+                                    &folder_id,
+                                    cursor.as_deref(),
+                                    sync_since,
+                                    cached_remote_ids,
+                                )
                                 .await
                         }
                     },
