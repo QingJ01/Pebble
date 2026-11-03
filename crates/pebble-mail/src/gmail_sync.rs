@@ -106,6 +106,18 @@ fn should_use_gmail_history_sync_on_startup(stored_cursor: Option<&str>) -> bool
     stored_cursor.is_some_and(|cursor| !cursor.trim().is_empty())
 }
 
+fn gmail_sync_scope_matches(
+    has_saved_scope: bool,
+    saved_sync_since: Option<i64>,
+    sync_since: Option<i64>,
+) -> bool {
+    if has_saved_scope {
+        saved_sync_since == sync_since
+    } else {
+        sync_since.is_none()
+    }
+}
+
 async fn collect_paginated_gmail_refs<F, Fut>(
     label_id: &str,
     limit: u32,
@@ -608,11 +620,19 @@ impl GmailSyncWorker {
         self.refresh_folders().await?;
 
         // Get the stored sync cursor (historyId) if any
-        let stored_cursor = self
+        let sync_state = self
             .base
             .store
-            .get_sync_cursor(&self.base.account_id)
-            .ok()
+            .get_sync_state(&self.base.account_id)?
+            .unwrap_or_default();
+        let sync_since = sync_state.sync_since;
+        let scope_matches = gmail_sync_scope_matches(
+            sync_state.has_gmail_sync_scope,
+            sync_state.gmail_sync_since,
+            sync_since,
+        );
+        let stored_cursor = scope_matches
+            .then_some(sync_state.last_sync_cursor)
             .flatten();
         let notify_new = should_notify_gmail_startup_fetch(stored_cursor.as_deref());
 
@@ -642,6 +662,7 @@ impl GmailSyncWorker {
                     &folders_by_remote,
                     &mut thread_mappings,
                     notify_new,
+                    sync_since,
                 )
                 .await
             {
@@ -657,10 +678,13 @@ impl GmailSyncWorker {
 
         // Store the historyId as sync cursor for future delta syncs
         if !profile_history_id.is_empty() && can_advance_gmail_cursor(failure_count) {
-            let _ = self
-                .base
+            self.base
                 .store
-                .set_sync_cursor(&self.base.account_id, &profile_history_id);
+                .update_sync_state(&self.base.account_id, |state| {
+                    state.last_sync_cursor = Some(profile_history_id.clone());
+                    state.gmail_sync_since = sync_since;
+                    state.has_gmail_sync_scope = true;
+                })?;
         } else if failure_count > 0 {
             warn!(
                 "Gmail initial sync had {} failures; keeping previous history cursor",
@@ -683,6 +707,7 @@ impl GmailSyncWorker {
         folders_by_remote: &HashMap<String, String>,
         thread_mappings: &mut HashMap<String, String>,
         notify_new: bool,
+        sync_since: Option<i64>,
     ) -> Result<GmailLabelSyncOutcome> {
         let folder_id = match folders_by_remote.get(label_id) {
             Some(id) => id.clone(),
@@ -699,7 +724,7 @@ impl GmailSyncWorker {
                 let provider = Arc::clone(&self.provider);
                 async move {
                     provider
-                        .list_message_ids(&label_id, limit, page_token.as_deref())
+                        .list_message_ids(&label_id, limit, page_token.as_deref(), sync_since)
                         .await
                 }
             })
@@ -1397,6 +1422,15 @@ mod tests {
         assert!(!should_notify_gmail_startup_fetch(None));
         assert!(!should_notify_gmail_startup_fetch(Some("")));
         assert!(should_notify_gmail_startup_fetch(Some("history-1")));
+    }
+
+    #[test]
+    fn gmail_sync_scope_change_forces_history_bootstrap() {
+        assert!(gmail_sync_scope_matches(false, None, None));
+        assert!(!gmail_sync_scope_matches(false, None, Some(86_400)));
+        assert!(gmail_sync_scope_matches(true, Some(86_400), Some(86_400)));
+        assert!(!gmail_sync_scope_matches(true, Some(86_400), Some(0)));
+        assert!(!gmail_sync_scope_matches(true, Some(86_400), None));
     }
 
     #[test]

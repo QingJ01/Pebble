@@ -35,6 +35,18 @@ pub struct SyncState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_sync_cursor: Option<String>,
 
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_range_days: Option<u32>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_since: Option<i64>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gmail_sync_since: Option<i64>,
+
+    #[serde(default)]
+    pub has_gmail_sync_scope: bool,
+
     /// Legacy inline IMAP config, present on accounts that predate the move
     /// of credentials into `auth_data`. New accounts should not populate it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -56,6 +68,99 @@ pub struct SyncState {
     /// round-tripping through [`Store::update_sync_state`] never drops data.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+pub fn validate_sync_range_days(days: Option<u32>) -> Result<()> {
+    if days.is_some_and(|days| !(1..=36_500).contains(&days)) {
+        return Err(PebbleError::Validation(
+            "Sync range must be between 1 and 36500 days".into(),
+        ));
+    }
+    Ok(())
+}
+
+pub fn sync_range_cutoff(days: Option<u32>, now_unix_seconds: i64) -> Option<i64> {
+    let days = i64::from(days?);
+    let utc_midnight = now_unix_seconds.div_euclid(86_400) * 86_400;
+    Some(utc_midnight - days * 86_400)
+}
+
+#[cfg(test)]
+mod sync_range_tests {
+    use super::{sync_range_cutoff, validate_sync_range_days, SyncState};
+
+    #[test]
+    fn sync_range_validation_and_cutoff_are_stable_utc_days() {
+        assert!(validate_sync_range_days(None).is_ok());
+        assert!(validate_sync_range_days(Some(1)).is_ok());
+        assert!(validate_sync_range_days(Some(36_500)).is_ok());
+        assert!(validate_sync_range_days(Some(0)).is_err());
+        assert!(validate_sync_range_days(Some(36_501)).is_err());
+        assert_eq!(sync_range_cutoff(None, 172_800), None);
+        assert_eq!(sync_range_cutoff(Some(1), 172_799), Some(0));
+    }
+
+    #[test]
+    fn legacy_sync_state_round_trip_preserves_unknown_siblings() {
+        let mut state =
+            SyncState::from_json_opt(Some(r#"{"provider":"gmail","legacy":7}"#)).unwrap();
+        assert_eq!(state.sync_range_days, None);
+        assert_eq!(state.sync_since, None);
+        state.sync_range_days = Some(30);
+        state.sync_since = Some(86_400);
+        let json: serde_json::Value = serde_json::from_str(&state.to_json().unwrap()).unwrap();
+        assert_eq!(json["legacy"], 7);
+        assert_eq!(json["provider"], "gmail");
+        assert_eq!(json["sync_range_days"], 30);
+        assert_eq!(json["sync_since"], 86_400);
+    }
+
+    #[test]
+    fn sync_range_state_is_isolated_by_account() {
+        let store = crate::Store::open_in_memory().unwrap();
+        let now = pebble_core::now_timestamp();
+        for (id, email) in [
+            ("range-account-1", "one@example.com"),
+            ("range-account-2", "two@example.com"),
+        ] {
+            store
+                .insert_account(&pebble_core::Account {
+                    id: id.to_string(),
+                    email: email.to_string(),
+                    display_name: email.to_string(),
+                    account_label: None,
+                    provider_display_name: None,
+                    color: None,
+                    provider: pebble_core::ProviderType::Gmail,
+                    created_at: now,
+                    updated_at: now,
+                })
+                .unwrap();
+        }
+        store
+            .update_sync_state("range-account-1", |state| {
+                state.sync_range_days = Some(30);
+                state.sync_since = Some(86_400);
+            })
+            .unwrap();
+
+        assert_eq!(
+            store
+                .get_sync_state("range-account-1")
+                .unwrap()
+                .unwrap()
+                .sync_range_days,
+            Some(30)
+        );
+        assert_eq!(
+            store
+                .get_sync_state("range-account-2")
+                .unwrap()
+                .unwrap()
+                .sync_range_days,
+            None
+        );
+    }
 }
 
 impl SyncState {

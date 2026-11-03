@@ -35,6 +35,23 @@ vi.mock("../../src/lib/api", () => ({
 }));
 
 describe("AccountSetup OAuth", () => {
+  it("passes the selected range into OAuth before starting the first sync", async () => {
+    render(<QueryClientProvider client={new QueryClient()}><AccountSetup onClose={vi.fn()} /></QueryClientProvider>);
+    fireEvent.change(screen.getByLabelText("Sync range"), { target: { value: "90" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in with Microsoft" }));
+    await waitFor(() => expect(completeOAuthFlow).toHaveBeenCalledWith("outlook", "", "", undefined, undefined, undefined, 90));
+    await waitFor(() => expect(startSync).toHaveBeenCalled());
+    expect(vi.mocked(completeOAuthFlow).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(startSync).mock.invocationCallOrder[0]);
+  });
+
+  it("blocks OAuth when custom days are invalid", () => {
+    render(<QueryClientProvider client={new QueryClient()}><AccountSetup onClose={vi.fn()} /></QueryClientProvider>);
+    fireEvent.change(screen.getByLabelText("Sync range"), { target: { value: "custom" } });
+    fireEvent.change(screen.getByLabelText("Number of days"), { target: { value: "0" } });
+    expect((screen.getByRole("button", { name: "Sign in with Google" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Sign in with Google" }));
+    expect(completeOAuthFlow).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.mocked(completeOAuthFlow).mockResolvedValue({
       id: "account-1",
@@ -78,7 +95,7 @@ describe("AccountSetup OAuth", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sign in with Google" }));
 
     await waitFor(() => {
-      expect(completeOAuthFlow).toHaveBeenCalledWith("gmail", "", "", undefined, undefined, undefined);
+      expect(completeOAuthFlow).toHaveBeenCalledWith("gmail", "", "", undefined, undefined, undefined, null);
     });
     await waitFor(() => {
       expect(startSync).toHaveBeenCalledWith("account-1", 3);
@@ -116,7 +133,7 @@ describe("AccountSetup OAuth", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sign in with Google" }));
 
     await waitFor(() => {
-      expect(completeOAuthFlow).toHaveBeenCalledWith("gmail", "", "", "127.0.0.1", 7890, undefined);
+      expect(completeOAuthFlow).toHaveBeenCalledWith("gmail", "", "", "127.0.0.1", 7890, undefined, null);
     });
   });
 
@@ -201,6 +218,7 @@ describe("AccountSetup OAuth", () => {
           email: "legacy@example.com",
           display_name: "Legacy",
           provider: "pop3",
+          sync_range_days: null,
           imap_host: "pop.example.com",
           imap_port: 995,
           smtp_host: "smtp.example.com",
@@ -227,6 +245,7 @@ describe("AccountSetup OAuth", () => {
     fireEvent.change(screen.getByLabelText("Email address"), {
       target: { value: "user@hotmail.com" },
     });
+    fireEvent.change(screen.getByLabelText("Sync range"), { target: { value: "30" } });
     fireEvent.change(screen.getByLabelText("Sender name"), {
       target: { value: "Hotmail" },
     });
@@ -248,6 +267,7 @@ describe("AccountSetup OAuth", () => {
           email: "user@hotmail.com",
           display_name: "Hotmail",
           provider: "imap",
+          sync_range_days: 30,
           imap_host: "outlook.office365.com",
           smtp_host: "smtp.office365.com",
           username: "",

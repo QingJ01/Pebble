@@ -1,8 +1,11 @@
+import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import AccountsTab from "../../../src/features/settings/AccountsTab";
 import {
   getImapSyncFolders,
+  getAccountSyncRange,
+  updateAccountSyncRange,
   triggerSync,
   updateAccount,
   updateImapSyncFolders,
@@ -46,6 +49,8 @@ vi.mock("../../../src/hooks/queries", () => ({
 }));
 
 vi.mock("../../../src/lib/api", () => ({
+  getAccountSyncRange: vi.fn(() => Promise.resolve(null)),
+  updateAccountSyncRange: vi.fn(() => Promise.resolve()),
   deleteAccount: vi.fn(),
   getImapSyncFolders: vi.fn(),
   getOAuthAccountProxySetting: vi.fn(),
@@ -75,6 +80,7 @@ vi.mock("../../../src/stores/mail.store", () => ({
 }));
 
 vi.mock("../../../src/stores/ui.store", () => ({
+  realtimePreferenceToPollInterval: () => 3,
   useUIStore: (selector: (state: { realtimeStatusByAccount: Record<string, unknown> }) => unknown) =>
     selector({ realtimeStatusByAccount: {} }),
 }));
@@ -132,6 +138,7 @@ const folderSettings = {
 describe("AccountsTab IMAP folder selection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getAccountSyncRange).mockResolvedValue(null);
     vi.mocked(getImapSyncFolders).mockResolvedValue(folderSettings);
     vi.mocked(updateImapSyncFolders).mockImplementation(
       async (_accountId, selectedRemoteIds) => ({
@@ -141,6 +148,38 @@ describe("AccountsTab IMAP folder selection", () => {
     );
     vi.mocked(updateAccount).mockResolvedValue(undefined);
     vi.mocked(triggerSync).mockResolvedValue(undefined);
+  });
+
+  it("loads a custom range and saves a wider range to backfill earlier mail", async () => {
+    vi.mocked(getAccountSyncRange).mockResolvedValue(14);
+    render(<AccountsTab />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit account" }));
+    const days = await screen.findByLabelText("Number of days") as HTMLInputElement;
+    expect(days.value).toBe("14");
+    fireEvent.change(screen.getByLabelText("Sync range"), { target: { value: "all" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "common.save" })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    await waitFor(() => expect(updateAccountSyncRange).toHaveBeenCalledWith("account-1", null, 3));
+  });
+
+  it("does not overwrite the stored range when loading fails", async () => {
+    vi.mocked(getAccountSyncRange).mockRejectedValue(new Error("Storage unavailable"));
+    render(<AccountsTab />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit account" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Storage unavailable");
+    expect(screen.getByRole("button", { name: "common.save" })).toBeDisabled();
+    expect(updateAccountSyncRange).not.toHaveBeenCalled();
+  });
+
+  it("shows a save failure without closing the editor", async () => {
+    vi.mocked(updateAccountSyncRange).mockRejectedValueOnce(new Error("Sync restart failed"));
+    render(<AccountsTab />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit account" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "common.save" })).not.toBeDisabled());
+    fireEvent.change(screen.getByLabelText("Sync range"), { target: { value: "30" } });
+    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Sync restart failed");
+    expect(screen.getByLabelText("Sync range")).toHaveValue("30");
   });
 
   it("lists folders, locks Inbox, and saves additional selections", async () => {

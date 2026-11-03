@@ -166,6 +166,7 @@ export type ConnectionSecurity = "tls" | "starttls" | "plain";
 
 /** @rust src-tauri/src/commands/accounts.rs → AddAccountRequest */
 export interface AddAccountRequest {
+  sync_range_days?: number | null;
   account_label?: string | null;
   email: string;
   display_name: string;

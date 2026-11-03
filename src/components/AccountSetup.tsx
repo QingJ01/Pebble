@@ -11,6 +11,7 @@ import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import { realtimePreferenceToPollInterval, useUIStore } from "@/stores/ui.store";
 import { useToastStore } from "@/stores/toast.store";
 import { inputStyle, labelStyle } from "../styles/form";
+import SyncRangeFields, { syncRangeDays, syncRangeDraft } from "./SyncRangeFields";
 
 const FOLDER_REFRESH_ATTEMPTS = 5;
 const FOLDER_REFRESH_INTERVAL_MS = 2000;
@@ -99,6 +100,7 @@ export default function AccountSetup({ onClose }: Props) {
     password: "",
   };
   const [form, setForm] = useState<AddAccountRequest>(initialForm);
+  const [syncRange, setSyncRange] = useState(() => syncRangeDraft(null));
   const initialFormRef = useRef(initialForm);
 
   const [loading, setLoading] = useState(false);
@@ -116,7 +118,7 @@ export default function AccountSetup({ onClose }: Props) {
     const isDirty = (Object.keys(current) as Array<keyof AddAccountRequest>).some(
       (k) => current[k] !== initial[k],
     );
-    if (!isDirty) {
+    if (!isDirty && syncRange.preset === "all" && !syncRange.customDays) {
       onClose();
       return;
     }
@@ -209,6 +211,8 @@ export default function AccountSetup({ onClose }: Props) {
   const [oauthLoading, setOauthLoading] = useState(false);
 
   async function handleOAuth(provider: "gmail" | "outlook") {
+    const days = syncRangeDays(syncRange);
+    if (days === undefined) return;
     setOauthLoading(true);
     setError(null);
     try {
@@ -219,6 +223,7 @@ export default function AccountSetup({ onClose }: Props) {
         form.proxy_host?.trim() || undefined,
         form.proxy_port,
         form.account_label || undefined,
+        days,
       );
       await queryClient.invalidateQueries({ queryKey: accountsQueryKey });
       await startSync(account.id, syncPollInterval);
@@ -271,10 +276,12 @@ export default function AccountSetup({ onClose }: Props) {
 
   async function handleSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
+    const days = form.provider === "pop3" ? null : syncRangeDays(syncRange);
+    if (days === undefined) return;
     setError(null);
     setLoading(true);
     try {
-      const account = await addAccount(form);
+      const account = await addAccount({ ...form, sync_range_days: days });
       // Invalidate accounts immediately so UI reflects the new account
       await queryClient.invalidateQueries({ queryKey: accountsQueryKey });
       onClose();
@@ -419,10 +426,11 @@ export default function AccountSetup({ onClose }: Props) {
             <small>{t("accountSetup.accountLabelHelp", "Only used to identify this account in Pebble; never sent as your sender name.")}</small>
           </div>
           {/* OAuth sign-in buttons */}
+          <SyncRangeFields value={syncRange} onChange={setSyncRange} disabled={loading || oauthLoading} />
           <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
             <button
               type="button"
-              disabled={oauthLoading}
+              disabled={loading || oauthLoading || syncRangeDays(syncRange) === undefined}
               onClick={() => handleOAuth("gmail")}
               style={{
                 flex: 1,
@@ -446,7 +454,7 @@ export default function AccountSetup({ onClose }: Props) {
             </button>
             <button
               type="button"
-              disabled={oauthLoading}
+              disabled={loading || oauthLoading || syncRangeDays(syncRange) === undefined}
               onClick={() => handleOAuth("outlook")}
               style={{
                 flex: 1,
@@ -549,6 +557,9 @@ export default function AccountSetup({ onClose }: Props) {
                 <option value="imap">{t("accountSetup.incomingProtocolImap", "IMAP")}</option>
                 <option value="pop3">{t("accountSetup.incomingProtocolPop3", "POP3")}</option>
               </select>
+              {isPop3 && <div style={{ color: "var(--color-text-secondary)", fontSize: "12px", marginTop: "6px" }}>
+                {t("syncRange.pop3", "POP3 does not support server-side date filtering; all mail will be synced.")}
+              </div>}
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "12px" }}>
@@ -772,7 +783,7 @@ export default function AccountSetup({ onClose }: Props) {
               </button>
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || oauthLoading || (!isPop3 && syncRangeDays(syncRange) === undefined)}
                 style={{
                   flex: 1,
                   padding: "9px 16px",

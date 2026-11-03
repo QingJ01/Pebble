@@ -40,6 +40,67 @@ pub async fn start_sync(
     Ok(format!("Sync started for account {account_id}"))
 }
 
+#[tauri::command]
+pub async fn get_account_sync_range(
+    state: State<'_, AppState>,
+    account_id: String,
+) -> std::result::Result<Option<u32>, PebbleError> {
+    if state.store.get_account(&account_id)?.is_none() {
+        return Err(PebbleError::Internal(format!(
+            "Account not found: {account_id}"
+        )));
+    }
+    Ok(state
+        .store
+        .get_sync_state(&account_id)?
+        .and_then(|sync_state| sync_state.sync_range_days))
+}
+
+#[tauri::command]
+pub async fn update_account_sync_range(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    account_id: String,
+    days: Option<u32>,
+    poll_interval_secs: Option<u64>,
+) -> std::result::Result<(), PebbleError> {
+    pebble_store::accounts::validate_sync_range_days(days)?;
+    let account = state
+        .store
+        .get_account(&account_id)?
+        .ok_or_else(|| PebbleError::Internal(format!("Account not found: {account_id}")))?;
+    if account.provider == ProviderType::Pop3 && days.is_some() {
+        return Err(PebbleError::Validation(
+            "POP3 does not support a bounded sync range".into(),
+        ));
+    }
+
+    let current = state
+        .store
+        .get_sync_state(&account_id)?
+        .and_then(|sync_state| sync_state.sync_range_days);
+    let worker_active = state
+        .sync_handles
+        .lock()
+        .await
+        .get(&account_id)
+        .is_some_and(|handle| !handle.task.is_finished());
+    if current == days && worker_active {
+        return Ok(());
+    }
+
+    if current != days {
+        stop_sync_and_await(&state, &account_id).await;
+        let now = pebble_core::now_timestamp();
+        state.store.update_sync_state(&account_id, |sync_state| {
+            sync_state.sync_range_days = days;
+            sync_state.sync_since = pebble_store::accounts::sync_range_cutoff(days, now);
+        })?;
+    }
+
+    start_sync_inner(&app, &state, account_id, poll_interval_secs).await
+}
+
 /// Auto-resume sync for all existing accounts on app startup.
 pub async fn resume_all_syncs(app: tauri::AppHandle) {
     use tauri::Manager;
@@ -736,6 +797,17 @@ async fn stop_sync_inner(state: &AppState, account_id: &str) {
             }
             handle.task.abort();
         }
+    }
+}
+
+async fn stop_sync_and_await(state: &AppState, account_id: &str) {
+    let handle = state.sync_handles.lock().await.remove(account_id);
+    if let Some(handle) = handle {
+        if !handle.task.is_finished() {
+            let _ = handle.stop_tx.send(true);
+            handle.task.abort();
+        }
+        let _ = handle.task.await;
     }
 }
 

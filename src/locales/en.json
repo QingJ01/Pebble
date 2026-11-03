@@ -1,4 +1,17 @@
 {
+  "syncRange": {
+    "label": "Sync range",
+    "all": "All mail",
+    "month": "Last month (30 days)",
+    "quarter": "Last 3 months (90 days)",
+    "year": "Last year (365 days)",
+    "custom": "Custom days",
+    "days": "Number of days",
+    "invalid": "Enter a whole number from 1 to 36500.",
+    "help": "Limits history downloaded from the server, starting at midnight UTC. New mail continues to sync; existing local mail is kept. To load earlier mail, choose a wider range or All mail and save.",
+    "pop3": "POP3 does not support server-side date filtering; all mail will be synced.",
+    "loadError": "Could not load the sync range. Close and reopen this dialog to retry."
+  },
   "common": {
     "loading": "Loading...",
     "noMessages": "No messages",

@@ -41,6 +41,8 @@ vi.mock("../../../src/hooks/queries", () => ({
 }));
 
 vi.mock("../../../src/lib/api", () => ({
+  getAccountSyncRange: vi.fn(() => Promise.resolve(null)),
+  updateAccountSyncRange: vi.fn(() => Promise.resolve()),
   deleteAccount: vi.fn(),
   getOAuthAccountProxy: vi.fn(() => Promise.resolve(null)),
   getOAuthAccountProxySetting: vi.fn(),
@@ -65,6 +67,7 @@ vi.mock("../../../src/stores/mail.store", () => ({
 }));
 
 vi.mock("../../../src/stores/ui.store", () => ({
+  realtimePreferenceToPollInterval: () => 3,
   useUIStore: (selector: (state: { realtimeStatusByAccount: Record<string, unknown> }) => unknown) =>
     selector({ realtimeStatusByAccount: {} }),
 }));

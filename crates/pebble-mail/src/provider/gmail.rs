@@ -15,6 +15,28 @@ use pebble_core::{
 
 const GMAIL_API_BASE: &str = "https://www.googleapis.com/gmail/v1/users/me";
 
+fn gmail_list_messages_url(
+    label_id: &str,
+    max_results: u32,
+    page_token: Option<&str>,
+    sync_since: Option<i64>,
+) -> Result<reqwest::Url> {
+    let mut url = reqwest::Url::parse(&format!("{GMAIL_API_BASE}/messages"))
+        .map_err(|e| PebbleError::Network(format!("Build Gmail list URL: {e}")))?;
+    {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("labelIds", label_id);
+        query.append_pair("maxResults", &max_results.to_string());
+        if let Some(token) = page_token {
+            query.append_pair("pageToken", token);
+        }
+        if let Some(since) = sync_since {
+            query.append_pair("q", &format!("after:{since}"));
+        }
+    }
+    Ok(url)
+}
+
 // ---------------------------------------------------------------------------
 // Gmail API response types (internal)
 // ---------------------------------------------------------------------------
@@ -334,13 +356,10 @@ impl GmailProvider {
         label_id: &str,
         max_results: u32,
         page_token: Option<&str>,
+        sync_since: Option<i64>,
     ) -> Result<(Vec<GmailMessageRef>, Option<String>)> {
-        let mut url =
-            format!("{GMAIL_API_BASE}/messages?labelIds={label_id}&maxResults={max_results}");
-        if let Some(token) = page_token {
-            url.push_str(&format!("&pageToken={token}"));
-        }
-        let resp = self.get(&url).await?;
+        let url = gmail_list_messages_url(label_id, max_results, page_token, sync_since)?;
+        let resp = self.get(url.as_str()).await?;
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
@@ -1419,6 +1438,22 @@ fn base64url_encode(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gmail_sync_range_query_is_encoded_on_every_page() {
+        let url = gmail_list_messages_url("INBOX", 100, Some("next token+/"), Some(1_704_067_200))
+            .unwrap();
+        let query = url
+            .query_pairs()
+            .into_owned()
+            .collect::<std::collections::HashMap<_, _>>();
+        assert_eq!(query.get("labelIds").map(String::as_str), Some("INBOX"));
+        assert_eq!(
+            query.get("pageToken").map(String::as_str),
+            Some("next token+/")
+        );
+        assert_eq!(query.get("q").map(String::as_str), Some("after:1704067200"));
+    }
 
     #[test]
     fn test_parse_email_header_with_name() {
