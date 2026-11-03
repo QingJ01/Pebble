@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::future::Future;
+use std::sync::Arc;
 use std::sync::RwLock;
 
 use async_trait::async_trait;
@@ -827,8 +828,13 @@ impl OutlookProvider {
         cursor: Option<&str>,
         sync_since: Option<i64>,
     ) -> Result<OutlookDeltaPage> {
-        self.fetch_delta_page_since_with_cached_ids(folder_id, cursor, sync_since, HashSet::new())
-            .await
+        self.fetch_delta_page_since_with_cached_ids(
+            folder_id,
+            cursor,
+            sync_since,
+            Arc::new(HashSet::new()),
+        )
+        .await
     }
 
     pub async fn fetch_delta_page_since_with_cached_ids(
@@ -836,7 +842,7 @@ impl OutlookProvider {
         folder_id: &str,
         cursor: Option<&str>,
         sync_since: Option<i64>,
-        cached_remote_ids: HashSet<String>,
+        cached_remote_ids: Arc<HashSet<String>>,
     ) -> Result<OutlookDeltaPage> {
         let url = match cursor {
             Some(cursor) if !cursor.is_empty() => {

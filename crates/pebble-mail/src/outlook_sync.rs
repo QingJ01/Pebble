@@ -99,6 +99,16 @@ fn should_sync_outlook_folder(folder: &Folder) -> bool {
         || !should_hide_outlook_folder(Some(&folder.name), None)
 }
 
+fn load_cached_outlook_ids(
+    sync_since: Option<i64>,
+    load: impl FnOnce() -> Result<std::collections::HashSet<String>>,
+) -> Result<Arc<std::collections::HashSet<String>>> {
+    match sync_since {
+        Some(_) => load().map(Arc::new),
+        None => Ok(Arc::new(std::collections::HashSet::new())),
+    }
+}
+
 async fn collect_outlook_delta_pages<F, Fut>(
     folder_id: &str,
     stored_cursor: Option<&str>,
@@ -867,15 +877,18 @@ impl OutlookSyncWorker {
                 } else {
                     None
                 };
-                let cached_remote_ids = match self
-                    .base
-                    .store
-                    .list_remote_ids_by_folder(&self.base.account_id, &folder.id)
-                {
-                    Ok(messages) => messages
-                        .into_iter()
-                        .map(|(_, remote_id, _, _, _)| remote_id)
-                        .collect::<std::collections::HashSet<_>>(),
+                let cached_remote_ids = match load_cached_outlook_ids(sync_since, || {
+                    self.base
+                        .store
+                        .list_remote_ids_by_folder(&self.base.account_id, &folder.id)
+                        .map(|messages| {
+                            messages
+                                .into_iter()
+                                .map(|(_, remote_id, _, _, _)| remote_id)
+                                .collect::<std::collections::HashSet<_>>()
+                        })
+                }) {
+                    Ok(cached_remote_ids) => cached_remote_ids,
                     Err(error) => {
                         warn!(
                             "Failed to read cached Outlook message IDs for folder {}: {error}",
@@ -891,7 +904,7 @@ impl OutlookSyncWorker {
                     cursor.as_deref(),
                     |folder_id, cursor| {
                         let provider = Arc::clone(&self.provider);
-                        let cached_remote_ids = cached_remote_ids.clone();
+                        let cached_remote_ids = Arc::clone(&cached_remote_ids);
                         async move {
                             provider
                                 .fetch_delta_page_since_with_cached_ids(
@@ -1207,6 +1220,27 @@ mod tests {
         assert!(should_sync_outlook_folder(&make_folder("inbox-id")));
     }
 
+    #[test]
+    fn unbounded_outlook_sync_does_not_load_cached_remote_ids() {
+        let mut load_count = 0;
+        let cached = load_cached_outlook_ids(None, || {
+            load_count += 1;
+            Ok(std::collections::HashSet::from(["cached".to_string()]))
+        })
+        .unwrap();
+
+        assert!(cached.is_empty());
+        assert_eq!(load_count, 0);
+
+        let bounded = load_cached_outlook_ids(Some(1), || {
+            load_count += 1;
+            Ok(std::collections::HashSet::from(["cached".to_string()]))
+        })
+        .unwrap();
+        assert!(bounded.contains("cached"));
+        assert_eq!(load_count, 1);
+    }
+
     #[tokio::test]
     async fn collect_outlook_delta_pages_follows_next_link_until_delta_link() {
         let mut pages = VecDeque::from([
@@ -1270,6 +1304,49 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn outlook_pagination_reuses_shared_cached_remote_ids() {
+        let cached = Arc::new(std::collections::HashSet::from(["cached".to_string()]));
+        let mut allocations = Vec::new();
+        let mut page_number = 0;
+
+        collect_outlook_delta_pages("inbox", None, |_, cursor| {
+            allocations.push(Arc::as_ptr(&cached));
+            let cached = Arc::clone(&cached);
+            page_number += 1;
+            async move {
+                assert!(cached.contains("cached"));
+                if cursor.is_none() {
+                    Ok(OutlookDeltaPage {
+                        messages: Vec::new(),
+                        deleted_remote_ids: Vec::new(),
+                        next_link: Some(
+                            "https://graph.microsoft.com/v1.0/me/messages/delta?$skiptoken=page-2"
+                                .to_string(),
+                        ),
+                        delta_link: None,
+                    })
+                } else {
+                    Ok(OutlookDeltaPage {
+                        messages: Vec::new(),
+                        deleted_remote_ids: Vec::new(),
+                        next_link: None,
+                        delta_link: Some(
+                            "https://graph.microsoft.com/v1.0/me/messages/delta?$deltatoken=done"
+                                .to_string(),
+                        ),
+                    })
+                }
+            }
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(page_number, 2);
+        assert_eq!(allocations.len(), 2);
+        assert_eq!(allocations[0], allocations[1]);
     }
 
     #[tokio::test]
