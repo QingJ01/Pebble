@@ -203,11 +203,32 @@ fn parse_outlook_delta_cursor(folder_remote_id: &str, state: Option<&str>) -> Op
         })
 }
 
-fn serialize_outlook_delta_cursor(folder_remote_id: &str, delta_link: &str) -> String {
+fn serialize_outlook_delta_cursor_with_scope(
+    folder_remote_id: &str,
+    delta_link: &str,
+    sync_since: Option<i64>,
+) -> String {
     serde_json::json!({
         outlook_delta_cursor_key(folder_remote_id): delta_link,
+        "sync_since": sync_since,
     })
     .to_string()
+}
+
+fn outlook_delta_scope_matches(state: Option<&str>, sync_since: Option<i64>) -> bool {
+    let Some(state) = state else {
+        return true;
+    };
+    if state.trim_start().starts_with("https://") {
+        return sync_since.is_none();
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(state) else {
+        return sync_since.is_none();
+    };
+    match value.get("sync_since") {
+        Some(saved) => saved.as_i64() == sync_since,
+        None => sync_since.is_none(),
+    }
 }
 
 fn can_advance_outlook_delta_cursor(failure_count: u32) -> bool {
@@ -275,15 +296,34 @@ fn load_outlook_folder_snapshot(store: &Store, folder_id: &str) -> Result<Vec<Me
     }
 }
 
+#[cfg(test)]
 fn reconcile_outlook_fresh_snapshot(
     store: &Store,
     folder_id: &str,
     previous_snapshot: &[Message],
     fresh_remote_ids: &std::collections::HashSet<String>,
 ) -> OutlookDeletionOutcome {
+    reconcile_outlook_fresh_snapshot_since(
+        store,
+        folder_id,
+        previous_snapshot,
+        fresh_remote_ids,
+        None,
+    )
+}
+
+fn reconcile_outlook_fresh_snapshot_since(
+    store: &Store,
+    folder_id: &str,
+    previous_snapshot: &[Message],
+    fresh_remote_ids: &std::collections::HashSet<String>,
+    sync_since: Option<i64>,
+) -> OutlookDeletionOutcome {
     let mut outcome = OutlookDeletionOutcome::default();
     for message in previous_snapshot {
-        if fresh_remote_ids.contains(&message.remote_id) {
+        if fresh_remote_ids.contains(&message.remote_id)
+            || sync_since.is_some_and(|cutoff| message.date < cutoff)
+        {
             continue;
         }
         match store.remove_message_from_folder(&message.id, folder_id) {
@@ -781,6 +821,13 @@ impl OutlookSyncWorker {
                 .filter(should_sync_outlook_folder)
                 .collect::<Vec<_>>();
             let mut sync_failure_count = 0u32;
+            let sync_since = self
+                .base
+                .store
+                .get_sync_state(&self.base.account_id)
+                .ok()
+                .flatten()
+                .and_then(|state| state.sync_since);
 
             for folder in &db_folders {
                 let state = self
@@ -789,7 +836,11 @@ impl OutlookSyncWorker {
                     .get_folder_sync_state(&self.base.account_id, &folder.id)
                     .ok()
                     .flatten();
-                let cursor = parse_outlook_delta_cursor(&folder.remote_id, state.as_deref());
+                let cursor = if outlook_delta_scope_matches(state.as_deref(), sync_since) {
+                    parse_outlook_delta_cursor(&folder.remote_id, state.as_deref())
+                } else {
+                    None
+                };
 
                 match collect_outlook_delta_pages_with_expiry_recovery(
                     &folder.remote_id,
@@ -798,7 +849,7 @@ impl OutlookSyncWorker {
                         let provider = Arc::clone(&self.provider);
                         async move {
                             provider
-                                .fetch_delta_page(&folder_id, cursor.as_deref())
+                                .fetch_delta_page_since(&folder_id, cursor.as_deref(), sync_since)
                                 .await
                         }
                     },
@@ -858,11 +909,12 @@ impl OutlookSyncWorker {
                             if let (Some(previous_snapshot), Some(fresh_remote_ids)) =
                                 (previous_snapshot.as_deref(), fresh_remote_ids.as_ref())
                             {
-                                failure_count += reconcile_outlook_fresh_snapshot(
+                                failure_count += reconcile_outlook_fresh_snapshot_since(
                                     &self.base.store,
                                     &folder.id,
                                     previous_snapshot,
                                     fresh_remote_ids,
+                                    sync_since,
                                 )
                                 .failure_count;
                             }
@@ -871,8 +923,11 @@ impl OutlookSyncWorker {
 
                         if let Some(delta_link) = delta_link {
                             if can_advance_outlook_delta_cursor(failure_count) {
-                                let state =
-                                    serialize_outlook_delta_cursor(&folder.remote_id, &delta_link);
+                                let state = serialize_outlook_delta_cursor_with_scope(
+                                    &folder.remote_id,
+                                    &delta_link,
+                                    sync_since,
+                                );
                                 if let Err(e) = self.base.store.set_folder_sync_state(
                                     &self.base.account_id,
                                     &folder.id,
@@ -965,6 +1020,17 @@ mod tests {
         assert!(!can_advance_outlook_delta_cursor(1));
     }
 
+    #[test]
+    fn outlook_range_scope_mismatch_bootstraps_without_reusing_cursor() {
+        let cursor = serialize_outlook_delta_cursor_with_scope("inbox", "opaque", Some(86_400));
+        assert!(outlook_delta_scope_matches(Some(&cursor), Some(86_400)));
+        assert!(!outlook_delta_scope_matches(Some(&cursor), Some(0)));
+        assert!(!outlook_delta_scope_matches(
+            Some("https://graph.microsoft.com/v1.0/me/messages/delta?$deltatoken=old"),
+            Some(86_400)
+        ));
+    }
+
     fn make_message(remote_id: &str) -> Message {
         let now = now_timestamp();
         Message {
@@ -995,6 +1061,38 @@ mod tests {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    #[test]
+    fn expired_outlook_snapshot_does_not_prune_cached_mail_before_cutoff() {
+        let store = Store::open_in_memory().unwrap();
+        let account = make_account();
+        let folder = make_folder("inbox");
+        let cutoff = 1_704_067_200;
+        let mut old = make_message("old");
+        old.date = cutoff - 1;
+        let mut recent = make_message("recent");
+        recent.date = cutoff + 1;
+        store.insert_account(&account).unwrap();
+        store.insert_folder(&folder).unwrap();
+        store
+            .insert_message(&old, std::slice::from_ref(&folder.id))
+            .unwrap();
+        store
+            .insert_message(&recent, std::slice::from_ref(&folder.id))
+            .unwrap();
+
+        let outcome = reconcile_outlook_fresh_snapshot_since(
+            &store,
+            &folder.id,
+            &[old.clone(), recent.clone()],
+            &std::collections::HashSet::new(),
+            Some(cutoff),
+        );
+
+        assert_eq!(outcome.failure_count, 0);
+        assert!(!store.get_message(&old.id).unwrap().unwrap().is_deleted);
+        assert!(store.get_message(&recent.id).unwrap().unwrap().is_deleted);
     }
 
     fn make_account() -> Account {

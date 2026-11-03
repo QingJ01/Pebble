@@ -576,6 +576,8 @@ pub fn run() {
             commands::network::update_global_proxy,
             commands::search::search_messages,
             commands::sync_cmd::start_sync,
+            commands::sync_cmd::get_account_sync_range,
+            commands::sync_cmd::update_account_sync_range,
             commands::sync_cmd::trigger_sync,
             commands::sync_cmd::stop_sync,
             commands::sync_cmd::set_realtime_preference,

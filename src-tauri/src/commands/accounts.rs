@@ -279,6 +279,8 @@ fn validate_account_color(color: Option<&str>) -> std::result::Result<(), Pebble
 pub struct AddAccountRequest {
     #[serde(default)]
     pub account_label: Option<String>,
+    #[serde(default)]
+    pub sync_range_days: Option<u32>,
     pub email: String,
     pub display_name: String,
     pub provider: String,
@@ -326,6 +328,7 @@ pub async fn add_account(
     state: State<'_, AppState>,
     request: AddAccountRequest,
 ) -> std::result::Result<Account, PebbleError> {
+    pebble_store::accounts::validate_sync_range_days(request.sync_range_days)?;
     let now = now_timestamp();
     pebble_mail::sender::sender_mailbox(&pebble_core::EmailAddress {
         name: Some(request.display_name.clone()),
@@ -337,6 +340,11 @@ pub async fn add_account(
         "pop3" => ProviderType::Pop3,
         _ => ProviderType::Imap,
     };
+    if provider == ProviderType::Pop3 && request.sync_range_days.is_some() {
+        return Err(PebbleError::Validation(
+            "POP3 does not support a bounded sync range".into(),
+        ));
+    }
 
     let incoming_label = if provider == ProviderType::Pop3 {
         "POP3"
@@ -424,6 +432,8 @@ pub async fn add_account(
         };
         state.store.update_sync_state(&account.id, |s| {
             s.provider = Some(provider_slug.to_string());
+            s.sync_range_days = request.sync_range_days;
+            s.sync_since = pebble_store::accounts::sync_range_cutoff(request.sync_range_days, now);
             // New IMAP accounts start with Inbox only. Users can opt into
             // additional mailboxes from the account editor after the account
             // exists and its saved credentials can be used for IMAP LIST.

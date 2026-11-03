@@ -134,8 +134,17 @@ export async function completeOAuthFlow(
   proxyHost?: string,
   proxyPort?: number,
   accountLabel?: string,
+  syncRangeDays?: number | null,
 ): Promise<Account> {
-  return invoke<Account>("complete_oauth_flow", { provider, email, displayName, proxyHost, proxyPort, accountLabel });
+  return invoke<Account>("complete_oauth_flow", { provider, email, displayName, proxyHost, proxyPort, accountLabel, syncRangeDays });
+}
+
+export async function getAccountSyncRange(accountId: string): Promise<number | null> {
+  return invoke<number | null>("get_account_sync_range", { accountId });
+}
+
+export async function updateAccountSyncRange(accountId: string, days: number | null, pollIntervalSecs: number): Promise<void> {
+  return invoke<void>("update_account_sync_range", { accountId, days, pollIntervalSecs });
 }
 
 export async function getOAuthAccountProxy(accountId: string): Promise<HttpProxyConfig | null> {

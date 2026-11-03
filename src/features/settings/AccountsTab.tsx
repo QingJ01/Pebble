@@ -8,11 +8,13 @@ import type { TFunction } from "i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   deleteAccount,
+  getAccountSyncRange,
   getImapSyncFolders,
   getOAuthAccountProxySetting,
   testAccountConnection,
   triggerSync,
   updateAccount,
+  updateAccountSyncRange,
   updateImapSyncFolders,
   updateOAuthAccountProxySetting,
 } from "@/lib/api";
@@ -24,9 +26,10 @@ import type {
 } from "@/lib/api";
 import { useAccountsQuery, accountsQueryKey } from "@/hooks/queries";
 import { useMailStore } from "@/stores/mail.store";
-import { useUIStore, type RealtimeStatus } from "@/stores/ui.store";
+import { realtimePreferenceToPollInterval, useUIStore, type RealtimeStatus } from "@/stores/ui.store";
 import { useToastStore } from "@/stores/toast.store";
 import AccountSetup from "@/components/AccountSetup";
+import SyncRangeFields, { syncRangeDays, syncRangeDraft } from "@/components/SyncRangeFields";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import { getSignature, setSignature } from "@/lib/signatures";
 import { ACCOUNT_COLOR_PRESETS, assignAccountColors, getAccountColor } from "@/lib/accountColors";
@@ -422,6 +425,11 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
   const [proxyHost, setProxyHost] = useState("");
   const [proxyPort, setProxyPort] = useState("");
   const [signature, setSignatureValue] = useState("");
+  const [syncRange, setSyncRange] = useState(() => syncRangeDraft(null));
+  const [savedSyncRange, setSavedSyncRange] = useState<number | null>(null);
+  const [rangeLoading, setRangeLoading] = useState(account.provider !== "pop3");
+  const [rangeError, setRangeError] = useState<string | null>(null);
+  const realtimeMode = useUIStore((state) => state.realtimeMode);
   const [imapFolderSettings, setImapFolderSettings] = useState<ImapSyncFolderSettings | null>(null);
   const [selectedImapFolderIds, setSelectedImapFolderIds] = useState<Set<string>>(new Set());
   const [folderLoading, setFolderLoading] = useState(false);
@@ -437,6 +445,24 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
   const incomingPortLabel = isPop3
     ? t("accountSetup.pop3Port", "POP3 port")
     : t("accountSetup.imapPort", "IMAP port");
+
+  useEffect(() => {
+    if (isPop3) return;
+    let cancelled = false;
+    getAccountSyncRange(account.id)
+      .then((days) => {
+        if (cancelled) return;
+        setSavedSyncRange(days);
+        setSyncRange(syncRangeDraft(days));
+      })
+      .catch((err) => {
+        if (!cancelled) setRangeError(extractErrorMessage(err));
+      })
+      .finally(() => {
+        if (!cancelled) setRangeLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [account.id, isPop3]);
 
   useEffect(() => {
     let cancelled = false;
@@ -522,6 +548,8 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const days = isPop3 ? null : syncRangeDays(syncRange);
+    if (rangeLoading || rangeError || days === undefined) return;
     setLoading(true);
     setError(null);
     try {
@@ -598,6 +626,10 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
         ]);
       }
 
+      if (!isPop3 && days !== savedSyncRange) {
+        await updateAccountSyncRange(account.id, days, realtimePreferenceToPollInterval(realtimeMode));
+        setSavedSyncRange(days);
+      }
       await setSignature(account.id, signature);
       onSaved();
     } catch (err) {
@@ -850,6 +882,13 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
 
             {proxyFields}
 
+            <SyncRangeFields value={syncRange} onChange={setSyncRange}
+              disabled={loading || rangeLoading || !!rangeError} unsupported={isPop3} />
+            {rangeLoading && <div role="status">{t("common.loading", "Loading...")}</div>}
+            {rangeError && <div role="alert" style={{ color: "var(--color-danger)", fontSize: "12px" }}>
+              {t("syncRange.loadError", "Could not load the sync range. Close and reopen this dialog to retry.")} {rangeError}
+            </div>}
+
             {isImap && (
               <div
                 style={{
@@ -997,7 +1036,7 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
 
             <button
               type="submit"
-              disabled={loading || folderLoading}
+              disabled={loading || folderLoading || rangeLoading || !!rangeError || (!isPop3 && syncRangeDays(syncRange) === undefined)}
               style={{
                 padding: "9px 16px",
                 borderRadius: "6px",

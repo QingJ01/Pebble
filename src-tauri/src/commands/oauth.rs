@@ -794,15 +794,26 @@ pub(crate) async fn ensure_account_oauth_auth(
 /// authorization code for tokens, encrypts and stores the tokens, and creates
 /// the account record.
 #[tauri::command]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Tauri IPC arguments are part of the public command contract"
+)]
 pub async fn complete_oauth_flow(
     state: State<'_, AppState>,
     provider: String,
     email: String,
     display_name: String,
     account_label: Option<String>,
+    sync_range_days: Option<u32>,
     proxy_host: Option<String>,
     proxy_port: Option<u16>,
 ) -> std::result::Result<Account, PebbleError> {
+    pebble_store::accounts::validate_sync_range_days(sync_range_days)?;
+    if provider.eq_ignore_ascii_case("pop3") && sync_range_days.is_some() {
+        return Err(PebbleError::Validation(
+            "POP3 does not support a bounded sync range".into(),
+        ));
+    }
     let mut config = config_for_provider(&provider)?;
     let account_proxy = oauth_proxy_from_parts(proxy_host, proxy_port)?;
     let effective_proxy = resolve_effective_proxy(
@@ -917,6 +928,8 @@ pub async fn complete_oauth_flow(
         let slug = provider_slug(&account.provider).to_string();
         state.store.update_sync_state(&account.id, |s| {
             s.provider = Some(slug);
+            s.sync_range_days = sync_range_days;
+            s.sync_since = pebble_store::accounts::sync_range_cutoff(sync_range_days, now);
         })?;
         Ok(())
     })() {

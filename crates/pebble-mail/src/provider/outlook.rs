@@ -84,6 +84,47 @@ pub struct OutlookDeltaPage {
     pub delta_link: Option<String>,
 }
 
+fn filter_outlook_delta_scope(mut list: GraphDeltaList, sync_since: Option<i64>) -> GraphDeltaList {
+    let Some(since) = sync_since else {
+        return list;
+    };
+    let (year, month, day) = pebble_core::utc_date_from_unix_seconds(since);
+    let cutoff = format!("{year:04}-{month:02}-{day:02}T00:00:00Z");
+    list.value.retain(|value| {
+        if value
+            .get("@removed")
+            .is_some_and(|removed| !removed.is_null())
+        {
+            return true;
+        }
+        value
+            .get("receivedDateTime")
+            .and_then(serde_json::Value::as_str)
+            .is_none_or(|received| received >= cutoff.as_str())
+    });
+    list
+}
+
+fn outlook_delta_bootstrap_url(folder_id: &str, sync_since: Option<i64>) -> Result<String> {
+    let mut url = reqwest::Url::parse(&format!(
+        "{GRAPH_API_BASE}/mailFolders/{folder_id}/messages/delta"
+    ))
+    .map_err(|error| PebbleError::Network(format!("Build Outlook delta URL: {error}")))?;
+    {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("$top", "50");
+        query.append_pair("$select", GRAPH_MESSAGE_SELECT);
+        if let Some(since) = sync_since {
+            let (year, month, day) = pebble_core::utc_date_from_unix_seconds(since);
+            query.append_pair(
+                "$filter",
+                &format!("receivedDateTime ge {year:04}-{month:02}-{day:02}T00:00:00Z"),
+            );
+        }
+    }
+    Ok(url.to_string())
+}
+
 pub(crate) async fn resolve_outlook_delta_page<F, Fut>(
     list: GraphDeltaList,
     account_id: &str,
@@ -722,13 +763,20 @@ impl OutlookProvider {
         folder_id: &str,
         cursor: Option<&str>,
     ) -> Result<OutlookDeltaPage> {
+        self.fetch_delta_page_since(folder_id, cursor, None).await
+    }
+
+    pub async fn fetch_delta_page_since(
+        &self,
+        folder_id: &str,
+        cursor: Option<&str>,
+        sync_since: Option<i64>,
+    ) -> Result<OutlookDeltaPage> {
         let url = match cursor {
             Some(cursor) if !cursor.is_empty() => {
                 validate_graph_continuation_url(cursor)?.to_string()
             }
-            _ => format!(
-                "{GRAPH_API_BASE}/mailFolders/{folder_id}/messages/delta?$top=50&$select={GRAPH_MESSAGE_SELECT}"
-            ),
+            _ => outlook_delta_bootstrap_url(folder_id, sync_since)?,
         };
 
         let resp = self.get(&url).await?;
@@ -742,6 +790,7 @@ impl OutlookProvider {
             .json()
             .await
             .map_err(|e| PebbleError::Network(format!("Failed to parse delta response: {e}")))?;
+        let list = filter_outlook_delta_scope(list, sync_since);
         for continuation in [list.next_link.as_deref(), list.delta_link.as_deref()]
             .into_iter()
             .flatten()
@@ -1735,6 +1784,55 @@ mod tests {
             "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages/delta?$deltatoken=next"
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn outlook_delta_bootstrap_url_applies_utc_range_only_when_bounded() {
+        let bounded = reqwest::Url::parse(
+            &outlook_delta_bootstrap_url("inbox", Some(1_704_067_200)).unwrap(),
+        )
+        .unwrap();
+        let query = bounded
+            .query_pairs()
+            .into_owned()
+            .collect::<std::collections::HashMap<_, _>>();
+        assert_eq!(
+            query.get("$filter").map(String::as_str),
+            Some("receivedDateTime ge 2024-01-01T00:00:00Z")
+        );
+        let unbounded =
+            reqwest::Url::parse(&outlook_delta_bootstrap_url("inbox", None).unwrap()).unwrap();
+        assert!(!unbounded.query_pairs().any(|(key, _)| key == "$filter"));
+    }
+
+    #[tokio::test]
+    async fn out_of_range_thin_deltas_skip_body_fetch_and_keep_tombstones() {
+        let list = delta_list(vec![
+            serde_json::json!({
+                "id": "old-message",
+                "receivedDateTime": "2023-12-31T23:59:59Z",
+                "isRead": true
+            }),
+            serde_json::json!({
+                "id": "deleted-message",
+                "@removed": {"reason": "deleted"}
+            }),
+        ]);
+        let mut fetch_count = 0;
+        let page = resolve_outlook_delta_page(
+            filter_outlook_delta_scope(list, Some(1_704_067_200)),
+            "account-1",
+            |_| {
+                fetch_count += 1;
+                std::future::ready(Ok(None))
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(fetch_count, 0);
+        assert!(page.messages.is_empty());
+        assert_eq!(page.deleted_remote_ids, ["deleted-message"]);
     }
 
     #[tokio::test]

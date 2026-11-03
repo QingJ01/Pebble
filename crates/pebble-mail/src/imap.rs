@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fmt::Display;
 use std::future::Future;
 use std::pin::Pin;
@@ -350,8 +351,37 @@ where
 pub struct ImapMailboxStatus {
     pub uid_validity: Option<u32>,
     pub highest_modseq: Option<u64>,
+    pub uid_next: Option<u32>,
     /// Number of messages in the mailbox as reported by SELECT.
     pub exists: u32,
+}
+
+fn imap_since_date(timestamp: i64) -> String {
+    let (year, month, day) = pebble_core::utc_date_from_unix_seconds(timestamp);
+    let month = match month {
+        1 => "Jan",
+        2 => "Feb",
+        3 => "Mar",
+        4 => "Apr",
+        5 => "May",
+        6 => "Jun",
+        7 => "Jul",
+        8 => "Aug",
+        9 => "Sep",
+        10 => "Oct",
+        11 => "Nov",
+        _ => "Dec",
+    };
+    format!("{day:02}-{month}-{year:04}")
+}
+
+fn imap_since_search_criteria(cutoff: i64, since_uid: Option<u32>) -> Option<String> {
+    let mut criteria = format!("SINCE {}", imap_since_date(cutoff));
+    if let Some(uid) = since_uid {
+        let next_uid = uid.checked_add(1)?;
+        criteria.push_str(&format!(" UID {next_uid}:*"));
+    }
+    Some(criteria)
 }
 
 /// An IMAP provider that manages a connection and session.
@@ -1359,6 +1389,88 @@ impl ImapProvider {
         Ok(results)
     }
 
+    pub async fn search_uids_since(
+        &self,
+        mailbox: &str,
+        cutoff: i64,
+        since_uid: Option<u32>,
+    ) -> Result<(Vec<u32>, Option<u32>)> {
+        let mut guard = self.session.lock().await;
+        let sess = guard
+            .as_mut()
+            .ok_or_else(|| PebbleError::Network("Not connected".to_string()))?;
+        let mailbox_info =
+            with_imap_timeout("SELECT", IMAP_COMMAND_TIMEOUT_SECS, sess.select(mailbox)).await?;
+        let Some(criteria) = imap_since_search_criteria(cutoff, since_uid) else {
+            return Ok((Vec::new(), mailbox_info.uid_next));
+        };
+        let mut uids = with_imap_timeout(
+            "UID SEARCH",
+            IMAP_COMMAND_TIMEOUT_SECS,
+            sess.uid_search(&criteria),
+        )
+        .await?
+        .into_iter()
+        .collect::<Vec<_>>();
+        uids.sort_unstable();
+        uids.dedup();
+        Ok((uids, mailbox_info.uid_next))
+    }
+
+    pub async fn fetch_messages_by_uids(
+        &self,
+        mailbox: &str,
+        uids: &[u32],
+    ) -> Result<Vec<(u32, Vec<u8>)>> {
+        if uids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let uid_set = uids
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut guard = self.session.lock().await;
+        let sess = guard
+            .as_mut()
+            .ok_or_else(|| PebbleError::Network("Not connected".to_string()))?;
+        let _ =
+            with_imap_timeout("SELECT", IMAP_COMMAND_TIMEOUT_SECS, sess.select(mailbox)).await?;
+        let fetches = with_imap_timeout(
+            "UID FETCH",
+            IMAP_COMMAND_TIMEOUT_SECS,
+            sess.uid_fetch(&uid_set, "(UID BODY.PEEK[])"),
+        )
+        .await?;
+        let fetches: Vec<async_imap::types::Fetch> = with_imap_timeout(
+            "UID FETCH collect",
+            IMAP_COMMAND_TIMEOUT_SECS,
+            fetches.try_collect(),
+        )
+        .await?;
+        let requested: HashSet<_> = uids.iter().copied().collect();
+        let mut fetched = Vec::with_capacity(requested.len());
+        let mut fetched_uids = HashSet::with_capacity(requested.len());
+        for fetch in fetches {
+            let Some(uid) = fetch.uid else {
+                continue;
+            };
+            let Some(body) = fetch.body() else {
+                return Err(PebbleError::Network(format!(
+                    "IMAP UID FETCH returned no body for UID {uid}"
+                )));
+            };
+            fetched_uids.insert(uid);
+            fetched.push((uid, body.to_vec()));
+        }
+        if fetched_uids != requested {
+            return Err(PebbleError::Network(
+                "IMAP UID FETCH did not return every requested UID".to_string(),
+            ));
+        }
+        Ok(fetched)
+    }
+
     /// Fetch the raw bytes of the messages whose sequence numbers fall within
     /// `[start_seq, end_seq]` (inclusive). The caller must have already
     /// selected the mailbox on the same session.
@@ -1794,6 +1906,7 @@ impl ImapProvider {
                 ImapMailboxStatus {
                     uid_validity: mailbox_info.uid_validity,
                     highest_modseq: mailbox_info.highest_modseq,
+                    uid_next: mailbox_info.uid_next,
                     exists: mailbox_info.exists,
                 }
             }};
@@ -2167,7 +2280,21 @@ mod folder_list_tests {
 
 #[cfg(test)]
 mod incremental_uid_tests {
-    use super::{incremental_fetch_uids, should_search_incremental_uids};
+    use super::{
+        imap_since_search_criteria, incremental_fetch_uids, should_search_incremental_uids,
+    };
+
+    #[test]
+    fn sync_range_search_uses_inclusive_utc_date_and_uid_cursor() {
+        assert_eq!(
+            imap_since_search_criteria(1_704_067_200, Some(42)),
+            Some("SINCE 01-Jan-2024 UID 43:*".to_string())
+        );
+        assert_eq!(
+            imap_since_search_criteria(1_704_067_200, Some(u32::MAX)),
+            None
+        );
+    }
 
     #[test]
     fn incremental_fetch_skips_when_no_uid_is_newer_than_cursor() {
