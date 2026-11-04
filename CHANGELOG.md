@@ -6,6 +6,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-10-30
+
+### Added
+
+- Added per-account sync ranges (all mail, 30/90/365 days, or a custom number of days) for IMAP, Gmail and Outlook, selectable before the first sync and editable later. Widening the range backfills earlier mail; narrowing it keeps existing local mail (#99, #100).
+- Added a grouped sidebar style with a switch back to the classic layout in Appearance settings; the grouped layout keeps every folder reachable (#97).
+- Added collapsible recipient chips for messages with many participants, plus file-type icons and card styling for attachments (#97).
+
+### Changed
+
+- Strengthened typography in the message list and message detail, and restyled the thread sender card (#97).
+
+### Fixed
+
+- Fixed unreadable default links in dark-mode email bodies on macOS WebKit and other webviews (#76, #98).
+- Fixed closing the window during startup quitting the app instead of hiding to the tray; an explicit "quit on close" preference is still respected (#97).
+- Pinned the macOS traffic-light buttons to the top-left titlebar corner (#97).
+- Hardened sync recovery for range changes: IMAP UIDVALIDITY resets rebuild the mailbox without discarding cached mail outside the range, Gmail replays pending history before switching ranges, and Outlook avoids redundant per-page cache copies (#100).
+
+### Upgrade notes
+
+- POP3 cannot filter by date and always syncs all mail. Sync range cutoffs start at midnight UTC.
+- Automated tests, package builds and native macOS checks against a local IMAP server cover this release. Live Gmail/Outlook range syncing, POP3 downloads and native Windows/Linux UI have not been exercised.
+
 ## [0.1.5] - 2026-09-09
 
 ### Added
