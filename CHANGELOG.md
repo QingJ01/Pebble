@@ -358,7 +358,8 @@ This release includes:
 - Windows installers are not code-signed yet, so Windows SmartScreen may show a warning.
 - Outlook support is still experimental and depends on Microsoft Graph permissions configured by the user.
 
-[Unreleased]: https://github.com/QingJ01/Pebble/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/QingJ01/Pebble/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/QingJ01/Pebble/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/QingJ01/Pebble/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/QingJ01/Pebble/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/QingJ01/Pebble/compare/v0.1.2...v0.1.3
