@@ -792,6 +792,38 @@ impl Store {
         })
     }
 
+    /// Change mailbox membership and its mailbox-local UID atomically.
+    pub fn move_message_to_folder_with_remote_id(
+        &self,
+        message_id: &str,
+        target_folder_id: &str,
+        new_remote_id: &str,
+    ) -> Result<()> {
+        self.with_write(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute(
+                "DELETE FROM message_folders WHERE message_id = ?1",
+                params![message_id],
+            )?;
+            let changed = tx.execute(
+                "UPDATE messages SET remote_id = ?1, is_deleted = 0, deleted_at = NULL,
+                 updated_at = ?2 WHERE id = ?3",
+                params![new_remote_id, pebble_core::now_timestamp(), message_id],
+            )?;
+            if changed == 0 {
+                return Err(PebbleError::Internal(format!(
+                    "Message not found for remote_id update: {message_id}"
+                )));
+            }
+            tx.execute(
+                "INSERT INTO message_folders (message_id, folder_id) VALUES (?1, ?2)",
+                params![message_id, target_folder_id],
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
     pub fn update_remote_id(&self, message_id: &str, new_remote_id: &str) -> Result<()> {
         self.with_write(|conn| {
             let now = pebble_core::now_timestamp();
@@ -2013,6 +2045,73 @@ mod remote_id_scope_tests {
         assert_eq!(inbox_state.len(), 1);
         assert_eq!(sent_state.len(), 1);
         assert_ne!(inbox_state[0].0, sent_state[0].0);
+    }
+
+    #[test]
+    fn move_records_destination_uid_without_source_folder_collision() {
+        let store = Store::open_in_memory().unwrap();
+        let account = make_account();
+        let inbox = make_folder(&account.id, "INBOX", FolderRole::Inbox, 0);
+        let archive = make_folder(&account.id, "Archive", FolderRole::Archive, 1);
+        let moved = make_message(&account.id, "5");
+        let neighbor = make_message(&account.id, "2");
+        store.insert_account(&account).unwrap();
+        store.insert_folder(&inbox).unwrap();
+        store.insert_folder(&archive).unwrap();
+        store
+            .insert_message(&moved, std::slice::from_ref(&inbox.id))
+            .unwrap();
+        store
+            .insert_message(&neighbor, std::slice::from_ref(&inbox.id))
+            .unwrap();
+
+        assert!(store.update_remote_id(&moved.id, "2").is_err());
+        store
+            .move_message_to_folder_with_remote_id(&moved.id, &archive.id, "2")
+            .unwrap();
+        assert_eq!(
+            store.get_message(&moved.id).unwrap().unwrap().remote_id,
+            "2"
+        );
+        assert_eq!(
+            store.get_message_folder_ids(&moved.id).unwrap(),
+            vec![archive.id]
+        );
+        assert_eq!(
+            store.get_message(&neighbor.id).unwrap().unwrap().remote_id,
+            "2"
+        );
+    }
+
+    #[test]
+    fn move_with_duplicate_destination_uid_rolls_back() {
+        let store = Store::open_in_memory().unwrap();
+        let account = make_account();
+        let inbox = make_folder(&account.id, "INBOX", FolderRole::Inbox, 0);
+        let archive = make_folder(&account.id, "Archive", FolderRole::Archive, 1);
+        let moved = make_message(&account.id, "5");
+        let neighbor = make_message(&account.id, "2");
+        store.insert_account(&account).unwrap();
+        store.insert_folder(&inbox).unwrap();
+        store.insert_folder(&archive).unwrap();
+        store
+            .insert_message(&moved, std::slice::from_ref(&inbox.id))
+            .unwrap();
+        store
+            .insert_message(&neighbor, std::slice::from_ref(&archive.id))
+            .unwrap();
+
+        assert!(store
+            .move_message_to_folder_with_remote_id(&moved.id, &archive.id, "2")
+            .is_err());
+        assert_eq!(
+            store.get_message(&moved.id).unwrap().unwrap().remote_id,
+            "5"
+        );
+        assert_eq!(
+            store.get_message_folder_ids(&moved.id).unwrap(),
+            vec![inbox.id]
+        );
     }
 
     #[test]

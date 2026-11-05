@@ -29,6 +29,82 @@ pub(super) enum RemoteMutationOutcome {
     Failed,
 }
 
+/// An IMAP MOVE assigns a new UID. Keep it with the new folder so subsequent
+/// flag changes do not operate on an unrelated destination UID.
+pub(super) async fn imap_move_tracked(
+    state: &AppState,
+    imap: &ImapProvider,
+    message: &Message,
+    source_mailbox: &str,
+    uid: u32,
+    target_mailbox: &str,
+) -> Result<(), PebbleError> {
+    let header = message
+        .message_id_header
+        .as_deref()
+        .filter(|value| !value.trim().is_empty());
+    let target_uid = if let Some(header) = header {
+        if let Some(source_uid) = imap.find_uid_by_message_id(source_mailbox, header).await? {
+            imap.move_message_with_dedup(source_mailbox, source_uid, target_mailbox, Some(header))
+                .await?;
+            if source_uid != uid {
+                tracing::debug!("Resolved changed IMAP UID for {}", message.id);
+            }
+        }
+        // Also handles a retry after MOVE succeeded but local persistence failed.
+        imap.find_uid_by_message_id(target_mailbox, header)
+            .await?
+            .ok_or_else(|| {
+                PebbleError::Sync("Moved IMAP message was not found in the destination".into())
+            })?
+    } else {
+        let (_, source_raw) = imap
+            .fetch_messages_by_uids(source_mailbox, &[uid])
+            .await?
+            .pop()
+            .ok_or_else(|| PebbleError::Sync("Source IMAP message not found".into()))?;
+        let before: std::collections::HashSet<_> = imap
+            .fetch_all_uids(target_mailbox)
+            .await?
+            .into_iter()
+            .collect();
+        imap.move_message(source_mailbox, uid, target_mailbox)
+            .await?;
+        let added: Vec<_> = imap
+            .fetch_all_uids(target_mailbox)
+            .await?
+            .into_iter()
+            .filter(|uid| !before.contains(uid))
+            .collect();
+        let matching: Vec<_> = imap
+            .fetch_messages_by_uids(target_mailbox, &added)
+            .await?
+            .into_iter()
+            .filter(|(_, raw)| raw == &source_raw)
+            .map(|(uid, _)| uid)
+            .collect();
+        match matching.as_slice() {
+            [uid] => *uid,
+            _ => {
+                return Err(PebbleError::Sync(
+                    "Cannot uniquely resolve moved IMAP message".into(),
+                ))
+            }
+        }
+    };
+    let target_folder = state
+        .store
+        .list_folders(&message.account_id)?
+        .into_iter()
+        .find(|folder| folder.remote_id == target_mailbox)
+        .ok_or_else(|| PebbleError::Internal("IMAP target folder not found".into()))?;
+    state.store.move_message_to_folder_with_remote_id(
+        &message.id,
+        &target_folder.id,
+        &target_uid.to_string(),
+    )
+}
+
 pub(super) fn remote_mutation_allows_local_commit(outcome: RemoteMutationOutcome) -> bool {
     matches!(
         outcome,

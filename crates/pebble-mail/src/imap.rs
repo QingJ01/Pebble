@@ -1785,6 +1785,41 @@ impl ImapProvider {
         Ok(())
     }
 
+    /// Resolve a Message-ID to its mailbox-local UID, including after MOVE.
+    pub async fn find_uid_by_message_id(
+        &self,
+        mailbox: &str,
+        message_id_header: &str,
+    ) -> Result<Option<u32>> {
+        if message_id_header.trim().is_empty() {
+            return Ok(None);
+        }
+        if message_id_header.contains(['\r', '\n']) {
+            return Err(PebbleError::Validation("Invalid Message-ID".into()));
+        }
+        let criteria = format!(
+            "HEADER \"Message-ID\" \"{}\"",
+            message_id_header.replace('\\', "\\\\").replace('"', "\\\"")
+        );
+        let mut guard = self.session.lock().await;
+        let sess = guard
+            .as_mut()
+            .ok_or_else(|| PebbleError::Network("Not connected".to_string()))?;
+        with_imap_timeout("SELECT", IMAP_COMMAND_TIMEOUT_SECS, sess.select(mailbox)).await?;
+        let hits = with_imap_timeout(
+            "UID SEARCH",
+            IMAP_COMMAND_TIMEOUT_SECS,
+            sess.uid_search(criteria.as_str()),
+        )
+        .await?;
+        if hits.len() > 1 {
+            return Err(PebbleError::Sync(
+                "Message-ID matches multiple IMAP messages".into(),
+            ));
+        }
+        Ok(hits.into_iter().next())
+    }
+
     /// Delete a message by UID: flag as \Deleted and EXPUNGE.
     pub async fn delete_message(&self, mailbox: &str, uid: u32) -> Result<()> {
         let uid_str = uid.to_string();
