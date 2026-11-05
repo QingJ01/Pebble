@@ -53,19 +53,30 @@ fn address_to_list(addr: Option<&Address<'_>>) -> Vec<EmailAddress> {
 
 /// Extract message IDs from a header value that holds a list of IDs.
 /// Returns them joined by a space.
+/// mail-parser strips the angle brackets from message IDs, while
+/// `message_id_header` is stored as `<id>`. Re-bracket references so thread
+/// lookups compare like with like.
+fn bracket_message_id(id: &str) -> Option<String> {
+    let bare = id
+        .trim()
+        .trim_start_matches('<')
+        .trim_end_matches('>')
+        .trim();
+    (!bare.is_empty()).then(|| format!("<{bare}>"))
+}
+
 fn extract_id_list(hv: &HeaderValue<'_>) -> Option<String> {
-    match hv {
-        HeaderValue::Text(s) => Some(s.as_ref().to_string()),
-        HeaderValue::TextList(list) => {
-            let parts: Vec<&str> = list.iter().map(|s| s.as_ref()).collect();
-            if parts.is_empty() {
-                None
-            } else {
-                Some(parts.join(" "))
-            }
-        }
-        _ => None,
-    }
+    let raw: Vec<&str> = match hv {
+        HeaderValue::Text(s) => vec![s.as_ref()],
+        HeaderValue::TextList(list) => list.iter().map(|s| s.as_ref()).collect(),
+        _ => return None,
+    };
+    let ids: Vec<String> = raw
+        .into_iter()
+        .flat_map(str::split_whitespace)
+        .filter_map(bracket_message_id)
+        .collect();
+    (!ids.is_empty()).then(|| ids.join(" "))
 }
 
 /// Parse a raw email byte slice into a `ParsedMessage`.
@@ -270,18 +281,43 @@ mod tests {
             parsed.message_id_header.as_deref(),
             Some("<reply123@example.com>")
         );
-        let irt = parsed.in_reply_to.as_deref().unwrap_or("");
-        assert!(
-            irt.contains("abc123@example.com"),
-            "Expected in_reply_to to contain 'abc123@example.com', got: {:?}",
-            irt
+        assert_eq!(parsed.in_reply_to.as_deref(), Some("<abc123@example.com>"));
+        assert_eq!(
+            parsed.references_header.as_deref(),
+            Some("<abc123@example.com>")
         );
-        let refs = parsed.references_header.as_deref().unwrap_or("");
-        assert!(
-            refs.contains("abc123@example.com"),
-            "Expected references_header to contain 'abc123@example.com', got: {:?}",
-            refs
+    }
+
+    #[test]
+    fn test_parse_reply_references_match_stored_message_id_format() {
+        let original = parse_raw_email(
+            b"From: a@example.com\r\nMessage-ID: <root@example.com>\r\nSubject: Hi\r\n\r\nBody",
+        )
+        .unwrap();
+        let reply = parse_raw_email(
+            b"From: b@example.com\r\n\
+              Message-ID: <reply@example.com>\r\n\
+              In-Reply-To: <parent@example.com>\r\n\
+              References: <root@example.com> <parent@example.com>\r\n\
+              Subject: Re: Hi\r\n\r\nBody",
+        )
+        .unwrap();
+
+        assert_eq!(
+            original.message_id_header.as_deref(),
+            Some("<root@example.com>")
         );
+        assert_eq!(reply.in_reply_to.as_deref(), Some("<parent@example.com>"));
+        assert_eq!(
+            reply.references_header.as_deref(),
+            Some("<root@example.com> <parent@example.com>")
+        );
+        assert!(reply
+            .references_header
+            .as_deref()
+            .unwrap()
+            .split_whitespace()
+            .any(|id| Some(id) == original.message_id_header.as_deref()));
     }
 
     #[test]

@@ -113,7 +113,9 @@ impl Store {
             let mut stmt = conn
                 .prepare_cached(
                     "SELECT id, account_id, remote_id, name, folder_type, role, parent_id, color, is_system, sort_order
-                     FROM folders WHERE account_id = ?1 AND role = ?2 LIMIT 1",
+                     FROM folders WHERE account_id = ?1 AND role = ?2
+                     ORDER BY CASE WHEN remote_id LIKE '\\_\\_local\\_%' ESCAPE '\\' THEN 1 ELSE 0 END, sort_order ASC
+                     LIMIT 1",
                 )?;
             let result = stmt
                 .query_row(params![account_id, role_str], |row| {
@@ -134,6 +136,33 @@ impl Store {
                 })
                 .optional()?;
             Ok(result)
+        })
+    }
+
+    /// Remove an empty local fallback folder (e.g. `__local_archive__`) once a
+    /// server folder with the same role exists, so role lookups and the sidebar
+    /// target the server folder. Fallback folders that hold messages are kept.
+    pub fn remove_empty_local_fallback_folder(
+        &self,
+        account_id: &str,
+        local_remote_id: &str,
+        role: FolderRole,
+    ) -> Result<bool> {
+        let role_str = folder_role_to_str(&role);
+        self.with_write(|conn| {
+            let removed = conn.execute(
+                "DELETE FROM folders
+                 WHERE account_id = ?1 AND remote_id = ?2 AND role = ?3
+                   AND EXISTS (
+                     SELECT 1 FROM folders f2
+                     WHERE f2.account_id = ?1 AND f2.role = ?3 AND f2.remote_id NOT LIKE '\\_\\_local\\_%' ESCAPE '\\'
+                   )
+                   AND NOT EXISTS (
+                     SELECT 1 FROM message_folders mf WHERE mf.folder_id = folders.id
+                   )",
+                rusqlite::params![account_id, local_remote_id, role_str],
+            )?;
+            Ok(removed > 0)
         })
     }
 
@@ -425,6 +454,115 @@ mod tests {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    #[test]
+    fn role_lookup_prefers_server_folder_over_local_fallback() {
+        let store = Store::open_in_memory().unwrap();
+        let account = account();
+        store.insert_account(&account).unwrap();
+        store
+            .insert_folder(&folder(
+                &account.id,
+                "local",
+                "__local_archive__",
+                Some(FolderRole::Archive),
+            ))
+            .unwrap();
+        store
+            .insert_folder(&folder(
+                &account.id,
+                "remote",
+                "Archive",
+                Some(FolderRole::Archive),
+            ))
+            .unwrap();
+
+        let found = store
+            .find_folder_by_role(&account.id, FolderRole::Archive)
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.remote_id, "Archive");
+    }
+
+    #[test]
+    fn empty_local_fallback_is_removed_only_when_server_folder_exists() {
+        let store = Store::open_in_memory().unwrap();
+        let account = account();
+        store.insert_account(&account).unwrap();
+        store
+            .insert_folder(&folder(
+                &account.id,
+                "local",
+                "__local_archive__",
+                Some(FolderRole::Archive),
+            ))
+            .unwrap();
+
+        assert!(!store
+            .remove_empty_local_fallback_folder(
+                &account.id,
+                "__local_archive__",
+                FolderRole::Archive
+            )
+            .unwrap());
+
+        store
+            .insert_folder(&folder(
+                &account.id,
+                "remote",
+                "Archive",
+                Some(FolderRole::Archive),
+            ))
+            .unwrap();
+        assert!(store
+            .remove_empty_local_fallback_folder(
+                &account.id,
+                "__local_archive__",
+                FolderRole::Archive
+            )
+            .unwrap());
+        let folders = store.list_folders(&account.id).unwrap();
+        assert!(folders.iter().all(|f| f.remote_id != "__local_archive__"));
+    }
+
+    #[test]
+    fn local_fallback_holding_messages_is_kept() {
+        let store = Store::open_in_memory().unwrap();
+        let account = account();
+        store.insert_account(&account).unwrap();
+        store
+            .insert_folder(&folder(
+                &account.id,
+                "local",
+                "__local_archive__",
+                Some(FolderRole::Archive),
+            ))
+            .unwrap();
+        store
+            .insert_folder(&folder(
+                &account.id,
+                "remote",
+                "Archive",
+                Some(FolderRole::Archive),
+            ))
+            .unwrap();
+        store
+            .insert_message(&message(&account.id, "m1", "1"), &["local".to_string()])
+            .unwrap();
+
+        assert!(!store
+            .remove_empty_local_fallback_folder(
+                &account.id,
+                "__local_archive__",
+                FolderRole::Archive
+            )
+            .unwrap());
+        assert!(store
+            .list_folders(&account.id)
+            .unwrap()
+            .iter()
+            .any(|f| f.remote_id == "__local_archive__"));
     }
 
     #[test]

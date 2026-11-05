@@ -30,6 +30,7 @@
   },
   "app": {
     "security": {
+      "dangerousDisableAssetCspModification": ["style-src"],
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https: http: asset: http://asset.localhost; connect-src 'self' https://api.github.com; font-src 'self' data:; frame-src 'none'; object-src 'none';",
       "assetProtocol": {
         "enable": true,

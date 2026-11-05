@@ -24,6 +24,18 @@ describe("background image asset protocol config", () => {
     expect(config.app.security.csp).toMatch(/style-src[^;]*https:/);
   });
 
+  it("keeps unsafe-inline effective for email styles by not injecting style-src nonces", () => {
+    const config = JSON.parse(
+      readFileSync(resolve(process.cwd(), "src-tauri", "tauri.conf.json"), "utf8"),
+    );
+
+    // Tauri adds nonces/hashes to modified directives, and browsers ignore
+    // 'unsafe-inline' when a nonce is present, blocking shadow-DOM <style>
+    // and email style attributes in packaged builds.
+    expect(config.app.security.csp).toMatch(/style-src[^;]*'unsafe-inline'/);
+    expect(config.app.security.dangerousDisableAssetCspModification).toEqual(["style-src"]);
+  });
+
   it("allows remote http images used by some email senders", () => {
     const config = JSON.parse(
       readFileSync(resolve(process.cwd(), "src-tauri", "tauri.conf.json"), "utf8"),

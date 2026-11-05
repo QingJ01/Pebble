@@ -60,9 +60,12 @@ pub async fn update_message_flags(
                     // here inside the blocking task.
                     let folder_ids = store.get_message_folder_ids(&msg_id)?;
                     let folders = store.list_folders(&msg.account_id)?;
+                    // Local-only folders (e.g. `__local_archive__`) do not exist
+                    // on the server, so they can never be a writeback target.
                     let folder = folder_ids
                         .iter()
-                        .find_map(|fid| folders.iter().find(|f| &f.id == fid))
+                        .filter_map(|fid| folders.iter().find(|f| &f.id == fid))
+                        .find(|f| !f.remote_id.starts_with("__local_"))
                         .cloned();
 
                     // Missing config here means the account has no IMAP writeback

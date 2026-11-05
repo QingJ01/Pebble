@@ -1044,7 +1044,18 @@ impl SyncWorker {
         let has_archive = remote_folders
             .iter()
             .any(|f| f.role == Some(pebble_core::FolderRole::Archive));
-        if !has_archive {
+        if has_archive {
+            if self.base.store.remove_empty_local_fallback_folder(
+                &self.base.account_id,
+                "__local_archive__",
+                pebble_core::FolderRole::Archive,
+            )? {
+                info!(
+                    "Removed local archive fallback for account {} now that the server has one",
+                    self.base.account_id
+                );
+            }
+        } else {
             let archive = pebble_core::Folder {
                 id: new_id(),
                 account_id: self.base.account_id.clone(),
