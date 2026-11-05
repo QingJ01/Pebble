@@ -1,5 +1,7 @@
 use super::messages::provider_dispatch::{parse_imap_uid, ConnectedProvider};
-use super::messages::{find_folder_by_role, find_message_folder, refresh_search_documents};
+use super::messages::{
+    find_folder_by_role, find_message_folder, imap_move_tracked, refresh_search_documents,
+};
 use crate::state::AppState;
 use pebble_core::traits::{FolderProvider, LabelProvider};
 use pebble_core::{FolderRole, Message, PebbleError, ProviderType};
@@ -199,9 +201,15 @@ pub async fn batch_archive(
                                     if let Ok(src) =
                                         find_message_folder(&state, &msg.id, account_id)
                                     {
-                                        match imap
-                                            .move_message(&src.remote_id, uid, &af.remote_id)
-                                            .await
+                                        match imap_move_tracked(
+                                            &state,
+                                            imap,
+                                            msg,
+                                            &src.remote_id,
+                                            uid,
+                                            &af.remote_id,
+                                        )
+                                        .await
                                         {
                                             Ok(_) => remote_succeeded.push(msg.id.clone()),
                                             Err(e) => {

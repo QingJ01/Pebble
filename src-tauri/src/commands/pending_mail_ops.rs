@@ -12,7 +12,8 @@ use tracing::{debug, warn};
 use super::compose::{self, LocalOutgoingState};
 use super::messages::{
     classify_remote_delete_result, connect_gmail, connect_imap, connect_outlook,
-    find_folder_by_role, find_message_folder, refresh_search_document, remove_search_documents,
+    find_folder_by_role, find_message_folder, imap_move_tracked, refresh_search_document,
+    remove_search_documents,
 };
 
 const WORKER_INTERVAL_SECS: u64 = 30;
@@ -421,14 +422,15 @@ async fn replay_remote_archive(
                 target_folder_remote_id(state, message, payload, FolderRole::Archive)?;
             let uid = parse_uid(message)?;
             let imap = connect_imap(state, &message.account_id).await?;
-            let result = imap
-                .move_message_with_dedup(
-                    &source_remote_id,
-                    uid,
-                    &target_remote_id,
-                    message.message_id_header.as_deref(),
-                )
-                .await;
+            let result = imap_move_tracked(
+                state,
+                &imap,
+                message,
+                &source_remote_id,
+                uid,
+                &target_remote_id,
+            )
+            .await;
             let _ = imap.disconnect().await;
             result
         }
@@ -479,14 +481,15 @@ async fn replay_remote_restore(
                 target_folder_remote_id(state, message, payload, FolderRole::Inbox)?;
             let uid = parse_uid(message)?;
             let imap = connect_imap(state, &message.account_id).await?;
-            let result = imap
-                .move_message_with_dedup(
-                    &source_remote_id,
-                    uid,
-                    &target_remote_id,
-                    message.message_id_header.as_deref(),
-                )
-                .await;
+            let result = imap_move_tracked(
+                state,
+                &imap,
+                message,
+                &source_remote_id,
+                uid,
+                &target_remote_id,
+            )
+            .await;
             let _ = imap.disconnect().await;
             result
         }
@@ -598,14 +601,15 @@ async fn replay_remote_move_to_folder(
                 target_folder_remote_id(state, message, payload, FolderRole::Inbox)?;
             let uid = parse_uid(message)?;
             let imap = connect_imap(state, &message.account_id).await?;
-            let result = imap
-                .move_message_with_dedup(
-                    &source_remote_id,
-                    uid,
-                    &target_remote_id,
-                    message.message_id_header.as_deref(),
-                )
-                .await;
+            let result = imap_move_tracked(
+                state,
+                &imap,
+                message,
+                &source_remote_id,
+                uid,
+                &target_remote_id,
+            )
+            .await;
             let _ = imap.disconnect().await;
             result
         }

@@ -8,7 +8,7 @@ use tracing::{info, warn};
 use super::provider_dispatch::{parse_imap_uid, ConnectedProvider};
 use super::{
     classify_remote_delete_result, connect_gmail, connect_imap, connect_outlook,
-    find_folder_by_role, find_message_folder, queue_pending_remote_op,
+    find_folder_by_role, find_message_folder, imap_move_tracked, queue_pending_remote_op,
     queue_pending_remote_op_for_local_commit, queued_remote_error, refresh_search_document,
     remote_delete_is_already_absent, remote_mutation_allows_local_commit, remove_search_documents,
     RemoteMutationOutcome,
@@ -194,9 +194,15 @@ pub async fn archive_message(
                     })?;
                     match connect_imap(&state, &msg.account_id).await {
                         Ok(imap) => {
-                            let result = imap
-                                .move_message(&source_folder.remote_id, uid, &inbox.remote_id)
-                                .await;
+                            let result = imap_move_tracked(
+                                &state,
+                                &imap,
+                                &msg,
+                                &source_folder.remote_id,
+                                uid,
+                                &inbox.remote_id,
+                            )
+                            .await;
                             let _ = imap.disconnect().await;
                             match result {
                                 Ok(()) => RemoteMutationOutcome::Applied,
@@ -365,13 +371,15 @@ pub async fn archive_message(
                         })?;
                         match connect_imap(&state, &msg.account_id).await {
                             Ok(imap) => {
-                                let result = imap
-                                    .move_message(
-                                        &source_folder.remote_id,
-                                        uid,
-                                        &archive_folder.remote_id,
-                                    )
-                                    .await;
+                                let result = imap_move_tracked(
+                                    &state,
+                                    &imap,
+                                    &msg,
+                                    &source_folder.remote_id,
+                                    uid,
+                                    &archive_folder.remote_id,
+                                )
+                                .await;
                                 let _ = imap.disconnect().await;
                                 match result {
                                     Ok(()) => RemoteMutationOutcome::Applied,

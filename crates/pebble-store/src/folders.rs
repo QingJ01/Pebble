@@ -1,8 +1,30 @@
 use pebble_core::{Folder, FolderRole, FolderType, PebbleError, Result};
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::{BTreeSet, HashSet};
 
 use crate::{accounts::SyncState, Store};
+
+fn remove_empty_fallback(
+    conn: &Connection,
+    account_id: &str,
+    local_remote_id: &str,
+    role: FolderRole,
+) -> Result<bool> {
+    let removed = conn.execute(
+        "DELETE FROM folders
+         WHERE account_id = ?1 AND remote_id = ?2 AND role = ?3
+           AND EXISTS (
+             SELECT 1 FROM folders f2
+             WHERE f2.account_id = ?1 AND f2.role = ?3
+               AND f2.remote_id NOT LIKE '\\_\\_local\\_%' ESCAPE '\\'
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM message_folders mf WHERE mf.folder_id = folders.id
+           )",
+        params![account_id, local_remote_id, folder_role_to_str(&role)],
+    )?;
+    Ok(removed > 0)
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ImapFolderSelectionChange {
@@ -148,22 +170,7 @@ impl Store {
         local_remote_id: &str,
         role: FolderRole,
     ) -> Result<bool> {
-        let role_str = folder_role_to_str(&role);
-        self.with_write(|conn| {
-            let removed = conn.execute(
-                "DELETE FROM folders
-                 WHERE account_id = ?1 AND remote_id = ?2 AND role = ?3
-                   AND EXISTS (
-                     SELECT 1 FROM folders f2
-                     WHERE f2.account_id = ?1 AND f2.role = ?3 AND f2.remote_id NOT LIKE '\\_\\_local\\_%' ESCAPE '\\'
-                   )
-                   AND NOT EXISTS (
-                     SELECT 1 FROM message_folders mf WHERE mf.folder_id = folders.id
-                   )",
-                rusqlite::params![account_id, local_remote_id, role_str],
-            )?;
-            Ok(removed > 0)
-        })
+        self.with_write(|conn| remove_empty_fallback(conn, account_id, local_remote_id, role))
     }
 
     pub fn find_folder_by_name(&self, account_id: &str, name: &str) -> Result<Option<Folder>> {
@@ -216,8 +223,8 @@ impl Store {
 
     /// Atomically persist an explicit IMAP mailbox selection, upsert the
     /// selected remote folders, and remove local data for deselected remote
-    /// folders. Local-only folders (whose remote ID starts with `__local_`) are
-    /// intentionally retained.
+    /// folders. Local-only folders are retained unless they are an empty
+    /// Archive fallback superseded by a selected server Archive.
     pub fn apply_imap_folder_selection(
         &self,
         account_id: &str,
@@ -371,6 +378,8 @@ impl Store {
                     deleted_message_ids.push(message_id.clone());
                 }
             }
+
+            remove_empty_fallback(&tx, account_id, "__local_archive__", FolderRole::Archive)?;
 
             tx.execute(
                 "UPDATE accounts SET sync_state = ?1, updated_at = ?2 WHERE id = ?3",
@@ -563,6 +572,59 @@ mod tests {
             .unwrap()
             .iter()
             .any(|f| f.remote_id == "__local_archive__"));
+    }
+
+    #[test]
+    fn selecting_server_archive_removes_only_empty_fallback() {
+        for has_cached_message in [false, true] {
+            let store = Store::open_in_memory().unwrap();
+            let account = account();
+            store.insert_account(&account).unwrap();
+            let inbox = folder(&account.id, "inbox", "INBOX", Some(FolderRole::Inbox));
+            let archive = folder(&account.id, "remote", "Archive", Some(FolderRole::Archive));
+            store.insert_folder(&inbox).unwrap();
+            store
+                .insert_folder(&folder(
+                    &account.id,
+                    "local",
+                    "__local_archive__",
+                    Some(FolderRole::Archive),
+                ))
+                .unwrap();
+            if has_cached_message {
+                store
+                    .insert_message(&message(&account.id, "m1", "1"), &["local".into()])
+                    .unwrap();
+            }
+
+            let change = store
+                .apply_imap_folder_selection(
+                    &account.id,
+                    &[inbox, archive],
+                    &["INBOX".into(), "Archive".into()],
+                )
+                .unwrap();
+            assert!(change.deleted_message_ids.is_empty());
+            assert_eq!(
+                store
+                    .list_folders(&account.id)
+                    .unwrap()
+                    .iter()
+                    .any(|f| f.remote_id == "__local_archive__"),
+                has_cached_message,
+            );
+            assert_eq!(
+                store
+                    .find_folder_by_role(&account.id, FolderRole::Archive)
+                    .unwrap()
+                    .unwrap()
+                    .remote_id,
+                "Archive",
+            );
+            if has_cached_message {
+                assert_eq!(store.get_message_folder_ids("m1").unwrap(), vec!["local"]);
+            }
+        }
     }
 
     #[test]
