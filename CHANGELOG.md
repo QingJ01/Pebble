@@ -24,6 +24,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Fixed email body styles (including the dark-mode light canvas and authored inline styles) being blocked in packaged builds, where Tauri's injected `style-src` nonce disabled `'unsafe-inline'`.
 - Fixed archiving with IMAP when the server Archive folder was selected after the local fallback Archive had been created: archive now targets the server folder, the empty fallback is removed, and the destination UID is recorded so later flag changes target the moved message.
 - Fixed replies not joining their original conversation because parsed `In-Reply-To`/`References` IDs lacked the angle brackets used by stored Message-IDs. Previously mis-threaded messages are not regrouped.
+- Restored attachment cards and downloads inside expanded conversation messages.
 - Fixed closing the window during startup quitting the app instead of hiding to the tray; an explicit "quit on close" preference is still respected (#97).
 - Pinned the macOS traffic-light buttons to the top-left titlebar corner (#97).
 - Hardened sync recovery for range changes: IMAP UIDVALIDITY resets rebuild the mailbox without discarding cached mail outside the range, Gmail replays pending history before switching ranges, and Outlook avoids redundant per-page cache copies (#100).

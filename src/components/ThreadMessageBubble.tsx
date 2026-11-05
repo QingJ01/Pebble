@@ -8,6 +8,7 @@ import { sanitizeHtml } from "@/lib/sanitizeHtml";
 import { ShadowDomEmail } from "./ShadowDomEmail";
 import ContactAddressAction from "./ContactAddressAction";
 import MessageParticipants from "./MessageParticipants";
+import AttachmentList from "./AttachmentList";
 
 interface Props {
   message: Message;
@@ -126,6 +127,7 @@ export default function ThreadMessageBubble({ message, defaultExpanded = false }
               {message.body_text}
             </pre>
           )}
+          {message.has_attachments && <AttachmentList messageId={message.id} />}
         </div>
       )}
     </div>
