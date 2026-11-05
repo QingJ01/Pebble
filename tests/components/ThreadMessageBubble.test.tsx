@@ -1,8 +1,16 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import ThreadMessageBubble from "../../src/components/ThreadMessageBubble";
 import type { Message } from "../../src/lib/api";
-import { getRenderedHtml } from "../../src/lib/api";
+import { downloadAttachment, getRenderedHtml, listAttachments } from "../../src/lib/api";
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(() => Promise.resolve(vi.fn())),
+}));
+
+vi.mock("@tauri-apps/api/path", () => ({
+  downloadDir: vi.fn().mockResolvedValue("/downloads"),
+}));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -16,6 +24,11 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("../../src/lib/api", () => ({
+  listAttachments: vi.fn().mockResolvedValue([
+    { id: "attachment-1", message_id: "message-1", filename: "report.pdf", mime_type: "application/pdf", size: 1024, is_inline: false },
+    { id: "attachment-inline", message_id: "message-1", filename: "inline.png", mime_type: "image/png", size: 100, is_inline: true },
+  ]),
+  downloadAttachment: vi.fn().mockResolvedValue("/downloads/report.pdf"),
   getRenderedHtml: vi.fn().mockResolvedValue({
     html: "<p>Rendered</p>",
     trackers_blocked: [],
@@ -63,6 +76,32 @@ const message: Message = {
 };
 
 describe("ThreadMessageBubble", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("loads and downloads the expanded message's attachments, hiding them when collapsed", async () => {
+    render(<ThreadMessageBubble message={{ ...message, has_attachments: true }} />);
+
+    expect(listAttachments).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { expanded: false }));
+    const download = await screen.findByRole("button", { name: "attachments.download: report.pdf" });
+    expect(listAttachments).toHaveBeenCalledWith("message-1");
+    expect(screen.queryByText("inline.png")).toBeNull();
+
+    fireEvent.click(download);
+    await waitFor(() => {
+      expect(downloadAttachment).toHaveBeenCalledWith("attachment-1", "/downloads/report.pdf");
+      expect(download.hasAttribute("disabled")).toBe(false);
+    });
+    fireEvent.click(screen.getByRole("button", { expanded: true }));
+    expect(screen.queryByText("report.pdf")).toBeNull();
+  });
+
+  it("does not fetch attachments for an expanded message without attachments", async () => {
+    render(<ThreadMessageBubble message={message} defaultExpanded />);
+    await waitFor(() => expect(getRenderedHtml).toHaveBeenCalled());
+    expect(listAttachments).not.toHaveBeenCalled();
+  });
+
   it("shows copied recipients when expanded", () => {
     render(<ThreadMessageBubble message={message} defaultExpanded />);
 
