@@ -27,6 +27,7 @@ import type { ComposeAttachment } from "./compose-draft";
 import { ModeButton, EditorToolbar, MarkdownToolbar, composeStyles } from "./ComposeToolbar";
 import { subjectAfterAddingAttachments } from "./attachment-subject";
 import { isValidEmailAddress, mergePendingRecipient } from "./recipient-utils";
+import { queryClient } from "@/lib/query-client";
 
 export default function ComposeView() {
   const composeMode = useComposeStore((s) => s.composeMode);
@@ -53,12 +54,14 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
   const [isDiscarding, setIsDiscarding] = useState(false);
   const sendInProgressRef = useRef(false);
   const [sendInProgress, setSendInProgress] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const composeDraft = useComposeStore((s) => s.composeDraft);
 
   const isReply = composeMode === "reply" || composeMode === "reply-all";
   const restoredDraft = useRef(
-    composeMode === "new"
+    composeDraft ?? (composeMode === "new"
       ? loadDraftFromStorage(accountsLoaded ? accounts.map((account) => account.id) : undefined)
-      : null,
+      : null),
   );
 
   // ─── Recipients ──────────────────────────────────────────────────────────────
@@ -126,11 +129,13 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
   useEffect(() => {
     if (editor && !editorReady) setEditorReady(true);
   }, [editor, editorReady]);
-  const { cancelPendingDraftSaves } = useComposeDraft({
+  const { cancelPendingDraftSaves, flushDraftSave, resumeDraftSaves, draftIdsByAccountRef } = useComposeDraft({
     to, cc, bcc, subject, rawSource, richTextHtml, editorMode, composeMode, fromAccountId,
     attachments,
     editorReady,
-    migrateLegacyDraft: Boolean(restoredDraft.current),
+    migrateLegacyDraft: Boolean(restoredDraft.current && !composeDraft),
+    existingDraftId: composeDraft?.id,
+    inReplyTo: composeDraft?.inReplyTo ?? (isReply ? composeReplyTo?.message_id_header ?? undefined : undefined),
   });
 
   // ─── Templates ───────────────────────────────────────────────────────────────
@@ -226,7 +231,15 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
         deleteDraft(draftAccountId, draftId),
       ),
     );
-    if (deletionResults.some((result) => result.status === "rejected")) {
+    Object.entries(draftIdsToDelete).forEach(([accountId, draftId], index) => {
+      if (deletionResults[index].status === "fulfilled" && draftIdsByAccountRef.current[accountId] === draftId) {
+        delete draftIdsByAccountRef.current[accountId];
+      }
+    });
+    void queryClient.invalidateQueries({ queryKey: ["messages"] });
+    void queryClient.invalidateQueries({ queryKey: ["threads"] });
+    const failed = deletionResults.some((result) => result.status === "rejected");
+    if (failed) {
       for (const result of deletionResults) {
         if (result.status === "rejected") {
           console.warn(`Failed to delete draft after ${context}:`, result.reason);
@@ -240,11 +253,12 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
               "Sent, but failed to remove the saved draft. You can delete it from Drafts.",
             )
           : t(
-              "compose.discardDraftCleanupFailed",
-              "Discarded, but failed to remove the saved draft. You can delete it from Drafts.",
+              "compose.discardFailed",
+              "Could not remove the saved draft. Your draft is still open; please try again.",
             ),
       });
     }
+    return !failed;
   }
 
   async function stageAttachmentFiles(files: FileList | File[]) {
@@ -357,10 +371,10 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
     }
     const outgoingBodyHtml = appendReplyQuoteHtml(bodyHtml, quotedReplyHtml);
 
-    const inReplyTo =
+    const inReplyTo = composeDraft?.inReplyTo ?? (
       isReply && composeReplyTo?.message_id_header
         ? composeReplyTo.message_id_header
-        : undefined;
+        : undefined);
 
     sendMutation.mutate(
       {
@@ -407,13 +421,39 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
       await waitForPendingAttachmentStaging();
     }
     if (!acceptsStagedAttachmentsRef.current) return;
-    await cleanupSavedDrafts("discard");
+    if (!(await cleanupSavedDrafts("discard"))) {
+      resumeDraftSaves();
+      discardInProgressRef.current = false;
+      setIsDiscarding(false);
+      return;
+    }
     await cleanupAllStagedAttachments();
     clearDraftStorage();
     useComposeStore.getState().setComposeDirty(false);
     discardInProgressRef.current = false;
     setIsDiscarding(false);
     confirmCloseCompose();
+  }
+
+  async function handleSaveAndClose() {
+    if (isSaving || discardInProgressRef.current || sendInProgressRef.current) return;
+    setIsSaving(true);
+    try {
+      await flushDraftSave({
+        to: mergePendingRecipient(to, toInputValue),
+        cc: mergePendingRecipient(cc, ccInputValue),
+        bcc: mergePendingRecipient(bcc, bccInputValue),
+      });
+      await cancelPendingDraftSaves();
+      await cleanupAllStagedAttachments();
+      clearDraftStorage();
+      useComposeStore.getState().setComposeDirty(false);
+      confirmCloseCompose();
+    } catch (error) {
+      useToastStore.getState().addToast({ type: "error", message: String(error) });
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   const title =
@@ -971,9 +1011,11 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
           message={t("compose.leaveMessage", "You have unsaved changes. Are you sure you want to leave?")}
           cancelLabel={t("compose.leaveCancel", "Keep editing")}
           confirmLabel={t("compose.leaveConfirm", "Discard")}
-          busyConfirmLabel={t("compose.discarding", "Discarding...")}
+          busyConfirmLabel={isSaving ? t("common.saving", "Saving...") : t("compose.discarding", "Discarding...")}
           destructive
-          busy={isDiscarding}
+          busy={isDiscarding || isSaving}
+          extraActionLabel={t("compose.saveAndClose", "Save and close")}
+          onExtraAction={() => { void handleSaveAndClose(); }}
           confirmDisabled={pendingAttachmentStagingCount > 0}
           onCancel={() => {
             if (!discardInProgressRef.current) cancelCloseCompose();

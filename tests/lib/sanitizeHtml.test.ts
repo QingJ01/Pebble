@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { sanitizeHtml } from "../../src/lib/sanitizeHtml";
 
 describe("sanitizeHtml", () => {
+  it("preserves locally resolved PNG data URLs through both reader sanitization passes", () => {
+    const source = '<img src="data:image/png;base64,cG5nLWZpeHR1cmU=" width="120" height="60">';
+    expect(sanitizeHtml(sanitizeHtml(source))).toContain('src="data:image/png;base64,cG5nLWZpeHR1cmU="');
+  });
   it("preserves safe inline email styles", () => {
     const sanitized = sanitizeHtml(
       '<p style="color: red; text-align: center; margin: 8px">Hello</p>',

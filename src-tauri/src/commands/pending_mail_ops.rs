@@ -19,6 +19,23 @@ use super::messages::{
 const WORKER_INTERVAL_SECS: u64 = 30;
 const WORKER_BATCH_LIMIT: i64 = 20;
 
+#[tauri::command]
+pub fn retry_failed_send(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    op_id: String,
+    confirm_duplicate_risk: bool,
+) -> Result<(), PebbleError> {
+    if !confirm_duplicate_risk {
+        return Err(PebbleError::Validation(
+            "Check Sent and confirm the risk of duplicate delivery before retrying".into(),
+        ));
+    }
+    state.store.retry_failed_send(&op_id)?;
+    emit_pending_ops_changed(Some(&app));
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct PendingMailOpsSummaryResponse {
     pub pending_count: i64,

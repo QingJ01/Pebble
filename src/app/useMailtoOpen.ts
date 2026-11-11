@@ -3,8 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { parseMailtoUrl } from "@/features/compose/mailto";
 import i18n from "@/lib/i18n";
-import { isComposeDirty, useComposeStore, type ComposePrefill } from "@/stores/compose.store";
-import { useConfirmStore } from "@/stores/confirm.store";
+import { useComposeStore, type ComposePrefill } from "@/stores/compose.store";
 import { useToastStore } from "@/stores/toast.store";
 
 const OPEN_MAILTO_EVENT = "app:open-mailto";
@@ -23,20 +22,6 @@ function parseMailtoUrls(urls: string[]) {
     if (prefill) parsed.push(prefill);
   }
   return parsed;
-}
-
-async function confirmReplaceDirtyCompose() {
-  if (!isComposeDirty()) return true;
-  return useConfirmStore.getState().confirm({
-    title: i18n.t("compose.mailtoReplaceDraftTitle", "Open mail link?"),
-    message: i18n.t(
-      "compose.mailtoReplaceDraftConfirm",
-      "Opening this mail link will discard your unsaved draft. Continue?",
-    ),
-    confirmLabel: i18n.t("compose.leaveConfirm", "Discard"),
-    cancelLabel: i18n.t("compose.leaveCancel", "Keep editing"),
-    destructive: true,
-  });
 }
 
 function reportSkippedMailtoUrls(count: number) {
@@ -58,8 +43,6 @@ export async function openMailtoUrl(url: string) {
 async function openMailtoUrls(urls: string[]) {
   const parsed = parseMailtoUrls(urls);
   if (parsed.length === 0) return false;
-
-  if (!(await confirmReplaceDirtyCompose())) return false;
 
   const [first, ...skipped] = parsed;
   useComposeStore.getState().openCompose("new", null, first);

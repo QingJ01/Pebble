@@ -3,6 +3,20 @@ import { useComposeStore } from "../../src/stores/compose.store";
 import { useUIStore } from "../../src/stores/ui.store";
 
 describe("ComposeStore", () => {
+  it("clears resumed draft state and completes deferred navigation only after cleanup confirmation", () => {
+    const draft = { id: "draft", accountId: "account", to: [], cc: [], bcc: [], subject: "Saved",
+      rawSource: "Body", richTextHtml: "", editorMode: "markdown" as const, attachments: [], savedAt: 1 };
+    useComposeStore.getState().openDraft(draft);
+    expect(useComposeStore.getState().composeDraft).toEqual(draft);
+    useComposeStore.getState().setComposeDirty(true);
+    useComposeStore.getState().openCompose("new", null, { subject: "New mailto" });
+    expect(useComposeStore.getState().showComposeLeaveConfirm).toBe(true);
+    expect(useComposeStore.getState().composeDraft).toEqual(draft);
+    useComposeStore.getState().confirmCloseCompose();
+    expect(useComposeStore.getState().composeDraft).toBeNull();
+    expect(useComposeStore.getState().composePrefill).toEqual({ subject: "New mailto" });
+    expect(useComposeStore.getState().pendingNavigation).toBeNull();
+  });
   beforeEach(() => {
     useUIStore.setState({
       activeView: "inbox",

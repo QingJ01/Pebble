@@ -46,6 +46,7 @@
     "quit": "退出 Pebble"
   },
   "sidebar": {
+    "outbox": "发件箱",
     "inbox": "收件箱",
     "sent": "已发送",
     "drafts": "草稿箱",
@@ -110,8 +111,11 @@
     "saveAsTemplate": "保存为模板",
     "noTemplates": "暂无模板",
     "templateName": "模板名称",
-    "leaveTitle": "丢弃草稿？",
-    "leaveMessage": "您有未保存的更改，确定要离开吗？",
+    "saveAndClose": "保存并关闭",
+    "discardFailed": "未能删除已保存的草稿。草稿仍保持打开，请重试。",
+    "resumeDraft": "继续编辑草稿",
+    "leaveTitle": "离开草稿？",
+    "leaveMessage": "保存草稿以便稍后继续编辑，或丢弃草稿。",
     "leaveCancel": "继续编辑",
     "leaveConfirm": "丢弃",
     "toolbar": {
@@ -307,6 +311,8 @@
     "autoBackupFillFields": "请先填写上方的 WebDAV 连接信息以启用自动备份。"
   },
   "pendingOps": {
+    "retrySend": "重试发送",
+    "retrySendWarning": "请先检查已发送邮件。上一次投递可能已经成功，重试可能重复发送。确定重试这封邮件吗？",
     "title": "远端写回",
     "description": "已排队的邮件变更会在后台重试，直到服务商接受为止。",
     "accountFilter": "账户",
@@ -527,6 +533,7 @@
     "securityPlain": "无",
     "proxyHost": "SOCKS5 代理",
     "proxyPort": "端口",
+    "proxyPortInvalid": "端口必须是 1 至 65535 之间的整数。",
     "signInGoogle": "使用 Google 账号登录",
     "signInOutlook": "使用 Outlook 账号登录",
     "orManual": "或手动添加账户",

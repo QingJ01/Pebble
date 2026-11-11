@@ -87,7 +87,7 @@ describe("useMailtoOpen", () => {
 
     renderHook(() => useMailtoOpen());
 
-    await waitFor(() => expect(mocks.confirm).toHaveBeenCalled());
+    await waitFor(() => expect(useComposeStore.getState().showComposeLeaveConfirm).toBe(true));
     expect(useComposeStore.getState().composePrefill).toEqual({ to: ["draft@example.com"] });
   });
 

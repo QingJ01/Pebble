@@ -1,8 +1,85 @@
 use crate::state::AppState;
+use base64::{engine::general_purpose::STANDARD, Engine};
 use pebble_core::{Message, PebbleError, PrivacyMode, RenderedHtml, TrustType};
 use pebble_privacy::PrivacyGuard;
 use pebble_store::Store;
+use std::{collections::HashMap, path::Path};
 use tauri::State;
+
+fn resolve_inline_images(
+    store: &Store,
+    root: &Path,
+    message_id: &str,
+    rendered: &mut RenderedHtml,
+) -> Result<(), PebbleError> {
+    if !rendered.html.to_ascii_lowercase().contains("cid:") {
+        return Ok(());
+    }
+    let Ok(root) = root.canonicalize() else {
+        return Ok(());
+    };
+    let mut images = HashMap::new();
+    let mut total_size = 0;
+    for attachment in store.list_attachments_by_message(message_id)? {
+        let Some(cid) = attachment.content_id else {
+            continue;
+        };
+        let mime = attachment.mime_type.to_ascii_lowercase();
+        if !matches!(
+            mime.as_str(),
+            "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "image/bmp"
+        ) {
+            continue;
+        }
+        let Some(path) = attachment.local_path else {
+            continue;
+        };
+        let Ok(path) = Path::new(&path).canonicalize() else {
+            continue;
+        };
+        if !path.starts_with(&root) {
+            continue;
+        }
+        let Ok(metadata) = path.metadata() else {
+            continue;
+        };
+        if metadata.len() > 10 * 1024 * 1024 || total_size + metadata.len() > 20 * 1024 * 1024 {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(path) else {
+            continue;
+        };
+        total_size += bytes.len() as u64;
+        images.insert(
+            cid.trim().trim_matches(['<', '>']).to_string(),
+            format!("data:{mime};base64,{}", STANDARD.encode(bytes)),
+        );
+    }
+    rendered.html = lol_html::rewrite_str(
+        &rendered.html,
+        lol_html::RewriteStrSettings {
+            element_content_handlers: vec![lol_html::element!("img[src]", |element| {
+                if let Some(src) = element.get_attribute("src") {
+                    if src
+                        .get(..4)
+                        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("cid:"))
+                    {
+                        let cid = src[4..].trim().trim_matches(['<', '>']);
+                        if let Some(data) = images.get(cid) {
+                            element.set_attribute("src", data)?;
+                        } else {
+                            element.remove_attribute("src");
+                        }
+                    }
+                }
+                Ok(())
+            })],
+            ..Default::default()
+        },
+    )
+    .map_err(|error| PebbleError::Internal(format!("Inline image rendering failed: {error}")))?;
+    Ok(())
+}
 
 #[tauri::command]
 pub async fn get_rendered_html(
@@ -11,6 +88,7 @@ pub async fn get_rendered_html(
     privacy_mode: PrivacyMode,
 ) -> std::result::Result<RenderedHtml, PebbleError> {
     let store = state.store.clone();
+    let attachments_dir = state.attachments_dir.clone();
     tokio::task::spawn_blocking(move || {
         let message = store
             .get_message(&message_id)?
@@ -18,7 +96,10 @@ pub async fn get_rendered_html(
 
         let effective_mode = resolve_privacy_mode(&store, &message, privacy_mode)?;
         let guard = PrivacyGuard::new();
-        Ok(guard.render_message_html(&message.body_html_raw, &message.body_text, &effective_mode))
+        let mut rendered =
+            guard.render_message_html(&message.body_html_raw, &message.body_text, &effective_mode);
+        resolve_inline_images(&store, &attachments_dir, &message_id, &mut rendered)?;
+        Ok(rendered)
     })
     .await
     .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))?
@@ -31,6 +112,7 @@ pub async fn get_message_with_html(
     privacy_mode: PrivacyMode,
 ) -> std::result::Result<Option<(Message, RenderedHtml)>, PebbleError> {
     let store = state.store.clone();
+    let attachments_dir = state.attachments_dir.clone();
     tokio::task::spawn_blocking(move || {
         let message = match store.get_message(&message_id)? {
             Some(m) => m,
@@ -39,8 +121,9 @@ pub async fn get_message_with_html(
 
         let effective_mode = resolve_privacy_mode(&store, &message, privacy_mode)?;
         let guard = PrivacyGuard::new();
-        let rendered =
+        let mut rendered =
             guard.render_message_html(&message.body_html_raw, &message.body_text, &effective_mode);
+        resolve_inline_images(&store, &attachments_dir, &message_id, &mut rendered)?;
         Ok(Some((message, rendered)))
     })
     .await
@@ -91,6 +174,78 @@ mod tests {
         new_id, now_timestamp, Account, EmailAddress, Folder, FolderRole, FolderType, Message,
         ProviderType, TrustType, TrustedSender,
     };
+
+    #[test]
+    fn cid_images_resolve_locally_without_loading_external_images() {
+        let (store, message) = store_with_trusted_sender(TrustType::Images);
+        let root = std::env::temp_dir().join(format!("pebble-cid-{}", new_id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("image.png");
+        std::fs::write(&path, b"png-fixture").unwrap();
+        store
+            .insert_attachment(&pebble_core::Attachment {
+                id: new_id(),
+                message_id: message.id.clone(),
+                filename: "image.png".into(),
+                mime_type: "image/png".into(),
+                size: 11,
+                local_path: Some(path.to_string_lossy().into_owned()),
+                content_id: Some("<image@example.com>".into()),
+                is_inline: true,
+            })
+            .unwrap();
+        let mut rendered = PrivacyGuard::new().render_safe_html(
+            r#"<img src="cid:image@example.com" width="120" height="60"><img src="https://remote.invalid/image.png"><img src="cid:missing">"#,
+            &PrivacyMode::Strict,
+        );
+        resolve_inline_images(&store, &root, &message.id, &mut rendered).unwrap();
+        assert!(rendered
+            .html
+            .contains("data:image/png;base64,cG5nLWZpeHR1cmU="));
+        assert_eq!(rendered.images_blocked, 1);
+        assert!(!rendered.html.contains(" src=\"https://remote.invalid"));
+        assert!(!rendered.html.contains("cid:missing"));
+        let other = make_message("account-1", "other@example.com");
+        store.insert_message(&other, &[]).unwrap();
+        let mut other_html = PrivacyGuard::new()
+            .render_safe_html(r#"<img src="cid:image@example.com">"#, &PrivacyMode::Strict);
+        resolve_inline_images(&store, &root, &other.id, &mut other_html).unwrap();
+        assert!(!other_html.html.contains("data:image"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cid_cannot_read_files_outside_attachment_root_or_render_svg() {
+        let (store, message) = store_with_trusted_sender(TrustType::Images);
+        let base = std::env::temp_dir().join(format!("pebble-cid-safety-{}", new_id()));
+        let root = base.join("attachments");
+        std::fs::create_dir_all(&root).unwrap();
+        for (cid, path, mime) in [
+            ("outside", base.join("secret.png"), "image/png"),
+            ("vector", root.join("vector.svg"), "image/svg+xml"),
+        ] {
+            std::fs::write(&path, b"secret").unwrap();
+            store
+                .insert_attachment(&pebble_core::Attachment {
+                    id: new_id(),
+                    message_id: message.id.clone(),
+                    filename: cid.into(),
+                    mime_type: mime.into(),
+                    size: 6,
+                    local_path: Some(path.to_string_lossy().into_owned()),
+                    content_id: Some(cid.into()),
+                    is_inline: true,
+                })
+                .unwrap();
+        }
+        let mut rendered = PrivacyGuard::new().render_safe_html(
+            r#"<img src="cid:outside"><img src="cid:vector">"#,
+            &PrivacyMode::Off,
+        );
+        resolve_inline_images(&store, &root, &message.id, &mut rendered).unwrap();
+        assert!(!rendered.html.contains("data:"));
+        let _ = std::fs::remove_dir_all(base);
+    }
 
     fn make_account(id: &str) -> Account {
         let now = now_timestamp();

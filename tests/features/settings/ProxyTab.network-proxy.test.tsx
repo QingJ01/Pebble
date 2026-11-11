@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import ProxyTab from "../../../src/features/settings/ProxyTab";
+import ProxyTab, { parseProxyPort } from "../../../src/features/settings/ProxyTab";
 import {
   getAccountProxySetting,
   getGlobalProxy,
@@ -83,6 +83,23 @@ vi.mock("../../../src/lib/api", () => ({
 }));
 
 describe("ProxyTab global proxy", () => {
+  it.each(["0", "70000", "-1", "1.5", "80abc", "1e3", "Infinity"])("rejects invalid port %s before IPC", (port) => {
+    expect(() => parseProxyPort(port, "Invalid port")).toThrow("Invalid port");
+  });
+
+  it.each(["1", "65535", " 1080 "])("accepts an integer port in range: %s", (port) => {
+    expect(parseProxyPort(port, "Invalid port")).toBe(Number(port));
+  });
+
+  it("shows a friendly global validation error without sending an out-of-range u16", async () => {
+    render(<ProxyTab />);
+    await waitFor(() => expect(getGlobalProxy).toHaveBeenCalled());
+    const group = screen.getByRole("group", { name: "Global Proxy" });
+    fireEvent.change(within(group).getByLabelText("Port"), { target: { value: "70000" } });
+    fireEvent.click(within(group).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByText("Port must be an integer between 1 and 65535.")).toBeTruthy());
+    expect(updateGlobalProxy).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.accounts = [

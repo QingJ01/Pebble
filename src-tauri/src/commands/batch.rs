@@ -332,9 +332,21 @@ pub async fn batch_delete(
     state: State<'_, AppState>,
     message_ids: Vec<String>,
 ) -> std::result::Result<u32, PebbleError> {
-    let Some(groups) = prepare_batch(state.store.clone(), &message_ids).await? else {
+    let Some(mut groups) = prepare_batch(state.store.clone(), &message_ids).await? else {
         return Ok(0);
     };
+    let mut local_draft_count = 0;
+    for (_, messages) in groups.values_mut() {
+        let mut local_drafts = std::collections::HashSet::new();
+        for message in messages.iter() {
+            if super::drafts::delete_local_only_draft(&state, message)? {
+                local_drafts.insert(message.id.clone());
+                local_draft_count += 1;
+            }
+        }
+        messages.retain(|message| !local_drafts.contains(&message.id));
+    }
+    groups.retain(|_, (_, messages)| !messages.is_empty());
 
     // Track which messages were successfully deleted remotely
     let mut deleted_ids: Vec<String> = Vec::new();
@@ -499,7 +511,7 @@ pub async fn batch_delete(
 
     // Local bulk soft-delete
     state.store.bulk_soft_delete(&ids_to_delete)?;
-    let success_count = ids_to_delete.len() as u32;
+    let success_count = ids_to_delete.len() as u32 + local_draft_count;
 
     // Update search index: remove deleted messages.
     let delete_ids: Vec<String> = ids_to_delete.clone();

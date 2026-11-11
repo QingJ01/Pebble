@@ -4,7 +4,9 @@ import { listen } from "@tauri-apps/api/event";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Clock, RefreshCw, Trash2 } from "lucide-react";
 import type { PendingMailOp } from "@/lib/api";
-import { dismissFailedPendingMailOps } from "@/lib/api";
+import { dismissFailedPendingMailOps, retryFailedSend } from "@/lib/api";
+import { useConfirmStore } from "@/stores/confirm.store";
+import { useToastStore } from "@/stores/toast.store";
 import {
   pendingMailOpsQueryKey,
   pendingMailOpsSummaryQueryKey,
@@ -68,6 +70,26 @@ export default function PendingOpsTab() {
   const queryClient = useQueryClient();
   const activeAccountId = useMailStore((s) => s.activeAccountId);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(activeAccountId);
+  const [retryingSend, setRetryingSend] = useState<string | null>(null);
+  async function retrySend(op: PendingMailOp) {
+    if (retryingSend) return;
+    setRetryingSend(op.id);
+    try {
+      const confirmed = await useConfirmStore.getState().confirm({
+        title: t("pendingOps.retrySend", "Retry send"),
+        message: t("pendingOps.retrySendWarning", "Check Sent first. The previous delivery may have succeeded; retrying could send a duplicate. Retry this message?"),
+        confirmLabel: t("pendingOps.retrySend", "Retry send"),
+        destructive: true,
+      });
+      if (!confirmed) return;
+      await retryFailedSend(op.id);
+      await refresh();
+    } catch (error) {
+      useToastStore.getState().addToast({ type: "error", message: String(error) });
+    } finally {
+      setRetryingSend(null);
+    }
+  }
 
   const accountsQuery = useAccountsQuery();
   const summaryQuery = usePendingMailOpsSummary(selectedAccountId);
@@ -370,6 +392,11 @@ export default function PendingOpsTab() {
                     <td style={tableCellStyle}>{formatTimestamp(op.updated_at)}</td>
                     <td style={{ ...tableCellStyle, color: op.last_error ? "var(--color-warning, #d97706)" : "var(--color-text-secondary)" }}>
                       {op.last_error ?? "-"}
+                      {op.op_type === "send" && op.status === "failed" && (
+                        <button disabled={retryingSend !== null} onClick={() => { void retrySend(op); }}>
+                          {t("pendingOps.retrySend", "Retry send")}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );

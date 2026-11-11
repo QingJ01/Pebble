@@ -13,6 +13,7 @@ vi.mock("@tauri-apps/api/path", () => ({
 }));
 
 vi.mock("react-i18next", () => ({
+  initReactI18next: { type: "3rdParty", init: vi.fn() },
   useTranslation: () => ({
     t: (key: string, options?: unknown) => {
       if (typeof options === "string") return options;

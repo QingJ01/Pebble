@@ -21,7 +21,6 @@ import {
 import { useTranslation } from "react-i18next";
 import { useUIStore } from "../stores/ui.store";
 import { isComposeDirty, useComposeStore } from "../stores/compose.store";
-import { useConfirmStore } from "../stores/confirm.store";
 import { useMailStore } from "../stores/mail.store";
 import { useAccountsQuery, useFoldersForAccountsQuery } from "../hooks/queries";
 import { useFolderUnreadCountsForAccounts } from "../hooks/queries/useFolderUnreadCounts";
@@ -107,35 +106,16 @@ export default function SidebarGrouped() {
     if (preferred) setActiveFolderId(preferred.id);
   }, [accounts.length, folders, activeFolderId, setActiveFolderId]);
 
-  async function confirmDiscardDraft() {
-    if (isComposeDirty()) {
-      const confirmed = await useConfirmStore.getState().confirm({
-        title: t("compose.discardDraft", "Discard draft"),
-        message: t("compose.discardDraftConfirm", "You have an unsaved draft. Discard and leave?"),
-        destructive: true,
-      });
-      return confirmed;
-    }
-    return true;
-  }
-
   async function safeSetActiveView(view: Parameters<typeof setActiveView>[0]) {
-    if (isComposeDirty()) {
-      const confirmed = await confirmDiscardDraft();
-      if (!confirmed) return;
-      useComposeStore.getState().discardComposeAndSetActiveView(view);
-      return;
-    }
     setActiveView(view);
   }
 
   async function handleFolderSelect(accountId: string | null, folderId: string) {
     if (isComposeDirty()) {
-      const confirmed = await confirmDiscardDraft();
-      if (!confirmed) return;
-      setActiveAccountId(accountId);
-      setActiveFolderId(folderId);
-      useComposeStore.getState().discardComposeAndSetActiveView("inbox");
+      useComposeStore.setState({
+        showComposeLeaveConfirm: true, pendingView: "inbox",
+        pendingNavigation: () => { setActiveAccountId(accountId); setActiveFolderId(folderId); },
+      });
       return;
     }
     setActiveAccountId(accountId);
@@ -296,7 +276,8 @@ export default function SidebarGrouped() {
                   )}
                   {!groupCollapsed && (entries.length > 0
                     ? entries.map((folder) => {
-                        const label = folder.role ? ROLE_LABELS[folder.role] : folder.name;
+                        const label = folder.remote_id === "__local_outbox__" ? t("sidebar.outbox", "Outbox")
+                          : folder.role ? ROLE_LABELS[folder.role] : folder.name;
                         return (
                           <SidebarButton
                             key={folder.id}

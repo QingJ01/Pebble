@@ -512,6 +512,10 @@ pub async fn delete_message(
 ) -> std::result::Result<(), PebbleError> {
     let (msg, provider_type) = resolve_message_context(&state, &message_id)?;
 
+    if crate::commands::drafts::delete_local_only_draft(&state, &msg)? {
+        return Ok(());
+    }
+
     let source_folder = find_message_folder(&state, &message_id, &msg.account_id)?;
     let trash_folder = find_folder_by_role(&state, &msg.account_id, FolderRole::Trash).ok();
     let is_permanent = source_folder.role == Some(FolderRole::Trash);

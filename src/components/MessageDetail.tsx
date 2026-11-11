@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Clock, Languages } from "lucide-react";
 import { trustSender } from "@/lib/api";
+import ResumeDraftButton from "./ResumeDraftButton";
 import { useTranslation } from "react-i18next";
 import type { PrivacyMode, TranslateResult } from "@/lib/api";
 import { useClickOutside } from "@/hooks/useClickOutside";
@@ -318,6 +319,7 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
           </button>
         </div>
         {/* Action Toolbar */}
+        {message.is_draft && <ResumeDraftButton messageId={messageId} />}
         <MessageActionToolbar
           message={message}
           folderRole={folderRole}

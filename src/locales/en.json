@@ -46,6 +46,7 @@
     "quit": "Quit Pebble"
   },
   "sidebar": {
+    "outbox": "Outbox",
     "inbox": "Inbox",
     "sent": "Sent",
     "drafts": "Drafts",
@@ -110,8 +111,11 @@
     "saveAsTemplate": "Save current",
     "noTemplates": "No templates saved",
     "templateName": "Template name",
-    "leaveTitle": "Discard draft?",
-    "leaveMessage": "You have unsaved changes. Are you sure you want to leave?",
+    "saveAndClose": "Save and close",
+    "discardFailed": "Could not remove the saved draft. Your draft is still open; please try again.",
+    "resumeDraft": "Resume draft",
+    "leaveTitle": "Leave draft?",
+    "leaveMessage": "Save this draft to continue later, or discard it.",
     "leaveCancel": "Keep editing",
     "leaveConfirm": "Discard",
     "toolbar": {
@@ -307,6 +311,8 @@
     "autoBackupFillFields": "Fill in WebDAV credentials above to enable auto-backup."
   },
   "pendingOps": {
+    "retrySend": "Retry send",
+    "retrySendWarning": "Check Sent first. The previous delivery may have succeeded; retrying could send a duplicate. Retry this message?",
     "title": "Remote Writes",
     "description": "Queued mail changes are retried in the background until the provider accepts them.",
     "accountFilter": "Account",
@@ -527,6 +533,7 @@
     "securityPlain": "None",
     "proxyHost": "SOCKS5 Proxy",
     "proxyPort": "Port",
+    "proxyPortInvalid": "Port must be an integer between 1 and 65535.",
     "signInGoogle": "Sign in with Google",
     "signInOutlook": "Sign in with Outlook",
     "orManual": "or add account manually",

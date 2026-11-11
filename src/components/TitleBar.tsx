@@ -1,9 +1,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTranslation } from "react-i18next";
 import iconUrl from "@/assets/app-icon.png";
-import { isComposeDirty } from "@/stores/compose.store";
-import { useConfirmStore } from "@/stores/confirm.store";
-import i18n from "@/lib/i18n";
+import { isComposeDirty, useComposeStore } from "@/stores/compose.store";
 
 const isMac = navigator.userAgent.includes("Macintosh");
 
@@ -13,12 +11,9 @@ export default function TitleBar() {
 
   async function handleCloseWindow() {
     if (isComposeDirty()) {
-      const confirmed = await useConfirmStore.getState().confirm({
-        title: i18n.t("compose.discardDraft", "Discard draft"),
-        message: i18n.t("compose.discardDraftConfirm", "You have an unsaved draft. Discard and leave?"),
-        destructive: true,
-      });
-      if (!confirmed) return;
+      useComposeStore.setState({ showComposeLeaveConfirm: true, pendingView: null,
+        pendingNavigation: () => { void appWindow.close(); } });
+      return;
     }
     await appWindow.close();
   }

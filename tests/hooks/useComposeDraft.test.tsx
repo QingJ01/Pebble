@@ -38,6 +38,30 @@ function baseProps(overrides: Partial<Parameters<typeof useComposeDraft>[0]> = {
 }
 
 describe("useComposeDraft", () => {
+  it("resumes the same persisted draft and immediately flushes the latest content and mode", async () => {
+    saveDraftMock.mockResolvedValue("existing-draft");
+    const { result } = renderHook(() => useComposeDraft(baseProps({
+      existingDraftId: "existing-draft", subject: "Edited", editorMode: "markdown",
+      rawSource: "**正文**", bcc: ["hidden@example.com"], inReplyTo: "<parent@example.com>",
+    })));
+    await act(async () => { await result.current.flushDraftSave(); });
+    expect(saveDraftMock).toHaveBeenCalledWith(expect.objectContaining({
+      existingDraftId: "existing-draft", subject: "Edited", bodyText: "**正文**",
+      editorMode: "markdown", bcc: ["hidden@example.com"], inReplyTo: "<parent@example.com>",
+    }));
+  });
+
+  it("does not report a successful flush when every save fails", async () => {
+    saveDraftMock.mockRejectedValue(new Error("Disk full"));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { result } = renderHook(() => useComposeDraft(baseProps({ subject: "Keep me" })));
+    const flush = result.current.flushDraftSave();
+    const assertion = expect(flush).rejects.toThrow("Disk full");
+    await act(async () => { await vi.advanceTimersByTimeAsync(7000); });
+    await assertion;
+    expect(saveDraftMock).toHaveBeenCalledTimes(4);
+    vi.restoreAllMocks();
+  });
   beforeEach(() => {
     vi.useFakeTimers();
     localStorage.clear();
