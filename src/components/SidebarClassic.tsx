@@ -18,7 +18,6 @@ import {
 import { useTranslation } from "react-i18next";
 import { useUIStore } from "../stores/ui.store";
 import { isComposeDirty, useComposeStore } from "../stores/compose.store";
-import { useConfirmStore } from "../stores/confirm.store";
 import { useMailStore } from "../stores/mail.store";
 import { useAccountsQuery, useFoldersForAccountsQuery } from "../hooks/queries";
 import { useFolderUnreadCountsForAccounts } from "../hooks/queries/useFolderUnreadCounts";
@@ -83,7 +82,8 @@ export default function SidebarClassic() {
     archive: t("sidebar.archive"),
     spam: t("sidebar.spam"),
   };
-  const folderLabel = (folder: FolderType) => (folder.role && ROLE_LABELS[folder.role]) || folder.name;
+  const folderLabel = (folder: FolderType) => folder.remote_id === "__local_outbox__"
+    ? t("sidebar.outbox", "Outbox") : (folder.role && ROLE_LABELS[folder.role]) || folder.name;
 
   const displayedFolders = useMemo(
     () => allAccountsMode ? buildAllAccountsFolders(folders) : folders,
@@ -119,34 +119,16 @@ export default function SidebarClassic() {
     }
   }, [displayedFolders, foldersFetched, activeFolderId, setActiveFolderId, accounts, activeAccountId, setActiveAccountId, allAccountsMode]);
 
-  async function confirmDiscardDraft() {
-    if (isComposeDirty()) {
-      const confirmed = await useConfirmStore.getState().confirm({
-        title: t("compose.discardDraft", "Discard draft"),
-        message: t("compose.discardDraftConfirm", "You have an unsaved draft. Discard and leave?"),
-        destructive: true,
-      });
-      return confirmed;
-    }
-    return true;
-  }
-
   async function safeSetActiveView(view: Parameters<typeof setActiveView>[0]) {
-    if (isComposeDirty()) {
-      const confirmed = await confirmDiscardDraft();
-      if (!confirmed) return;
-      useComposeStore.getState().discardComposeAndSetActiveView(view);
-      return;
-    }
     setActiveView(view);
   }
 
   async function handleFolderClick(folderId: string) {
     if (isComposeDirty()) {
-      const confirmed = await confirmDiscardDraft();
-      if (!confirmed) return;
-      useComposeStore.getState().discardComposeAndSetActiveView("inbox");
-      setActiveFolderId(folderId);
+      useComposeStore.setState({
+        showComposeLeaveConfirm: true, pendingView: "inbox",
+        pendingNavigation: () => setActiveFolderId(folderId),
+      });
       return;
     }
     setActiveView("inbox");

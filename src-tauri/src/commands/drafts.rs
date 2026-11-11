@@ -118,6 +118,9 @@ fn delete_local_draft(state: &AppState, draft_id: &str) -> Result<(), PebbleErro
         .filter_map(|attachment| attachment.local_path)
         .collect();
     state.store.hard_delete_messages(&[draft_id.to_string()])?;
+    state
+        .store
+        .delete_secure_user_data(&format!("draft-editor:{draft_id}"))?;
     cleanup_unreferenced_local_attachment_paths(state, &local_paths);
     Ok(())
 }
@@ -136,6 +139,7 @@ pub async fn save_draft(
     in_reply_to: Option<String>,
     attachment_paths: Option<Vec<String>>,
     existing_draft_id: Option<String>,
+    editor_mode: Option<String>,
 ) -> std::result::Result<String, PebbleError> {
     let raw_attachment_paths = attachment_paths.unwrap_or_default();
     let attachment_paths = if raw_attachment_paths.is_empty() {
@@ -185,7 +189,7 @@ pub async fn save_draft(
         attachment_paths,
     };
 
-    if matches!(
+    let saved_id = if matches!(
         account.provider,
         ProviderType::Gmail | ProviderType::Outlook
     ) {
@@ -216,7 +220,94 @@ pub async fn save_draft(
             provenance.local_id.as_deref(),
             provenance.remote_id.as_deref(),
         )
+    }?;
+    if let Some(mode) =
+        editor_mode.filter(|mode| matches!(mode.as_str(), "rich" | "markdown" | "html"))
+    {
+        super::encrypted_store::store_secure_user_data(
+            &state.crypto,
+            &state.store,
+            &format!("draft-editor:{saved_id}"),
+            mode.as_bytes(),
+        )?;
     }
+    Ok(saved_id)
+}
+
+#[derive(serde::Serialize)]
+pub struct DraftContent {
+    message: pebble_core::Message,
+    attachments: Vec<pebble_core::Attachment>,
+    editor_mode: String,
+}
+
+#[tauri::command]
+pub async fn get_draft(
+    state: State<'_, AppState>,
+    draft_id: String,
+) -> Result<DraftContent, PebbleError> {
+    load_draft_content(&state, &draft_id)
+}
+
+fn load_draft_content(state: &AppState, draft_id: &str) -> Result<DraftContent, PebbleError> {
+    let message = state
+        .store
+        .get_message(draft_id)?
+        .filter(|message| message.is_draft)
+        .ok_or_else(|| PebbleError::Validation("Draft not found".into()))?;
+    let attachments = state.store.list_attachments_by_message(draft_id)?;
+    if attachments.iter().any(|attachment| {
+        !attachment.is_inline
+            && attachment
+                .local_path
+                .as_deref()
+                .is_none_or(|path| !std::path::Path::new(path).is_file())
+    }) {
+        return Err(PebbleError::Validation(
+            "Draft attachments are not available locally; sync the account first".into(),
+        ));
+    }
+    let saved_mode = super::encrypted_store::load_secure_user_data(
+        &state.crypto,
+        &state.store,
+        &format!("draft-editor:{draft_id}"),
+    )?;
+    let editor_mode = saved_mode
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .filter(|mode| matches!(mode.as_str(), "rich" | "markdown" | "html"))
+        .unwrap_or_else(|| {
+            if message.body_html_raw.is_empty() {
+                "markdown"
+            } else {
+                "rich"
+            }
+            .into()
+        });
+    let source_paths: Vec<String> = attachments
+        .iter()
+        .filter(|attachment| !attachment.is_inline)
+        .filter_map(|attachment| attachment.local_path.clone())
+        .collect();
+    let source_paths = validate_attachment_paths(&source_paths, &state.attachments_dir)?;
+    let attachments =
+        stage_local_attachment_records(&state.attachments_dir, "compose_staging", &source_paths)?;
+    Ok(DraftContent {
+        message,
+        attachments,
+        editor_mode,
+    })
+}
+
+pub(crate) fn delete_local_only_draft(
+    state: &AppState,
+    message: &pebble_core::Message,
+) -> Result<bool, PebbleError> {
+    if !message.is_draft || !message.remote_id.is_empty() {
+        return Ok(false);
+    }
+    delete_local_draft(state, &message.id)?;
+    super::messages::remove_search_documents(state, std::slice::from_ref(&message.id))?;
+    Ok(true)
 }
 
 async fn save_prepared_oauth_draft<R: RemoteDraftOperations>(
@@ -407,6 +498,93 @@ mod tests {
     use pebble_search::TantivySearch;
     use pebble_store::Store;
     use std::sync::Mutex;
+
+    #[test]
+    fn local_only_draft_deletion_needs_no_imap_uid_or_connection() {
+        let state = test_state();
+        let message = make_local_draft("account-a", "local-draft", "");
+        state.store.insert_message(&message, &[]).unwrap();
+        assert!(delete_local_only_draft(&state, &message).unwrap());
+        assert!(state.store.get_message(&message.id).unwrap().is_none());
+        let remote = make_local_draft("account-a", "remote-draft", "123");
+        state.store.insert_message(&remote, &[]).unwrap();
+        assert!(!delete_local_only_draft(&state, &remote).unwrap());
+        assert!(state.store.get_message(&remote.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn resumed_draft_keeps_metadata_and_stable_attachment_sources_across_saves() {
+        let state = test_state();
+        std::fs::create_dir_all(&state.attachments_dir).unwrap();
+        let source = state.attachments_dir.join("original.txt");
+        std::fs::write(&source, b"payload").unwrap();
+        let mut draft = draft_message("正文");
+        draft.bcc.push(EmailAddress {
+            name: None,
+            address: "hidden@example.com".into(),
+        });
+        draft.in_reply_to = Some("<parent@example.com>".into());
+        draft.body_text = "**正文**".into();
+        draft.attachment_paths = vec![source.to_string_lossy().into_owned()];
+        let id = save_draft_locally(&state, "account-a", &draft, None, None).unwrap();
+        super::super::encrypted_store::store_secure_user_data(
+            &state.crypto,
+            &state.store,
+            &format!("draft-editor:{id}"),
+            b"markdown",
+        )
+        .unwrap();
+        let loaded = load_draft_content(&state, &id).unwrap();
+        assert_eq!(loaded.editor_mode, "markdown");
+        assert_eq!(loaded.message.bcc_list[0].address, "hidden@example.com");
+        assert_eq!(loaded.message.in_reply_to, draft.in_reply_to);
+        let staged = loaded.attachments[0].local_path.clone().unwrap();
+        assert!(std::path::Path::new(&staged)
+            .starts_with(state.attachments_dir.join("compose_staging")));
+        draft.attachment_paths = vec![staged.clone()];
+        for subject in ["First edit", "Second edit"] {
+            draft.subject = subject.into();
+            assert_eq!(
+                save_draft_locally(&state, "account-a", &draft, Some(&id), None).unwrap(),
+                id
+            );
+            assert_eq!(std::fs::read(&staged).unwrap(), b"payload");
+        }
+        delete_local_draft(&state, &id).unwrap();
+        assert!(state.store.get_message(&id).unwrap().is_none());
+        assert!(state
+            .store
+            .get_secure_user_data(&format!("draft-editor:{id}"))
+            .unwrap()
+            .is_none());
+        let _ = std::fs::remove_dir_all(&state.attachments_dir);
+    }
+
+    #[test]
+    fn resume_rejects_missing_attachments_and_non_drafts() {
+        let state = test_state();
+        let mut message = make_local_draft("account-a", "draft", "");
+        message.is_draft = false;
+        state.store.insert_message(&message, &[]).unwrap();
+        assert!(load_draft_content(&state, &message.id).is_err());
+        message.id = "draft-with-missing-attachment".into();
+        message.is_draft = true;
+        state.store.insert_message(&message, &[]).unwrap();
+        state
+            .store
+            .insert_attachment(&pebble_core::Attachment {
+                id: new_id(),
+                message_id: message.id.clone(),
+                filename: "lost.txt".into(),
+                mime_type: "text/plain".into(),
+                size: 2,
+                local_path: None,
+                content_id: None,
+                is_inline: false,
+            })
+            .unwrap();
+        assert!(load_draft_content(&state, &message.id).is_err());
+    }
 
     fn make_account(id: &str, email: &str, provider: ProviderType) -> Account {
         let now = now_timestamp();

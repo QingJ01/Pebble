@@ -57,7 +57,7 @@ export function useComposeRecipients({
 
   const [bcc, setBcc] = useState<string[]>(restoredDraft?.bcc ?? composePrefill?.bcc ?? []);
   const [showCc, setShowCc] = useState(() => cc.length > 0);
-  const [showBcc, setShowBcc] = useState(false);
+  const [showBcc, setShowBcc] = useState(() => bcc.length > 0);
 
   // Re-calculate from/to/cc once accounts data loads (fixes reply-all with async data)
   useEffect(() => {

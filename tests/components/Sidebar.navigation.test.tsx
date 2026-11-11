@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Sidebar from "../../src/components/Sidebar";
 import { useComposeStore } from "../../src/stores/compose.store";
@@ -21,6 +21,7 @@ vi.mock("react-i18next", () => ({
         "sidebar.mailFolders": "Mail folders",
         "sidebar.tools": "Tools",
         "sidebar.inbox": "Inbox",
+        "sidebar.outbox": "发件箱",
         "sidebar.sent": "Sent",
         "sidebar.drafts": "Drafts",
         "sidebar.trash": "Trash",
@@ -64,6 +65,8 @@ vi.mock("../../src/hooks/queries", () => ({
         is_system: true,
         sort_order: 0,
       },
+      { id: "outbox", account_id: "account-1", remote_id: "__local_outbox__", name: "Outbox",
+        folder_type: "folder", role: null, parent_id: null, color: null, is_system: true, sort_order: 6 },
     ],
     isFetched: true,
   }),
@@ -74,6 +77,12 @@ vi.mock("../../src/hooks/queries/useFolderUnreadCounts", () => ({
 }));
 
 describe("Sidebar navigation", () => {
+  it.each(["classic", "grouped"] as const)("translates local Outbox in %s mode", (sidebarStyle) => {
+    useUIStore.setState({ sidebarStyle });
+    render(<Sidebar />);
+    expect(screen.getByText("发件箱")).toBeTruthy();
+    expect(screen.queryByText("Outbox")).toBeNull();
+  });
   beforeEach(() => {
     useUIStore.setState({
       sidebarCollapsed: false,
@@ -133,10 +142,15 @@ describe("Sidebar navigation", () => {
     expect(screen.getByRole("button", { name: "Settings" }).getAttribute("type")).toBe("button");
   });
 
-  it("leaves a dirty compose draft after confirming sidebar navigation", async () => {
+  it("defers dirty compose navigation to the compose save/discard dialog", async () => {
     render(<Sidebar />);
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    expect(useUIStore.getState().activeView).toBe("compose");
+    expect(useComposeStore.getState().showComposeLeaveConfirm).toBe(true);
+    expect(useComposeStore.getState().pendingView).toBe("settings");
+    act(() => useComposeStore.getState().confirmCloseCompose());
 
     await waitFor(() => {
       expect(useUIStore.getState().activeView).toBe("settings");

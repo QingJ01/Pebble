@@ -25,6 +25,16 @@ type AccountProxyDraft = {
 const usesMailProxySetting = (provider: Account["provider"]) =>
   provider === "imap" || provider === "pop3";
 
+export function parseProxyPort(value: string, errorMessage: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const port = Number(trimmed);
+  if (!/^\d+$/.test(trimmed) || !Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(errorMessage);
+  }
+  return port;
+}
+
 const emptyAccountDraft = (): AccountProxyDraft => ({
   mode: "inherit",
   host: "",
@@ -142,10 +152,8 @@ export default function ProxyTab() {
     setProxyError(null);
     const trimmedHost = proxyHost.trim();
     const trimmedPort = proxyPort.trim();
-    const parsedPort = trimmedPort ? Number.parseInt(trimmedPort, 10) : undefined;
-    const normalizedPort =
-      parsedPort === undefined || Number.isNaN(parsedPort) ? undefined : parsedPort;
     try {
+      const normalizedPort = parseProxyPort(trimmedPort, t("settings.proxyPortInvalid", "Port must be an integer between 1 and 65535."));
       await updateGlobalProxy(trimmedHost || undefined, normalizedPort);
       addToast({
         message: t("settings.globalProxySaved", "Global proxy saved"),
@@ -175,10 +183,8 @@ export default function ProxyTab() {
     const custom = draft.mode === "custom";
     const trimmedHost = custom ? draft.host.trim() : "";
     const trimmedPort = custom ? draft.port.trim() : "";
-    const parsedPort = trimmedPort ? Number.parseInt(trimmedPort, 10) : undefined;
-    const normalizedPort =
-      parsedPort === undefined || Number.isNaN(parsedPort) ? undefined : parsedPort;
     try {
+      const normalizedPort = parseProxyPort(trimmedPort, t("settings.proxyPortInvalid", "Port must be an integer between 1 and 65535."));
       if (usesMailProxySetting(account.provider)) {
         await updateAccountProxySetting(
           account.id,

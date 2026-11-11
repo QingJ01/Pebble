@@ -398,6 +398,10 @@ export async function dismissFailedPendingMailOps(
   return invoke<number>("dismiss_failed_pending_mail_ops", { accountId });
 }
 
+export async function retryFailedSend(opId: string): Promise<void> {
+  return invoke("retry_failed_send", { opId, confirmDuplicateRisk: true });
+}
+
 // ─── Trusted Senders API ────────────────────────────────────────────────────
 
 export async function listTrustedSenders(accountId: string): Promise<TrustedSender[]> {
@@ -779,6 +783,7 @@ export async function exportContactsVcard(): Promise<string> {
 // ─── Drafts API ──────────────────────────────────────────────────────────────
 
 export async function saveDraft(args: {
+  editorMode?: "rich" | "markdown" | "html";
   accountId: string;
   to: string[];
   cc: string[];
@@ -791,6 +796,7 @@ export async function saveDraft(args: {
   attachmentPaths?: string[];
 }): Promise<string> {
   return invoke("save_draft", {
+    editorMode: args.editorMode ?? null,
     accountId: args.accountId,
     to: args.to,
     cc: args.cc,
@@ -802,6 +808,12 @@ export async function saveDraft(args: {
     existingDraftId: args.existingDraftId ?? null,
     attachmentPaths: args.attachmentPaths ?? null,
   });
+}
+
+export async function getDraft(draftId: string): Promise<{
+  message: Message; attachments: Attachment[]; editor_mode: "rich" | "markdown" | "html";
+}> {
+  return invoke("get_draft", { draftId });
 }
 
 export async function deleteDraft(accountId: string, draftId: string): Promise<void> {

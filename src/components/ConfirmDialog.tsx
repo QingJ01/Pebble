@@ -12,6 +12,8 @@ interface Props {
   busyConfirmLabel?: string;
   onConfirm: () => void;
   onCancel: () => void;
+  extraActionLabel?: string;
+  onExtraAction?: () => void;
 }
 
 function getFocusableElements(container: HTMLElement | null): HTMLElement[] {
@@ -37,6 +39,7 @@ export default function ConfirmDialog({
   busyConfirmLabel,
   onConfirm,
   onCancel,
+  extraActionLabel, onExtraAction,
 }: Props) {
   const { t } = useTranslation();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -141,6 +144,11 @@ export default function ConfirmDialog({
           {message}
         </p>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+          {extraActionLabel && onExtraAction && (
+            <button disabled={busy || confirmDisabled} onClick={onExtraAction}>
+              {extraActionLabel}
+            </button>
+          )}
           <button
             ref={cancelRef}
             onClick={() => { if (!busy) onCancel(); }}

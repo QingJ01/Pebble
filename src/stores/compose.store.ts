@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { Message } from "@/lib/api";
+import type { DraftData } from "@/hooks/useComposeDraft";
 import { useUIStore, type ActiveView } from "./ui.store";
 
 export type ComposeMode = "new" | "reply" | "reply-all" | "forward";
@@ -16,6 +17,9 @@ interface ComposeState {
   composeMode: ComposeMode | null;
   composeReplyTo: Message | null;
   composePrefill: ComposePrefill | null;
+  composeDraft: DraftData | null;
+  openDraft: (draft: DraftData) => void;
+  pendingNavigation: (() => void) | null;
   composeKey: number;
   composeDirty: boolean;
   showComposeLeaveConfirm: boolean;
@@ -33,6 +37,7 @@ function getComposeResetState() {
     composeMode: null as ComposeMode | null,
     composeReplyTo: null as Message | null,
     composePrefill: null as ComposePrefill | null,
+    composeDraft: null as DraftData | null,
     composeDirty: false,
   };
 }
@@ -48,6 +53,12 @@ export const useComposeStore = create<ComposeState>((set) => ({
   composeMode: null,
   composeReplyTo: null,
   composePrefill: null,
+  composeDraft: null,
+  pendingNavigation: null,
+  openDraft: (draft) => {
+    useComposeStore.getState().openCompose("new");
+    set({ composeDraft: draft });
+  },
   composeKey: 0,
   composeDirty: false,
   showComposeLeaveConfirm: false,
@@ -55,6 +66,11 @@ export const useComposeStore = create<ComposeState>((set) => ({
   setComposeDirty: (dirty) => set({ composeDirty: dirty }),
   openCompose: (mode, replyTo = null, prefill = null) => {
     const uiState = useUIStore.getState();
+    if (isComposeDirty()) {
+      set({ showComposeLeaveConfirm: true, pendingView: uiState.previousView,
+        pendingNavigation: () => useComposeStore.getState().openCompose(mode, replyTo, prefill) });
+      return;
+    }
     useUIStore.setState({
       previousView: uiState.activeView === "compose" ? uiState.previousView : uiState.activeView,
       activeView: "compose" as ActiveView,
@@ -63,10 +79,12 @@ export const useComposeStore = create<ComposeState>((set) => ({
       composeMode: mode,
       composeReplyTo: replyTo,
       composePrefill: prefill,
+      composeDraft: null,
       composeKey: state.composeKey + 1,
       composeDirty: false,
       showComposeLeaveConfirm: false,
       pendingView: null,
+      pendingNavigation: null,
     }));
   },
   closeCompose: () => {
@@ -88,13 +106,16 @@ export const useComposeStore = create<ComposeState>((set) => ({
     const targetView = state.pendingView ?? uiState.previousView;
     useComposeStore.getState().discardComposeAndSetActiveView(targetView);
   },
-  cancelCloseCompose: () => set({ showComposeLeaveConfirm: false, pendingView: null }),
+  cancelCloseCompose: () => set({ showComposeLeaveConfirm: false, pendingView: null, pendingNavigation: null }),
   discardComposeAndSetActiveView: (view) => {
+    const navigate = useComposeStore.getState().pendingNavigation;
     useUIStore.setState({ activeView: view });
     set({
       showComposeLeaveConfirm: false,
       pendingView: null,
+      pendingNavigation: null,
       ...getComposeResetState(),
     });
+    navigate?.();
   },
 }));

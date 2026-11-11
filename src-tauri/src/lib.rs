@@ -655,6 +655,8 @@ pub fn run() {
             commands::pending_mail_ops::list_pending_mail_ops,
             commands::pending_mail_ops::dismiss_failed_pending_mail_ops,
             commands::drafts::save_draft,
+            commands::drafts::get_draft,
+            commands::pending_mail_ops::retry_failed_send,
             commands::drafts::delete_draft,
             commands::folder_counts::get_folder_unread_counts,
             commands::user_data::list_email_templates,

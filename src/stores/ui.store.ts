@@ -232,6 +232,8 @@ export const useUIStore = create<UIState>((set) => ({
         composeMode: null,
         composeReplyTo: null,
         composePrefill: null,
+        composeDraft: null,
+        pendingNavigation: null,
         composeDirty: false,
         showComposeLeaveConfirm: false,
         pendingView: null,

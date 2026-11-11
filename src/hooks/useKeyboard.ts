@@ -1,9 +1,8 @@
 import { useEffect, useRef } from "react";
 import { useShortcutStore } from "@/stores/shortcut.store";
 import { useCommandStore } from "@/stores/command.store";
-import { useUIStore, type ActiveView } from "@/stores/ui.store";
-import { useComposeStore, isComposeDirty } from "@/stores/compose.store";
-import { useConfirmStore } from "@/stores/confirm.store";
+import { useUIStore } from "@/stores/ui.store";
+import { useComposeStore } from "@/stores/compose.store";
 import { useMailStore } from "@/stores/mail.store";
 import { useToastStore } from "@/stores/toast.store";
 import { updateMessageFlags, archiveMessage, getMessage } from "@/lib/api";
@@ -40,31 +39,6 @@ function getCachedThreads(): ThreadSummary[] {
   return [];
 }
 
-async function confirmLeaveCompose(): Promise<boolean> {
-  if (!isComposeDirty()) return true;
-  return useConfirmStore.getState().confirm({
-    title: i18n.t("compose.discardDraft", "Discard draft"),
-    message: i18n.t("compose.discardDraftConfirm", "You have an unsaved draft. Discard and leave?"),
-    destructive: true,
-  });
-}
-
-function navigateAfterComposeConfirm(view: ActiveView) {
-  if (isComposeDirty()) {
-    useComposeStore.getState().discardComposeAndSetActiveView(view);
-    return;
-  }
-  useUIStore.getState().setActiveView(view);
-}
-
-function closeComposeAfterConfirm() {
-  if (isComposeDirty()) {
-    useComposeStore.getState().confirmCloseCompose();
-    return;
-  }
-  useComposeStore.getState().closeCompose();
-}
-
 export function useKeyboard() {
   // Reverse lookup: keyString (lowercase) -> actionId, rebuilt only when bindings change
   const keyToActionRef = useRef<Map<string, string>>(new Map());
@@ -91,6 +65,7 @@ export function useKeyboard() {
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      if (document.querySelector('[role="dialog"]')) return;
       // Don't interfere with shortcut recording
       if (useShortcutStore.getState().recording) return;
 
@@ -121,16 +96,16 @@ export function useKeyboard() {
           if (useCommandStore.getState().isOpen) {
             useCommandStore.getState().close();
           } else if (useUIStore.getState().activeView === "compose") {
-            confirmLeaveCompose().then((ok) => { if (ok) closeComposeAfterConfirm(); });
+            useComposeStore.getState().closeCompose();
           } else if (useUIStore.getState().activeView === "search") {
             useUIStore.getState().setActiveView("inbox");
           }
           break;
         case "toggle-view-inbox":
-          confirmLeaveCompose().then((ok) => { if (ok) navigateAfterComposeConfirm("inbox"); });
+          useUIStore.getState().setActiveView("inbox");
           break;
         case "toggle-view-kanban":
-          confirmLeaveCompose().then((ok) => { if (ok) navigateAfterComposeConfirm("kanban"); });
+          useUIStore.getState().setActiveView("kanban");
           break;
         case "toggle-star": {
           const { selectedMessageId } = useMailStore.getState();
@@ -249,7 +224,7 @@ export function useKeyboard() {
           break;
         }
         case "focus-search":
-          confirmLeaveCompose().then((ok) => { if (ok) navigateAfterComposeConfirm("search"); });
+          useUIStore.getState().setActiveView("search");
           break;
         case "open-message": {
           const state = useMailStore.getState();
@@ -271,10 +246,10 @@ export function useKeyboard() {
           break;
         }
         case "open-search":
-          confirmLeaveCompose().then((ok) => { if (ok) navigateAfterComposeConfirm("search"); });
+          useUIStore.getState().setActiveView("search");
           break;
         case "open-cloud-settings":
-          confirmLeaveCompose().then((ok) => { if (ok) navigateAfterComposeConfirm("settings"); });
+          useUIStore.getState().setActiveView("settings");
           break;
         case "toggle-notifications": {
           const { notificationsEnabled, setNotificationsEnabled } = useUIStore.getState();

@@ -3571,7 +3571,9 @@ dependencies = [
 name = "pebble"
 version = "0.1.6"
 dependencies = [
+ "base64 0.22.1",
  "lettre",
+ "lol_html",
  "mac-notification-sys",
  "notify-rust",
  "opener",

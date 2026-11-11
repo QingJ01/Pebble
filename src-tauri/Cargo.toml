@@ -30,6 +30,8 @@ tauri-plugin-deep-link = "2"
 lettre = { workspace = true }
 reqwest = { workspace = true }
 semver = { workspace = true }
+base64 = "0.22"
+lol_html = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 tauri-winrt-notification = "0.7"

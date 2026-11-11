@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   addToast: vi.fn(),
   loadDraftFromStorage: vi.fn(),
   cancelPendingDraftSaves: vi.fn(),
+  flushDraftSave: vi.fn(),
+  resumeDraftSaves: vi.fn(),
   confirmCloseCompose: vi.fn(),
   cancelCloseCompose: vi.fn(),
   showComposeLeaveConfirm: false,
@@ -97,6 +99,8 @@ vi.mock("../../../src/hooks/useComposeDraft", () => ({
     draftIdRef: { current: "draft-1" },
     draftIdsByAccountRef: { current: { "account-1": "draft-1" } },
     cancelPendingDraftSaves: mocks.cancelPendingDraftSaves,
+    flushDraftSave: mocks.flushDraftSave,
+    resumeDraftSaves: mocks.resumeDraftSaves,
   }),
   loadDraftFromStorage: mocks.loadDraftFromStorage,
   clearDraftStorage: vi.fn(),
@@ -206,6 +210,34 @@ function deferred<T>() {
 }
 
 describe("ComposeView", () => {
+  it("saves immediately before leaving instead of deleting the saved draft", async () => {
+    mocks.showComposeLeaveConfirm = true;
+    render(<ComposeView />);
+    fireEvent.click(screen.getByRole("button", { name: "Save and close" }));
+    await waitFor(() => expect(mocks.confirmCloseCompose).toHaveBeenCalledOnce());
+    expect(mocks.flushDraftSave).toHaveBeenCalledOnce();
+    expect(deleteDraft).not.toHaveBeenCalled();
+  });
+
+  it("stays open when saving fails", async () => {
+    mocks.showComposeLeaveConfirm = true;
+    mocks.flushDraftSave.mockRejectedValue(new Error("Disk full"));
+    render(<ComposeView />);
+    fireEvent.click(screen.getByRole("button", { name: "Save and close" }));
+    await waitFor(() => expect(mocks.addToast).toHaveBeenCalledWith(expect.objectContaining({ type: "error" })));
+    expect(mocks.confirmCloseCompose).not.toHaveBeenCalled();
+    expect(deleteDraft).not.toHaveBeenCalled();
+  });
+
+  it("retains the editor and attachment sources when discard cleanup fails", async () => {
+    mocks.showComposeLeaveConfirm = true;
+    vi.mocked(deleteDraft).mockRejectedValue(new Error("Unavailable"));
+    render(<ComposeView />);
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(mocks.resumeDraftSaves).toHaveBeenCalledOnce());
+    expect(mocks.confirmCloseCompose).not.toHaveBeenCalled();
+    expect(cleanupStagedComposeAttachment).not.toHaveBeenCalled();
+  });
   let warnSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -216,6 +248,8 @@ describe("ComposeView", () => {
     mocks.addToast.mockReset();
     mocks.loadDraftFromStorage.mockReset();
     mocks.cancelPendingDraftSaves.mockReset();
+    mocks.flushDraftSave.mockReset().mockResolvedValue("draft-1");
+    mocks.resumeDraftSaves.mockReset();
     mocks.cancelPendingDraftSaves.mockResolvedValue({ "account-1": "draft-1" });
     mocks.confirmCloseCompose.mockReset();
     mocks.cancelCloseCompose.mockReset();
@@ -554,11 +588,11 @@ describe("ComposeView", () => {
     rerender(<ComposeView />);
 
     const keepEditingButton = screen.getByRole("button", { name: "Keep editing" });
-    const discardButton = screen.getByRole("button", { name: "Discard" });
+    screen.getByRole("button", { name: "Discard" });
     expect(document.activeElement).toBe(keepEditingButton);
 
     fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
-    expect(document.activeElement).toBe(discardButton);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Save and close" }));
     fireEvent.keyDown(document, { key: "Tab" });
     expect(document.activeElement).toBe(keepEditingButton);
 

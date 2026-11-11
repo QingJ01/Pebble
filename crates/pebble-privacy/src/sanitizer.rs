@@ -724,7 +724,7 @@ fn build_sanitizer(mode: &PrivacyMode) -> Builder<'static> {
 
     // Only allow safe URL schemes (blocks javascript:, data:, vbscript:, etc.)
     builder.url_schemes(
-        ["http", "https", "mailto"]
+        ["http", "https", "mailto", "cid"]
             .iter()
             .copied()
             .collect::<HashSet<_>>(),

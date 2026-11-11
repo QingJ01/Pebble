@@ -9,6 +9,7 @@ import { ShadowDomEmail } from "./ShadowDomEmail";
 import ContactAddressAction from "./ContactAddressAction";
 import MessageParticipants from "./MessageParticipants";
 import AttachmentList from "./AttachmentList";
+import ResumeDraftButton from "./ResumeDraftButton";
 
 interface Props {
   message: Message;
@@ -49,6 +50,7 @@ export default function ThreadMessageBubble({ message, defaultExpanded = false }
         backgroundColor: "var(--color-bg)",
       }}
     >
+      {message.is_draft && <ResumeDraftButton messageId={message.id} />}
       {/* Header - always visible */}
       <button
         onClick={() => setExpanded(!expanded)}
