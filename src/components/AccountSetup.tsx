@@ -3,7 +3,7 @@ import i18n from "@/lib/i18n";
 import { useConfirmStore } from "@/stores/confirm.store";
 import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { parseProxyPort } from "@/lib/proxy-port";
+import { parseProxyPort, PROXY_PORT_ERROR_KEY } from "@/lib/proxy-port";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { addAccount, startSync, testImapConnection, testPop3Connection, completeOAuthFlow } from "@/lib/api";
 import type { AddAccountRequest } from "@/lib/api";
@@ -172,7 +172,7 @@ export default function AccountSetup({ onClose }: Props) {
   }, [onClose]);
 
   function validatedProxyPort() {
-    return parseProxyPort(String(form.proxy_port ?? ""), t("settings.proxyPortInvalid", "Port must be an integer between 1 and 65535."));
+    return parseProxyPort(String(form.proxy_port ?? ""), t(PROXY_PORT_ERROR_KEY, "Port must be an integer between 1 and 65535."));
   }
 
   async function handleTestConnection() {
