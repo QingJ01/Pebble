@@ -35,6 +35,24 @@ vi.mock("../../src/lib/api", () => ({
 }));
 
 describe("AccountSetup OAuth", () => {
+  it("validates proxy ports before OAuth, manual setup and connection tests", async () => {
+    render(<QueryClientProvider client={new QueryClient()}><AccountSetup onClose={vi.fn()} /></QueryClientProvider>);
+    fireEvent.change(screen.getByLabelText("SOCKS5 Proxy"), { target: { value: "127.0.0.1" } });
+    fireEvent.change(screen.getByLabelText("Port"), { target: { value: "70000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in with Microsoft" }));
+    await screen.findByText("Port must be an integer between 1 and 65535.");
+    expect(completeOAuthFlow).not.toHaveBeenCalled();
+    fireEvent.submit(screen.getByLabelText("Email address").closest("form")!);
+    await waitFor(() => expect(screen.getByText("Port must be an integer between 1 and 65535.")).toBeTruthy());
+    expect(addAccount).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("Incoming protocol"), { target: { value: "pop3" } });
+    fireEvent.change(screen.getByLabelText("POP3 host"), { target: { value: "pop.example.com" } });
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "fixture" } });
+    fireEvent.change(screen.getByLabelText("Password / App password"), { target: { value: "fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: "Test Connection" }));
+    await waitFor(() => expect(screen.getAllByText("Port must be an integer between 1 and 65535.").length).toBeGreaterThan(1));
+    expect(testPop3Connection).not.toHaveBeenCalled();
+  });
   it("passes the selected range into OAuth before starting the first sync", async () => {
     render(<QueryClientProvider client={new QueryClient()}><AccountSetup onClose={vi.fn()} /></QueryClientProvider>);
     fireEvent.change(screen.getByLabelText("Sync range"), { target: { value: "90" } });

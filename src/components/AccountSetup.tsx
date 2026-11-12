@@ -3,6 +3,7 @@ import i18n from "@/lib/i18n";
 import { useConfirmStore } from "@/stores/confirm.store";
 import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { parseProxyPort } from "@/lib/proxy-port";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { addAccount, startSync, testImapConnection, testPop3Connection, completeOAuthFlow } from "@/lib/api";
 import type { AddAccountRequest } from "@/lib/api";
@@ -170,10 +171,15 @@ export default function AccountSetup({ onClose }: Props) {
     };
   }, [onClose]);
 
+  function validatedProxyPort() {
+    return parseProxyPort(String(form.proxy_port ?? ""), t("settings.proxyPortInvalid", "Port must be an integer between 1 and 65535."));
+  }
+
   async function handleTestConnection() {
     setTestResult(null);
     setTestLoading(true);
     try {
+      const proxyPort = validatedProxyPort();
       const report =
         form.provider === "pop3"
           ? await testPop3Connection(
@@ -182,7 +188,7 @@ export default function AccountSetup({ onClose }: Props) {
               form.imap_security,
               form.accept_invalid_certs,
               form.proxy_host,
-              form.proxy_port,
+              proxyPort,
               form.username || undefined,
               form.password || undefined,
               form.allow_plaintext,
@@ -193,7 +199,7 @@ export default function AccountSetup({ onClose }: Props) {
               form.imap_security,
               form.accept_invalid_certs,
               form.proxy_host,
-              form.proxy_port,
+              proxyPort,
               form.username || undefined,
               form.password || undefined,
               form.email || undefined,
@@ -221,7 +227,7 @@ export default function AccountSetup({ onClose }: Props) {
         form.email || "",
         form.display_name || "",
         form.proxy_host?.trim() || undefined,
-        form.proxy_port,
+        validatedProxyPort(),
         form.account_label || undefined,
         days,
       );
@@ -281,7 +287,7 @@ export default function AccountSetup({ onClose }: Props) {
     setError(null);
     setLoading(true);
     try {
-      const account = await addAccount({ ...form, sync_range_days: days });
+      const account = await addAccount({ ...form, proxy_port: validatedProxyPort(), sync_range_days: days });
       // Invalidate accounts immediately so UI reflects the new account
       await queryClient.invalidateQueries({ queryKey: accountsQueryKey });
       onClose();
@@ -343,7 +349,7 @@ export default function AccountSetup({ onClose }: Props) {
           style={{ ...inputStyle, width: "80px" }}
           type="number"
           value={form.proxy_port ?? ""}
-          onChange={(e) => setForm((prev) => ({ ...prev, proxy_port: e.target.value ? parseInt(e.target.value, 10) : undefined }))}
+          onChange={(e) => setForm((prev) => ({ ...prev, proxy_port: e.target.value ? Number(e.target.value) : undefined }))}
           placeholder="7890"
         />
       </div>

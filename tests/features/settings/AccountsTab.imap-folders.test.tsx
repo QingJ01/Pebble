@@ -136,6 +136,25 @@ const folderSettings = {
 };
 
 describe("AccountsTab IMAP folder selection", () => {
+  it.each(["70000", "0", "-1", "1.5"])("rejects invalid proxy port %s before update_account", async (value) => {
+    render(<AccountsTab />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit account" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "common.save" })).not.toBeDisabled());
+    fireEvent.change(screen.getByLabelText("Port"), { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    await screen.findByText("Port must be an integer between 1 and 65535.");
+    expect(updateAccount).not.toHaveBeenCalled();
+  });
+  it.each(["1", "65535"])("accepts proxy boundary %s in Edit Account", async (value) => {
+    render(<AccountsTab />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit account" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "common.save" })).not.toBeDisabled());
+    fireEvent.change(screen.getByLabelText("SOCKS5 Proxy"), { target: { value: "127.0.0.1" } });
+    fireEvent.change(screen.getByLabelText("Port"), { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    await waitFor(() => expect(updateAccount).toHaveBeenCalled());
+    expect(vi.mocked(updateAccount).mock.calls[0][12]).toBe(Number(value));
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getAccountSyncRange).mockResolvedValue(null);

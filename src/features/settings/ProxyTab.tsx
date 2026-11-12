@@ -10,6 +10,7 @@ import {
 } from "@/lib/api";
 import type { Account, AccountProxyMode } from "@/lib/api";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
+import { parseProxyPort } from "@/lib/proxy-port";
 import { useAccountsQuery } from "@/hooks/queries";
 import { useToastStore } from "@/stores/toast.store";
 
@@ -24,16 +25,6 @@ type AccountProxyDraft = {
 
 const usesMailProxySetting = (provider: Account["provider"]) =>
   provider === "imap" || provider === "pop3";
-
-export function parseProxyPort(value: string, errorMessage: string): number | undefined {
-  const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  const port = Number(trimmed);
-  if (!/^\d+$/.test(trimmed) || !Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error(errorMessage);
-  }
-  return port;
-}
 
 const emptyAccountDraft = (): AccountProxyDraft => ({
   mode: "inherit",

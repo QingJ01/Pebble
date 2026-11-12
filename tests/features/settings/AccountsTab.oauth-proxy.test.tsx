@@ -81,6 +81,17 @@ vi.mock("../../../src/stores/toast.store", () => ({
 }));
 
 describe("AccountsTab OAuth proxy", () => {
+  it("rejects invalid proxy ports before changing OAuth account metadata", async () => {
+    render(<AccountsTab />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit account" }));
+    const port = await screen.findByLabelText("Port");
+    await waitFor(() => expect((port as HTMLInputElement).value).toBe("7890"));
+    fireEvent.change(port, { target: { value: "70000" } });
+    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    await screen.findByText("Port must be an integer between 1 and 65535.");
+    expect(updateAccount).not.toHaveBeenCalled();
+    expect(updateOAuthAccountProxySetting).not.toHaveBeenCalled();
+  });
   it("edits a local label independently and keeps the OAuth address read-only", async () => {
     render(<AccountsTab />);
     fireEvent.click(screen.getByRole("button", { name: "Edit account" }));
