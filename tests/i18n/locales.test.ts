@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { createInstance } from "i18next";
+import { parseProxyPort, PROXY_PORT_ERROR_KEY } from "../../src/lib/proxy-port";
 
 function readLocale(locale: string) {
   const localePath = resolve(process.cwd(), "src", "locales", `${locale}.json`);
@@ -8,6 +10,16 @@ function readLocale(locale: string) {
 }
 
 describe("locale files", () => {
+  it.each([
+    ["en", "Port must be an integer between 1 and 65535."],
+    ["zh", "端口必须是 1 至 65535 之间的整数。"],
+  ])("resolves the shared proxy validation key through real %s translations", async (locale, expected) => {
+    const translator = createInstance();
+    await translator.init({ resources: { [locale]: { translation: readLocale(locale) } }, lng: locale, fallbackLng: false });
+    const error = translator.t(PROXY_PORT_ERROR_KEY);
+    expect(error).toBe(expected);
+    expect(() => parseProxyPort("70000", error)).toThrow(expected);
+  });
   it("translates tray menu labels in English and Chinese", () => {
     const en = readLocale("en");
     const zh = readLocale("zh");
