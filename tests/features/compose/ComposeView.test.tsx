@@ -1,6 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ComposeView from "../../../src/features/compose/ComposeView";
+import { useMailStore } from "../../../src/stores/mail.store";
+import { queryClient } from "../../../src/lib/query-client";
+import type { DraftData } from "../../../src/hooks/useComposeDraft";
 import {
   cleanupStagedComposeAttachment,
   deleteDraft,
@@ -20,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   cancelCloseCompose: vi.fn(),
   showComposeLeaveConfirm: false,
   quotedReplyHtml: "",
+  composeDraft: null as DraftData | null,
   accountsQuery: {
     data: [{ id: "account-1", email: "me@example.com", display_name: "Me" }],
     isLoading: false,
@@ -37,11 +41,6 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (_key: string, fallback?: string) => fallback ?? _key }),
 }));
 
-vi.mock("../../../src/stores/mail.store", () => ({
-  useMailStore: (selector: (state: { activeAccountId: string }) => unknown) =>
-    selector({ activeAccountId: "account-1" }),
-}));
-
 vi.mock("../../../src/stores/compose.store", () => ({
   useComposeStore: Object.assign(
     (selector: (state: {
@@ -54,6 +53,7 @@ vi.mock("../../../src/stores/compose.store", () => ({
     }) => unknown) =>
       selector({
         composeMode: "new",
+        composeDraft: mocks.composeDraft,
         composeReplyTo: null,
         closeCompose: mocks.closeCompose,
         showComposeLeaveConfirm: mocks.showComposeLeaveConfirm,
@@ -241,6 +241,10 @@ describe("ComposeView", () => {
   let warnSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
+    useMailStore.setState({ activeAccountId: "account-1", selectedMessageId: null,
+      selectedThreadId: null, selectedMessageIds: new Set(), batchMode: false });
+    queryClient.clear();
+    mocks.composeDraft = null;
     warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.mutate.mockReset();
     mocks.closeCompose.mockReset();
@@ -304,6 +308,64 @@ describe("ComposeView", () => {
 
     await act(async () => pendingDeletion.resolve());
     await waitFor(() => expect(mocks.closeCompose).toHaveBeenCalledOnce());
+  });
+
+  it.each(["send", "discard"])("clears deleted draft detail and singleton thread selection after %s", async (action) => {
+    useMailStore.setState({ selectedMessageId: "draft-1", selectedThreadId: "draft-1", selectedMessageIds: new Set(["draft-1", "unrelated"]) });
+    mocks.mutate.mockImplementation((_params, options) => options.onSuccess());
+    mocks.showComposeLeaveConfirm = action === "discard";
+    render(<ComposeView />);
+    fireEvent.click(screen.getByRole("button", { name: action === "send" ? "Send" : "Discard" }));
+    await waitFor(() => expect(deleteDraft).toHaveBeenCalledWith("account-1", "draft-1"));
+    await waitFor(() => expect(useMailStore.getState().selectedMessageId).toBeNull());
+    expect(useMailStore.getState().selectedThreadId).toBeNull();
+    expect([...useMailStore.getState().selectedMessageIds]).toEqual(["unrelated"]);
+  });
+
+  it("retains selected draft detail when successful delivery cannot delete the draft", async () => {
+    useMailStore.setState({ selectedMessageId: "draft-1", selectedThreadId: "draft-1" });
+    vi.mocked(deleteDraft).mockRejectedValue(new Error("cleanup failed"));
+    mocks.mutate.mockImplementation((_params, options) => options.onSuccess());
+    render(<ComposeView />);
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(mocks.closeCompose).toHaveBeenCalledOnce());
+    expect(useMailStore.getState().selectedMessageId).toBe("draft-1");
+    expect(useMailStore.getState().selectedThreadId).toBe("draft-1");
+  });
+
+  it("does not clear a different message selected while draft deletion is pending", async () => {
+    useMailStore.setState({ selectedMessageId: "draft-1" });
+    const pending = deferred<void>();
+    vi.mocked(deleteDraft).mockReturnValue(pending.promise);
+    mocks.mutate.mockImplementation((_params, options) => options.onSuccess());
+    render(<ComposeView />);
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(deleteDraft).toHaveBeenCalledOnce());
+    act(() => useMailStore.setState({ selectedMessageId: "another-message", selectedThreadId: "another-thread" }));
+    await act(async () => pending.resolve());
+    await waitFor(() => expect(mocks.closeCompose).toHaveBeenCalledOnce());
+    expect(useMailStore.getState().selectedMessageId).toBe("another-message");
+    expect(useMailStore.getState().selectedThreadId).toBe("another-thread");
+  });
+
+  it.each([true, false])("only clears a cached conversation if all its messages were deleted: %s", async (onlyDraft) => {
+    useMailStore.setState({ selectedThreadId: "conversation" });
+    queryClient.setQueryData(["threadMessages", "conversation"], onlyDraft ? [{ id: "draft-1" }] : [{ id: "draft-1" }, { id: "other" }]);
+    mocks.mutate.mockImplementation((_params, options) => options.onSuccess());
+    render(<ComposeView />);
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(mocks.closeCompose).toHaveBeenCalledOnce());
+    expect(useMailStore.getState().selectedThreadId).toBe(onlyDraft ? null : "conversation");
+  });
+
+  it("clears the original resumed draft UUID after cleanup of its promoted remote identity", async () => {
+    mocks.composeDraft = { id: "original-uuid", accountId: "account-1", to: [], cc: [], bcc: [], subject: "Resumed", rawSource: "", richTextHtml: "", editorMode: "rich", attachments: [], savedAt: Date.now() };
+    useMailStore.setState({ selectedMessageId: "original-uuid" });
+    mocks.mutate.mockImplementation((_params, options) => options.onSuccess());
+    render(<ComposeView />);
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(mocks.closeCompose).toHaveBeenCalledOnce());
+    expect(useMailStore.getState().selectedMessageId).toBeNull();
   });
 
   it("validates a restored new-message draft against loaded account ids", () => {
