@@ -114,6 +114,7 @@
     "saveAndClose": "Save and close",
     "discardFailed": "Could not remove the saved draft. Your draft is still open; please try again.",
     "resumeDraft": "Resume draft",
+    "inlineDraftUnsupported": "This draft contains embedded images that the editor cannot preserve. It has not been opened for editing; the original draft is unchanged.",
     "leaveTitle": "Leave draft?",
     "leaveMessage": "Save this draft to continue later, or discard it.",
     "leaveCancel": "Keep editing",

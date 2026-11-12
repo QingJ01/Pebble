@@ -114,6 +114,7 @@
     "saveAndClose": "保存并关闭",
     "discardFailed": "未能删除已保存的草稿。草稿仍保持打开，请重试。",
     "resumeDraft": "继续编辑草稿",
+    "inlineDraftUnsupported": "此草稿含有编辑器无法完整保留的内嵌图片，暂不支持继续编辑；原始草稿未作更改。",
     "leaveTitle": "离开草稿？",
     "leaveMessage": "保存草稿以便稍后继续编辑，或丢弃草稿。",
     "leaveCancel": "继续编辑",
