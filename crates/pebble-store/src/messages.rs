@@ -1560,7 +1560,7 @@ impl Store {
     pub fn list_messages_by_thread(&self, thread_id: &str) -> Result<Vec<Message>> {
         self.with_read(|conn| {
             let sql = format!(
-                "SELECT {} FROM messages WHERE thread_id = ?1 AND is_deleted = 0 ORDER BY date ASC",
+                "SELECT {} FROM messages WHERE (thread_id = ?1 OR (thread_id IS NULL AND id = ?1)) AND is_deleted = 0 ORDER BY date ASC",
                 MSG_SELECT
             );
             let mut stmt = conn.prepare(&sql)?;
@@ -1592,17 +1592,16 @@ impl Store {
                         SELECT thread_id,
                                GROUP_CONCAT(from_address, '||') AS participants
                         FROM (
-                            SELECT DISTINCT m3.thread_id, m3.from_address
+                            SELECT DISTINCT COALESCE(m3.thread_id, m3.id) AS thread_id, m3.from_address
                             FROM messages m3
                             JOIN message_folders mf3 ON m3.id = mf3.message_id
                             WHERE mf3.folder_id = ?1
                               AND m3.is_deleted = 0
-                              AND m3.thread_id IS NOT NULL
                         )
                         GROUP BY thread_id
                      )
                      SELECT
-                        m.thread_id,
+                        COALESCE(m.thread_id, m.id),
                         MAX(m.subject) as subject,
                         MAX(CASE WHEN m.date = max_date.md THEN m.snippet ELSE '' END) as snippet,
                         MAX(m.date) as last_date,
@@ -1614,17 +1613,16 @@ impl Store {
                      FROM messages m
                      JOIN message_folders mf ON m.id = mf.message_id
                      JOIN (
-                        SELECT m2.thread_id, MAX(m2.date) as md
+                        SELECT COALESCE(m2.thread_id, m2.id) AS thread_id, MAX(m2.date) as md
                         FROM messages m2
                         JOIN message_folders mf2 ON m2.id = mf2.message_id
                         WHERE mf2.folder_id = ?1
                           AND m2.is_deleted = 0
-                          AND m2.thread_id IS NOT NULL
-                        GROUP BY m2.thread_id
-                     ) max_date ON m.thread_id = max_date.thread_id
-                     LEFT JOIN thread_participants tp ON m.thread_id = tp.thread_id
-                     WHERE mf.folder_id = ?1 AND m.is_deleted = 0 AND m.thread_id IS NOT NULL
-                     GROUP BY m.thread_id
+                        GROUP BY COALESCE(m2.thread_id, m2.id)
+                     ) max_date ON COALESCE(m.thread_id, m.id) = max_date.thread_id
+                     LEFT JOIN thread_participants tp ON COALESCE(m.thread_id, m.id) = tp.thread_id
+                     WHERE mf.folder_id = ?1 AND m.is_deleted = 0
+                     GROUP BY COALESCE(m.thread_id, m.id)
                      ORDER BY last_date DESC
                      LIMIT ?2 OFFSET ?3",
             )?;
@@ -1682,7 +1680,7 @@ impl Store {
                 "WITH selected_messages AS (
                         SELECT DISTINCT
                                m.id,
-                               m.thread_id,
+                               COALESCE(m.thread_id, m.id) AS thread_id,
                                m.subject,
                                m.snippet,
                                m.date,
@@ -1694,7 +1692,6 @@ impl Store {
                         JOIN message_folders mf ON m.id = mf.message_id
                         WHERE mf.folder_id IN ({})
                           AND m.is_deleted = 0
-                          AND m.thread_id IS NOT NULL
                      ),
                      thread_participants AS (
                         SELECT thread_id,
@@ -2855,6 +2852,54 @@ mod tombstone_tests {
 mod thread_listing_tests {
     use crate::Store;
     use pebble_core::*;
+
+    #[test]
+    fn local_drafts_without_thread_ids_are_independent_threads_in_single_and_multi_folder_views() {
+        let store = Store::open_in_memory().unwrap();
+        let (account, folder) = seed_account_and_folder(&store);
+        let (_, other_folder) = seed_account_and_folder(&store);
+        let mut first = make_msg(&account, "unused", "sender@example.com", 20);
+        first.thread_id = None;
+        first.remote_id.clear();
+        first.is_draft = true;
+        first.in_reply_to = Some("<parent@example.com>".into());
+        let mut second = first.clone();
+        second.id = new_id();
+        second.date = 10;
+        second.snippet = "Second draft".into();
+        store
+            .insert_message(&first, &[folder.clone(), other_folder.clone()])
+            .unwrap();
+        store
+            .insert_message(&second, std::slice::from_ref(&folder))
+            .unwrap();
+        let single = store.list_threads_by_folder(&folder, 50, 0).unwrap();
+        assert_eq!(single.len(), 2);
+        assert_eq!(single[0].thread_id, first.id);
+        assert_eq!(single[0].message_count, 1);
+        assert_eq!(single[1].thread_id, second.id);
+        let multi = store
+            .list_threads_by_folders(&[folder.clone(), other_folder], 50, 0)
+            .unwrap();
+        assert_eq!(multi.len(), 2);
+        assert_eq!(multi[0].message_count, 1);
+        let opened = store.list_messages_by_thread(&first.id).unwrap();
+        assert_eq!(opened.len(), 1);
+        assert_eq!(opened[0].in_reply_to, first.in_reply_to);
+        assert!(opened[0].thread_id.is_none());
+        assert_eq!(
+            store.list_threads_by_folder(&folder, 1, 1).unwrap()[0].thread_id,
+            second.id
+        );
+        store
+            .hard_delete_messages(std::slice::from_ref(&first.id))
+            .unwrap();
+        assert!(store.list_messages_by_thread(&first.id).unwrap().is_empty());
+        assert_eq!(
+            store.list_threads_by_folder(&folder, 50, 0).unwrap().len(),
+            1
+        );
+    }
 
     fn seed_account_and_folder(store: &Store) -> (String, String) {
         let now = now_timestamp();

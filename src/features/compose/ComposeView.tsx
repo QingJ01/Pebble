@@ -238,6 +238,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
     });
     void queryClient.invalidateQueries({ queryKey: ["messages"] });
     void queryClient.invalidateQueries({ queryKey: ["threads"] });
+    void queryClient.invalidateQueries({ queryKey: ["threadMessages"] });
     const failed = deletionResults.some((result) => result.status === "rejected");
     if (failed) {
       for (const result of deletionResults) {
