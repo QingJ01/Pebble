@@ -534,7 +534,7 @@ impl Store {
                 "UPDATE pending_mail_ops SET status = 'pending', attempts = 0,
                  last_error = NULL, next_retry_at = ?1, updated_at = ?1
                  WHERE id = ?2 AND status = 'failed' AND op_type = 'send'
-                   AND EXISTS (SELECT 1 FROM messages WHERE messages.id = pending_mail_ops.message_id)",
+               AND EXISTS (SELECT 1 FROM messages WHERE messages.id = pending_mail_ops.message_id AND messages.is_deleted = 0)",
                 params![pebble_core::now_timestamp(), id],
             )?;
             if updated != 1 {
@@ -628,6 +628,14 @@ mod tests {
         store.mark_pending_mail_op_stopped(&id, "Failed").unwrap();
         assert!(store.retry_failed_send(&id).is_err());
         assert!(store.retry_failed_send("missing").is_err());
+        let send = store
+            .insert_pending_mail_op(&account.id, &message.id, "send", "{}")
+            .unwrap();
+        store.mark_pending_mail_op_stopped(&send, "Failed").unwrap();
+        store
+            .bulk_soft_delete(std::slice::from_ref(&message.id))
+            .unwrap();
+        assert!(store.retry_failed_send(&send).is_err());
     }
 
     #[test]
