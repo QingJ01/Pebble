@@ -15,27 +15,82 @@ struct DraftProvenance {
     remote_id: Option<String>,
 }
 
+const INLINE_DRAFT_UNSUPPORTED: &str = "draft_inline_attachments_unsupported";
+
+fn ensure_draft_editable(store: &pebble_store::Store, draft_id: &str) -> Result<(), PebbleError> {
+    let has_cid_body = store
+        .get_message(draft_id)?
+        .is_some_and(|message| message.body_html_raw.to_ascii_lowercase().contains("cid:"));
+    if has_cid_body
+        || store
+            .list_attachments_by_message(draft_id)?
+            .iter()
+            .any(|attachment| attachment.is_inline || attachment.content_id.is_some())
+    {
+        return Err(PebbleError::Validation(INLINE_DRAFT_UNSUPPORTED.into()));
+    }
+    Ok(())
+}
+
 trait RemoteDraftOperations {
-    async fn create_draft(&self, draft: &DraftMessage) -> Result<String, PebbleError>;
-    async fn update_draft(&self, draft_id: &str, draft: &DraftMessage) -> Result<(), PebbleError>;
+    async fn create_draft(&self, draft: &DraftMessage) -> Result<RemoteDraftIdentity, PebbleError>;
+    async fn update_draft(
+        &self,
+        draft_id: &str,
+        draft: &DraftMessage,
+    ) -> Result<RemoteDraftIdentity, PebbleError>;
     async fn delete_draft(&self, draft_id: &str) -> Result<(), PebbleError>;
 }
 
 impl RemoteDraftOperations for ConnectedProvider {
-    async fn create_draft(&self, draft: &DraftMessage) -> Result<String, PebbleError> {
+    async fn create_draft(&self, draft: &DraftMessage) -> Result<RemoteDraftIdentity, PebbleError> {
         match self {
-            Self::Gmail(provider) => provider.save_draft(draft).await,
-            Self::Outlook(provider) => provider.save_draft(draft).await,
+            Self::Gmail(provider) => {
+                provider
+                    .save_draft_with_message_id(draft)
+                    .await
+                    .map(|(draft_id, message_id)| RemoteDraftIdentity {
+                        draft_id,
+                        message_id,
+                    })
+            }
+            Self::Outlook(provider) => {
+                provider
+                    .save_draft(draft)
+                    .await
+                    .map(|draft_id| RemoteDraftIdentity {
+                        message_id: Some(draft_id.clone()),
+                        draft_id,
+                    })
+            }
             Self::Imap(_) => Err(PebbleError::UnsupportedProvider(
                 "IMAP remote drafts are not supported".to_string(),
             )),
         }
     }
 
-    async fn update_draft(&self, draft_id: &str, draft: &DraftMessage) -> Result<(), PebbleError> {
+    async fn update_draft(
+        &self,
+        draft_id: &str,
+        draft: &DraftMessage,
+    ) -> Result<RemoteDraftIdentity, PebbleError> {
         match self {
-            Self::Gmail(provider) => provider.update_draft(draft_id, draft).await,
-            Self::Outlook(provider) => provider.update_draft(draft_id, draft).await,
+            Self::Gmail(provider) => provider
+                .update_draft_with_message_id(draft_id, draft)
+                .await
+                .map(|message_id| RemoteDraftIdentity {
+                    draft_id: draft_id.into(),
+                    message_id,
+                }),
+            Self::Outlook(provider) => {
+                provider
+                    .update_draft(draft_id, draft)
+                    .await
+                    .map(|()| RemoteDraftIdentity {
+                        draft_id: draft_id.into(),
+                        message_id: Some(draft_id.into()),
+                    })
+            }
             Self::Imap(_) => Err(PebbleError::UnsupportedProvider(
                 "IMAP remote drafts are not supported".to_string(),
             )),
@@ -49,6 +104,98 @@ impl RemoteDraftOperations for ConnectedProvider {
             Self::Imap(_) => Ok(()),
         }
     }
+}
+
+struct RemoteDraftIdentity {
+    draft_id: String,
+    message_id: Option<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct DraftEditorMetadata {
+    editor_mode: Option<String>,
+    remote_draft_id: Option<String>,
+}
+
+fn draft_editor_key(account_id: &str, identity_type: &str, id: &str) -> String {
+    format!(
+        "draft-editor:{}",
+        serde_json::json!([account_id, identity_type, id])
+    )
+}
+
+fn store_draft_editor_metadata(
+    state: &AppState,
+    key: &str,
+    mode: Option<&str>,
+    remote_draft_id: Option<&str>,
+) -> Result<(), PebbleError> {
+    let editor_mode = mode
+        .filter(|mode| matches!(*mode, "rich" | "markdown" | "html"))
+        .map(str::to_owned);
+    if editor_mode.is_none() && remote_draft_id.is_none() {
+        return Ok(());
+    }
+    let metadata = DraftEditorMetadata {
+        editor_mode,
+        remote_draft_id: remote_draft_id.map(str::to_owned),
+    };
+    let value =
+        serde_json::to_vec(&metadata).map_err(|error| PebbleError::Internal(error.to_string()))?;
+    super::encrypted_store::store_secure_user_data(&state.crypto, &state.store, key, &value)
+}
+
+fn load_draft_editor_metadata(
+    state: &AppState,
+    message: &pebble_core::Message,
+) -> Result<Option<DraftEditorMetadata>, PebbleError> {
+    let mut keys = vec![draft_editor_key(&message.account_id, "local", &message.id)];
+    if !message.remote_id.is_empty() {
+        keys.push(draft_editor_key(
+            &message.account_id,
+            "remote",
+            &message.remote_id,
+        ));
+    }
+    // Only local UUIDs can safely read legacy unscoped metadata.
+    keys.push(format!("draft-editor:{}", message.id));
+    for key in keys {
+        let Some(bytes) =
+            super::encrypted_store::load_secure_user_data(&state.crypto, &state.store, &key)?
+        else {
+            continue;
+        };
+        if let Ok(metadata) = serde_json::from_slice::<DraftEditorMetadata>(&bytes) {
+            return Ok(Some(metadata));
+        }
+        if let Ok(mode) = String::from_utf8(bytes) {
+            if matches!(mode.as_str(), "rich" | "markdown" | "html") {
+                return Ok(Some(DraftEditorMetadata {
+                    editor_mode: Some(mode),
+                    remote_draft_id: None,
+                }));
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn resolve_editable_draft_provenance(
+    state: &AppState,
+    account_id: &str,
+    draft_id: Option<&str>,
+) -> Result<DraftProvenance, PebbleError> {
+    let mut provenance = resolve_draft_provenance(&state.store, account_id, draft_id)?;
+    if let Some(id) = provenance.local_id.as_deref() {
+        if let Some(message) = state.store.get_message(id)? {
+            if let Some(remote_id) = load_draft_editor_metadata(state, &message)?
+                .and_then(|metadata| metadata.remote_draft_id)
+            {
+                provenance.remote_id = Some(remote_id);
+            }
+        }
+    }
+    Ok(provenance)
 }
 
 fn requires_remote_draft_delete(provider_type: Option<ProviderType>) -> bool {
@@ -111,6 +258,7 @@ fn cleanup_unreferenced_local_attachment_paths(state: &AppState, local_paths: &[
 }
 
 fn delete_local_draft(state: &AppState, draft_id: &str) -> Result<(), PebbleError> {
+    let message = state.store.get_message(draft_id)?;
     let local_paths: Vec<String> = state
         .store
         .list_attachments_by_message(draft_id)?
@@ -118,6 +266,13 @@ fn delete_local_draft(state: &AppState, draft_id: &str) -> Result<(), PebbleErro
         .filter_map(|attachment| attachment.local_path)
         .collect();
     state.store.hard_delete_messages(&[draft_id.to_string()])?;
+    if let Some(message) = message {
+        state.store.delete_secure_user_data(&draft_editor_key(
+            &message.account_id,
+            "local",
+            draft_id,
+        ))?;
+    }
     state
         .store
         .delete_secure_user_data(&format!("draft-editor:{draft_id}"))?;
@@ -147,15 +302,15 @@ pub async fn save_draft(
     } else {
         validate_attachment_paths(&raw_attachment_paths, &state.attachments_dir)?
     };
-    let provenance = resolve_draft_provenance(
-        state.store.as_ref(),
-        &account_id,
-        existing_draft_id.as_deref(),
-    )?;
+    let provenance =
+        resolve_editable_draft_provenance(&state, &account_id, existing_draft_id.as_deref())?;
     let account = state
         .store
         .get_account(&account_id)?
         .ok_or_else(|| PebbleError::Validation("Account not found".into()))?;
+    if let Some(id) = provenance.local_id.as_deref() {
+        ensure_draft_editable(&state.store, id)?;
+    }
     let sender = account.sender_identity();
     pebble_mail::sender::sender_mailbox(&sender)?;
     let draft = DraftMessage {
@@ -211,26 +366,24 @@ pub async fn save_draft(
                 };
                 Ok((remote, sender))
             });
-        save_prepared_oauth_draft(&state, &account_id, &draft, &provenance, prepared).await
-    } else {
-        save_draft_locally(
+        save_prepared_oauth_draft(
             &state,
             &account_id,
             &draft,
-            provenance.local_id.as_deref(),
-            provenance.remote_id.as_deref(),
+            &provenance,
+            prepared,
+            editor_mode.as_deref(),
+        )
+        .await
+    } else {
+        save_local_draft_with_metadata(
+            &state,
+            &account_id,
+            &draft,
+            &provenance,
+            editor_mode.as_deref(),
         )
     }?;
-    if let Some(mode) =
-        editor_mode.filter(|mode| matches!(mode.as_str(), "rich" | "markdown" | "html"))
-    {
-        super::encrypted_store::store_secure_user_data(
-            &state.crypto,
-            &state.store,
-            &format!("draft-editor:{saved_id}"),
-            mode.as_bytes(),
-        )?;
-    }
     Ok(saved_id)
 }
 
@@ -255,6 +408,7 @@ fn load_draft_content(state: &AppState, draft_id: &str) -> Result<DraftContent, 
         .get_message(draft_id)?
         .filter(|message| message.is_draft)
         .ok_or_else(|| PebbleError::Validation("Draft not found".into()))?;
+    ensure_draft_editable(&state.store, draft_id)?;
     let attachments = state.store.list_attachments_by_message(draft_id)?;
     if attachments.iter().any(|attachment| {
         !attachment.is_inline
@@ -267,13 +421,8 @@ fn load_draft_content(state: &AppState, draft_id: &str) -> Result<DraftContent, 
             "Draft attachments are not available locally; sync the account first".into(),
         ));
     }
-    let saved_mode = super::encrypted_store::load_secure_user_data(
-        &state.crypto,
-        &state.store,
-        &format!("draft-editor:{draft_id}"),
-    )?;
-    let editor_mode = saved_mode
-        .and_then(|bytes| String::from_utf8(bytes).ok())
+    let editor_mode = load_draft_editor_metadata(state, &message)?
+        .and_then(|metadata| metadata.editor_mode)
         .filter(|mode| matches!(mode.as_str(), "rich" | "markdown" | "html"))
         .unwrap_or_else(|| {
             if message.body_html_raw.is_empty() {
@@ -316,23 +465,25 @@ async fn save_prepared_oauth_draft<R: RemoteDraftOperations>(
     draft: &DraftMessage,
     provenance: &DraftProvenance,
     prepared: Result<(R, EmailAddress), PebbleError>,
+    editor_mode: Option<&str>,
 ) -> Result<String, PebbleError> {
     match prepared {
         Ok((remote, sender)) => {
             let mut verified_draft = draft.clone();
             verified_draft.from = Some(sender);
-            save_oauth_draft_with_fallback(state, account_id, &verified_draft, provenance, &remote)
-                .await
+            save_oauth_draft_with_fallback(
+                state,
+                account_id,
+                &verified_draft,
+                provenance,
+                &remote,
+                editor_mode,
+            )
+            .await
         }
         Err(error) => {
             warn!("Draft identity verification failed; preserving local draft: {error}");
-            save_draft_locally(
-                state,
-                account_id,
-                draft,
-                provenance.local_id.as_deref(),
-                provenance.remote_id.as_deref(),
-            )
+            save_local_draft_with_metadata(state, account_id, draft, provenance, editor_mode)
         }
     }
 }
@@ -343,18 +494,27 @@ async fn save_oauth_draft_with_fallback<R: RemoteDraftOperations>(
     draft: &DraftMessage,
     provenance: &DraftProvenance,
     remote: &R,
+    editor_mode: Option<&str>,
 ) -> Result<String, PebbleError> {
+    if let Some(id) = provenance.local_id.as_deref() {
+        ensure_draft_editable(&state.store, id)?;
+    }
     let remote_result = if let Some(remote_id) = provenance.remote_id.as_deref() {
-        remote
-            .update_draft(remote_id, draft)
-            .await
-            .map(|()| remote_id.to_string())
+        remote.update_draft(remote_id, draft).await
     } else {
         remote.create_draft(draft).await
     };
 
     match remote_result {
-        Ok(remote_id) => {
+        Ok(identity) => {
+            let remote_id = identity.draft_id;
+            let message_id = identity.message_id.as_deref().unwrap_or(&remote_id);
+            store_draft_editor_metadata(
+                state,
+                &draft_editor_key(account_id, "remote", message_id),
+                editor_mode,
+                Some(&remote_id),
+            )?;
             if let Some(local_id) = provenance.local_id.as_deref() {
                 if let Err(error) = delete_local_draft(state, local_id) {
                     warn!(
@@ -366,15 +526,32 @@ async fn save_oauth_draft_with_fallback<R: RemoteDraftOperations>(
         }
         Err(error) => {
             warn!("Remote draft save failed; preserving encrypted local fallback: {error}");
-            save_draft_locally(
-                state,
-                account_id,
-                draft,
-                provenance.local_id.as_deref(),
-                provenance.remote_id.as_deref(),
-            )
+            save_local_draft_with_metadata(state, account_id, draft, provenance, editor_mode)
         }
     }
+}
+
+fn save_local_draft_with_metadata(
+    state: &AppState,
+    account_id: &str,
+    draft: &DraftMessage,
+    provenance: &DraftProvenance,
+    editor_mode: Option<&str>,
+) -> Result<String, PebbleError> {
+    let id = save_draft_locally(
+        state,
+        account_id,
+        draft,
+        provenance.local_id.as_deref(),
+        provenance.remote_id.as_deref(),
+    )?;
+    store_draft_editor_metadata(
+        state,
+        &draft_editor_key(account_id, "local", &id),
+        editor_mode,
+        provenance.remote_id.as_deref(),
+    )?;
+    Ok(id)
 }
 
 fn save_draft_locally(
@@ -384,6 +561,9 @@ fn save_draft_locally(
     existing_local_id: Option<&str>,
     remote_draft_id: Option<&str>,
 ) -> std::result::Result<String, PebbleError> {
+    if let Some(id) = existing_local_id {
+        ensure_draft_editable(&state.store, id)?;
+    }
     let id = existing_local_id
         .map(ToOwned::to_owned)
         .unwrap_or_else(pebble_core::new_id);
@@ -461,7 +641,7 @@ pub async fn delete_draft(
     account_id: String,
     draft_id: String,
 ) -> std::result::Result<(), PebbleError> {
-    let provenance = resolve_draft_provenance(state.store.as_ref(), &account_id, Some(&draft_id))?;
+    let provenance = resolve_editable_draft_provenance(&state, &account_id, Some(&draft_id))?;
     let provider_type = state.store.get_account(&account_id)?.map(|a| a.provider);
 
     if requires_remote_draft_delete(provider_type.clone()) {
@@ -586,6 +766,81 @@ mod tests {
         assert!(load_draft_content(&state, &message.id).is_err());
     }
 
+    #[test]
+    fn inline_drafts_cannot_be_resumed_or_overwritten_and_keep_original_payload() {
+        for inline_flag in [true, false] {
+            let state = test_state();
+            std::fs::create_dir_all(&state.attachments_dir).unwrap();
+            let path = state.attachments_dir.join("inline.png");
+            std::fs::write(&path, b"original inline image").unwrap();
+            let mut message = make_local_draft("account-a", "inline-draft", "");
+            message.body_html_raw = "<img src=\"cid:original\">".into();
+            state.store.insert_message(&message, &[]).unwrap();
+            let attachment = pebble_core::Attachment {
+                id: new_id(),
+                message_id: message.id.clone(),
+                filename: "inline.png".into(),
+                mime_type: "image/png".into(),
+                size: 21,
+                local_path: Some(path.to_string_lossy().into_owned()),
+                content_id: Some("original".into()),
+                is_inline: inline_flag,
+            };
+            state.store.insert_attachment(&attachment).unwrap();
+            assert!(
+                matches!(load_draft_content(&state, &message.id), Err(PebbleError::Validation(error)) if error == INLINE_DRAFT_UNSUPPORTED)
+            );
+            assert!(save_draft_locally(
+                &state,
+                "account-a",
+                &draft_message("replacement"),
+                Some(&message.id),
+                None
+            )
+            .is_err());
+            let original = state.store.get_message(&message.id).unwrap().unwrap();
+            assert_eq!(original.body_html_raw, message.body_html_raw);
+            assert_eq!(
+                state
+                    .store
+                    .list_attachments_by_message(&message.id)
+                    .unwrap()[0]
+                    .id,
+                attachment.id
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), b"original inline image");
+            let _ = std::fs::remove_dir_all(&state.attachments_dir);
+        }
+    }
+
+    #[test]
+    fn cid_body_is_protected_even_when_attachment_records_are_missing() {
+        let state = test_state();
+        let mut message = make_local_draft("account-a", "cid-draft", "");
+        message.body_html_raw = "<img src=\"CID:not-downloaded\">".into();
+        state.store.insert_message(&message, &[]).unwrap();
+        assert!(
+            matches!(load_draft_content(&state, &message.id), Err(PebbleError::Validation(error)) if error == INLINE_DRAFT_UNSUPPORTED)
+        );
+        assert!(save_draft_locally(
+            &state,
+            "account-a",
+            &draft_message("replacement"),
+            Some(&message.id),
+            None
+        )
+        .is_err());
+        assert_eq!(
+            state
+                .store
+                .get_message(&message.id)
+                .unwrap()
+                .unwrap()
+                .body_html_raw,
+            message.body_html_raw
+        );
+    }
+
     fn make_account(id: &str, email: &str, provider: ProviderType) -> Account {
         let now = now_timestamp();
         Account {
@@ -669,6 +924,7 @@ mod tests {
 
     struct SuccessfulRemote {
         created_id: String,
+        message_id: Option<String>,
         updated_ids: Mutex<Vec<String>>,
         created_from: std::sync::Arc<Mutex<Vec<Option<EmailAddress>>>>,
     }
@@ -677,6 +933,7 @@ mod tests {
         fn new(created_id: &str) -> Self {
             Self {
                 created_id: created_id.to_string(),
+                message_id: None,
                 updated_ids: Mutex::new(Vec::new()),
                 created_from: Default::default(),
             }
@@ -684,18 +941,31 @@ mod tests {
     }
 
     impl RemoteDraftOperations for SuccessfulRemote {
-        async fn create_draft(&self, draft: &DraftMessage) -> Result<String, PebbleError> {
+        async fn create_draft(
+            &self,
+            draft: &DraftMessage,
+        ) -> Result<RemoteDraftIdentity, PebbleError> {
             self.created_from.lock().unwrap().push(draft.from.clone());
-            Ok(self.created_id.clone())
+            Ok(RemoteDraftIdentity {
+                draft_id: self.created_id.clone(),
+                message_id: Some(
+                    self.message_id
+                        .clone()
+                        .unwrap_or_else(|| self.created_id.clone()),
+                ),
+            })
         }
 
         async fn update_draft(
             &self,
             draft_id: &str,
             _draft: &DraftMessage,
-        ) -> Result<(), PebbleError> {
+        ) -> Result<RemoteDraftIdentity, PebbleError> {
             self.updated_ids.lock().unwrap().push(draft_id.to_string());
-            Ok(())
+            Ok(RemoteDraftIdentity {
+                draft_id: draft_id.into(),
+                message_id: Some(self.message_id.clone().unwrap_or_else(|| draft_id.into())),
+            })
         }
 
         async fn delete_draft(&self, _draft_id: &str) -> Result<(), PebbleError> {
@@ -704,6 +974,281 @@ mod tests {
     }
 
     struct FailingRemote;
+
+    #[tokio::test]
+    async fn inline_oauth_drafts_are_rejected_before_any_remote_write_or_local_fallback() {
+        let state = test_state();
+        let mut message = make_local_draft("account-a", "inline-oauth", "gmail-message");
+        message.body_html_raw = "<img src=\"cid:original\">".into();
+        state.store.insert_message(&message, &[]).unwrap();
+        let provenance =
+            resolve_editable_draft_provenance(&state, "account-a", Some(&message.id)).unwrap();
+        let remote = SuccessfulRemote::new("must-not-create");
+        let error = save_oauth_draft_with_fallback(
+            &state,
+            "account-a",
+            &draft_message("replacement"),
+            &provenance,
+            &remote,
+            Some("html"),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(error, PebbleError::Validation(error) if error == INLINE_DRAFT_UNSUPPORTED)
+        );
+        assert!(remote.created_from.lock().unwrap().is_empty());
+        assert!(remote.updated_ids.lock().unwrap().is_empty());
+        assert_eq!(
+            state
+                .store
+                .get_message(&message.id)
+                .unwrap()
+                .unwrap()
+                .body_html_raw,
+            message.body_html_raw
+        );
+        assert!(!state.attachments_dir.exists());
+    }
+
+    #[tokio::test]
+    async fn oauth_modes_follow_synced_message_identity_on_create_and_update() {
+        for provider in [ProviderType::Gmail, ProviderType::Outlook] {
+            for mode in ["html", "markdown", "rich"] {
+                let state = test_state();
+                let account_id = if provider == ProviderType::Gmail {
+                    "account-a"
+                } else {
+                    "account-outlook"
+                };
+                if provider == ProviderType::Outlook {
+                    state
+                        .store
+                        .insert_account(&make_account(
+                            account_id,
+                            "outlook@example.com",
+                            provider.clone(),
+                        ))
+                        .unwrap();
+                }
+                let draft_id = "remote-draft";
+                let message_id = if provider == ProviderType::Gmail {
+                    "gmail-message"
+                } else {
+                    draft_id
+                };
+                let mut remote = SuccessfulRemote::new(draft_id);
+                remote.message_id = Some(message_id.into());
+                let mut original = draft_message("original source");
+                original.body_html =
+                    Some("<table style=\"width:73%\"><tr><td>HTML source</td></tr></table>".into());
+                original.body_text = "# Original Markdown source".into();
+                let provenance = DraftProvenance {
+                    local_id: None,
+                    remote_id: None,
+                };
+                let saved = save_oauth_draft_with_fallback(
+                    &state,
+                    account_id,
+                    &original,
+                    &provenance,
+                    &remote,
+                    Some(mode),
+                )
+                .await
+                .unwrap();
+                assert_eq!(saved, draft_id);
+                let mut synced = make_local_draft(account_id, &new_id(), message_id);
+                synced.body_html_raw = original.body_html.clone().unwrap();
+                synced.body_text = original.body_text.clone();
+                state.store.insert_message(&synced, &[]).unwrap();
+                assert_ne!(synced.id, saved);
+                let loaded = load_draft_content(&state, &synced.id).unwrap();
+                assert_eq!(loaded.editor_mode, mode);
+                assert_eq!(
+                    loaded.message.body_html_raw,
+                    original.body_html.clone().unwrap()
+                );
+                assert_eq!(loaded.message.body_text, original.body_text);
+                let provenance =
+                    resolve_editable_draft_provenance(&state, account_id, Some(&synced.id))
+                        .unwrap();
+                assert_eq!(provenance.remote_id.as_deref(), Some(draft_id));
+
+                let updated_message_id = if provider == ProviderType::Gmail {
+                    "gmail-replaced-message"
+                } else {
+                    draft_id
+                };
+                remote.message_id = Some(updated_message_id.into());
+                let updated_mode = match mode {
+                    "html" => "markdown",
+                    "markdown" => "rich",
+                    _ => "html",
+                };
+                save_oauth_draft_with_fallback(
+                    &state,
+                    account_id,
+                    &draft_message("updated"),
+                    &provenance,
+                    &remote,
+                    Some(updated_mode),
+                )
+                .await
+                .unwrap();
+                assert_eq!(remote.updated_ids.lock().unwrap().as_slice(), &[draft_id]);
+                let resynced = make_local_draft(account_id, &new_id(), updated_message_id);
+                state.store.insert_message(&resynced, &[]).unwrap();
+                assert_eq!(
+                    load_draft_content(&state, &resynced.id)
+                        .unwrap()
+                        .editor_mode,
+                    updated_mode
+                );
+                assert_eq!(
+                    resolve_editable_draft_provenance(&state, account_id, Some(&resynced.id))
+                        .unwrap()
+                        .remote_id
+                        .as_deref(),
+                    Some(draft_id)
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn oauth_local_fallback_keeps_modes_through_promotion_and_offline_updates() {
+        for mode in ["html", "markdown", "rich"] {
+            let state = test_state();
+            let provenance = DraftProvenance {
+                local_id: None,
+                remote_id: None,
+            };
+            let draft = draft_message("offline");
+            let local_id = save_oauth_draft_with_fallback(
+                &state,
+                "account-a",
+                &draft,
+                &provenance,
+                &FailingRemote,
+                Some(mode),
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                load_draft_content(&state, &local_id).unwrap().editor_mode,
+                mode
+            );
+            let provenance =
+                resolve_editable_draft_provenance(&state, "account-a", Some(&local_id)).unwrap();
+            let mut remote = SuccessfulRemote::new("gmail-draft");
+            remote.message_id = Some("gmail-message".into());
+            save_oauth_draft_with_fallback(
+                &state,
+                "account-a",
+                &draft,
+                &provenance,
+                &remote,
+                Some(mode),
+            )
+            .await
+            .unwrap();
+            assert!(state.store.get_message(&local_id).unwrap().is_none());
+            let synced = make_local_draft("account-a", &new_id(), "gmail-message");
+            state.store.insert_message(&synced, &[]).unwrap();
+            assert_eq!(
+                load_draft_content(&state, &synced.id).unwrap().editor_mode,
+                mode
+            );
+            let provenance =
+                resolve_editable_draft_provenance(&state, "account-a", Some(&synced.id)).unwrap();
+            let fallback = save_oauth_draft_with_fallback(
+                &state,
+                "account-a",
+                &draft,
+                &provenance,
+                &FailingRemote,
+                Some(mode),
+            )
+            .await
+            .unwrap();
+            let provenance =
+                resolve_editable_draft_provenance(&state, "account-a", Some(&fallback)).unwrap();
+            assert_eq!(provenance.remote_id.as_deref(), Some("gmail-draft"));
+            assert_eq!(
+                load_draft_content(&state, &fallback).unwrap().editor_mode,
+                mode
+            );
+            remote.message_id = Some("gmail-new-message".into());
+            save_oauth_draft_with_fallback(
+                &state,
+                "account-a",
+                &draft,
+                &provenance,
+                &remote,
+                Some(mode),
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                remote.updated_ids.lock().unwrap().as_slice(),
+                &["gmail-draft"]
+            );
+            let resynced = make_local_draft("account-a", &new_id(), "gmail-new-message");
+            state.store.insert_message(&resynced, &[]).unwrap();
+            assert_eq!(
+                load_draft_content(&state, &resynced.id)
+                    .unwrap()
+                    .editor_mode,
+                mode
+            );
+        }
+    }
+
+    #[test]
+    fn editor_metadata_is_account_scoped_and_does_not_alias_local_and_remote_ids() {
+        let state = test_state();
+        state
+            .store
+            .insert_account(&make_account(
+                "account-b",
+                "b@example.com",
+                ProviderType::Outlook,
+            ))
+            .unwrap();
+        for (account, mode) in [("account-a", "html"), ("account-b", "markdown")] {
+            let key = draft_editor_key(account, "remote", "same-remote-id");
+            store_draft_editor_metadata(&state, &key, Some(mode), Some("same-draft-id")).unwrap();
+            let message = make_local_draft(account, &new_id(), "same-remote-id");
+            state.store.insert_message(&message, &[]).unwrap();
+            assert_eq!(
+                load_draft_content(&state, &message.id).unwrap().editor_mode,
+                mode
+            );
+        }
+        let first_account_again = make_local_draft("account-a", &new_id(), "same-remote-id");
+        assert_eq!(
+            load_draft_editor_metadata(&state, &first_account_again)
+                .unwrap()
+                .unwrap()
+                .editor_mode
+                .as_deref(),
+            Some("html")
+        );
+        assert_ne!(
+            draft_editor_key("account-a", "local", "same-remote-id"),
+            draft_editor_key("account-a", "remote", "same-remote-id")
+        );
+        assert_ne!(
+            draft_editor_key("a:b", "remote", "c"),
+            draft_editor_key("a", "remote", "b:c")
+        );
+        let unrelated = make_local_draft("account-b", &new_id(), "other-id");
+        state.store.insert_message(&unrelated, &[]).unwrap();
+        assert!(load_draft_editor_metadata(&state, &unrelated)
+            .unwrap()
+            .is_none());
+    }
 
     #[tokio::test]
     async fn prepared_draft_uses_verified_sender_from_the_same_connection() {
@@ -725,6 +1270,7 @@ mod tests {
             &draft,
             &provenance,
             Ok((remote, sender.clone())),
+            None,
         )
         .await
         .unwrap();
@@ -765,9 +1311,10 @@ mod tests {
             local_id: None,
             remote_id: None,
         };
-        let id = save_prepared_oauth_draft(&state, "account-a", &draft, &provenance, prepared)
-            .await
-            .unwrap();
+        let id =
+            save_prepared_oauth_draft(&state, "account-a", &draft, &provenance, prepared, None)
+                .await
+                .unwrap();
         assert!(observed.lock().unwrap().is_empty());
         let stored = state.store.get_message(&id).unwrap().unwrap();
         assert!(stored.is_draft);
@@ -776,7 +1323,10 @@ mod tests {
     }
 
     impl RemoteDraftOperations for FailingRemote {
-        async fn create_draft(&self, _draft: &DraftMessage) -> Result<String, PebbleError> {
+        async fn create_draft(
+            &self,
+            _draft: &DraftMessage,
+        ) -> Result<RemoteDraftIdentity, PebbleError> {
             Err(PebbleError::Network("provider unavailable".to_string()))
         }
 
@@ -784,7 +1334,7 @@ mod tests {
             &self,
             _draft_id: &str,
             _draft: &DraftMessage,
-        ) -> Result<(), PebbleError> {
+        ) -> Result<RemoteDraftIdentity, PebbleError> {
             Err(PebbleError::Network("provider unavailable".to_string()))
         }
 
@@ -864,6 +1414,7 @@ mod tests {
             &draft_message("online"),
             &provenance,
             &remote,
+            None,
         )
         .await
         .unwrap();
@@ -885,6 +1436,7 @@ mod tests {
             &draft_message("offline edit"),
             &remote_provenance,
             &FailingRemote,
+            None,
         )
         .await
         .unwrap();
@@ -901,6 +1453,7 @@ mod tests {
             &draft_message("online edit"),
             &recovered,
             &remote,
+            None,
         )
         .await
         .unwrap();
@@ -925,6 +1478,7 @@ mod tests {
                 remote_id: None,
             },
             &FailingRemote,
+            None,
         )
         .await
         .unwrap();

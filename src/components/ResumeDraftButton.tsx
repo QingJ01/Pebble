@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import { getDraft } from "@/lib/api";
 import { useComposeStore } from "@/stores/compose.store";
 import { useToastStore } from "@/stores/toast.store";
@@ -26,7 +27,11 @@ export default function ResumeDraftButton({ messageId }: { messageId: string }) 
         })), savedAt: Date.now(),
       });
     } catch (error) {
-      useToastStore.getState().addToast({ type: "error", message: String(error) });
+      const reason = extractErrorMessage(error);
+      const message = reason.includes("draft_inline_attachments_unsupported")
+        ? t("compose.inlineDraftUnsupported", "This draft contains embedded images that the editor cannot preserve. It has not been opened for editing; the original draft is unchanged.")
+        : reason;
+      useToastStore.getState().addToast({ type: "error", message });
     } finally {
       setResuming(false);
     }

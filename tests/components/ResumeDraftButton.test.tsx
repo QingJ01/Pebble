@@ -33,4 +33,11 @@ describe("ResumeDraftButton", () => {
     await waitFor(() => expect(mocks.addToast).toHaveBeenCalled());
     expect(mocks.openDraft).not.toHaveBeenCalled();
   });
+  it("explains why inline drafts cannot be edited without opening a destructive compose session", async () => {
+    mocks.getDraft.mockRejectedValue({ message: "draft_inline_attachments_unsupported" });
+    render(<ResumeDraftButton messageId="draft" />);
+    fireEvent.click(screen.getByRole("button", { name: "Resume draft" }));
+    await waitFor(() => expect(mocks.addToast).toHaveBeenCalledWith({ type: "error", message: "This draft contains embedded images that the editor cannot preserve. It has not been opened for editing; the original draft is unchanged." }));
+    expect(mocks.openDraft).not.toHaveBeenCalled();
+  });
 });

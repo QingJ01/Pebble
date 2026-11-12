@@ -6,6 +6,8 @@ use pebble_store::Store;
 use std::{collections::HashMap, path::Path};
 use tauri::State;
 
+const MAX_INLINE_EXPANSION_BYTES: usize = 20 * 1024 * 1024;
+
 fn resolve_inline_images(
     store: &Store,
     root: &Path,
@@ -55,6 +57,7 @@ fn resolve_inline_images(
             format!("data:{mime};base64,{}", STANDARD.encode(bytes)),
         );
     }
+    let mut expanded_bytes = 0;
     rendered.html = lol_html::rewrite_str(
         &rendered.html,
         lol_html::RewriteStrSettings {
@@ -65,8 +68,11 @@ fn resolve_inline_images(
                         .is_some_and(|prefix| prefix.eq_ignore_ascii_case("cid:"))
                     {
                         let cid = src[4..].trim().trim_matches(['<', '>']);
-                        if let Some(data) = images.get(cid) {
+                        if let Some(data) = images.get(cid).filter(|data| {
+                            data.len() <= MAX_INLINE_EXPANSION_BYTES - expanded_bytes
+                        }) {
                             element.set_attribute("src", data)?;
+                            expanded_bytes += data.len();
                         } else {
                             element.remove_attribute("src");
                         }
@@ -245,6 +251,39 @@ mod tests {
         resolve_inline_images(&store, &root, &message.id, &mut rendered).unwrap();
         assert!(!rendered.html.contains("data:"));
         let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn repeated_cid_references_share_a_cumulative_expansion_budget() {
+        let (store, message) = store_with_trusted_sender(TrustType::Images);
+        let root = std::env::temp_dir().join(format!("pebble-cid-repeat-{}", new_id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("image.png");
+        let bytes = vec![42_u8; 256 * 1024];
+        std::fs::write(&path, &bytes).unwrap();
+        store
+            .insert_attachment(&pebble_core::Attachment {
+                id: new_id(),
+                message_id: message.id.clone(),
+                filename: "image.png".into(),
+                mime_type: "image/png".into(),
+                size: bytes.len() as i64,
+                local_path: Some(path.to_string_lossy().into_owned()),
+                content_id: Some("repeated".into()),
+                is_inline: true,
+            })
+            .unwrap();
+        let html = "<img src=\"cid:repeated\">".repeat(128);
+        let mut rendered = PrivacyGuard::new().render_safe_html(&html, &PrivacyMode::Strict);
+        let initial_size = rendered.html.len();
+        resolve_inline_images(&store, &root, &message.id, &mut rendered).unwrap();
+        let replacements = rendered.html.matches("data:image/png;base64,").count();
+        let data_url_size = "data:image/png;base64,".len() + STANDARD.encode(&bytes).len();
+        assert_eq!(replacements, MAX_INLINE_EXPANSION_BYTES / data_url_size);
+        assert!(replacements < 128);
+        assert!(rendered.html.len() <= initial_size + MAX_INLINE_EXPANSION_BYTES);
+        assert!(!rendered.html.contains("cid:"));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     fn make_account(id: &str) -> Account {
