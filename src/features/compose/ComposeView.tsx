@@ -28,6 +28,7 @@ import { ModeButton, EditorToolbar, MarkdownToolbar, composeStyles } from "./Com
 import { subjectAfterAddingAttachments } from "./attachment-subject";
 import { isValidEmailAddress, mergePendingRecipient } from "./recipient-utils";
 import { queryClient } from "@/lib/query-client";
+import { threadMessagesQueryKey } from "@/hooks/queries/useThreadMessagesQuery";
 
 export default function ComposeView() {
   const composeMode = useComposeStore((s) => s.composeMode);
@@ -231,11 +232,32 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
         deleteDraft(draftAccountId, draftId),
       ),
     );
+    const deletedIds = new Set<string>();
     Object.entries(draftIdsToDelete).forEach(([accountId, draftId], index) => {
-      if (deletionResults[index].status === "fulfilled" && draftIdsByAccountRef.current[accountId] === draftId) {
-        delete draftIdsByAccountRef.current[accountId];
+      if (deletionResults[index].status === "fulfilled") {
+        deletedIds.add(draftId);
+        if (composeDraft?.id && composeDraft.accountId === accountId) {
+          deletedIds.add(composeDraft.id);
+        }
+        if (draftIdsByAccountRef.current[accountId] === draftId) {
+          delete draftIdsByAccountRef.current[accountId];
+        }
       }
     });
+    if (deletedIds.size > 0) {
+      useMailStore.setState((state) => {
+        const threadMessages = state.selectedThreadId
+          ? queryClient.getQueryData<{ id: string }[]>(threadMessagesQueryKey(state.selectedThreadId))
+          : undefined;
+        const removedThread = deletedIds.has(state.selectedThreadId ?? "")
+          || (threadMessages?.length ? threadMessages.every((message) => deletedIds.has(message.id)) : false);
+        return {
+          selectedMessageId: deletedIds.has(state.selectedMessageId ?? "") ? null : state.selectedMessageId,
+          selectedThreadId: removedThread ? null : state.selectedThreadId,
+          selectedMessageIds: new Set([...state.selectedMessageIds].filter((id) => !deletedIds.has(id))),
+        };
+      });
+    }
     void queryClient.invalidateQueries({ queryKey: ["messages"] });
     void queryClient.invalidateQueries({ queryKey: ["threads"] });
     void queryClient.invalidateQueries({ queryKey: ["threadMessages"] });
