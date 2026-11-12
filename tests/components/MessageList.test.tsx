@@ -125,6 +125,29 @@ function makeMessage(id: string): MessageSummary {
 }
 
 describe("MessageList", () => {
+  it.each([false, true])("warns about irreversible local-draft deletion, including mixed selection=%s", async (mixed) => {
+    const first = { ...makeMessage("m-1"), is_draft: true, remote_id: "" };
+    const second = { ...makeMessage("m-2"), is_draft: !mixed, remote_id: mixed ? "remote-2" : "" };
+    useMailStore.setState({ batchMode: true, selectedMessageIds: new Set([first.id, second.id]) });
+    mocks.confirm.mockResolvedValue(false);
+    render(<MessageList messages={[first, second]} selectedMessageId={null} onSelectMessage={vi.fn()} loading={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
+    await waitFor(() => expect(mocks.confirm).toHaveBeenCalledWith(expect.objectContaining({
+      message: "Local-only drafts in this selection will be permanently deleted and cannot be restored. Other messages will move to Trash.",
+    })));
+    expect(mocks.batchDelete).not.toHaveBeenCalled();
+  });
+
+  it("retains the Trash confirmation for provider messages", async () => {
+    useMailStore.setState({ batchMode: true, selectedMessageIds: new Set(["m-1"]) });
+    mocks.confirm.mockResolvedValue(false);
+    render(<MessageList messages={[makeMessage("m-1")]} selectedMessageId={null} onSelectMessage={vi.fn()} loading={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
+    await waitFor(() => expect(mocks.confirm).toHaveBeenCalledWith(expect.objectContaining({
+      message: "This will move 1 message(s) to Trash. This action can be undone by restoring from Trash.",
+    })));
+    expect(mocks.batchDelete).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.accounts = [

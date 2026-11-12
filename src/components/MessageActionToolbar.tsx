@@ -259,7 +259,9 @@ export default function MessageActionToolbar({
       {showDeleteConfirm && (
         <ConfirmDialog
           title={t("messageActions.delete", "Delete")}
-          message={t("messageActions.deleteConfirm", "Move this message to trash?")}
+          message={message.is_draft && message.remote_id === ""
+            ? t("messageActions.deleteLocalDraftConfirm", "Permanently delete this local draft? This cannot be undone.")
+            : t("messageActions.deleteConfirm", "Move this message to trash?")}
           confirmLabel={t("common.delete", "Delete")}
           destructive
           onCancel={() => setShowDeleteConfirm(false)}
