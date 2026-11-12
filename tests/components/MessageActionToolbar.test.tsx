@@ -80,8 +80,8 @@ vi.mock("../../src/stores/toast.store", () => ({
 }));
 
 vi.mock("../../src/components/ConfirmDialog", () => ({
-  default: ({ onConfirm }: { onConfirm: () => void }) => (
-    <button onClick={onConfirm}>Confirm delete</button>
+  default: ({ onConfirm, message }: { onConfirm: () => void; message: string }) => (
+    <div><p>{message}</p><button onClick={onConfirm}>Confirm delete</button></div>
   ),
 }));
 
@@ -119,6 +119,16 @@ function makeMessage(): Message {
 }
 
 describe("MessageActionToolbar", () => {
+  it.each([
+    [true, "", "Permanently delete this local draft? This cannot be undone."],
+    [true, "remote-draft", "Move this message to trash?"],
+    [false, "", "Move this message to trash?"],
+  ])("describes deletion accurately for draft=%s remote=%s", (is_draft, remote_id, warning) => {
+    render(<MessageActionToolbar message={{ ...makeMessage(), is_draft, remote_id }} onBack={vi.fn()} onMessageUpdate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByText(warning)).toBeTruthy();
+    expect(mocks.deleteMessage).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.snapshotMessagesCache.mockReturnValue({ messages: "snapshot" });

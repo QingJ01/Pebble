@@ -131,9 +131,14 @@ export default function MessageList({
     if (ids.length === 0) return;
     if (action === "delete") {
       const count = ids.length;
+      const includesLocalDraft = ids.some((id) => {
+        const message = messages.find((message) => message.id === id);
+        return !message || (message.is_draft && message.remote_id === "");
+      });
       const ok = await confirm({
         title: t("batch.deleteTitle", { count, defaultValue: `Delete ${count} messages?` }),
-        message: t("batch.deleteConfirm", {
+        message: includesLocalDraft ? t("batch.deleteWithLocalDraftsConfirm",
+          "Local-only drafts in this selection will be permanently deleted and cannot be restored. Other messages will move to Trash.") : t("batch.deleteConfirm", {
           count,
           defaultValue: `This will move ${count} message(s) to Trash. This action can be undone by restoring from Trash.`,
         }),
