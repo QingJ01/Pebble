@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import ProxyTab, { parseProxyPort } from "../../../src/features/settings/ProxyTab";
+import ProxyTab from "../../../src/features/settings/ProxyTab";
+import { parseProxyPort } from "../../../src/lib/proxy-port";
 import {
   getAccountProxySetting,
   getGlobalProxy,

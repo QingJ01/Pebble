@@ -1,4 +1,5 @@
 import { accountLabel } from "@/lib/accountIdentity";
+import { parseProxyPort } from "@/lib/proxy-port";
 import OAuthIdentityPanel from "./OAuthIdentityPanel";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Trash2, Mail, Pencil, Plug, RefreshCw } from "lucide-react";
@@ -553,6 +554,7 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
     setLoading(true);
     setError(null);
     try {
+      const parsedProxyPort = parseProxyPort(proxyPort, t("settings.proxyPortInvalid", "Port must be an integer between 1 and 65535."));
       if (isOAuth) {
         await updateAccount(
           account.id,
@@ -583,7 +585,7 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
           account.id,
           nextProxyMode,
           nextProxyMode === "custom" ? trimmedProxyHost || undefined : undefined,
-          nextProxyMode === "custom" && trimmedProxyPort ? parseInt(trimmedProxyPort, 10) : undefined,
+          nextProxyMode === "custom" ? parsedProxyPort : undefined,
         );
       } else {
         await updateAccount(
@@ -599,7 +601,7 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
           smtpSecurity || undefined,
           acceptInvalidCerts === "" ? undefined : acceptInvalidCerts === "true",
           proxyHost.trim() || undefined,
-          proxyPort ? parseInt(proxyPort, 10) : undefined,
+          parsedProxyPort,
           accountColor,
           accountLabelValue,
         );
