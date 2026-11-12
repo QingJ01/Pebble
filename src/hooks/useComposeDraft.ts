@@ -198,6 +198,7 @@ export function useComposeDraft({
             delete saveErrorsRef.current[accountId];
             void queryClient.invalidateQueries({ queryKey: ["messages"] });
             void queryClient.invalidateQueries({ queryKey: ["threads"] });
+            void queryClient.invalidateQueries({ queryKey: ["threadMessages"] });
             if (draftAccountRef.current === accountId) {
               draftIdRef.current = id;
             }
