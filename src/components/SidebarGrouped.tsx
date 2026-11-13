@@ -1,3 +1,4 @@
+import FolderManagementButton from "./FolderManagementButton";
 import { accountOptionLabel } from "@/lib/accountIdentity";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -212,6 +213,7 @@ export default function SidebarGrouped() {
       )}
 
       {/* Overview + per-account folder groups */}
+      <FolderManagementButton accounts={accounts} folders={folders} accountId={activeAccountId} collapsed={sidebarCollapsed}/>
       <nav
         className="scroll-region sidebar-folder-scroll"
         aria-label={t("sidebar.mailFolders", "Mail folders")}

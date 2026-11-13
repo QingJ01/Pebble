@@ -1,3 +1,6 @@
+#[path = "outlook_folders.rs"]
+mod folder_management;
+
 use std::collections::HashSet;
 use std::future::Future;
 use std::sync::Arc;
@@ -345,11 +348,6 @@ struct GraphFolder {
 }
 
 #[derive(Deserialize)]
-struct GraphFolderList {
-    value: Vec<GraphFolder>,
-}
-
-#[derive(Deserialize)]
 struct GraphCategory {
     id: Option<String>,
     #[serde(rename = "displayName")]
@@ -638,6 +636,8 @@ pub struct OutlookProvider {
     client: Client,
     access_token: RwLock<String>,
     account_id: String,
+    #[cfg(test)]
+    test_folder_endpoint: RwLock<Option<String>>,
 }
 
 struct OutlookGraphAttachmentPageOperations<'a> {
@@ -732,6 +732,8 @@ impl OutlookProvider {
             client: http_client_with_proxy(None).expect("failed to build Outlook HTTP client"),
             access_token: RwLock::new(access_token),
             account_id,
+            #[cfg(test)]
+            test_folder_endpoint: RwLock::new(None),
         }
     }
 
@@ -744,6 +746,8 @@ impl OutlookProvider {
             client: http_client_with_proxy(proxy.as_ref())?,
             access_token: RwLock::new(access_token),
             account_id,
+            #[cfg(test)]
+            test_folder_endpoint: RwLock::new(None),
         })
     }
 
@@ -759,6 +763,8 @@ impl OutlookProvider {
     }
 
     async fn get(&self, url: &str) -> Result<reqwest::Response> {
+        #[cfg(test)]
+        let url = self.test_folder_url(url);
         self.client
             .get(url)
             .bearer_auth(self.token())
@@ -1187,32 +1193,7 @@ impl MailTransport for OutlookProvider {
 #[async_trait]
 impl FolderProvider for OutlookProvider {
     async fn list_folders(&self) -> Result<Vec<Folder>> {
-        let url = format!("{GRAPH_API_BASE}/mailFolders?$top=100");
-        let resp = self.get(&url).await?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(PebbleError::Network(format!(
-                "Failed to list folders (status {status}): {text}"
-            )));
-        }
-        let folder_list: GraphFolderList = resp
-            .json()
-            .await
-            .map_err(|e| PebbleError::Network(format!("Failed to parse folder list: {e}")))?;
-
-        let account_id = &self.account_id;
-        Ok(folder_list
-            .value
-            .iter()
-            .filter(|gf| {
-                !should_hide_outlook_folder(
-                    gf.display_name.as_deref(),
-                    gf.well_known_name.as_deref(),
-                )
-            })
-            .map(|gf| graph_folder_to_folder(gf, account_id))
-            .collect())
+        self.list_managed_folders().await
     }
 
     async fn move_message(&self, remote_id: &str, to_folder_id: &str) -> Result<String> {

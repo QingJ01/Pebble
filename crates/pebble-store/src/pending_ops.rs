@@ -229,12 +229,18 @@ impl Store {
                 "SELECT id, account_id, message_id, op_type, payload_json, status,
                         attempts, last_error, created_at, updated_at, next_retry_at
                  FROM pending_mail_ops
-                 WHERE status = 'pending'
+                 WHERE (status = 'pending'
                     OR (
                         status = 'failed'
                         AND attempts < ?2
                         AND (next_retry_at IS NULL OR next_retry_at <= ?3)
-                    )
+                    ))
+                   AND NOT EXISTS (
+                       SELECT 1 FROM pending_mail_ops claimed
+                       WHERE claimed.message_id = pending_mail_ops.message_id
+                         AND claimed.op_type = 'managed_move'
+                         AND claimed.status = 'in_progress'
+                   )
                  ORDER BY updated_at ASC
                  LIMIT ?1",
             )?;
