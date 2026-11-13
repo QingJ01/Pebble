@@ -42,19 +42,27 @@ impl ImapProvider {
             .collect())
     }
     pub async fn folder_delimiter(&self, mailbox: Option<&str>) -> Result<Option<String>> {
+        if mailbox.is_some_and(|name| name.contains(['\r', '\n', '\0'])) {
+            return Err(PebbleError::Validation("Invalid mailbox name".into()));
+        }
+        // async-imap quotes the reference but expects a wire-format pattern.
+        // None emits the required empty quoted string for the namespace root.
+        let pattern =
+            mailbox.map(|name| format!("\"{}\"", name.replace('\\', "\\\\").replace('"', "\\\"")));
         let mut guard = self.session.lock().await;
         let sess = guard
             .as_mut()
             .ok_or_else(|| PebbleError::Network("Not connected".into()))?;
         let names: Vec<_> = sess
-            .list(Some(""), Some(mailbox.unwrap_or("")))
+            .list(Some(""), pattern.as_deref())
             .await
             .map_err(|e| PebbleError::Network(format!("LIST failed: {e}")))?
             .try_collect()
             .await
             .map_err(|e| PebbleError::Network(format!("LIST failed: {e}")))?;
         let name = names
-            .first()
+            .iter()
+            .find(|name| mailbox.is_none_or(|mailbox| name.name() == mailbox))
             .ok_or_else(|| PebbleError::Validation("Mailbox namespace not found".into()))?;
         Ok(name.delimiter().map(str::to_owned))
     }

@@ -1080,8 +1080,12 @@ mod tests {
                     data = format!("* SEARCH{hit}\r\n");
                 } else if command.starts_with("UID MOVE") {
                     moved = true;
+                } else if command == "LIST \"\" \"\"" {
+                    data = "* LIST (\\Noselect) \".\" \"\"\r\n".into();
+                } else if command == "LIST \"\"" {
+                    status = "BAD";
                 } else if command.starts_with("LIST") {
-                    data="* LIST () \".\" \"Source\"\r\n* LIST () \".\" \"Source.Child\"\r\n* LIST () \".\" \"Target\"\r\n* LIST (\\Noselect) \".\" \"Container\"\r\n* LIST () \".\" \"Container.Child\"\r\n".into();
+                    data="* LIST () \".\" \"Source\"\r\n* LIST () \".\" \"Source.Child\"\r\n* LIST () \".\" \"Project Space\"\r\n* LIST () \".\" \"Target\"\r\n* LIST (\\Noselect) \".\" \"Container\"\r\n* LIST () \".\" \"Container.Child\"\r\n".into();
                 } else if command.starts_with("CREATE") && reject_create {
                     status = "NO";
                 } else if command.starts_with("LOGOUT") {
@@ -1260,6 +1264,46 @@ mod tests {
         .await
         .is_err());
     }
+    #[tokio::test]
+    async fn root_create_uses_empty_quoted_namespace_and_modified_utf7() {
+        let state = state(ProviderType::Imap);
+        let (server, _) = imap_fixture(&state, false, false);
+        let folder = create_folder_inner(&state, "a", "收件 项目", None, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            folder.remote_id,
+            encode_folder_segment("收件 项目", Some(".")).unwrap()
+        );
+        assert!(folder.parent_id.is_none());
+        let requests = server.join().unwrap();
+        assert!(requests.iter().any(|request| request == "LIST \"\" \"\""));
+        assert!(requests
+            .iter()
+            .any(|request| request == &format!("CREATE \"{}\"", folder.remote_id)));
+    }
+
+    #[tokio::test]
+    async fn spaced_mailbox_rename_quotes_the_exact_list_pattern() {
+        let state = state(ProviderType::Imap);
+        state
+            .store
+            .insert_folder(&folder("spaced", "Project Space"))
+            .unwrap();
+        let (server, _) = imap_fixture(&state, false, false);
+        let folders = rename_folder_inner(&state, "a", "spaced", "Renamed Space")
+            .await
+            .unwrap();
+        assert!(folders
+            .iter()
+            .any(|folder| folder.id == "spaced" && folder.remote_id == "Renamed Space"));
+        assert!(server
+            .join()
+            .unwrap()
+            .iter()
+            .any(|request| request == "LIST \"\" \"Project Space\""));
+    }
+
     #[tokio::test]
     async fn server_rejected_create_never_inserts_phantom_folder() {
         let state = state(ProviderType::Imap);
