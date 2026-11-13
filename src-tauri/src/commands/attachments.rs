@@ -3,6 +3,10 @@ use pebble_core::{Attachment, PebbleError};
 use std::path::{Path, PathBuf};
 use tauri::{Emitter, State};
 
+#[path = "attachment_preview.rs"]
+mod attachment_preview;
+use attachment_preview::{open_attachment_source, AttachmentPreview};
+
 fn is_windows_reserved_name(name: &str) -> bool {
     matches!(
         name.trim().to_ascii_uppercase().as_str(),
@@ -96,25 +100,51 @@ fn validate_save_path(save_to: &str) -> Result<(), PebbleError> {
 fn copy_attachment_file_safely<F>(
     source: &Path,
     save_path: &Path,
-    mut on_progress: F,
+    on_progress: F,
 ) -> Result<PathBuf, PebbleError>
 where
     F: FnMut(u64, u64),
 {
-    use std::io::{Read, Write};
-
-    let mut src_file = std::fs::File::open(source)
+    let src_file = std::fs::File::open(source)
         .map_err(|e| PebbleError::Internal(format!("Failed to open source: {e}")))?;
+    copy_open_attachment_safely(src_file, save_path, on_progress)
+}
+
+fn copy_open_attachment_safely<F>(
+    src_file: std::fs::File,
+    save_path: &Path,
+    on_progress: F,
+) -> Result<PathBuf, PebbleError>
+where
+    F: FnMut(u64, u64),
+{
     let total_bytes = src_file
         .metadata()
         .map_err(|e| PebbleError::Internal(format!("Failed to read file metadata: {e}")))?
         .len();
+
+    copy_reader_to_target(src_file, total_bytes, save_path, on_progress)
+}
+
+fn copy_reader_to_target<R, F>(
+    source: R,
+    total_bytes: u64,
+    save_path: &Path,
+    mut on_progress: F,
+) -> Result<PathBuf, PebbleError>
+where
+    R: std::io::Read,
+    F: FnMut(u64, u64),
+{
+    use std::io::{Read, Write};
+    let mut src_file = source.take(total_bytes);
 
     let (actual_save_path, mut dst_file) = create_unique_target(save_path)?;
 
     let mut buf = [0u8; 8192];
     let mut bytes_copied: u64 = 0;
     let copy_result: std::result::Result<(), PebbleError> = (|| {
+        on_progress(0, total_bytes);
         loop {
             let n = src_file
                 .read(&mut buf)
@@ -127,6 +157,11 @@ where
                 .map_err(|e| PebbleError::Internal(format!("Write error: {e}")))?;
             bytes_copied += n as u64;
             on_progress(bytes_copied, total_bytes);
+        }
+        if bytes_copied != total_bytes {
+            return Err(PebbleError::Validation(
+                "Attachment changed while downloading. Retry the download.".to_string(),
+            ));
         }
         dst_file
             .sync_all()
@@ -355,16 +390,13 @@ pub async fn download_attachment(
     // Validate save path to prevent path traversal
     validate_save_path(&save_to)?;
 
-    let source = att
-        .local_path
-        .ok_or_else(|| PebbleError::Internal("Attachment file not available".to_string()))?;
+    let source = open_attachment_source(&state.attachments_dir, &att)?;
 
     let att_id = attachment_id.clone();
     // Use spawn_blocking to avoid blocking the async executor on large files
     let actual_path_result = tokio::task::spawn_blocking(move || {
-        let source_path = std::path::Path::new(&source);
         let save_path = std::path::Path::new(&save_to);
-        copy_attachment_file_safely(source_path, save_path, |bytes_copied, total_bytes| {
+        copy_open_attachment_safely(source, save_path, |bytes_copied, total_bytes| {
             let _ = app.emit(
                 "attachment:download-progress",
                 serde_json::json!({
@@ -401,9 +433,236 @@ pub async fn download_attachment(
     Ok(actual_path.to_string_lossy().to_string())
 }
 
+#[tauri::command]
+pub async fn preview_attachment(
+    state: State<'_, AppState>,
+    attachment_id: String,
+) -> Result<AttachmentPreview, PebbleError> {
+    let attachment = state
+        .store
+        .get_attachment(&attachment_id)?
+        .ok_or_else(|| PebbleError::Validation("Attachment not found".to_string()))?;
+    attachment_preview::preview(state.attachments_dir.clone(), attachment).await
+}
+
+#[derive(serde::Serialize, Debug)]
+pub struct AttachmentSaveResult {
+    pub attachment_id: String,
+    pub filename: String,
+    pub saved_path: Option<String>,
+    pub error: Option<String>,
+}
+
+fn save_attachments_to_directory<F>(
+    root: &Path,
+    directory: &Path,
+    attachments: Vec<Attachment>,
+    mut on_progress: F,
+) -> Result<Vec<AttachmentSaveResult>, PebbleError>
+where
+    F: FnMut(&str, u64, u64),
+{
+    let directory = directory.canonicalize().map_err(|_| {
+        PebbleError::Validation("Save directory is unavailable. Choose another folder.".to_string())
+    })?;
+    if !directory.is_dir() || attachments.len() > 1000 {
+        return Err(PebbleError::Validation(
+            "Invalid save directory or too many attachments (maximum 1000)".to_string(),
+        ));
+    }
+    let mut results = Vec::new();
+    for attachment in attachments.into_iter().filter(|a| !a.is_inline) {
+        let filename = sanitize_stored_filename(&attachment.filename);
+        // Leave room for a duplicate suffix on filesystems with a 255-byte name limit.
+        let mut end = filename.len().min(200);
+        while !filename.is_char_boundary(end) {
+            end -= 1;
+        }
+        let filename = filename[..end].trim_end_matches(['.', ' ']);
+        let target = directory.join(filename);
+        let result = (|| {
+            validate_save_path(&target.to_string_lossy())?;
+            let source = open_attachment_source(root, &attachment)?;
+            copy_open_attachment_safely(source, &target, |copied, total| {
+                on_progress(&attachment.id, copied, total)
+            })
+        })();
+        let (saved_path, error) = match result {
+            Ok(path) => (Some(path.to_string_lossy().into_owned()), None),
+            Err(error) => (None, Some(error.to_string())),
+        };
+        results.push(AttachmentSaveResult {
+            attachment_id: attachment.id,
+            filename: attachment.filename,
+            saved_path,
+            error,
+        });
+    }
+    Ok(results)
+}
+
+#[tauri::command]
+pub async fn save_all_attachments(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    message_id: String,
+) -> Result<Option<Vec<AttachmentSaveResult>>, PebbleError> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let attachments = state.store.list_attachments_by_message(&message_id)?;
+    let root = state.attachments_dir.clone();
+    tokio::task::spawn_blocking(move || {
+        let Some(directory) = app.dialog().file().blocking_pick_folder() else {
+            return Ok(None);
+        };
+        let directory = directory
+            .into_path()
+            .map_err(|_| PebbleError::Validation("Choose a local save directory".to_string()))?;
+        let results =
+            save_attachments_to_directory(&root, &directory, attachments, |id, copied, total| {
+                let _ = app.emit(
+                    "attachment:download-progress",
+                    serde_json::json!({
+                        "attachment_id": id, "bytes_copied": copied, "total_bytes": total,
+                    }),
+                );
+            })?;
+        Ok(Some(results))
+    })
+    .await
+    .map_err(|_| {
+        PebbleError::Internal(
+            "Save All could not finish. Check the destination folder and retry.".to_string(),
+        )
+    })?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn record(root: &Path, filename: &str, contents: Option<&[u8]>, inline: bool) -> Attachment {
+        let id = pebble_core::new_id();
+        let path = root.join(&id);
+        if let Some(contents) = contents {
+            std::fs::write(&path, contents).unwrap();
+        }
+        Attachment {
+            id,
+            message_id: "message".into(),
+            filename: filename.into(),
+            mime_type: "application/octet-stream".into(),
+            size: 0,
+            local_path: Some(path.to_string_lossy().into_owned()),
+            content_id: None,
+            is_inline: inline,
+        }
+    }
+
+    #[test]
+    fn save_all_handles_duplicates_existing_files_bad_names_and_partial_failures() {
+        let base = std::env::temp_dir().join(format!("pebble-save-all-{}", pebble_core::new_id()));
+        let root = base.join("attachments");
+        let output = base.join("output");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir(&output).unwrap();
+        std::fs::write(output.join("report.txt"), b"existing").unwrap();
+        let attachments = vec![
+            record(&root, "report.txt", Some(b"first"), false),
+            record(&root, "report.txt", Some(b"second"), false),
+            record(&root, "missing.txt", None, false),
+            record(&root, "../..\\NUL.txt", Some(b"reserved"), false),
+            record(&root, "inline.png", Some(b"inline"), true),
+            record(&root, &"测".repeat(120), Some(b"long name"), false),
+        ];
+        let mut progress = Vec::new();
+        let result =
+            save_attachments_to_directory(&root, &output, attachments, |id, copied, total| {
+                progress.push((id.to_owned(), copied, total))
+            })
+            .unwrap();
+        assert_eq!(result.len(), 5, "ordinary attachments only");
+        assert_eq!(result.iter().filter(|r| r.saved_path.is_some()).count(), 4);
+        assert!(result[2].error.is_some());
+        assert!(result[2].saved_path.is_none());
+        assert_eq!(
+            std::fs::read(output.join("report.txt")).unwrap(),
+            b"existing"
+        );
+        assert_eq!(
+            std::fs::read(output.join("report (1).txt")).unwrap(),
+            b"first"
+        );
+        assert_eq!(
+            std::fs::read(output.join("report (2).txt")).unwrap(),
+            b"second"
+        );
+        assert_eq!(
+            std::fs::read(output.join("attachment")).unwrap(),
+            b"reserved"
+        );
+        assert!(!output.join("missing.txt").exists());
+        assert!(!output.join("inline.png").exists());
+        assert_eq!(std::fs::read_dir(&output).unwrap().count(), 5);
+        assert!(progress
+            .iter()
+            .any(|(_, copied, total)| copied == total && *total > 0));
+        assert!(save_attachments_to_directory(
+            &root,
+            &output.join("absent"),
+            Vec::new(),
+            |_, _, _| {}
+        )
+        .is_err());
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn failed_or_truncated_copy_removes_only_its_new_target() {
+        struct BrokenRead(bool);
+        impl std::io::Read for BrokenRead {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                if self.0 {
+                    return Err(std::io::Error::other("simulated read failure"));
+                }
+                self.0 = true;
+                buffer[0] = 1;
+                Ok(1)
+            }
+        }
+        let base =
+            std::env::temp_dir().join(format!("pebble-copy-failure-{}", pebble_core::new_id()));
+        std::fs::create_dir(&base).unwrap();
+        let target = base.join("keep.txt");
+        std::fs::write(&target, b"existing").unwrap();
+        assert!(copy_reader_to_target(BrokenRead(false), 10, &target, |_, _| {}).is_err());
+        assert!(
+            copy_reader_to_target(std::io::Cursor::new(b"short"), 10, &target, |_, _| {}).is_err()
+        );
+        assert_eq!(std::fs::read_dir(&base).unwrap().count(), 1);
+        assert_eq!(std::fs::read(target).unwrap(), b"existing");
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn target_symlink_is_never_followed_or_overwritten() {
+        let base = std::env::temp_dir().join(format!("pebble-copy-link-{}", pebble_core::new_id()));
+        std::fs::create_dir(&base).unwrap();
+        let original = base.join("original.txt");
+        let target = base.join("link.txt");
+        std::fs::write(&original, b"keep").unwrap();
+        std::os::unix::fs::symlink(&original, &target).unwrap();
+        let actual =
+            copy_reader_to_target(std::io::Cursor::new(b"new"), 3, &target, |_, _| {}).unwrap();
+        assert_eq!(std::fs::read(&original).unwrap(), b"keep");
+        assert_eq!(actual.file_name().unwrap(), "link (1).txt");
+        assert!(std::fs::symlink_metadata(target)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        let _ = std::fs::remove_dir_all(base);
+    }
 
     #[test]
     fn copy_attachment_file_safely_uses_unique_target_when_requested_name_exists() {

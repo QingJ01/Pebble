@@ -1,0 +1,26 @@
+{
+  "attachmentViewer": {
+    "preview": "预览",
+    "close": "关闭预览（Esc）",
+    "navigation": "附件切换",
+    "previous": "上一个附件（左方向键）",
+    "next": "下一个附件（右方向键）",
+    "keyboardHint": "← / → 切换附件 · Esc 关闭",
+    "loading": "正在加载预览…",
+    "loadingAttachments": "正在加载附件…",
+    "listFailed": "无法加载附件。",
+    "failed": "无法预览此附件。",
+    "fallback": "请重试，或下载文件后使用可信应用打开。",
+    "retry": "重试",
+    "staticPreview": "安全只读预览：图片为静态画面；PDF 链接、脚本、表单和外部资源已禁用。下载可获取原始文件。",
+    "pdfPages": "PDF 翻页",
+    "previousPage": "上一页",
+    "nextPage": "下一页",
+    "pageCount": "第 {{page}} / {{count}} 页",
+    "pdfPage": "PDF 第 {{page}} 页",
+    "saveAll": "全部保存…",
+    "savingAll": "正在保存附件…",
+    "saveFailed": "无法保存附件：{{reason}}",
+    "saveSummary": "已保存 {{saved}} 个 · 失败 {{failed}} 个。现有文件未被覆盖。"
+  }
+}
