@@ -4,13 +4,9 @@ import { setKeepRunningInBackground, startSync, stopSync } from "../../src/lib/a
 
 const mocks = vi.hoisted(() => ({
   accounts: [{ id: "account-1" }, { id: "account-2" }],
-  closeHandler: undefined as undefined | ((event: { preventDefault: () => void }) => void | Promise<void>),
   focusHandler: undefined as undefined | ((event: { payload: boolean }) => void),
   hide: vi.fn().mockResolvedValue(undefined),
-  onCloseRequested: vi.fn((handler: (event: { preventDefault: () => void }) => void | Promise<void>) => {
-    mocks.closeHandler = handler;
-    return Promise.resolve(vi.fn());
-  }),
+  onCloseRequested: vi.fn(),
   onFocusChanged: vi.fn((handler: (event: { payload: boolean }) => void) => {
     mocks.focusHandler = handler;
     return Promise.resolve(vi.fn());
@@ -56,7 +52,6 @@ function Harness() {
 describe("useCloseToBackground", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.closeHandler = undefined;
     mocks.focusHandler = undefined;
     mocks.accounts = [{ id: "account-1" }, { id: "account-2" }];
     mocks.uiState.keepRunningInBackground = false;
@@ -73,28 +68,24 @@ describe("useCloseToBackground", () => {
     );
   });
 
-  it("lets the app close normally when background mode is disabled", async () => {
-    render(<Harness />);
+  it.each([false, true])("leaves window lifetime with the native guard when background mode is %s", async (enabled) => {
+    mocks.uiState.keepRunningInBackground = enabled;
+    const view = render(<Harness />);
 
-    await waitFor(() => expect(mocks.onCloseRequested).toHaveBeenCalledOnce());
-    const preventDefault = vi.fn();
-    await mocks.closeHandler?.({ preventDefault });
-
-    expect(preventDefault).not.toHaveBeenCalled();
+    await waitFor(() => expect(setKeepRunningInBackground).toHaveBeenCalledWith(enabled));
+    view.unmount();
+    expect(mocks.onCloseRequested).not.toHaveBeenCalled();
     expect(mocks.hide).not.toHaveBeenCalled();
+    expect(stopSync).not.toHaveBeenCalled();
   });
 
-  it("keeps sync workers running when hiding the window to tray", async () => {
+  it("updates the native close guard when the preference changes", async () => {
+    const view = render(<Harness />);
+    await waitFor(() => expect(setKeepRunningInBackground).toHaveBeenLastCalledWith(false));
     mocks.uiState.keepRunningInBackground = true;
-    render(<Harness />);
-
-    await waitFor(() => expect(mocks.onCloseRequested).toHaveBeenCalledOnce());
-    const preventDefault = vi.fn();
-    await mocks.closeHandler?.({ preventDefault });
-
-    expect(preventDefault).toHaveBeenCalledOnce();
-    expect(mocks.hide).toHaveBeenCalledOnce();
-    expect(stopSync).not.toHaveBeenCalled();
+    view.rerender(<Harness />);
+    await waitFor(() => expect(setKeepRunningInBackground).toHaveBeenLastCalledWith(true));
+    expect(mocks.onCloseRequested).not.toHaveBeenCalled();
   });
 
   it("resumes sync when the hidden window regains focus", async () => {

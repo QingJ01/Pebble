@@ -10,45 +10,13 @@ export function useCloseToBackground() {
   const realtimeMode = useUIStore((s) => s.realtimeMode);
   const keepRunningInBackground = useUIStore((s) => s.keepRunningInBackground);
 
-  // Keep the Rust close guard aligned with the frontend preference source, so
-  // a close request is handled on the Rust side even before the JS listener
-  // below has registered.
+  // Rust owns window closing. A JS onCloseRequested listener can destroy the
+  // window after Rust has prevented closure to show a queued-send warning.
   useEffect(() => {
     setKeepRunningInBackground(keepRunningInBackground).catch((err) =>
       console.warn("Failed to sync keep-running preference to backend", err),
     );
   }, [keepRunningInBackground]);
-
-  useEffect(() => {
-    const appWindow = getCurrentWindow();
-    let unlisten: (() => void) | undefined;
-    let disposed = false;
-
-    appWindow
-      .onCloseRequested((event) => {
-        if (!useUIStore.getState().keepRunningInBackground) {
-          return;
-        }
-
-        event.preventDefault();
-        void appWindow
-          .hide()
-          .catch((err) => console.warn("Failed to hide window on close", err));
-      })
-      .then((fn) => {
-        if (disposed) {
-          fn();
-          return;
-        }
-        unlisten = fn;
-      })
-      .catch((err) => console.warn("Failed to register close-to-background handler", err));
-
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, []);
 
   // Resume sync workers when window regains visibility after being hidden to tray
   useEffect(() => {
