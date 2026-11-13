@@ -59,7 +59,7 @@ function MovePicker({messages,onMoved,onClose}: Props & {onClose: () => void}) {
       setBusy(true);setError("");
       try {
         const response = await moveMailMessages(accountId,ids,sourceId || null,target);
-        setResult(response);clearMovedSelection(response.moved_ids);invalidateFolderViews(client);
+        setResult(response);clearMovedSelection(response.moved_ids,selection);invalidateFolderViews(client);
         // Close selection/detail only for messages confirmed moved. Failed IDs
         // remain selected. Keep partial failures visible until dismissed.
         onMoved?.(response.moved_ids);
