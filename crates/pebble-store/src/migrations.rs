@@ -2,7 +2,7 @@ use pebble_core::{build_snippet, PebbleError, Result};
 use rusqlite::{Connection, OptionalExtension};
 use std::collections::HashSet;
 
-const CURRENT_VERSION: u32 = 19;
+const CURRENT_VERSION: u32 = 20;
 const ACCOUNT_COLOR_PRESETS: [&str; 12] = [
     "#0ea5e9", "#22c55e", "#f59e0b", "#8b5cf6", "#f43f5e", "#14b8a6", "#6366f1", "#f97316",
     "#06b6d4", "#ec4899", "#84cc16", "#3b82f6",
@@ -992,6 +992,13 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
              );
              CREATE INDEX scheduled_sends_due ON scheduled_sends(state, due_at);",
         )?;
+        set_schema_version(&tx, 19)?;
+        tx.commit()?;
+    }
+
+    if version < 20 {
+        let tx = conn.unchecked_transaction()?;
+        tx.execute_batch(include_str!("mail_archive_schema.sql"))?;
         set_schema_version(&tx, CURRENT_VERSION)?;
         tx.commit()?;
     }
@@ -1142,6 +1149,39 @@ CREATE TABLE IF NOT EXISTS translate_config (
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn v19_archive_upgrade_is_sequential_preserves_queue_and_is_transactional() {
+        let conn = Connection::open_in_memory().unwrap();
+        run_migrations(&conn).unwrap();
+        conn.execute_batch("DROP TABLE mail_archive_fts; DROP TABLE mail_archive_messages; DROP TABLE mail_archive_folders; DROP TABLE mail_archives; PRAGMA user_version=19;").unwrap();
+        conn.execute_batch("INSERT INTO accounts (id,email,provider,created_at,updated_at) VALUES ('a','a@example.com','imap',1,1); INSERT INTO scheduled_sends VALUES ('job','a','scheduled',200,'pending',X'0102',0,100);").unwrap();
+        run_migrations(&conn).unwrap();
+        assert_eq!(get_schema_version(&conn), 20);
+        let payload: Vec<u8> = conn
+            .query_row(
+                "SELECT payload FROM scheduled_sends WHERE id='job'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(payload, vec![1, 2]);
+        assert!(table_exists(&conn, "mail_archives").unwrap());
+        run_migrations(&conn).unwrap();
+
+        let broken = Connection::open_in_memory().unwrap();
+        broken.execute_batch("PRAGMA user_version=18; CREATE TABLE mail_archive_folders (sentinel TEXT); INSERT INTO mail_archive_folders VALUES ('preserve');").unwrap();
+        assert!(run_migrations(&broken).is_err());
+        assert_eq!(get_schema_version(&broken), 19);
+        assert!(table_exists(&broken, "scheduled_sends").unwrap());
+        assert!(!table_exists(&broken, "mail_archives").unwrap());
+        let value: String = broken
+            .query_row("SELECT sentinel FROM mail_archive_folders", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(value, "preserve");
+    }
 
     #[test]
     fn migration_v18_preserves_existing_identity_and_rolls_back_on_failure() {

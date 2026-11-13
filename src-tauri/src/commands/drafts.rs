@@ -205,6 +205,62 @@ fn requires_remote_draft_delete(provider_type: Option<ProviderType>) -> bool {
     )
 }
 
+pub(crate) fn controlled_source_remote_id(
+    state: &AppState,
+    account_id: &str,
+    id: &str,
+) -> Result<Option<String>, PebbleError> {
+    let account = state
+        .store
+        .get_account(account_id)?
+        .ok_or_else(|| PebbleError::Validation("Draft account not found".into()))?;
+    let local = state.store.get_message(id)?;
+    if local.is_none()
+        && (!requires_remote_draft_delete(Some(account.provider.clone()))
+            || id.is_empty()
+            || id.len() > 1024
+            || id.chars().any(char::is_control))
+    {
+        return Err(PebbleError::Validation("Source draft not found".into()));
+    }
+    let provenance = resolve_editable_draft_provenance(state, account_id, Some(id))?;
+    // IMAP/POP drafts use device-local UUIDs; OAuth autosave returns a provider draft ID.
+    Ok(if requires_remote_draft_delete(Some(account.provider)) {
+        provenance.remote_id
+    } else {
+        None
+    })
+}
+
+pub(crate) async fn delete_controlled_source(
+    state: &AppState,
+    account_id: &str,
+    id: &str,
+    remote_id: Option<&str>,
+) -> Result<Vec<String>, PebbleError> {
+    let ids = state.store.scheduled_source_draft_ids(account_id)?;
+    let mut aliases = Vec::new();
+    for alias in ids {
+        if alias == id
+            || (remote_id.is_some()
+                && resolve_editable_draft_provenance(state, account_id, Some(&alias))?
+                    .remote_id
+                    .as_deref()
+                    == remote_id)
+        {
+            aliases.push(alias);
+        }
+    }
+    if let Some(remote) = remote_id {
+        delete_owned_draft(state, account_id.to_string(), remote.to_string()).await?;
+    }
+    for alias in &aliases {
+        delete_local_draft(state, alias)?;
+    }
+    aliases.push(id.to_string());
+    Ok(aliases)
+}
+
 fn resolve_draft_provenance(
     store: &pebble_store::Store,
     account_id: &str,
@@ -304,6 +360,9 @@ pub async fn save_draft(
     };
     let provenance =
         resolve_editable_draft_provenance(&state, &account_id, existing_draft_id.as_deref())?;
+    if let Some(id) = existing_draft_id.as_deref() {
+        crate::send_controls::ensure_source_draft_available(&state, &account_id, id)?;
+    }
     let account = state
         .store
         .get_account(&account_id)?
@@ -409,6 +468,7 @@ fn load_draft_content(state: &AppState, draft_id: &str) -> Result<DraftContent, 
         .filter(|message| message.is_draft)
         .ok_or_else(|| PebbleError::Validation("Draft not found".into()))?;
     ensure_draft_editable(&state.store, draft_id)?;
+    crate::send_controls::ensure_source_draft_available(state, &message.account_id, draft_id)?;
     let attachments = state.store.list_attachments_by_message(draft_id)?;
     if attachments.iter().any(|attachment| {
         !attachment.is_inline
@@ -641,7 +701,15 @@ pub async fn delete_draft(
     account_id: String,
     draft_id: String,
 ) -> std::result::Result<(), PebbleError> {
-    let provenance = resolve_editable_draft_provenance(&state, &account_id, Some(&draft_id))?;
+    delete_owned_draft(&state, account_id, draft_id).await
+}
+
+pub(crate) async fn delete_owned_draft(
+    state: &AppState,
+    account_id: String,
+    draft_id: String,
+) -> std::result::Result<(), PebbleError> {
+    let provenance = resolve_editable_draft_provenance(state, &account_id, Some(&draft_id))?;
     let provider_type = state.store.get_account(&account_id)?.map(|a| a.provider);
 
     if requires_remote_draft_delete(provider_type.clone()) {
@@ -651,7 +719,7 @@ pub async fn delete_draft(
                     "OAuth draft deletion requires a persisted account provider".to_string(),
                 )
             })?;
-            let conn = ConnectedProvider::connect(&state, &account_id, provider)
+            let conn = ConnectedProvider::connect(state, &account_id, provider)
                 .await
                 .map_err(|error| {
                     PebbleError::Network(format!(
@@ -665,7 +733,7 @@ pub async fn delete_draft(
     }
 
     if let Some(local_id) = provenance.local_id.as_deref() {
-        delete_local_draft(&state, local_id)?;
+        delete_local_draft(state, local_id)?;
     }
     Ok(())
 }
@@ -920,6 +988,42 @@ mod tests {
             snooze_stop_tx,
             std::env::temp_dir().join(format!("pebble-draft-test-{}", new_id())),
         )
+    }
+
+    #[test]
+    fn controlled_source_identity_distinguishes_oauth_draft_and_message_ids() {
+        let state = test_state();
+        let id =
+            save_draft_locally(&state, "account-a", &draft_message("source"), None, None).unwrap();
+        assert_eq!(
+            controlled_source_remote_id(&state, "account-a", &id).unwrap(),
+            None
+        );
+        state
+            .store
+            .update_remote_id(&id, "gmail-message-id")
+            .unwrap();
+        store_draft_editor_metadata(
+            &state,
+            &draft_editor_key("account-a", "local", &id),
+            Some("rich"),
+            Some("gmail-draft-id"),
+        )
+        .unwrap();
+        assert_eq!(
+            controlled_source_remote_id(&state, "account-a", &id)
+                .unwrap()
+                .as_deref(),
+            Some("gmail-draft-id")
+        );
+        assert_eq!(
+            controlled_source_remote_id(&state, "account-a", "gmail-draft-id")
+                .unwrap()
+                .as_deref(),
+            Some("gmail-draft-id")
+        );
+        assert!(controlled_source_remote_id(&state, "different-account", &id).is_err());
+        let _ = std::fs::remove_dir_all(state.attachments_dir);
     }
 
     struct SuccessfulRemote {

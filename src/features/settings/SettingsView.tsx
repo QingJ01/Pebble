@@ -11,8 +11,9 @@ import ShortcutsTab from "./ShortcutsTab";
 import TranslateTab from "./TranslateTab";
 import PrivacyTab from "./PrivacyTab";
 import AboutTab from "./AboutTab";
+import MailArchiveView from "../mail-archive/MailArchiveView";
 
-const TAB_IDS = ["accounts", "general", "proxy", "appearance", "privacy", "rules", "remoteWrites", "translation", "shortcuts", "cloudSync", "about"] as const;
+const TAB_IDS = ["accounts", "general", "proxy", "appearance", "privacy", "rules", "remoteWrites", "mailArchive", "translation", "shortcuts", "cloudSync", "about"] as const;
 
 const TAB_LABEL_KEYS: Record<string, string> = {
   accounts: "settings.accounts",
@@ -22,6 +23,7 @@ const TAB_LABEL_KEYS: Record<string, string> = {
   privacy: "settings.privacy",
   rules: "settings.rules",
   remoteWrites: "settings.remoteWrites",
+  mailArchive: "mailArchive.title",
   translation: "settings.translation",
   shortcuts: "settings.shortcuts",
   cloudSync: "settings.cloudSync",
@@ -100,7 +102,7 @@ export default function SettingsView() {
           flex: 1,
           minWidth: 0,
           padding: "32px",
-          maxWidth: activeTab === "remoteWrites" ? "980px" : "640px",
+          maxWidth: activeTab === "remoteWrites" || activeTab === "mailArchive" ? "980px" : "640px",
           boxSizing: "border-box",
           overflowY: "auto",
           overflowX: "hidden",
@@ -112,6 +114,7 @@ export default function SettingsView() {
         {activeTab === "appearance" && <AppearanceTab />}
         {activeTab === "rules" && <RulesTab />}
         {activeTab === "remoteWrites" && <PendingOpsTab />}
+        {activeTab === "mailArchive" && <MailArchiveView />}
         {activeTab === "translation" && <TranslateTab />}
         {activeTab === "shortcuts" && <ShortcutsTab />}
         {activeTab === "privacy" && <PrivacyTab />}

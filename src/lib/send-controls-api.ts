@@ -4,6 +4,7 @@ import type { ComposeMode } from "@/stores/compose.store";
 import type { ComposeAttachment } from "@/features/compose/compose-draft";
 
 export interface SendSnapshot {
+  sourceDrafts?: { accountId: string; id: string }[];
   accountId: string;
   to: string[]; cc: string[]; bcc: string[];
   subject: string; bodyText: string; bodyHtml?: string;

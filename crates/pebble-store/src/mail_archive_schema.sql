@@ -30,6 +30,8 @@ CREATE TABLE mail_archive_messages (
     UNIQUE(archive_id, fingerprint)
 );
 CREATE INDEX mail_archive_messages_folder ON mail_archive_messages(folder_id, date DESC, id);
+CREATE INDEX mail_archive_messages_content ON mail_archive_messages(fingerprint, archive_id);
+CREATE INDEX mail_archives_account ON mail_archives(account_id);
 CREATE VIRTUAL TABLE mail_archive_fts USING fts5(message_id UNINDEXED, text, tokenize='trigram');
 CREATE TRIGGER mail_archive_messages_delete AFTER DELETE ON mail_archive_messages BEGIN
     DELETE FROM mail_archive_fts WHERE message_id = old.id;

@@ -45,7 +45,7 @@ function ScheduledRow({ job }: { job: ControlledSend }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   const dateInstant = scheduledInstant(date);
-  const mutable = job.state === "pending" || job.state === "draft";
+  const mutable = job.state === "pending";
   async function run(action: () => Promise<unknown>) {
     if (busy) return;
     setBusy(true); setError(false);

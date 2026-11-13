@@ -26,6 +26,9 @@ pub struct SnapshotAttachment {
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SendSnapshot {
+    /// Immutable source identities, encrypted with the message, owned until cancellation/delivery.
+    #[serde(default)]
+    pub source_drafts: Vec<SourceDraft>,
     pub account_id: String,
     pub to: Vec<String>,
     pub cc: Vec<String>,
@@ -42,6 +45,93 @@ pub struct SendSnapshot {
     pub attachments: Vec<SnapshotAttachment>,
 }
 
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceDraft {
+    pub account_id: String,
+    pub id: String,
+    #[serde(default)]
+    pub remote_id: Option<String>,
+}
+
+/// A saved draft may not be edited/sent as a second copy while a durable job owns it.
+pub(crate) fn ensure_source_draft_available(
+    state: &AppState,
+    account: &str,
+    id: &str,
+) -> Result<()> {
+    let remote_id = crate::commands::drafts::controlled_source_remote_id(state, account, id)?;
+    for job in state.store.list_scheduled_sends()? {
+        if job.state != "draft"
+            && unseal(state, &job)?
+                .snapshot
+                .source_drafts
+                .iter()
+                .any(|source| {
+                    source.account_id == account
+                        && (source.id == id
+                            || (remote_id.is_some() && source.remote_id == remote_id))
+                })
+        {
+            return Err(PebbleError::Validation("This draft belongs to a queued or delivered message. Manage it in Settings → General → Scheduled sends; check Sent before restoring.".into()));
+        }
+    }
+    Ok(())
+}
+
+fn validate_source_drafts(state: &AppState, snapshot: &mut SendSnapshot) -> Result<()> {
+    if snapshot.source_drafts.len() > 64 {
+        return Err(conflict());
+    }
+    for source in &mut snapshot.source_drafts {
+        source.remote_id = crate::commands::drafts::controlled_source_remote_id(
+            state,
+            &source.account_id,
+            &source.id,
+        )?;
+    }
+    Ok(())
+}
+
+async fn cleanup_delivered_sources(
+    state: &AppState,
+    runtime: &SendControlRuntime,
+    job: &ScheduledSend,
+    on_removed: impl Fn(Vec<String>),
+) -> Result<()> {
+    let _cleanup = runtime.cleanup.lock().await;
+    let current = state
+        .store
+        .get_scheduled_send(&job.id)?
+        .filter(|current| current.state == "sent" && current.revision == job.revision)
+        .ok_or_else(conflict)?;
+    let mut sealed = unseal(state, &current)?;
+    for source in sealed.snapshot.source_drafts.clone() {
+        let key = (source.account_id.clone(), source.id.clone());
+        if sealed.cleaned_sources.contains(&key) {
+            continue;
+        }
+        let removed = crate::commands::drafts::delete_controlled_source(
+            state,
+            &source.account_id,
+            &source.id,
+            source.remote_id.as_deref(),
+        )
+        .await?;
+        sealed.cleaned_sources.push(key);
+        let payload = state.crypto.encrypt_for(
+            PURPOSE,
+            &job.id,
+            &serde_json::to_vec(&sealed).map_err(invalid_data)?,
+        )?;
+        state
+            .store
+            .update_delivered_send_payload(&job.id, job.revision, &payload)?;
+        on_removed(removed);
+    }
+    Ok(())
+}
+
 #[derive(Serialize, Deserialize, PartialEq)]
 struct SealedAttachment {
     name: String,
@@ -52,6 +142,8 @@ struct SealedAttachment {
 struct SealedSend {
     snapshot: SendSnapshot,
     attachments: Vec<SealedAttachment>,
+    #[serde(default)]
+    cleaned_sources: Vec<(String, String)>,
 }
 
 #[derive(Clone, Serialize)]
@@ -77,6 +169,7 @@ enum ExitGate {
 #[derive(Default)]
 pub struct SendControlRuntime {
     gate: Mutex<ExitGate>,
+    cleanup: tokio::sync::Mutex<()>,
 }
 
 fn conflict() -> PebbleError {
@@ -162,6 +255,7 @@ fn seal(state: &AppState, id: &str, mut snapshot: SendSnapshot) -> Result<Vec<u8
         &serde_json::to_vec(&SealedSend {
             snapshot,
             attachments,
+            cleaned_sources: vec![],
         })
         .map_err(invalid_data)?,
     )
@@ -246,7 +340,7 @@ pub async fn queue_controlled_send(
 fn queue_snapshot(
     state: &AppState,
     runtime: &SendControlRuntime,
-    snapshot: SendSnapshot,
+    mut snapshot: SendSnapshot,
     request_id: String,
     due_at: Option<i64>,
     undo_seconds: Option<u32>,
@@ -271,6 +365,7 @@ fn queue_snapshot(
     }
     let id = request_id;
     let account_id = snapshot.account_id.clone();
+    validate_source_drafts(state, &mut snapshot)?;
     let payload = seal(state, &id, snapshot)?;
     let gate = runtime.gate.lock().unwrap();
     ensure_running(&gate)?;
@@ -285,6 +380,12 @@ fn queue_snapshot(
             return Err(conflict());
         }
         return summary(state, &existing);
+    }
+    let candidate: SealedSend =
+        serde_json::from_slice(&state.crypto.decrypt_for(PURPOSE, &id, &payload)?)
+            .map_err(invalid_data)?;
+    for source in &candidate.snapshot.source_drafts {
+        ensure_source_draft_available(state, &source.account_id, &source.id)?;
     }
     let job = ScheduledSend {
         id,
@@ -332,7 +433,10 @@ pub async fn restore_controlled_send(
     }
     let _ = app.emit(CHANGED, ());
     // The encrypted backup remains in state=draft if staging fails or the app exits.
-    stage_snapshot(&state.attachments_dir, sealed)
+    let mut snapshot = stage_snapshot(&state.attachments_dir, sealed)?;
+    // A restored compose gets its own autosaved identity. The retained backup never owns it.
+    snapshot.source_drafts.clear();
+    Ok(snapshot)
 }
 
 #[tauri::command]
@@ -360,9 +464,21 @@ pub async fn reschedule_controlled_send(
 pub async fn delete_controlled_send(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
+    runtime: State<'_, SendControlRuntime>,
     id: String,
     revision: i64,
 ) -> Result<()> {
+    let job = state.store.get_scheduled_send(&id)?.ok_or_else(conflict)?;
+    if job.revision != revision {
+        return Err(conflict());
+    }
+    if job.state == "sent" {
+        cleanup_delivered_sources(&state, &runtime, &job, |removed| {
+            let _ = app.emit("send-controls-drafts-removed", removed);
+            let _ = app.emit(crate::events::MAIL_PENDING_OPS_CHANGED, ());
+        })
+        .await?;
+    }
     if !state.store.delete_scheduled_send(&id, revision)? {
         return Err(conflict());
     }
@@ -436,6 +552,7 @@ pub fn setup(app: &tauri::AppHandle) -> Result<()> {
     state.store.recover_scheduled_sends(now_timestamp())?;
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
+        let mut next_cleanup = tokio::time::Instant::now();
         loop {
             tokio::time::sleep(Duration::from_millis(250)).await;
             let state = app.state::<AppState>();
@@ -455,6 +572,20 @@ pub fn setup(app: &tauri::AppHandle) -> Result<()> {
                 .await;
                 let _ = app.emit(CHANGED, ());
                 let _ = app.emit(crate::events::MAIL_PENDING_OPS_CHANGED, ());
+                next_cleanup = tokio::time::Instant::now();
+            }
+            // Only draft cleanup is retried, never transport. This also covers a crash after acceptance.
+            if tokio::time::Instant::now() >= next_cleanup {
+                next_cleanup = tokio::time::Instant::now() + Duration::from_secs(15);
+                if let Ok(jobs) = state.store.list_scheduled_sends() {
+                    for job in jobs.into_iter().filter(|job| job.state == "sent") {
+                        let _ = cleanup_delivered_sources(&state, &runtime, &job, |removed| {
+                            let _ = app.emit("send-controls-drafts-removed", removed);
+                            let _ = app.emit(crate::events::MAIL_PENDING_OPS_CHANGED, ());
+                        })
+                        .await;
+                    }
+                }
             }
         }
     });
@@ -557,6 +688,7 @@ mod tests {
     }
     fn snapshot() -> SendSnapshot {
         SendSnapshot {
+            source_drafts: vec![],
             account_id: "a".into(),
             to: vec!["to@example.com".into()],
             cc: vec![],
@@ -572,6 +704,116 @@ mod tests {
             quoted_reply_html: "<blockquote>quote</blockquote>".into(),
             attachments: vec![],
         }
+    }
+
+    #[tokio::test]
+    async fn source_ownership_survives_unmount_and_delivery_cleanup_is_durable() {
+        let (mut state, root) = fixture();
+        let db = root.join("ownership.sqlite");
+        let persisted = Store::open(&db).unwrap();
+        persisted
+            .insert_account(&state.store.get_account("a").unwrap().unwrap())
+            .unwrap();
+        state.store = persisted.into();
+        let message: pebble_core::Message = serde_json::from_value(serde_json::json!({
+            "id":"source", "account_id":"a", "remote_id":"", "message_id_header":null,
+            "in_reply_to":null, "references_header":null, "thread_id":null, "subject":"draft",
+            "snippet":"", "from_address":"from@example.com", "from_name":"", "to_list":[],
+            "cc_list":[], "bcc_list":[], "body_text":"draft", "body_html_raw":"", "has_attachments":false,
+            "is_read":true, "is_starred":false, "is_draft":true, "date":1, "remote_version":null,
+            "is_deleted":false, "deleted_at":null, "created_at":1, "updated_at":1
+        })).unwrap();
+        state.store.insert_message(&message, &[]).unwrap();
+        let runtime = SendControlRuntime::default();
+        let mut input = snapshot();
+        input.source_drafts.push(SourceDraft {
+            account_id: "a".into(),
+            id: "source".into(),
+            remote_id: Some("untrusted-input".into()),
+        });
+        let queued = queue_snapshot(
+            &state,
+            &runtime,
+            input.clone(),
+            new_id(),
+            Some(200),
+            None,
+            100,
+        )
+        .unwrap();
+        assert!(ensure_source_draft_available(&state, "a", "source").is_err());
+        assert!(queue_snapshot(
+            &state,
+            &runtime,
+            input.clone(),
+            new_id(),
+            Some(200),
+            None,
+            100
+        )
+        .is_err());
+        // Cancellation releases the original; the restored backup cannot itself dispatch.
+        assert!(state
+            .store
+            .restore_scheduled_send(&queued.id, 0, 110)
+            .unwrap());
+        assert!(ensure_source_draft_available(&state, "a", "source").is_ok());
+        assert!(!state
+            .store
+            .reschedule_send(&queued.id, 1, 300, 110)
+            .unwrap());
+        let next = queue_snapshot(&state, &runtime, input, new_id(), Some(200), None, 110).unwrap();
+        assert!(state.store.claim_scheduled_send(&next.id, 0, 200).unwrap());
+        assert!(state
+            .store
+            .finish_scheduled_send(&next.id, 1, true, 201)
+            .unwrap());
+        // Simulate process death after acceptance, before Compose or cleanup runs.
+        drop(state);
+        let (tx, _) = std::sync::mpsc::channel();
+        let state = AppState::new(
+            Store::open(&db).unwrap(),
+            pebble_search::TantivySearch::open_in_memory().unwrap(),
+            pebble_crypto::CryptoService::from_key([5; 32]),
+            tx,
+            root.clone(),
+        );
+        let delivered = state.store.get_scheduled_send(&next.id).unwrap().unwrap();
+        assert!(ensure_source_draft_available(&state, "a", "source").is_err());
+        // No mounted Compose or UI callback participates in delivery cleanup.
+        let removed = Mutex::new(Vec::<String>::new());
+        cleanup_delivered_sources(&state, &SendControlRuntime::default(), &delivered, |ids| {
+            removed.lock().unwrap().extend(ids)
+        })
+        .await
+        .unwrap();
+        assert!(removed.lock().unwrap().iter().any(|id| id == "source"));
+        assert!(state.store.get_message("source").unwrap().is_none());
+        let receipt = Store::open(&db)
+            .unwrap()
+            .get_scheduled_send(&next.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            unseal(&state, &receipt).unwrap().cleaned_sources,
+            vec![("a".into(), "source".into())]
+        );
+        assert_eq!(state.store.recover_scheduled_sends(250).unwrap(), 0);
+        cleanup_delivered_sources(&state, &SendControlRuntime::default(), &receipt, |_| {
+            panic!("cleanup must not repeat after recovery")
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            state
+                .store
+                .get_scheduled_send(&next.id)
+                .unwrap()
+                .unwrap()
+                .state,
+            "sent"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
     fn job(state: &AppState) -> ScheduledSend {
         ScheduledSend {

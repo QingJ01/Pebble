@@ -36,6 +36,18 @@ pub fn validate_future(due_at: i64, now: i64) -> Result<()> {
 }
 
 impl Store {
+    pub fn scheduled_source_draft_ids(&self, account_id: &str) -> Result<Vec<String>> {
+        self.with_read(|conn| {
+            let mut query = conn.prepare(
+                "SELECT id FROM messages WHERE account_id=?1 AND is_draft=1 AND is_deleted=0",
+            )?;
+            let rows = query
+                .query_map([account_id], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
     pub fn insert_scheduled_send(&self, job: &ScheduledSend, now: i64) -> Result<()> {
         validate_future(job.due_at, now)?;
         self.with_write(|conn| {
@@ -92,11 +104,26 @@ impl Store {
 
     pub fn reschedule_send(&self, id: &str, revision: i64, due_at: i64, now: i64) -> Result<bool> {
         validate_future(due_at, now)?;
-        self.with_write(|conn| Ok(conn.execute("UPDATE scheduled_sends SET state='pending',kind='scheduled',due_at=?3,revision=revision+1,updated_at=?4 WHERE id=?1 AND revision=?2 AND state IN ('pending','draft')",params![id,revision,due_at,now])? == 1))
+        self.with_write(|conn| Ok(conn.execute("UPDATE scheduled_sends SET state='pending',kind='scheduled',due_at=?3,revision=revision+1,updated_at=?4 WHERE id=?1 AND revision=?2 AND state='pending'",params![id,revision,due_at,now])? == 1))
     }
 
     pub fn delete_scheduled_send(&self, id: &str, revision: i64) -> Result<bool> {
         self.with_write(|conn| Ok(conn.execute("DELETE FROM scheduled_sends WHERE id=?1 AND revision=?2 AND state IN ('draft','sent')",params![id,revision])? == 1))
+    }
+
+    /// Internal encrypted cleanup receipts do not change the user-visible delivery revision.
+    pub fn update_delivered_send_payload(
+        &self,
+        id: &str,
+        revision: i64,
+        payload: &[u8],
+    ) -> Result<()> {
+        self.with_write(|conn| {
+            if conn.execute("UPDATE scheduled_sends SET payload=?3 WHERE id=?1 AND revision=?2 AND state='sent'", params![id, revision, payload])? != 1 {
+                return Err(PebbleError::Validation("Delivered message changed during draft cleanup".into()));
+            }
+            Ok(())
+        })
     }
 
     pub fn scheduled_send_exit_count(&self) -> Result<usize> {
@@ -215,11 +242,15 @@ mod tests {
         assert!(store.restore_scheduled_send("a", 0, 150).unwrap());
         assert!(!store.claim_scheduled_send("a", 0, 500).unwrap());
         assert!(!store.reschedule_send("a", 0, 400, 200).unwrap());
-        assert!(store.reschedule_send("a", 1, 400, 200).unwrap());
+        assert!(
+            !store.reschedule_send("a", 1, 400, 200).unwrap(),
+            "a restored backup must never compete with the editable compose"
+        );
         assert_eq!(
             store.get_scheduled_send("a").unwrap().unwrap().payload,
             vec![1, 2, 3]
         );
         assert!(!store.delete_scheduled_send("a", 2).unwrap());
+        assert!(store.delete_scheduled_send("a", 1).unwrap());
     }
 }

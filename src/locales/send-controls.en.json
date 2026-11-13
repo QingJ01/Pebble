@@ -1,5 +1,6 @@
 {
   "sendControls": {
+    "queueReplyUnknown": "Checking whether this message was queued. Keep this copy closed to further sends until the queue can be checked.",
     "title": "Scheduled sends",
     "policy": "Scheduling is local. Pebble must be running (including in the tray) to send. After restarting, overdue messages and interrupted sends need your review; they are never sent late automatically.",
     "undoLabel": "Undo Send delay",

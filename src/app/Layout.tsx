@@ -1,5 +1,7 @@
 import TitleBar from "../components/TitleBar";
 import SenderIdentityNotice from "../components/SenderIdentityNotice";
+import SendControlsStatus from "../features/compose/SendControlsStatus";
+import SendControlExitGuard from "../features/compose/SendControlExitGuard";
 import Sidebar from "../components/Sidebar";
 import StatusBar from "../components/StatusBar";
 import ComposeFAB from "../components/ComposeFAB";
@@ -134,6 +136,7 @@ export default function Layout() {
       <AppBackground image={backgroundImage} />
       <TitleBar />
       <SenderIdentityNotice />
+      <SendControlsStatus />
       <div className="flex flex-1 min-h-0 app-shell-content">
         <Sidebar />
         <main className="flex-1 min-w-0 overflow-auto scroll-region app-main-scroll" style={{ position: "relative" }}>
@@ -156,6 +159,7 @@ export default function Layout() {
       <StatusBar />
       <CommandPalette />
       <ToastContainer />
+      <SendControlExitGuard />
       <GlobalConfirmDialog />
     </div>
   );
