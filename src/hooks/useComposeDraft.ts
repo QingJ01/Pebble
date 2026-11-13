@@ -11,6 +11,7 @@ const MAX_AUTOSAVE_RETRIES = 3;
 const AUTOSAVE_RETRY_BASE_DELAY_MS = 1000;
 
 export interface DraftData {
+  quotedReplyHtml?: string;
   id?: string;
   inReplyTo?: string;
   accountId: string;

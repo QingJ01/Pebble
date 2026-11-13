@@ -1,0 +1,10 @@
+.send-controls-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 20px; background: var(--color-bg-secondary); border-bottom: 1px solid var(--color-border); }
+.send-controls-options { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 8px 20px; }
+.send-controls-time { display: flex; flex-direction: column; gap: 4px; }
+.send-controls-time small { color: var(--color-text-secondary); }
+.send-controls-panel { padding: 20px; overflow: auto; height: 100%; color: var(--color-text-primary); }
+.send-controls-panel article { padding: 12px; margin: 12px 0; border: 1px solid var(--color-border); border-radius: 6px; }
+.send-controls-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.send-controls-panel button, .send-controls-banner button, .send-controls-options button { cursor: pointer; padding: 5px 10px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg); color: var(--color-text-primary); }
+.send-controls-panel button:disabled, .send-controls-banner button:disabled, .send-controls-options button:disabled { cursor: default; opacity: .5; }
+.send-controls-options select, .send-controls-time input { padding: 5px; color: var(--color-text-primary); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 4px; }
