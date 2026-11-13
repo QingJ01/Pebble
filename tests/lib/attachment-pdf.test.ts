@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getDocument, PDFWorker } from "pdfjs-dist";
+import { getDocument, PDFWorker } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { BundledPdfDataFactory, loadAttachmentPdf, previewAnnotationMode } from "../../src/lib/attachment-pdf";
 
-vi.mock("pdfjs-dist", () => ({ AnnotationMode: { DISABLE: 0 }, getDocument: vi.fn(), PDFWorker: { create: vi.fn() } }));
+vi.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({ AnnotationMode: { DISABLE: 0 }, getDocument: vi.fn(), PDFWorker: { create: vi.fn() } }));
 afterEach(() => { vi.clearAllMocks(); vi.unstubAllGlobals(); });
 
 describe("offline canvas PDF security settings", () => {

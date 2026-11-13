@@ -895,7 +895,7 @@ pub async fn replay_managed_move(
                     .filter(|h| !h.trim().is_empty())
                 {
                     match outlook
-                        .find_managed_message(&target.remote_id, header)
+                        .recover_managed_move(&message.remote_id, &target.remote_id, header)
                         .await?
                     {
                         Some(id) => id,

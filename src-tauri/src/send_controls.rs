@@ -813,6 +813,7 @@ mod tests {
                 .state,
             "sent"
         );
+        drop(state);
         std::fs::remove_dir_all(root).unwrap();
     }
     fn job(state: &AppState) -> ScheduledSend {
