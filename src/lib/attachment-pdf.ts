@@ -1,4 +1,4 @@
-import { AnnotationMode, getDocument, PDFWorker } from "pdfjs-dist";
+import { AnnotationMode, getDocument, PDFWorker } from "pdfjs-dist/legacy/build/pdf.mjs";
 
 const fonts = import.meta.glob<string>("../../node_modules/pdfjs-dist/standard_fonts/*.{pfb,ttf}", { eager: true, query: "?url&no-inline", import: "default" });
 const cmaps = import.meta.glob<string>("../../node_modules/pdfjs-dist/cmaps/*.bcmap", { eager: true, query: "?url&no-inline", import: "default" });

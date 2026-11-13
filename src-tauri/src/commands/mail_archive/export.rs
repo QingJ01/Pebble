@@ -403,11 +403,39 @@ impl AtomicExport {
     fn publish(mut self) -> Result<()> {
         self.writer.flush().map_err(io_error)?;
         self.writer.get_ref().sync_all().map_err(io_error)?;
-        // Linking is atomic and cannot overwrite an existing name (unlike rename
-        // on Unix). Both paths are in the user-chosen directory/filesystem.
-        std::fs::hard_link(&self.temporary, &self.target).map_err(io_error)?;
+        publish_no_replace(&self.temporary, &self.target, |from, to| {
+            std::fs::hard_link(from, to)
+        })
+        .map_err(io_error)?;
         Ok(())
     }
+}
+
+fn publish_no_replace(
+    source: &Path,
+    target: &Path,
+    link: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    if link(source, target).is_ok() {
+        return Ok(());
+    }
+    // FAT/exFAT cannot hard-link. Reserve a new target before copying so a
+    // concurrent export or an existing file can never be overwritten.
+    let mut input = File::open(source)?;
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut output = options.open(target)?;
+    let result = std::io::copy(&mut input, &mut output).and_then(|_| output.sync_all());
+    drop(output);
+    if result.is_err() {
+        let _ = std::fs::remove_file(target);
+    }
+    result
 }
 impl Drop for AtomicExport {
     fn drop(&mut self) {
@@ -561,6 +589,21 @@ mod tests {
             assert_eq!(meta.attachments[1].sha256, fingerprint(&[0, 1, 2, 255]));
         }
         assert_eq!(std::fs::read_dir(output).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn exports_to_filesystems_without_hard_links_without_overwriting() {
+        let fixture = Fixture::new();
+        let source = fixture.root.join("source.tmp");
+        let target = fixture.root.join("export.eml");
+        std::fs::write(&source, b"complete MIME content").unwrap();
+        let unsupported =
+            |_: &Path, _: &Path| Err(std::io::Error::from(std::io::ErrorKind::Unsupported));
+        publish_no_replace(&source, &target, unsupported).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"complete MIME content");
+        std::fs::write(&source, b"replacement").unwrap();
+        assert!(publish_no_replace(&source, &target, unsupported).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"complete MIME content");
     }
 
     #[test]

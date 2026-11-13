@@ -12,6 +12,30 @@ fn folder_url(id: Option<&str>, create: bool) -> reqwest::Url {
 }
 
 impl OutlookProvider {
+    /// A destination Message-ID match is recovery evidence only when the
+    /// original resource is gone, not when the destination holds another copy.
+    pub async fn recover_managed_move(
+        &self,
+        source_id: &str,
+        target: &str,
+        message_id: &str,
+    ) -> Result<Option<String>> {
+        let mut url = reqwest::Url::parse(&format!("{GRAPH_API_BASE}/messages")).unwrap();
+        url.path_segments_mut().unwrap().push(source_id);
+        url.query_pairs_mut().append_pair("$select", "id");
+        let response = self.get(url.as_str()).await?;
+        if response.status().is_success() {
+            return Ok(None);
+        }
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return self.find_managed_message(target, message_id).await;
+        }
+        Err(PebbleError::Network(format!(
+            "Graph move source check failed (status {})",
+            response.status()
+        )))
+    }
+
     #[cfg(test)]
     pub(super) fn test_folder_url(&self, url: &str) -> String {
         let endpoint = self.test_folder_endpoint.read().unwrap().clone();
@@ -383,6 +407,42 @@ mod tests {
         assert!(provider.list_managed_folders().await.is_err());
         assert_eq!(server.join().unwrap().len(), 1);
     }
+    #[tokio::test]
+    async fn graph_only_adopts_destination_copy_when_original_resource_is_gone() {
+        let (endpoint, server) = server(vec![
+            (200, r#"{"id":"source/id"}"#),
+            (403, "{}"),
+            (404, "{}"),
+            (
+                200,
+                r#"{"value":[{"id":"moved-id","internetMessageId":"<m@example.invalid>"}]}"#,
+            ),
+        ]);
+        let provider = provider(endpoint);
+        assert!(provider
+            .recover_managed_move("source/id", "target", "<m@example.invalid>")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(provider
+            .recover_managed_move("source/id", "target", "<m@example.invalid>")
+            .await
+            .is_err());
+        assert_eq!(
+            provider
+                .recover_managed_move("source/id", "target", "<m@example.invalid>")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("moved-id")
+        );
+        let requests = server.join().unwrap();
+        assert!(requests[..3]
+            .iter()
+            .all(|request| request.starts_with("GET /v1.0/me/messages/source%2Fid?")));
+        assert!(requests[3].starts_with("GET /v1.0/me/mailFolders/target/messages?"));
+    }
+
     #[tokio::test]
     async fn graph_recovers_moved_identity_but_rejects_ambiguous_matches() {
         let (endpoint, server) = server(vec![
