@@ -29,6 +29,7 @@
     "dompurify": "^3.4.1",
     "i18next": "^26.0.3",
     "lucide-react": "^0.500.0",
+    "pdfjs-dist": "6.4.299",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-i18next": "^17.0.2",

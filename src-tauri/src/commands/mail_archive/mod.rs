@@ -561,6 +561,12 @@ mod tests {
             (3, 2, 1)
         );
         assert_eq!(result.errors.len(), 1);
+        // Cancellation must retain a newly committed message, independently of
+        // the account-wide duplicate receipts created by the first import.
+        let mut fresh = Vec::new();
+        codec::write_mbox(&mut fresh, b"Subject: fresh first\n\nnew body\n").unwrap();
+        codec::write_mbox(&mut fresh, b"Subject: fresh second\n\nnew body\n").unwrap();
+        std::fs::write(&path, fresh).unwrap();
         let archive = fixture
             .store
             .create_mail_archive("account", "Cancel")

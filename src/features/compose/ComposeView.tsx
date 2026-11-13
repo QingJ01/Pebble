@@ -28,7 +28,7 @@ import { ModeButton, EditorToolbar, MarkdownToolbar, composeStyles } from "./Com
 import { subjectAfterAddingAttachments } from "./attachment-subject";
 import { isValidEmailAddress, mergePendingRecipient } from "./recipient-utils";
 import { queryClient } from "@/lib/query-client";
-import { queueControlledSend, restoreControlledSend, deleteControlledSend, type ControlledSend } from "@/lib/send-controls-api";
+import { queueControlledSend, restoreControlledSend, deleteControlledSend, listControlledSends, type ControlledSend } from "@/lib/send-controls-api";
 import { useControlledSends } from "./ScheduledSendsView";
 import { countdownSeconds, scheduledInstant } from "./send-control-time";
 import { loadUndoSeconds } from "./send-controls-settings";
@@ -70,6 +70,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [undoBusy, setUndoBusy] = useState(false);
   const [reviewBeforeRetry, setReviewBeforeRetry] = useState(false);
+  const [queueReplyUnknown, setQueueReplyUnknown] = useState(false);
   const sendRequestIdRef = useRef<string | null>(null);
   const controlledSends = useControlledSends(Boolean(pendingSend));
 
@@ -370,7 +371,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
     if (job?.state === "sent") {
       setPendingSend(null);
       void (async () => {
-        await cleanupSavedDrafts("send");
+        // Native queue ownership cleans source drafts even after navigation/restart.
         await cleanupAllStagedAttachments();
         clearDraftStorage();
         useComposeStore.getState().setComposeDirty(false);
@@ -415,10 +416,42 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
     } finally { setUndoBusy(false); }
   }
 
+  async function resolveQueueReply() {
+    try {
+      const jobs = await listControlledSends();
+      const job = jobs.find((item) => item.id === sendRequestIdRef.current);
+      setQueueReplyUnknown(false);
+      if (job) {
+        setPendingSend(job);
+        // Use the reply itself when the query cache has not caught up yet.
+        await queryClient.invalidateQueries({ queryKey: ["send-controls"] });
+      } else {
+        sendInProgressRef.current = false;
+        setSendInProgress(false);
+        resumeDraftSaves();
+        setSendError(t("sendControls.error"));
+      }
+    } catch {
+      // A lost IPC reply is not evidence that queueing failed. Keep the copy inert.
+      setQueueReplyUnknown(true);
+    }
+  }
+
   async function handleSend(scheduleAt?: number) {
     if (sendInProgressRef.current || discardInProgressRef.current) return;
     if (reviewBeforeRetry) {
       if (!(await useConfirmStore.getState().confirm({ title: t("sendControls.review"), message: t("sendControls.restoreWarning") }))) return;
+      try {
+        const jobs = await listControlledSends();
+        const job = jobs.find((item) => item.id === sendRequestIdRef.current);
+        if (job?.state === "review") {
+          const restored = await restoreControlledSend(job);
+          await Promise.allSettled(restored.attachments.map((attachment) => cleanupStagedComposeAttachment(attachment.path)));
+        } else if (job && job.state !== "draft") {
+          setSendError(t("sendControls.error"));
+          return;
+        }
+      } catch { setSendError(t("sendControls.error")); return; }
       setReviewBeforeRetry(false);
       sendRequestIdRef.current = null;
     }
@@ -491,6 +524,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
         await cancelPendingDraftSaves();
         const requestId = sendRequestIdRef.current ??= crypto.randomUUID();
         const job = await queueControlledSend({
+          sourceDrafts: Object.entries(draftIdsByAccountRef.current).map(([accountId, id]) => ({ accountId, id })),
           accountId: fromAccountId, to: finalTo, cc: finalCc, bcc: finalBcc,
           subject: finalSubject, bodyText, bodyHtml: outgoingBodyHtml || undefined,
           inReplyTo, editorMode, composeMode: composeMode ?? "new",
@@ -499,7 +533,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
         }, scheduleAt !== undefined ? { dueAt: scheduleAt } : { undoSeconds }, requestId);
         if (scheduleAt !== undefined) {
           // The independently encrypted scheduled copy now owns its attachment lifetime.
-          await cleanupSavedDrafts("schedule");
+          // Source drafts stay protected by durable queue ownership until delivery/cancellation.
           await cleanupAllStagedAttachments();
           clearDraftStorage();
           useComposeStore.getState().setComposeDirty(false);
@@ -507,10 +541,8 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
           closeCompose();
         } else { setPendingSend(job); }
       } catch {
-        sendInProgressRef.current = false;
-        setSendInProgress(false);
-        resumeDraftSaves();
-        setSendError(t("sendControls.error"));
+        setQueueReplyUnknown(true);
+        await resolveQueueReply();
       }
       return;
     }
@@ -624,6 +656,10 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
         <button disabled={undoBusy} onClick={() => void handleUndo()}>{t("sendControls.undo")}</button>
         <small>{t("sendControls.undoHint")}</small>
         {sendError && <p role="alert">{sendError}</p>}
+      </div>}
+      {queueReplyUnknown && <div role="alert" className="send-controls-banner">
+        {t("sendControls.queueReplyUnknown")}
+        <button onClick={() => void resolveQueueReply()}>{t("sendControls.refresh")}</button>
       </div>}
       <div inert={sendInProgress} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
       {/* Header */}

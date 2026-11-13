@@ -310,6 +310,9 @@ async fn replay_pending_mail_op(
         "move_to_folder" => {
             replay_remote_move_to_folder(state, account.provider, &message, &payload).await?;
         }
+        "managed_move" => {
+            super::folder_management::replay_managed_move(state, &message, &payload).await?;
+        }
         "send" => {
             if !remote_side_effect_already_applied(op)? {
                 replay_remote_send(state, account.provider.clone(), &account, &message).await?;
@@ -757,6 +760,8 @@ fn apply_pending_local_commit(
                 .ok_or_else(|| PebbleError::Internal("No move target folder".to_string()))?;
             store.move_message_to_folder(&op.message_id, &folder_id)?;
         }
+        // The provider-aware replay commits membership and destination identity atomically.
+        "managed_move" => {}
         "send" => {
             if compose::send_finalize_deletes_placeholder(&payload) {
                 store.complete_outgoing_send(&op.message_id, &op.id, None)?;

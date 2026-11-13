@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { useMailStore } from "@/stores/mail.store";
+import { threadMessagesQueryKey } from "@/hooks/queries/useThreadMessagesQuery";
 import { useTranslation } from "react-i18next";
 import { isComposeDirty } from "@/stores/compose.store";
 import { useSendControlsStore } from "@/stores/send-controls.store";
@@ -16,6 +19,23 @@ export default function SendControlsStatus() {
   const composeUndoId = useSendControlsStore((s) => s.composeUndoId);
   const query = useControlledSends();
   const client = useQueryClient();
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen<string[]>("send-controls-drafts-removed", ({ payload }) => {
+      const ids = new Set(payload);
+      useMailStore.setState((state) => {
+        const messages = state.selectedThreadId ? client.getQueryData<{id: string}[]>(threadMessagesQueryKey(state.selectedThreadId)) : undefined;
+        return {
+          selectedMessageId: ids.has(state.selectedMessageId ?? "") ? null : state.selectedMessageId,
+          selectedThreadId: ids.has(state.selectedThreadId ?? "") || (messages?.length && messages.every((message) => ids.has(message.id))) ? null : state.selectedThreadId,
+          selectedMessageIds: new Set([...state.selectedMessageIds].filter((id) => !ids.has(id))),
+        };
+      });
+      for (const key of ["messages", "message", "threads", "threadMessages", "folders", "folder-unread-counts"]) void client.invalidateQueries({ queryKey: [key] });
+    }).then((fn) => { if (disposed) fn(); else unlisten = fn; }).catch(() => {});
+    return () => { disposed = true; unlisten?.(); };
+  }, [client]);
   const [now, setNow] = useState(Date.now);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);

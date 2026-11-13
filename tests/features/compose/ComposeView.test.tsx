@@ -9,13 +9,14 @@ import {
   deleteDraft,
   stageComposeAttachment,
 } from "../../../src/lib/api";
-import { queueControlledSend, restoreControlledSend } from "../../../src/lib/send-controls-api";
+import { listControlledSends, queueControlledSend, restoreControlledSend } from "../../../src/lib/send-controls-api";
 
 vi.mock("../../../src/features/compose/ScheduledSendsView", () => ({
   useControlledSends: () => ({ data: [], refetch: vi.fn() }),
 }));
 vi.mock("../../../src/lib/send-controls-api", () => ({
   queueControlledSend: vi.fn(), restoreControlledSend: vi.fn(), deleteControlledSend: vi.fn().mockResolvedValue(undefined),
+  listControlledSends: vi.fn().mockResolvedValue([]),
 }));
 
 const mocks = vi.hoisted(() => ({
@@ -345,7 +346,7 @@ describe("ComposeView", () => {
     expect(mocks.mutate).not.toHaveBeenCalled();
   });
 
-  it("persists the chosen local schedule before removing the original draft and closing", async () => {
+  it("persists the chosen local schedule with durable source ownership before closing", async () => {
     const due = new Date(Date.now() + 86400000);
     const value = `${due.getFullYear()}-${String(due.getMonth()+1).padStart(2,"0")}-${String(due.getDate()).padStart(2,"0")}T12:30`;
     const dueAt = new Date(value).getTime() / 1000;
@@ -356,8 +357,36 @@ describe("ComposeView", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "sendControls.schedule" })[1]);
     await waitFor(() => expect(mocks.closeCompose).toHaveBeenCalledOnce());
     expect(queueControlledSend).toHaveBeenCalledWith(expect.objectContaining({ editorMode: "rich", bodyText: "Hello" }), { dueAt }, expect.any(String));
-    expect(deleteDraft).toHaveBeenCalledWith("account-1", "draft-1");
+    expect(deleteDraft).not.toHaveBeenCalled();
     expect(mocks.mutate).not.toHaveBeenCalled();
+  });
+
+  it("keeps the original inert while an IPC-lost queue reply cannot be reconciled", async () => {
+    localStorage.setItem("pebble-undo-send-seconds", "10");
+    vi.mocked(queueControlledSend).mockRejectedValueOnce(new Error("IPC reply lost"));
+    vi.mocked(listControlledSends).mockRejectedValueOnce(new Error("offline"));
+    render(<ComposeView />);
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByText("sendControls.queueReplyUnknown");
+    expect((screen.getByRole("button", { name: "Sending..." }) as HTMLButtonElement).disabled).toBe(true);
+    expect(mocks.resumeDraftSaves).not.toHaveBeenCalled();
+    expect(mocks.mutate).not.toHaveBeenCalled();
+    expect(deleteDraft).not.toHaveBeenCalled();
+  });
+
+  it("reconciles a lost reply to the queued job while preserving source draft ownership", async () => {
+    localStorage.setItem("pebble-undo-send-seconds", "10");
+    vi.mocked(queueControlledSend).mockImplementationOnce(async (_snapshot, _options, id) => {
+      vi.mocked(listControlledSends).mockResolvedValueOnce([{ id, accountId: "account-1", subject: "Subject", dueAt: Math.floor(Date.now()/1000)+10, revision:0, state:"pending", kind:"undo" }]);
+      throw new Error("IPC reply lost");
+    });
+    render(<ComposeView />);
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByRole("button", { name: "sendControls.undo" });
+    expect(queueControlledSend).toHaveBeenCalledOnce();
+    expect(mocks.resumeDraftSaves).not.toHaveBeenCalled();
+    expect(mocks.mutate).not.toHaveBeenCalled();
+    expect(deleteDraft).not.toHaveBeenCalled();
   });
 
   it("shows a user-visible error when sent draft cleanup fails", async () => {

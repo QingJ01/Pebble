@@ -140,11 +140,11 @@ impl Store {
     }
 
     pub fn archive_has_content(&self, archive_id: &str, fingerprint: &str) -> Result<bool> {
-        self.with_read(|conn| Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM mail_archive_messages WHERE archive_id=?1 AND fingerprint=?2)", params![archive_id,fingerprint], |r| r.get(0))?))
+        self.with_read(|conn| Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM mail_archive_messages m JOIN mail_archives a ON a.id=m.archive_id WHERE a.account_id=(SELECT account_id FROM mail_archives WHERE id=?1) AND m.fingerprint=?2)", params![archive_id,fingerprint], |r| r.get(0))?))
     }
 
     /// MIME, metadata and index either all commit, or none do. Duplicate scope is
-    /// the archive, not Message-ID or folder, so moving doesn't bypass detection.
+    /// the account's local archives, not Message-ID or folder.
     pub fn insert_archive_message(
         &self,
         archive_id: &str,
@@ -178,7 +178,7 @@ impl Store {
             let tx = conn.unchecked_transaction()?;
             let destination:bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM mail_archive_folders WHERE id=?1 AND archive_id=?2)",params![folder_id,archive_id],|r|r.get(0))?;
             if !destination { return Err(missing()); }
-            let existing:Option<Vec<u8>> = tx.query_row("SELECT raw_mime FROM mail_archive_messages WHERE archive_id=?1 AND fingerprint=?2",params![archive_id,fingerprint],|r|r.get(0)).optional()?;
+            let existing:Option<Vec<u8>> = tx.query_row("SELECT m.raw_mime FROM mail_archive_messages m JOIN mail_archives a ON a.id=m.archive_id WHERE a.account_id=(SELECT account_id FROM mail_archives WHERE id=?1) AND m.fingerprint=?2 LIMIT 1",params![archive_id,fingerprint],|r|r.get(0)).optional()?;
             if let Some(existing) = existing {
                 if existing != raw { return Err(PebbleError::Validation("Archive content fingerprint collision".into())); }
                 return Ok(false);
@@ -395,7 +395,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicates_use_full_content_per_archive_and_cross_archive_moves_fail() {
+    fn duplicates_use_full_content_per_account_and_cross_archive_moves_fail() {
         let (store, archive, folder) = setup();
         let raw = b"Subject: test\n\nbody";
         let hash = "a".repeat(64);
@@ -419,8 +419,24 @@ mod tests {
             .is_err());
         let other = store.create_mail_archive("account", "Other").unwrap();
         let other_folder = store.list_archive_folders(&other.id).unwrap().remove(0);
-        assert!(store
+        assert!(!store
             .insert_archive_message(&other.id, &other_folder.id, &hash, raw, &meta())
+            .unwrap());
+        assert!(store.archive_has_content(&other.id, &hash).unwrap());
+        let mut other_account = store.get_account("account").unwrap().unwrap();
+        other_account.id = "other-account".into();
+        other_account.email = "other@example.com".into();
+        store.insert_account(&other_account).unwrap();
+        let independent = store
+            .create_mail_archive(&other_account.id, "Independent")
+            .unwrap();
+        let independent_folder = store
+            .list_archive_folders(&independent.id)
+            .unwrap()
+            .remove(0);
+        assert!(!store.archive_has_content(&independent.id, &hash).unwrap());
+        assert!(store
+            .insert_archive_message(&independent.id, &independent_folder.id, &hash, raw, &meta())
             .unwrap());
         let row = store
             .list_archive_messages(&archive.id, None, "", 0)
