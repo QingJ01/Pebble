@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import { Download, Loader, Check } from "lucide-react";
@@ -7,6 +7,8 @@ import type { Attachment } from "@/lib/api";
 import { sanitizeFilename } from "@/lib/sanitizeFilename";
 import { attachmentVisual } from "./attachmentVisual";
 import { useToastStore } from "@/stores/toast.store";
+import { canPreviewAttachment, saveAllAttachments, type AttachmentSaveResult } from "@/lib/attachments-api";
+import AttachmentPreview from "./AttachmentPreview";
 
 interface Props {
   messageId: string;
@@ -28,12 +30,28 @@ function getErrorMessage(err: unknown): string | null {
 }
 
 export default function AttachmentList({ messageId }: Props) {
+  return <MessageAttachments key={messageId} messageId={messageId} />;
+}
+
+function MessageAttachments({ messageId }: Props) {
   const { t } = useTranslation();
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [loading, setLoading] = useState(true);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [downloadedPaths, setDownloadedPaths] = useState<Record<string, string>>({});
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  const [savingAll, setSavingAll] = useState(false);
+  const [saveResults, setSaveResults] = useState<AttachmentSaveResult[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const activeMessage = useRef(messageId);
+  activeMessage.current = messageId;
+  const previewable = attachments.filter((attachment) => canPreviewAttachment(attachment.mime_type));
+  useEffect(() => {
+    activeMessage.current = messageId;
+    return () => { activeMessage.current = ""; };
+  }, [messageId]);
 
   // Listen for download progress events
   useEffect(() => {
@@ -45,12 +63,14 @@ export default function AttachmentList({ messageId }: Props) {
         setDownloadProgress((prev) => ({ ...prev, [attachment_id]: pct }));
       },
     );
-    return () => { unlisten.then((fn) => fn()); };
+    return () => { void unlisten.then((fn) => fn()).catch(() => {}); };
   }, []);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setAttachments([]); setLoadError(false); setPreviewIndex(null); setSaveResults(null);
+    setDownloadedPaths({}); setDownloadProgress({}); setDownloadingId(null); setSavingAll(false);
 
     listAttachments(messageId)
       .then((list) => {
@@ -59,7 +79,7 @@ export default function AttachmentList({ messageId }: Props) {
         }
       })
       .catch(() => {
-        if (!cancelled) setAttachments([]);
+        if (!cancelled) { setAttachments([]); setLoadError(true); }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -68,9 +88,10 @@ export default function AttachmentList({ messageId }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [messageId]);
+  }, [messageId, loadAttempt]);
 
   async function handleDownload(attachment: Attachment) {
+    const currentMessage = messageId;
     setDownloadingId(attachment.id);
     try {
       const { downloadDir } = await import("@tauri-apps/api/path");
@@ -78,10 +99,10 @@ export default function AttachmentList({ messageId }: Props) {
       const safeName = sanitizeFilename(attachment.filename);
       const savePath = `${dir}/${safeName}`;
       const downloadedPath = await downloadAttachment(attachment.id, savePath);
+      if (activeMessage.current !== currentMessage) return;
       setDownloadedPaths((prev) => ({ ...prev, [attachment.id]: downloadedPath }));
       setDownloadProgress((prev) => { const next = { ...prev }; delete next[attachment.id]; return next; });
     } catch (err) {
-      console.error("Failed to download attachment:", err);
       const reason = getErrorMessage(err);
       useToastStore.getState().addToast({
         message: reason
@@ -90,11 +111,27 @@ export default function AttachmentList({ messageId }: Props) {
         type: "error",
       });
     } finally {
-      setDownloadingId(null);
+      if (activeMessage.current === currentMessage) setDownloadingId(null);
     }
   }
 
-  if (loading) return null;
+  async function handleSaveAll() {
+    const currentMessage = messageId;
+    setSavingAll(true); setSaveResults(null);
+    try {
+      const results = await saveAllAttachments(currentMessage);
+      if (activeMessage.current !== currentMessage || results === null) return;
+      setSaveResults(results);
+      setDownloadedPaths((previous) => ({ ...previous, ...Object.fromEntries(results.filter((result) => result.saved_path).map((result) => [result.attachment_id, result.saved_path!])) }));
+    } catch (error) {
+      useToastStore.getState().addToast({ message: t("attachmentViewer.saveFailed", { reason: getErrorMessage(error) ?? "" }), type: "error" });
+    } finally {
+      if (activeMessage.current === currentMessage) { setSavingAll(false); setDownloadProgress({}); }
+    }
+  }
+
+  if (loading) return <p role="status">{t("attachmentViewer.loadingAttachments")}</p>;
+  if (loadError) return <div role="alert">{t("attachmentViewer.listFailed")} <button onClick={() => setLoadAttempt((value) => value + 1)}>{t("attachmentViewer.retry")}</button></div>;
   if (attachments.length === 0) return null;
 
   return (
@@ -105,22 +142,21 @@ export default function AttachmentList({ messageId }: Props) {
         backgroundColor: "var(--color-bg)",
       }}
     >
-      <div
+      <div className="attachment-list-heading"><div
         style={{
           fontSize: "12px",
           fontWeight: "600",
           color: "var(--color-text-secondary)",
-          marginBottom: "8px",
           textTransform: "uppercase",
           letterSpacing: "0.5px",
         }}
       >
         {t("attachments.title")} ({attachments.length})
-      </div>
+      </div><button className="attachment-save-all" onClick={handleSaveAll} disabled={savingAll || downloadingId !== null}>{t(savingAll ? "attachmentViewer.savingAll" : "attachmentViewer.saveAll")}</button></div>
       <div className="attachment-list">
         {attachments.map((attachment) => {
           const { Icon, color } = attachmentVisual(attachment.mime_type, attachment.filename);
-          const isDownloading = downloadingId === attachment.id;
+          const isDownloading = downloadingId === attachment.id || (savingAll && downloadProgress[attachment.id] != null && downloadProgress[attachment.id] < 100);
 
           return (
             <div key={attachment.id} className="attachment-card">
@@ -129,7 +165,7 @@ export default function AttachmentList({ messageId }: Props) {
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="attachment-name" title={attachment.filename}>
-                  {attachment.filename}
+                  {canPreviewAttachment(attachment.mime_type) ? <button className="attachment-open-preview" onClick={() => setPreviewIndex(previewable.findIndex((item) => item.id === attachment.id))} aria-label={t("attachmentViewer.preview") + ": " + attachment.filename}>{attachment.filename}</button> : attachment.filename}
                 </div>
                 <div className="attachment-meta">{formatFileSize(attachment.size)}</div>
               </div>
@@ -141,7 +177,7 @@ export default function AttachmentList({ messageId }: Props) {
                 )}
                 <button
                   onClick={() => handleDownload(attachment)}
-                  disabled={isDownloading}
+                  disabled={downloadingId !== null || savingAll}
                   aria-label={t("attachments.download") + ": " + attachment.filename}
                   title={isDownloading ? t("attachments.downloading") : downloadedPaths[attachment.id] ? downloadedPaths[attachment.id] : t("attachments.download")}
                   className="attachment-download"
@@ -159,6 +195,11 @@ export default function AttachmentList({ messageId }: Props) {
           );
         })}
       </div>
+      {saveResults && <div className="attachment-save-results" role="status">
+        <p>{t("attachmentViewer.saveSummary", { saved: saveResults.filter((result) => result.saved_path).length, failed: saveResults.filter((result) => result.error).length })}</p>
+        <ul>{saveResults.map((result) => <li key={result.attachment_id}>{result.filename}: {result.saved_path ?? result.error}</li>)}</ul>
+      </div>}
+      {previewIndex !== null && previewable[previewIndex] && <AttachmentPreview attachments={previewable} index={previewIndex} onNavigate={setPreviewIndex} onClose={() => setPreviewIndex(null)} onDownload={handleDownload} downloading={downloadingId !== null || savingAll} />}
     </div>
   );
 }
