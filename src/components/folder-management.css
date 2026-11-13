@@ -1,0 +1,15 @@
+.folder-modal-backdrop { position: fixed; inset: 0; z-index: 1000; background: #0005; display: flex; align-items: center; justify-content: center; }
+.folder-modal { width: 420px; max-width: calc(100vw - 48px); max-height: calc(100vh - 64px); overflow: auto; padding: 24px; display: flex; flex-direction: column; gap: 14px; background: var(--color-bg); color: var(--color-text-primary); border: 1px solid var(--color-border); border-radius: 10px; box-shadow: 0 16px 60px #0004; }
+.folder-modal h2 { margin: 0; font-size: 16px; }
+.folder-modal label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.folder-modal input, .folder-modal select { padding: 8px; background: var(--color-bg); color: inherit; border: 1px solid var(--color-border); border-radius: 6px; width: 100%; }
+.folder-modal p { margin: 0; font-size: 12px; color: var(--color-text-secondary); white-space: pre-wrap; }
+.folder-modal [role="alert"] { color: var(--color-danger, #d14343); }
+.folder-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.folder-modal button { padding: 7px 12px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg); color: inherit; cursor: pointer; }
+.folder-modal button[type="submit"] { background: var(--color-accent); color: white; }
+.folder-modal button:disabled { opacity: .5; cursor: default; }
+.folder-modal form { display: flex; flex-direction: column; gap: 14px; }
+.folder-action-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--color-text-secondary); font-size: 12px; cursor: pointer; }
+.folder-action-button:hover { background: var(--color-bg-hover); }
+.folder-action-button:disabled { opacity: .45; cursor: default; }

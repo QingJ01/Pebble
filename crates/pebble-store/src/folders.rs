@@ -80,6 +80,13 @@ impl Store {
     /// when the folder already exists, or `folder.id` for a new insert).
     pub fn insert_folder(&self, folder: &Folder) -> Result<String> {
         self.with_write(|conn| {
+            // Provider discovery carries the parent's remote ID. Resolve it to
+            // a stable local ID (or accept a local ID for locally created folders).
+            let parent_id = folder.parent_id.as_deref().map(|parent| {
+                conn.query_row("SELECT id FROM folders WHERE account_id=?1 AND (id=?2 OR remote_id=?2) LIMIT 1",
+                    params![folder.account_id, parent], |r| r.get::<_, String>(0)).optional()
+                    .map(|id| id.unwrap_or_else(|| parent.to_owned()))
+            }).transpose()?;
             // Upsert: if a folder with the same (account_id, remote_id) exists,
             // update its name/role/sort_order instead of creating a duplicate.
             let existing: Option<String> = conn
@@ -92,7 +99,8 @@ impl Store {
 
             if let Some(existing_id) = existing {
                 conn.execute(
-                    "UPDATE folders SET name = ?1, folder_type = ?2, role = ?3, sort_order = ?4
+                    "UPDATE folders SET name = ?1, folder_type = ?2, role = ?3, sort_order = ?4,
+                     parent_id = ?6, is_system = ?7
                      WHERE id = ?5",
                     rusqlite::params![
                         folder.name,
@@ -100,6 +108,8 @@ impl Store {
                         folder.role.as_ref().map(folder_role_to_str),
                         folder.sort_order,
                         existing_id,
+                        parent_id,
+                        folder.is_system,
                     ],
                 )?;
                 Ok(existing_id)
@@ -114,7 +124,7 @@ impl Store {
                         folder.name,
                         folder_type_to_str(&folder.folder_type),
                         folder.role.as_ref().map(folder_role_to_str),
-                        folder.parent_id,
+                        parent_id,
                         folder.color,
                         folder.is_system as i32,
                         folder.sort_order,
