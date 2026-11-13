@@ -23,6 +23,8 @@ static LOG_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLo
 const TRAY_SHOW_ID: &str = "tray-show";
 const TRAY_HIDE_ID: &str = "tray-hide";
 const TRAY_QUIT_ID: &str = "tray-quit";
+#[cfg(target_os = "macos")]
+const APPLICATION_QUIT_ID: &str = "application-quit";
 const DEEP_LINK_NEW_URL_EVENT: &str = "deep-link://new-url";
 
 #[derive(Default)]
@@ -168,6 +170,56 @@ fn build_tray_menu<R: Runtime, M: Manager<R>>(
         .separator()
         .text(TRAY_QUIT_ID, quit_label)
         .build()
+}
+
+#[cfg(target_os = "macos")]
+fn setup_application_menu(app: &AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{AboutMetadata, MenuItem, PredefinedMenuItem, Submenu};
+
+    let package = app.package_info();
+    let menu = Menu::default(app)?;
+    let application_menu = Submenu::with_items(
+        app,
+        package.name.clone(),
+        true,
+        &[
+            &PredefinedMenuItem::about(
+                app,
+                None,
+                Some(AboutMetadata {
+                    name: Some(package.name.clone()),
+                    version: Some(package.version.to_string()),
+                    copyright: app.config().bundle.copyright.clone(),
+                    authors: app.config().bundle.publisher.clone().map(|p| vec![p]),
+                    ..Default::default()
+                }),
+            )?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::services(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::hide(app, None)?,
+            &PredefinedMenuItem::hide_others(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            // The predefined Quit action calls NSApplication::terminate directly,
+            // bypassing Tauri's cancellable ExitRequested event.
+            &MenuItem::with_id(
+                app,
+                APPLICATION_QUIT_ID,
+                format!("Quit {}", package.name),
+                true,
+                Some("CmdOrCtrl+Q"),
+            )?,
+        ],
+    )?;
+    menu.remove_at(0)?;
+    menu.prepend(&application_menu)?;
+    app.set_menu(menu)?;
+    app.on_menu_event(|app, event| {
+        if event.id().as_ref() == APPLICATION_QUIT_ID {
+            app.exit(0);
+        }
+    });
+    Ok(())
 }
 
 fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -421,6 +473,8 @@ pub fn run() {
             let (snooze_stop_tx, snooze_stop_rx) = std::sync::mpsc::channel::<()>();
             app.manage(AppState::new(store, search, crypto, snooze_stop_tx, attachments_dir));
             send_controls::setup(app.handle())?;
+            #[cfg(target_os = "macos")]
+            setup_application_menu(app.handle())?;
             log_startup_phase(startup_start, &mut startup_phase, "app state registered");
 
             // Start snooze watcher on the Tauri async runtime
