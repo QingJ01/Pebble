@@ -1,3 +1,10 @@
+#[path = "imap_folders.rs"]
+pub mod folder_management;
+
+pub fn decode_folder_name(remote_id: &str) -> String {
+    utf7_imap::decode_utf7_imap(remote_id.to_owned())
+}
+
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::future::Future;
@@ -1210,7 +1217,7 @@ impl ImapProvider {
             .as_mut()
             .ok_or_else(|| PebbleError::Network("Not connected".to_string()))?;
 
-        let mailboxes: Vec<(String, Vec<NameAttribute<'static>>)> = {
+        let mailboxes: Vec<(String, Option<String>, Vec<NameAttribute<'static>>)> = {
             let stream = sess
                 .list(None, Some("*"))
                 .await
@@ -1223,7 +1230,11 @@ impl ImapProvider {
                         .cloned()
                         .map(NameAttribute::into_owned)
                         .collect();
-                    (n.name().to_string(), attributes)
+                    (
+                        n.name().to_string(),
+                        n.delimiter().map(str::to_owned),
+                        attributes,
+                    )
                 })
                 .try_collect()
                 .await
@@ -1232,14 +1243,24 @@ impl ImapProvider {
 
         let mut folders: Vec<Folder> = mailboxes
             .into_iter()
-            .filter(|(_, attributes)| should_sync_listed_mailbox(attributes))
-            .map(|(raw_name, attributes)| {
+            .filter(|(_, _, attributes)| should_sync_listed_mailbox(attributes))
+            .map(|(raw_name, delimiter, attributes)| {
                 // Decode IMAP Modified UTF-7 folder name to UTF-8
                 let display_name = utf7_imap::decode_utf7_imap(raw_name.clone());
                 let role = detect_folder_role_from_attributes(&attributes)
                     .or_else(|| detect_folder_role(&raw_name))
                     .or_else(|| detect_folder_role(&display_name));
                 let sort_order = folder_sort_order(&role);
+                let parent_id = delimiter
+                    .as_deref()
+                    .filter(|d| !d.is_empty())
+                    .and_then(|d| raw_name.rsplit_once(d).map(|(parent, _)| parent.to_owned()));
+                let is_system = role.is_some()
+                    || attributes.iter().any(|a| {
+                        matches!(a, NameAttribute::All | NameAttribute::Flagged)
+                            || matches!(a,
+                    NameAttribute::Extension(value) if value.eq_ignore_ascii_case("\\Important"))
+                    });
                 Folder {
                     id: new_id(),
                     account_id: account_id.to_string(),
@@ -1247,9 +1268,9 @@ impl ImapProvider {
                     name: display_name,
                     folder_type: FolderType::Folder,
                     role,
-                    parent_id: None,
+                    parent_id,
                     color: None,
-                    is_system: true,
+                    is_system,
                     sort_order,
                 }
             })

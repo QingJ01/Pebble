@@ -1,4 +1,5 @@
 import { memo, useState } from "react";
+import MoveToButton from "./MoveToButton";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Star, Paperclip, Archive, LayoutGrid, ShieldAlert, RotateCcw } from "lucide-react";
@@ -240,6 +241,7 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
             boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
           }}
         >
+          <MoveToButton messages={[message]} />
           <button
             onClick={(e) => {
               e.stopPropagation();

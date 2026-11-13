@@ -1,3 +1,6 @@
+#[path = "gmail_folders.rs"]
+mod folder_management;
+
 use std::sync::RwLock;
 
 use async_trait::async_trait;
@@ -277,6 +280,8 @@ impl GmailProvider {
         url: &str,
         body: &T,
     ) -> Result<reqwest::Response> {
+        #[cfg(test)]
+        let url = self.test_request_url(url);
         self.client
             .post(url)
             .bearer_auth(self.token())
@@ -809,11 +814,20 @@ impl FolderProvider for GmailProvider {
             .await
             .map_err(|e| PebbleError::Network(format!("Failed to parse labels: {e}")))?;
         let labels = label_list.labels.unwrap_or_default();
-        Ok(labels
+        let mut folders: Vec<Folder> = labels
             .iter()
             .filter(|l| !is_hidden_gmail_label(&l.id))
             .map(gmail_label_to_folder)
-            .collect())
+            .collect();
+        for folder in &mut folders {
+            folder.parent_id = folder.name.rsplit_once('/').and_then(|(parent, _)| {
+                labels
+                    .iter()
+                    .find(|l| l.name == parent)
+                    .map(|l| l.id.clone())
+            });
+        }
+        Ok(folders)
     }
 
     async fn move_message(&self, remote_id: &str, to_folder_id: &str) -> Result<String> {
