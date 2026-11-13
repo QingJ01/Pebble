@@ -1,0 +1,26 @@
+{
+  "attachmentViewer": {
+    "preview": "Preview",
+    "close": "Close preview (Escape)",
+    "navigation": "Attachment navigation",
+    "previous": "Previous attachment (Left arrow)",
+    "next": "Next attachment (Right arrow)",
+    "keyboardHint": "← / → attachments · Esc close",
+    "loading": "Loading preview…",
+    "loadingAttachments": "Loading attachments…",
+    "listFailed": "Attachments could not be loaded.",
+    "failed": "This attachment could not be previewed.",
+    "fallback": "Retry, or use Download to save the file and open it in a trusted application.",
+    "retry": "Retry",
+    "staticPreview": "Safe, read-only preview. Images are static; PDF links, scripts, forms and external resources are disabled. Download for the original file.",
+    "pdfPages": "PDF page navigation",
+    "previousPage": "Previous page",
+    "nextPage": "Next page",
+    "pageCount": "Page {{page}} of {{count}}",
+    "pdfPage": "PDF page {{page}}",
+    "saveAll": "Save all…",
+    "savingAll": "Saving attachments…",
+    "saveFailed": "Could not save attachments: {{reason}}",
+    "saveSummary": "{{saved}} saved · {{failed}} failed. Existing files were not overwritten."
+  }
+}
