@@ -86,6 +86,22 @@ describe("folder management", () => {
 });
 
 describe("Move To", () => {
+  it.each(["t1", null])("closes a successfully moved thread detail with thread ID %s", async (threadId) => {
+    const message = {...messages[0],thread_id:threadId};
+    useMailStore.setState({selectedThreadId:threadId ?? message.id,selectedMessageId:message.id});
+    vi.mocked(moveMailMessages).mockResolvedValue({moved_ids:[message.id],failures:[]});
+    mount(<MoveToButton messages={[message]}/>);fireEvent.click(screen.getByRole("button",{name:"Move to folder"}));
+    await screen.findByRole("option",{name:"target"});fireEvent.change(screen.getByLabelText("Destination"),{target:{value:"target"}});fireEvent.click(screen.getByRole("button",{name:"Move"}));
+    await waitFor(()=>expect(useMailStore.getState().selectedThreadId).toBeNull());
+    expect(useMailStore.getState().selectedMessageId).toBeNull();
+  });
+  it("does not close another thread selected while a move is pending", async () => {
+    useMailStore.setState({selectedThreadId:"unrelated-thread"});
+    mount(<MoveToButton messages={messages}/>);fireEvent.click(screen.getByRole("button",{name:"Move to folder"}));
+    await screen.findByRole("option",{name:"target"});fireEvent.change(screen.getByLabelText("Destination"),{target:{value:"target"}});fireEvent.click(screen.getByRole("button",{name:"Move"}));
+    await waitFor(()=>expect(screen.queryByRole("dialog")).toBeNull());
+    expect(useMailStore.getState().selectedThreadId).toBe("unrelated-thread");
+  });
   it("retains failed batch selections and details, and reports only moved IDs", async () => {
     vi.mocked(moveMailMessages).mockResolvedValue({moved_ids:["m1"],failures:[{message_id:"m2",error:"offline; queued"}]});const onMoved=vi.fn();
     mount(<MoveToButton messages={messages} onMoved={onMoved}/>);fireEvent.click(screen.getByRole("button",{name:"Move to folder"}));

@@ -38,12 +38,14 @@ export function invalidateFolderViews(client: QueryClient) {
   }
 }
 
-export function clearMovedSelection(movedIds: string[]) {
+export function clearMovedSelection(movedIds: string[], selection: { id: string; thread_id?: string | null }[]) {
   if (!movedIds.length) return;
   const moved = new Set(movedIds);
   const state = useMailStore.getState();
+  const selectedThread = selection.filter((message) => (message.thread_id ?? message.id) === state.selectedThreadId);
   useMailStore.setState({
     selectedMessageIds: new Set([...state.selectedMessageIds].filter((id) => !moved.has(id))),
     ...(state.selectedMessageId && moved.has(state.selectedMessageId) ? { selectedMessageId: null } : {}),
+    ...(selectedThread.length && selectedThread.every((message) => moved.has(message.id)) ? { selectedThreadId: null } : {}),
   });
 }
