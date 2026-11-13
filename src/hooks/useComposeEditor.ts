@@ -23,6 +23,7 @@ interface UseComposeEditorArgs {
     editorMode?: EditorMode;
     rawSource?: string;
     richTextHtml?: string;
+    quotedReplyHtml?: string;
   } | null;
   prefillBody?: string;
 }
@@ -205,8 +206,9 @@ export function useComposeEditor({
     return buildComposeEditorContent({ composeMode, composeReplyTo, isReply, signatureHtml, prefillBody, t });
   }, [composeMode, composeReplyTo, isReply, t, signatureHtml, prefillBody]);
   const quotedReplyHtml = useMemo(() => {
+    if (restoredDraft?.quotedReplyHtml) return sanitizeComposeQuoteHtml(restoredDraft.quotedReplyHtml);
     return isReply ? buildReplyQuoteHtml({ composeReplyTo, t }) : "";
-  }, [composeReplyTo, isReply, t]);
+  }, [composeReplyTo, isReply, t, restoredDraft]);
 
   const editor = useEditor({
     immediatelyRender: false,

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import ScheduledSendsView from "@/features/compose/ScheduledSendsView";
 import { useTranslation } from "react-i18next";
 import {
   showTestNotification,
@@ -292,6 +293,8 @@ export default function GeneralTab() {
         />
         <span>{t("settings.showUnreadCount", "Show unread count badges in sidebar")}</span>
       </label>
+
+      <ScheduledSendsView />
 
       {navigator.userAgent.includes("Windows") && (
         <>

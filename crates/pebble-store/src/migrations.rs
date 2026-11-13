@@ -2,7 +2,7 @@ use pebble_core::{build_snippet, PebbleError, Result};
 use rusqlite::{Connection, OptionalExtension};
 use std::collections::HashSet;
 
-const CURRENT_VERSION: u32 = 18;
+const CURRENT_VERSION: u32 = 19;
 const ACCOUNT_COLOR_PRESETS: [&str; 12] = [
     "#0ea5e9", "#22c55e", "#f59e0b", "#8b5cf6", "#f43f5e", "#14b8a6", "#6366f1", "#f97316",
     "#06b6d4", "#ec4899", "#84cc16", "#3b82f6",
@@ -973,6 +973,25 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
                 ALTER TABLE accounts ADD COLUMN oauth_subject TEXT;",
             )?;
         }
+        set_schema_version(&tx, 18)?;
+        tx.commit()?;
+    }
+
+    if version < 19 {
+        let tx = conn.unchecked_transaction()?;
+        tx.execute_batch(
+            "CREATE TABLE scheduled_sends (
+                id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL CHECK(kind IN ('scheduled', 'undo')),
+                due_at INTEGER NOT NULL,
+                state TEXT NOT NULL CHECK(state IN ('pending', 'dispatching', 'review', 'draft', 'sent')),
+                payload BLOB NOT NULL,
+                revision INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL
+             );
+             CREATE INDEX scheduled_sends_due ON scheduled_sends(state, due_at);",
+        )?;
         set_schema_version(&tx, CURRENT_VERSION)?;
         tx.commit()?;
     }
