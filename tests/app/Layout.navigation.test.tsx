@@ -1,4 +1,6 @@
 vi.mock("../../src/components/SenderIdentityNotice", () => ({ default: () => null }));
+vi.mock("../../src/features/compose/SendControlsStatus", () => ({ default: () => null }));
+vi.mock("../../src/features/compose/SendControlExitGuard", () => ({ default: () => null }));
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Layout from "../../src/app/Layout";

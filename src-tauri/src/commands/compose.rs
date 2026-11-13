@@ -491,6 +491,43 @@ pub async fn send_email(
     attachment_paths: Option<Vec<String>>,
 ) -> std::result::Result<(), PebbleError> {
     let raw_paths = attachment_paths.unwrap_or_default();
+    dispatch_send_email(
+        &app,
+        &state,
+        account_id,
+        to,
+        cc,
+        bcc,
+        subject,
+        body_text,
+        body_html,
+        in_reply_to,
+        raw_paths,
+    )
+    .await
+    .map(|_| ())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum SendDispatchOutcome {
+    Accepted,
+    Review,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn dispatch_send_email(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    account_id: String,
+    to: Vec<String>,
+    cc: Vec<String>,
+    bcc: Vec<String>,
+    subject: String,
+    body_text: String,
+    body_html: Option<String>,
+    in_reply_to: Option<String>,
+    raw_paths: Vec<String>,
+) -> std::result::Result<SendDispatchOutcome, PebbleError> {
     let attachment_paths = if raw_paths.is_empty() {
         raw_paths
     } else {
@@ -501,7 +538,7 @@ pub async fn send_email(
         .get_account(&account_id)?
         .ok_or_else(|| PebbleError::Internal(format!("Account not found: {account_id}")))?;
 
-    let (transport, from) = prepare_send_transport(&state, &account).await?;
+    let (transport, from) = prepare_send_transport(state, &account).await?;
     let outgoing = OutgoingMessage {
         from,
         to: parse_recipients(to.clone()),
@@ -516,7 +553,7 @@ pub async fn send_email(
 
     // Resolve credentials/configuration before creating an in-progress send.
     // Errors here are known pre-dispatch failures and remain safe to return.
-    let prepared = prepare_outgoing_send_locally(&state, &account, &outgoing)?;
+    let prepared = prepare_outgoing_send_locally(state, &account, &outgoing)?;
     let durable_attachment_paths = prepared
         .attachments
         .iter()
@@ -536,11 +573,8 @@ pub async fn send_email(
                     &send_outcome_unknown_message(&receipt_error),
                 );
                 let _ = app.emit(events::MAIL_PENDING_OPS_CHANGED, ());
-                return accept_post_dispatch_transition(
-                    transition,
-                    &prepared.op_id,
-                    "outcome-unknown",
-                );
+                accept_post_dispatch_transition(transition, &prepared.op_id, "outcome-unknown")?;
+                return Ok(SendDispatchOutcome::Review);
             }
             if let Err(finalize_error) = state.store.complete_outgoing_send(
                 &prepared.message.id,
@@ -553,23 +587,24 @@ pub async fn send_email(
                     .store
                     .mark_pending_mail_op_failed(&prepared.op_id, &finalize_error.to_string());
                 let _ = app.emit(events::MAIL_PENDING_OPS_CHANGED, ());
-                return accept_post_dispatch_transition(
+                accept_post_dispatch_transition(
                     transition,
                     &prepared.op_id,
                     "local-finalize retry",
-                );
+                )?;
+                return Ok(SendDispatchOutcome::Accepted);
             }
             if prepared.delete_placeholder_after_send {
                 cleanup_staged_attachment_records(&prepared.attachments);
             }
-            if let Err(error) = refresh_search_document(&state, &prepared.message.id) {
+            if let Err(error) = refresh_search_document(state, &prepared.message.id) {
                 warn!(
                     "Failed to index sent outgoing message {}: {error}",
                     prepared.message.id
                 );
             }
             let _ = app.emit(events::MAIL_PENDING_OPS_CHANGED, ());
-            Ok(())
+            Ok(SendDispatchOutcome::Accepted)
         }
         Err(error) if send_call_outcome_is_unknown(&error) => {
             let transition = state.store.mark_pending_mail_op_outcome_unknown(
@@ -577,7 +612,8 @@ pub async fn send_email(
                 &send_outcome_unknown_message(&error),
             );
             let _ = app.emit(events::MAIL_PENDING_OPS_CHANGED, ());
-            accept_post_dispatch_transition(transition, &prepared.op_id, "outcome-unknown")
+            accept_post_dispatch_transition(transition, &prepared.op_id, "outcome-unknown")?;
+            Ok(SendDispatchOutcome::Review)
         }
         Err(error) => {
             let transition = state
@@ -585,7 +621,7 @@ pub async fn send_email(
                 .discard_prepared_outgoing_send(&prepared.message.id, &prepared.op_id);
             if transition.is_ok() {
                 cleanup_staged_attachment_records(&prepared.attachments);
-                if let Err(index_error) = refresh_search_document(&state, &prepared.message.id) {
+                if let Err(index_error) = refresh_search_document(state, &prepared.message.id) {
                     warn!(
                         "Failed to remove discarded outgoing message {} from search: {index_error}",
                         prepared.message.id
@@ -593,7 +629,12 @@ pub async fn send_email(
                 }
             }
             let _ = app.emit(events::MAIL_PENDING_OPS_CHANGED, ());
-            definite_send_failure_command_result(error, transition.as_ref().err(), &prepared.op_id)
+            definite_send_failure_command_result(
+                error,
+                transition.as_ref().err(),
+                &prepared.op_id,
+            )?;
+            Ok(SendDispatchOutcome::Review)
         }
     }
 }

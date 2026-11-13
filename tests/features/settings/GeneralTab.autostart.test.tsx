@@ -4,6 +4,8 @@ import GeneralTab from "../../../src/features/settings/GeneralTab";
 import { getAutostartEnabled, setAutostartEnabled } from "../../../src/lib/api";
 import { useUIStore } from "../../../src/stores/ui.store";
 
+vi.mock("../../../src/features/compose/ScheduledSendsView", () => ({ default: () => null }));
+
 vi.mock("../../../src/lib/api", () => ({
   showTestNotification: vi.fn().mockResolvedValue(undefined),
   openDefaultMailSettings: vi.fn().mockResolvedValue(undefined),
