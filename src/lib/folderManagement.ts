@@ -1,6 +1,6 @@
 import type { Folder } from "./api";
 import type { QueryClient } from "@tanstack/react-query";
-import { useMailStore } from "@/stores/mail.store";
+import { isThreadSelected, useMailStore } from "@/stores/mail.store";
 
 export interface FolderEntry { folder: Folder; depth: number; path: string }
 /** Providers can return parent remote IDs before their local ID is known. */
@@ -38,11 +38,15 @@ export function invalidateFolderViews(client: QueryClient) {
   }
 }
 
-export function clearMovedSelection(movedIds: string[], selection: { id: string; thread_id?: string | null }[]) {
+export function clearMovedSelection(
+  movedIds: string[],
+  selection: { id: string; thread_id?: string | null; account_id?: string | null }[],
+) {
   if (!movedIds.length) return;
   const moved = new Set(movedIds);
   const state = useMailStore.getState();
-  const selectedThread = selection.filter((message) => (message.thread_id ?? message.id) === state.selectedThreadId);
+  const selectedThread = selection.filter((message) =>
+    isThreadSelected(state, { thread_id: message.thread_id ?? message.id, account_id: message.account_id }));
   useMailStore.setState({
     selectedMessageIds: new Set([...state.selectedMessageIds].filter((id) => !moved.has(id))),
     ...(state.selectedMessageId && moved.has(state.selectedMessageId) ? { selectedMessageId: null } : {}),

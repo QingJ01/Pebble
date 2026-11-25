@@ -3,7 +3,7 @@ import { useShortcutStore } from "@/stores/shortcut.store";
 import { useCommandStore } from "@/stores/command.store";
 import { useUIStore } from "@/stores/ui.store";
 import { useComposeStore } from "@/stores/compose.store";
-import { useMailStore } from "@/stores/mail.store";
+import { isThreadSelected, useMailStore } from "@/stores/mail.store";
 import { useToastStore } from "@/stores/toast.store";
 import { updateMessageFlags, archiveMessage, getMessage } from "@/lib/api";
 import { queryClient } from "@/lib/query-client";
@@ -163,9 +163,9 @@ export function useKeyboard() {
           const state = useMailStore.getState();
           if (state.threadView) {
             const threads = getCachedThreads();
-            const idx = threads.findIndex((t) => t.thread_id === state.selectedThreadId);
+            const idx = threads.findIndex((t) => isThreadSelected(state, t));
             if (idx < threads.length - 1) {
-              state.setSelectedThreadId(threads[idx + 1].thread_id);
+              state.selectThread(threads[idx + 1]);
             }
           } else {
             const messages = getCachedMessages();
@@ -180,9 +180,9 @@ export function useKeyboard() {
           const state = useMailStore.getState();
           if (state.threadView) {
             const threads = getCachedThreads();
-            const idx = threads.findIndex((t) => t.thread_id === state.selectedThreadId);
+            const idx = threads.findIndex((t) => isThreadSelected(state, t));
             if (idx > 0) {
-              state.setSelectedThreadId(threads[idx - 1].thread_id);
+              state.selectThread(threads[idx - 1]);
             }
           } else {
             const messages = getCachedMessages();
@@ -232,7 +232,7 @@ export function useKeyboard() {
             if (!state.selectedThreadId) {
               const threads = getCachedThreads();
               if (threads.length > 0) {
-                state.setSelectedThreadId(threads[0].thread_id);
+                state.selectThread(threads[0]);
               }
             }
           } else {

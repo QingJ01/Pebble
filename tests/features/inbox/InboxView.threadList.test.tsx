@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ThreadSummary } from "../../../src/lib/api";
 
@@ -7,14 +7,18 @@ const mockMailState = {
   activeFolderId: "folder-inbox",
   selectedMessageId: null as string | null,
   selectedThreadId: "thread-1" as string | null,
+  selectedThreadAccountId: null as string | null,
   threadView: true,
   setSelectedMessage: vi.fn(),
   setSelectedThreadId: vi.fn(),
+  selectThread: vi.fn(),
   toggleThreadView: vi.fn(),
 };
 
-const threads: ThreadSummary[] = [{
+let threads: ThreadSummary[] = [];
+const defaultThreads: ThreadSummary[] = [{
   thread_id: "thread-1",
+  account_id: "account-1",
   subject: "Project update",
   snippet: "The latest project update",
   last_date: 1_700_000_000,
@@ -55,7 +59,8 @@ vi.mock("@tanstack/react-virtual", () => ({
   }),
 }));
 
-vi.mock("../../../src/stores/mail.store", () => ({
+vi.mock("../../../src/stores/mail.store", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../src/stores/mail.store")>()),
   useMailStore: (selector: (state: typeof mockMailState) => unknown) => selector(mockMailState),
 }));
 
@@ -131,7 +136,9 @@ describe("InboxView thread list", () => {
     mockMailState.activeFolderId = "folder-inbox";
     mockMailState.selectedMessageId = null;
     mockMailState.selectedThreadId = "thread-1";
+    mockMailState.selectedThreadAccountId = null;
     mockMailState.threadView = true;
+    threads = defaultThreads;
   });
 
   it("groups virtualized thread options in a named listbox", () => {
@@ -139,5 +146,28 @@ describe("InboxView thread list", () => {
 
     const listbox = screen.getByRole("listbox", { name: "Threads" });
     expect(within(listbox).getByRole("option", { name: "Project update" })).toBeTruthy();
+  });
+
+  it("keys selection by account in the unified view when thread ids collide", () => {
+    mockMailState.activeAccountId = null;
+    mockMailState.selectedThreadId = "shared-thread";
+    mockMailState.selectedThreadAccountId = "account-2";
+    threads = [
+      { ...defaultThreads[0], thread_id: "shared-thread", account_id: "account-1", subject: "From account one" },
+      { ...defaultThreads[0], thread_id: "shared-thread", account_id: "account-2", subject: "From account two" },
+    ];
+
+    render(<InboxView />);
+
+    const listbox = screen.getByRole("listbox", { name: "Threads" });
+    const one = within(listbox).getByRole("option", { name: "From account one" });
+    const two = within(listbox).getByRole("option", { name: "From account two" });
+    expect(one.getAttribute("aria-selected")).toBe("false");
+    expect(two.getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.click(one);
+    expect(mockMailState.selectThread).toHaveBeenCalledWith(
+      expect.objectContaining({ thread_id: "shared-thread", account_id: "account-1" }),
+    );
   });
 });

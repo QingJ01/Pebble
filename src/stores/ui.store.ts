@@ -251,6 +251,7 @@ export const useUIStore = create<UIState>((set) => ({
     useMailStore.setState({
       selectedMessageId: messageId,
       selectedThreadId: null,
+      selectedThreadAccountId: null,
       threadView: false,
       selectedMessageIds: new Set(),
       batchMode: false,
