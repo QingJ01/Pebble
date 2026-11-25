@@ -458,6 +458,11 @@
     "markThreadRead": "将整条会话标为已读",
     "markRead": "标记为已读",
     "updateReadFailed": "更新已读状态失败",
+    "threadReadFailed": "{{count}} 封邮件更新失败",
+    "threadReadNoMessages": "当前文件夹内没有邮件被更新",
+    "threadReadQueued": "{{count}} 封邮件将在后台重试",
+    "threadReadPartiallyUpdated": "已更新 {{updated}} 封邮件；{{queued}} 封将在后台重试",
+
     "contextMenu": "邮件操作",
     "replyAll": "全部回复",
     "archive": "归档",

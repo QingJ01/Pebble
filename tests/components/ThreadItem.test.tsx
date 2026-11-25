@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ThreadSummary } from "../../src/lib/api";
 import ThreadItem from "../../src/components/ThreadItem";
+import { useToastStore } from "../../src/stores/toast.store";
 
 
 const mocks = vi.hoisted(() => ({
@@ -19,7 +20,8 @@ vi.mock("../../src/lib/api", () => ({
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: string) => fallback ?? key,
+    t: (key: string, fallbackOrOptions?: string | Record<string, unknown>) =>
+      typeof fallbackOrOptions === "string" ? fallbackOrOptions : key,
   }),
 }));
 
@@ -41,7 +43,8 @@ function makeThread(overrides: Partial<ThreadSummary> = {}): ThreadSummary {
 describe("ThreadItem", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.updateThreadReadFlagsInFolders.mockResolvedValue(2);
+    mocks.updateThreadReadFlagsInFolders.mockResolvedValue({ updated: 2, queued: 0, failed: 0 });
+    useToastStore.setState({ toasts: [] });
   });
 
   it("marks unread rows with a row class", () => {
@@ -141,6 +144,63 @@ describe("ThreadItem", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Mark thread as read" }));
 
     await waitFor(() => expect(mocks.updateThreadReadFlagsInFolders).toHaveBeenCalledWith("thread-1", ["folder-1"], true));
+  });
+
+  it("shows an error when the scoped thread update fails for some messages", async () => {
+    mocks.updateThreadReadFlagsInFolders.mockResolvedValue({ updated: 1, queued: 0, failed: 1 });
+    render(
+      <ThreadItem
+        thread={makeThread({ unread_count: 0 })}
+        isSelected={false}
+        onClick={vi.fn()}
+        folderIds={["folder-1"]}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("option"), { clientX: 20, clientY: 30 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Mark thread as unread" }));
+
+    await waitFor(() => expect(useToastStore.getState().toasts).toEqual([
+      expect.objectContaining({ type: "error", message: "messageActions.threadReadFailed" }),
+    ]));
+  });
+
+  it("shows an error when no scoped thread messages were updated or queued", async () => {
+    mocks.updateThreadReadFlagsInFolders.mockResolvedValue({ updated: 0, queued: 0, failed: 0 });
+    render(
+      <ThreadItem
+        thread={makeThread({ unread_count: 0 })}
+        isSelected={false}
+        onClick={vi.fn()}
+        folderIds={["folder-1"]}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("option"), { clientX: 20, clientY: 30 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Mark thread as unread" }));
+
+    await waitFor(() => expect(useToastStore.getState().toasts).toEqual([
+      expect.objectContaining({ type: "error", message: "messageActions.threadReadNoMessages" }),
+    ]));
+  });
+
+  it("tells the user when scoped thread updates are queued for retry", async () => {
+    mocks.updateThreadReadFlagsInFolders.mockResolvedValue({ updated: 0, queued: 2, failed: 0 });
+    render(
+      <ThreadItem
+        thread={makeThread({ unread_count: 0 })}
+        isSelected={false}
+        onClick={vi.fn()}
+        folderIds={["folder-1"]}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("option"), { clientX: 20, clientY: 30 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Mark thread as unread" }));
+
+    await waitFor(() => expect(useToastStore.getState().toasts).toEqual([
+      expect.objectContaining({ type: "info", message: "messageActions.threadReadQueued" }),
+    ]));
   });
 
 });

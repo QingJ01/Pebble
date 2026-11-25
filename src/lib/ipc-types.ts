@@ -100,6 +100,15 @@ export interface PendingMailOpsSummary {
 
 export type PendingMailOpStatus = "pending" | "in_progress" | "failed";
 
+export interface BatchMarkReadResult {
+  /** Messages whose local read state was updated immediately. */
+  updated: number;
+  /** Messages with a pending remote retry; may overlap `updated` when committed locally offline. */
+  queued: number;
+  /** Requested messages that were neither updated nor queued. */
+  failed: number;
+}
+
 export interface PendingMailOp {
   id: string;
   account_id: string;
