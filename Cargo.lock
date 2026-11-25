@@ -3740,6 +3740,7 @@ dependencies = [
  "pebble-search",
  "pebble-store",
  "pebble-translate",
+ "pebble-webdav",
  "regex",
  "reqwest 0.12.28",
  "rfd 0.15.4",
@@ -3873,7 +3874,6 @@ dependencies = [
  "pebble-core",
  "r2d2",
  "r2d2_sqlite",
- "reqwest 0.12.28",
  "rusqlite",
  "serde",
  "serde_json",
@@ -3893,6 +3893,15 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "pebble-webdav"
+version = "0.1.6"
+dependencies = [
+ "pebble-core",
+ "reqwest 0.12.28",
+ "tokio",
 ]
 
 [[package]]

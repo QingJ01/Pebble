@@ -25,6 +25,7 @@ pebble-rules = { path = "../crates/pebble-rules" }
 pebble-translate = { path = "../crates/pebble-translate" }
 pebble-crypto = { path = "../crates/pebble-crypto" }
 pebble-oauth = { path = "../crates/pebble-oauth" }
+pebble-webdav = { path = "../crates/pebble-webdav" }
 tauri-plugin-notification = "2"
 tauri-plugin-deep-link = "2"
 lettre = { workspace = true }

@@ -10,6 +10,7 @@ members = [
     "crates/pebble-translate",
     "crates/pebble-crypto",
     "crates/pebble-oauth",
+    "crates/pebble-webdav",
 ]
 resolver = "2"
 
