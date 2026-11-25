@@ -33,6 +33,19 @@ fn group_by_account(
     Ok(groups)
 }
 
+
+fn find_remote_message_folder(
+    state: &AppState,
+    message_id: &str,
+    account_id: &str,
+) -> std::result::Result<Option<pebble_core::Folder>, PebbleError> {
+    let folder_ids = state.store.get_message_folder_ids(message_id)?;
+    let folders = state.store.list_folders(account_id)?;
+    Ok(folder_ids.iter().find_map(|fid| {
+        folders.iter().find(|folder| &folder.id == fid && !folder.remote_id.starts_with("__local_")).cloned()
+    }))
+}
+
 fn queue_batch_pending_op(
     state: &AppState,
     message: &Message,
@@ -599,12 +612,12 @@ pub async fn batch_mark_read(
                     ConnectedProvider::Imap(imap) => {
                         for msg in messages {
                             if let Ok(uid) = parse_imap_uid(&msg.remote_id) {
-                                if let Ok(folder) = find_message_folder(&state, &msg.id, account_id)
+                                if let Ok(remote_folder) = find_remote_message_folder(&state, &msg.id, account_id)
                                 {
-                                    if folder.remote_id.starts_with("__local_") {
+                                    let Some(folder) = remote_folder else {
                                         synced_ids.push(msg.id.clone());
                                         continue;
-                                    }
+                                    };
                                     match imap
                                         .set_flags(&folder.remote_id, uid, Some(is_read), None)
                                         .await
