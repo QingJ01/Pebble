@@ -435,13 +435,15 @@ pub async fn save_draft(
         )
         .await
     } else {
-        save_local_draft_with_metadata(
-            &state,
-            &account_id,
-            &draft,
-            &provenance,
-            editor_mode.as_deref(),
-        )
+        super::messages::query::run_blocking(|| {
+            save_local_draft_with_metadata(
+                &state,
+                &account_id,
+                &draft,
+                &provenance,
+                editor_mode.as_deref(),
+            )
+        })
     }?;
     Ok(saved_id)
 }
@@ -458,7 +460,7 @@ pub async fn get_draft(
     state: State<'_, AppState>,
     draft_id: String,
 ) -> Result<DraftContent, PebbleError> {
-    load_draft_content(&state, &draft_id)
+    super::messages::query::run_blocking(|| load_draft_content(&state, &draft_id))
 }
 
 fn load_draft_content(state: &AppState, draft_id: &str) -> Result<DraftContent, PebbleError> {
@@ -733,7 +735,7 @@ pub(crate) async fn delete_owned_draft(
     }
 
     if let Some(local_id) = provenance.local_id.as_deref() {
-        delete_local_draft(state, local_id)?;
+        super::messages::query::run_blocking(|| delete_local_draft(state, local_id))?;
     }
     Ok(())
 }

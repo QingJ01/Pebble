@@ -513,18 +513,22 @@ pub async fn batch_delete(
     state.store.bulk_soft_delete(&ids_to_delete)?;
     let success_count = ids_to_delete.len() as u32 + local_draft_count;
 
-    // Update search index: remove deleted messages.
-    let delete_ids: Vec<String> = ids_to_delete.clone();
-    let _ = state.store.add_search_pending(&delete_ids, "remove");
-    for id in &ids_to_delete {
-        if let Err(e) = state.search.remove_message(id) {
-            warn!("Failed to remove deleted message {id} from search index: {e}");
+    // Update search index: remove deleted messages. The local delete has
+    // already committed, so index problems are logged rather than failing
+    // the command; the durable `search_pending` markers are cleared only for
+    // removals that were applied AND committed, so crash/startup recovery
+    // retries anything else.
+    {
+        let store = state.store.clone();
+        let search = state.search.clone();
+        let ids = ids_to_delete.clone();
+        if let Err(e) =
+            tokio::task::spawn_blocking(move || remove_deleted_from_search(&store, &search, &ids))
+                .await
+        {
+            warn!("Search removal task failed after batch delete: {e}");
         }
     }
-    if let Err(e) = state.search.commit() {
-        warn!("Failed to commit search index after batch delete: {e}");
-    }
-    let _ = state.store.clear_search_pending(&delete_ids);
 
     info!(
         "Batch delete: {}/{} messages deleted",
@@ -827,6 +831,41 @@ pub async fn batch_star(
         message_ids.len()
     );
     Ok(success_count)
+}
+
+/// Remove soft-deleted messages from the search index with crash-safe
+/// `search_pending` bookkeeping (see `batch_delete`).
+fn remove_deleted_from_search(
+    store: &Store,
+    search: &pebble_search::TantivySearch,
+    ids: &[String],
+) {
+    if ids.is_empty() {
+        return;
+    }
+    if let Err(e) = store.add_search_pending(ids, "remove") {
+        // Without a durable marker a crash before commit would leave stale
+        // documents; still attempt the removal below.
+        warn!(
+            "Failed to record {} pending search removals: {e}",
+            ids.len()
+        );
+    }
+    let _guard = crate::commands::indexing::search_write_guard();
+    let mut removed = Vec::with_capacity(ids.len());
+    for id in ids {
+        match search.remove_message(id) {
+            Ok(()) => removed.push(id.clone()),
+            Err(e) => warn!("Failed to remove deleted message {id} from search index: {e}"),
+        }
+    }
+    if let Err(e) = search.commit() {
+        warn!("Failed to commit search index after batch delete; removals stay queued for recovery: {e}");
+        return;
+    }
+    if let Err(e) = store.clear_search_pending(&removed) {
+        warn!("Search removals committed but recovery markers could not be cleared: {e}");
+    }
 }
 
 #[cfg(test)]

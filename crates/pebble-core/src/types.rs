@@ -289,6 +289,9 @@ pub struct TranslateConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThreadSummary {
     pub thread_id: String,
+    /// Owning account; thread ids alone are not unique across accounts.
+    #[serde(default)]
+    pub account_id: String,
     pub subject: String,
     pub snippet: String,
     pub last_date: i64,

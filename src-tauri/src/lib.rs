@@ -442,12 +442,9 @@ pub fn run() {
                 "database opened and migrations complete",
             );
 
-            match store.quick_check() {
-                Ok(result) if result == "ok" => tracing::info!("Database integrity check passed"),
-                Ok(result) => tracing::warn!("Database integrity check warning: {}", result),
-                Err(e) => tracing::warn!("Database integrity check failed: {}", e),
-            }
-            log_startup_phase(startup_start, &mut startup_phase, "database quick check complete");
+            // `PRAGMA quick_check` reads the whole file; it runs in the
+            // background after startup (see below) instead of delaying the
+            // first window.
 
             let index_path = get_index_path(&app_data)?;
             tracing::info!("Search index path: {}", index_path.display());
@@ -504,7 +501,7 @@ pub fn run() {
             let store_for_reindex = state.store.clone();
             let search_for_reindex = state.search.clone();
             let app_for_reindex = app_handle.clone();
-            let reindex_handle = tauri::async_runtime::spawn_blocking(move || {
+            tauri::async_runtime::spawn_blocking(move || {
                 // 1. Process any pending search ops left over from a previous crash.
                 match commands::indexing::recover_pending_search_operations(
                     &store_for_reindex,
@@ -556,31 +553,36 @@ pub fn run() {
                 }
             });
 
-            // Start the long-lived workers only after the background reindex
-            // finishes. do_reindex calls clear_index() then rebuilds from a DB
-            // snapshot; running sync workers concurrently could index a freshly
-            // stored message whose document is then wiped and missed by the
-            // snapshot, leaving it permanently unsearchable. On a normal launch
-            // the reindex task only does the cheap pending-recovery + count
-            // check (no rebuild), so this ordering adds latency only on
-            // schema-upgrade launches.
-            let app_for_workers = app_handle.clone();
+            // Long-lived workers start immediately: do_reindex is safe to run
+            // concurrently with the live indexer (it walks a rowid cursor and
+            // serialises each read+index batch with the indexer through
+            // `indexing::search_write_guard`), so a schema-upgrade rebuild no
+            // longer delays sync.
+            let app_for_sync = app_handle.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = reindex_handle.await {
-                    tracing::error!("Background reindex task join failed: {e}");
+                commands::sync_cmd::resume_all_syncs(app_for_sync).await;
+            });
+            let app_for_pending_ops = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                commands::pending_mail_ops::run_pending_mail_ops_worker(app_for_pending_ops).await;
+            });
+            let app_for_backup = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                commands::cloud_sync::run_auto_backup_worker(app_for_backup).await;
+            });
+
+            // Background integrity check, once the UI and sync are up.
+            let store_for_check = state.store.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                match tokio::task::spawn_blocking(move || store_for_check.quick_check()).await {
+                    Ok(Ok(result)) if result == "ok" => {
+                        tracing::info!("Database integrity check passed")
+                    }
+                    Ok(Ok(result)) => tracing::warn!("Database integrity check warning: {}", result),
+                    Ok(Err(e)) => tracing::warn!("Database integrity check failed: {}", e),
+                    Err(e) => tracing::warn!("Database integrity check task failed: {}", e),
                 }
-                let app_for_sync = app_for_workers.clone();
-                tauri::async_runtime::spawn(async move {
-                    commands::sync_cmd::resume_all_syncs(app_for_sync).await;
-                });
-                let app_for_pending_ops = app_for_workers.clone();
-                tauri::async_runtime::spawn(async move {
-                    commands::pending_mail_ops::run_pending_mail_ops_worker(app_for_pending_ops)
-                        .await;
-                });
-                tauri::async_runtime::spawn(async move {
-                    commands::cloud_sync::run_auto_backup_worker(app_for_workers).await;
-                });
             });
             log_startup_phase(startup_start, &mut startup_phase, "background workers scheduled");
             tracing::info!(

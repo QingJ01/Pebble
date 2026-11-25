@@ -29,6 +29,18 @@ use rusqlite::{Connection, OpenFlags};
 use std::path::Path;
 use std::sync::Arc;
 
+/// Upper bound of pages released per [`Store::run_maintenance`] call (16 MiB
+/// at the default 4 KiB page size).
+pub const MAINTENANCE_PAGES_PER_STEP: i64 = 4096;
+
+/// What [`Store::run_maintenance`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MaintenanceReport {
+    Nothing,
+    Incremental { freed_pages: i64 },
+    FullVacuum { freed_bytes: i64 },
+}
+
 pub struct Store {
     read_pool: Pool<SqliteConnectionManager>,
     write_pool: Pool<SqliteConnectionManager>,
@@ -171,6 +183,44 @@ impl Store {
         self.with_write(|conn| {
             conn.execute_batch("VACUUM")?;
             Ok(())
+        })
+    }
+
+    /// Periodic, writer-friendly space reclamation.
+    ///
+    /// * Always runs `PRAGMA optimize` (cheap planner-statistics refresh).
+    /// * With `auto_vacuum = INCREMENTAL`, frees at most
+    ///   [`MAINTENANCE_PAGES_PER_STEP`] pages per call, holding the writer
+    ///   only for a short, bounded time.
+    /// * Otherwise (legacy databases), a full VACUUM runs only when at least
+    ///   a quarter of the file (and > 64 MiB) is free; it also switches the
+    ///   database to incremental mode so this is a one-off.
+    pub fn run_maintenance(&self) -> Result<MaintenanceReport> {
+        self.with_write(|conn| {
+            conn.execute_batch("PRAGMA optimize;")?;
+            let auto_vacuum: i64 = conn.query_row("PRAGMA auto_vacuum", [], |r| r.get(0))?;
+            let free_pages: i64 = conn.query_row("PRAGMA freelist_count", [], |r| r.get(0))?;
+            let page_count: i64 = conn.query_row("PRAGMA page_count", [], |r| r.get(0))?;
+            let page_size: i64 = conn.query_row("PRAGMA page_size", [], |r| r.get(0))?;
+            if free_pages == 0 {
+                return Ok(MaintenanceReport::Nothing);
+            }
+            if auto_vacuum == 2 {
+                conn.execute_batch(&format!(
+                    "PRAGMA incremental_vacuum({MAINTENANCE_PAGES_PER_STEP});"
+                ))?;
+                return Ok(MaintenanceReport::Incremental {
+                    freed_pages: free_pages.min(MAINTENANCE_PAGES_PER_STEP),
+                });
+            }
+            let free_bytes = free_pages.saturating_mul(page_size);
+            if free_pages.saturating_mul(4) >= page_count && free_bytes > 64 * 1024 * 1024 {
+                conn.execute_batch("PRAGMA auto_vacuum = INCREMENTAL; VACUUM;")?;
+                return Ok(MaintenanceReport::FullVacuum {
+                    freed_bytes: free_bytes,
+                });
+            }
+            Ok(MaintenanceReport::Nothing)
         })
     }
 

@@ -553,7 +553,11 @@ pub(crate) async fn dispatch_send_email(
 
     // Resolve credentials/configuration before creating an in-progress send.
     // Errors here are known pre-dispatch failures and remain safe to return.
-    let prepared = prepare_outgoing_send_locally(state, &account, &outgoing)?;
+    // Staging copies attachments and writes message/op rows plus a search
+    // commit: keep it off the async worker.
+    let prepared = super::messages::query::run_blocking(|| {
+        prepare_outgoing_send_locally(state, &account, &outgoing)
+    })?;
     let durable_attachment_paths = prepared
         .attachments
         .iter()

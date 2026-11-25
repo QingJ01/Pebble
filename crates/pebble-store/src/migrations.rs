@@ -2,7 +2,9 @@ use pebble_core::{build_snippet, PebbleError, Result};
 use rusqlite::{Connection, OptionalExtension};
 use std::collections::HashSet;
 
-const CURRENT_VERSION: u32 = 20;
+pub(crate) const CURRENT_VERSION: u32 = 22;
+/// How many pre-migration backups to keep next to the database file.
+const MIGRATION_BACKUPS_TO_KEEP: usize = 2;
 const ACCOUNT_COLOR_PRESETS: [&str; 12] = [
     "#0ea5e9", "#22c55e", "#f59e0b", "#8b5cf6", "#f43f5e", "#14b8a6", "#6366f1", "#f97316",
     "#06b6d4", "#ec4899", "#84cc16", "#3b82f6",
@@ -25,6 +27,90 @@ fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
         |row| row.get(0),
     )
     .map_err(Into::into)
+}
+
+fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
+    let mut stmt = conn.prepare("SELECT name FROM pragma_table_info(?1)")?;
+    let mut rows = stmt.query([table])?;
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(0)?;
+        if name.eq_ignore_ascii_case(column) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Path of the main database file, or `None` for in-memory databases.
+fn database_file_path(conn: &Connection) -> Option<std::path::PathBuf> {
+    let path = conn.path()?;
+    if path.is_empty() {
+        return None;
+    }
+    let path = std::path::PathBuf::from(path);
+    path.is_file().then_some(path)
+}
+
+/// Snapshot the database with `VACUUM INTO` before applying migrations to an
+/// existing database, keeping the newest [`MIGRATION_BACKUPS_TO_KEEP`] copies.
+/// Migrations such as V21 rewrite large tables; a consistent copy makes a
+/// failed or buggy upgrade recoverable by hand.
+fn backup_before_migration(conn: &Connection, from_version: u32) -> Result<()> {
+    let Some(db_path) = database_file_path(conn) else {
+        return Ok(());
+    };
+    let Some(file_name) = db_path.file_name().and_then(|n| n.to_str()) else {
+        return Ok(());
+    };
+    let dir = db_path
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_default();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let prefix = format!("{file_name}.v{from_version}-");
+    let backup_path = dir.join(format!("{prefix}{stamp}.bak"));
+    conn.execute("VACUUM INTO ?1", [backup_path.to_string_lossy().as_ref()])
+        .map_err(|e| {
+            PebbleError::Storage(format!(
+                "Refusing to migrate database from v{from_version}: backup to {} failed: {e}",
+                backup_path.display()
+            ))
+        })?;
+    tracing::info!(
+        "Database backed up to {} before migrating from v{from_version}",
+        backup_path.display()
+    );
+
+    // Prune older backups of this database file (any source version).
+    let backup_prefix = format!("{file_name}.v");
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        let mut backups: Vec<(std::time::SystemTime, std::path::PathBuf)> = entries
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|n| n.starts_with(&backup_prefix) && n.ends_with(".bak"))
+            })
+            .filter_map(|entry| {
+                let modified = entry.metadata().and_then(|m| m.modified()).ok()?;
+                Some((modified, entry.path()))
+            })
+            .collect();
+        backups.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+        for (_, stale) in backups.into_iter().skip(MIGRATION_BACKUPS_TO_KEEP) {
+            if let Err(e) = std::fs::remove_file(&stale) {
+                tracing::warn!(
+                    "Failed to prune old migration backup {}: {e}",
+                    stale.display()
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 fn is_valid_account_color(color: &str) -> bool {
@@ -157,6 +243,23 @@ fn rebuild_snippets(conn: &Connection) -> Result<()> {
 }
 
 pub fn run_migrations(conn: &Connection) -> Result<()> {
+    run_migrations_up_to(conn, CURRENT_VERSION)
+}
+
+/// Apply migrations up to `target` (tests use this to build historical
+/// schemas; production always targets [`CURRENT_VERSION`]). Versions up to
+/// 20 are always applied.
+fn run_migrations_up_to(conn: &Connection, target: u32) -> Result<()> {
+    // auto_vacuum can only be chosen before the first table exists; new
+    // databases reclaim space incrementally (see Store::run_maintenance).
+    let has_tables: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_tables {
+        conn.execute_batch("PRAGMA auto_vacuum = INCREMENTAL;")?;
+    }
     conn.execute_batch("PRAGMA journal_mode=WAL;")?;
     conn.execute_batch("PRAGMA synchronous=NORMAL;")?;
 
@@ -165,6 +268,15 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
     conn.execute_batch("PRAGMA busy_timeout=5000;")?;
 
     let version = get_schema_version(conn);
+    if version > CURRENT_VERSION {
+        return Err(PebbleError::Storage(format!(
+            "Database schema version {version} is newer than this version of Pebble supports \
+             ({CURRENT_VERSION}). Please update Pebble; the database was left untouched."
+        )));
+    }
+    if version > 0 && version < target {
+        backup_before_migration(conn, version)?;
+    }
 
     // Each migration is wrapped in a transaction so that the DDL and version
     // update are atomic; a crash mid-migration won't leave an inconsistent state.
@@ -999,10 +1111,428 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
     if version < 20 {
         let tx = conn.unchecked_transaction()?;
         tx.execute_batch(include_str!("mail_archive_schema.sql"))?;
-        set_schema_version(&tx, CURRENT_VERSION)?;
+        set_schema_version(&tx, 20)?;
         tx.commit()?;
     }
 
+    // V21: storage layout for fast list pages.
+    if version < 21 && target >= 21 {
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| PebbleError::Storage(format!("Migration V21 begin failed: {e}")))?;
+        migrate_v21_list_layout(&tx)
+            .map_err(|e| PebbleError::Storage(format!("Migration V21 failed: {e}")))?;
+        set_schema_version(&tx, 21)?;
+        tx.commit()
+            .map_err(|e| PebbleError::Storage(format!("Migration V21 commit failed: {e}")))?;
+    }
+
+    // V22: foreign keys for pending_mail_ops.account_id and labels.rule_id.
+    // Table rebuilds must run with enforcement off (dropping `labels` would
+    // otherwise cascade into message_labels), mirroring V12.
+    if version < 22 && target >= 22 {
+        conn.execute_batch("PRAGMA foreign_keys=OFF;")
+            .map_err(|e| PebbleError::Storage(format!("Migration V22 disable FK failed: {e}")))?;
+        let migration_result = (|| -> Result<()> {
+            let tx = conn
+                .unchecked_transaction()
+                .map_err(|e| PebbleError::Storage(format!("Migration V22 begin failed: {e}")))?;
+            migrate_v22_foreign_keys(&tx)
+                .map_err(|e| PebbleError::Storage(format!("Migration V22 failed: {e}")))?;
+            set_schema_version(&tx, 22)?;
+            tx.commit()
+                .map_err(|e| PebbleError::Storage(format!("Migration V22 commit failed: {e}")))?;
+            Ok(())
+        })();
+        let enable_foreign_keys_result = conn
+            .execute_batch("PRAGMA foreign_keys=ON;")
+            .map_err(|e| PebbleError::Storage(format!("Migration V22 enable FK failed: {e}")));
+        migration_result?;
+        enable_foreign_keys_result?;
+    }
+
+    Ok(())
+}
+
+/// V21:
+/// * Move `body_text` / `body_html_raw` out of `messages` into
+///   `message_bodies`, so list/summary reads never walk body overflow pages.
+/// * Denormalise `date`, `is_read`, `is_deleted` and the thread key into
+///   `message_folders` (kept in sync by triggers, so every writer — including
+///   ones outside messages.rs — stays correct) and index
+///   `(folder_id, date, message_id, thread_key) WHERE is_deleted = 0` so a
+///   folder page is an index range scan with no sort.
+/// * Partial indexes for unread counts and tombstone purges.
+/// * `message_correspondents`: per-account recent addresses for autocomplete,
+///   replacing `%x%` LIKE scans across every message's recipient JSON.
+fn migrate_v21_list_layout(tx: &Connection) -> Result<()> {
+    if !table_exists(tx, "messages")? {
+        return Ok(());
+    }
+
+    // --- bodies -----------------------------------------------------------
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS message_bodies (
+             message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+             body_text TEXT NOT NULL DEFAULT '',
+             body_html_raw TEXT NOT NULL DEFAULT ''
+         );",
+    )?;
+    let has_body_text = column_exists(tx, "messages", "body_text")?;
+    let has_body_html = column_exists(tx, "messages", "body_html_raw")?;
+    if has_body_text || has_body_html {
+        let text_expr = if has_body_text {
+            "COALESCE(body_text, '')"
+        } else {
+            "''"
+        };
+        let html_expr = if has_body_html {
+            "COALESCE(body_html_raw, '')"
+        } else {
+            "''"
+        };
+        tx.execute_batch(&format!(
+            "INSERT OR REPLACE INTO message_bodies (message_id, body_text, body_html_raw)
+             SELECT id, {text_expr}, {html_expr} FROM messages;"
+        ))?;
+        if has_body_text {
+            tx.execute_batch("ALTER TABLE messages DROP COLUMN body_text;")?;
+        }
+        if has_body_html {
+            tx.execute_batch("ALTER TABLE messages DROP COLUMN body_html_raw;")?;
+        }
+    }
+
+    // --- tombstones / unread on messages ------------------------------------
+    if column_exists(tx, "messages", "deleted_at")? && column_exists(tx, "messages", "is_deleted")?
+    {
+        tx.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_messages_tombstones
+                 ON messages(deleted_at) WHERE is_deleted = 1;",
+        )?;
+    }
+
+    // --- message_folders denormalisation ----------------------------------
+    if table_exists(tx, "message_folders")? {
+        tx.execute_batch(
+            "DELETE FROM message_folders
+             WHERE NOT EXISTS (SELECT 1 FROM messages m WHERE m.id = message_folders.message_id);",
+        )?;
+        for (column, ddl) in [
+            (
+                "date",
+                "ALTER TABLE message_folders ADD COLUMN date INTEGER NOT NULL DEFAULT 0;",
+            ),
+            (
+                "is_read",
+                "ALTER TABLE message_folders ADD COLUMN is_read INTEGER NOT NULL DEFAULT 0;",
+            ),
+            (
+                "is_deleted",
+                "ALTER TABLE message_folders ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0;",
+            ),
+            (
+                "thread_key",
+                "ALTER TABLE message_folders ADD COLUMN thread_key TEXT NOT NULL DEFAULT '';",
+            ),
+        ] {
+            if !column_exists(tx, "message_folders", column)? {
+                tx.execute_batch(ddl)?;
+            }
+        }
+
+        let expr = |column: &str, fallback: &str| -> Result<String> {
+            Ok(if column_exists(tx, "messages", column)? {
+                format!("m.{column}")
+            } else {
+                fallback.to_string()
+            })
+        };
+        let date = expr("date", "0")?;
+        let is_read = expr("is_read", "0")?;
+        let is_deleted = expr("is_deleted", "0")?;
+        let thread_key = if column_exists(tx, "messages", "thread_id")? {
+            "COALESCE(m.thread_id, m.id)".to_string()
+        } else {
+            "m.id".to_string()
+        };
+        tx.execute_batch(&format!(
+            "UPDATE message_folders
+             SET (date, is_read, is_deleted, thread_key) = (
+                 SELECT {date}, {is_read}, {is_deleted}, {thread_key}
+                 FROM messages m WHERE m.id = message_folders.message_id
+             );
+
+             DROP TRIGGER IF EXISTS trg_message_folders_denorm_insert;
+             CREATE TRIGGER trg_message_folders_denorm_insert
+             AFTER INSERT ON message_folders
+             BEGIN
+                 UPDATE message_folders
+                 SET (date, is_read, is_deleted, thread_key) = (
+                     SELECT {date}, {is_read}, {is_deleted}, {thread_key}
+                     FROM messages m WHERE m.id = NEW.message_id
+                 )
+                 WHERE message_id = NEW.message_id AND folder_id = NEW.folder_id
+                   AND EXISTS (SELECT 1 FROM messages m WHERE m.id = NEW.message_id);
+             END;
+
+             DROP TRIGGER IF EXISTS trg_message_folders_denorm_relink;
+             CREATE TRIGGER trg_message_folders_denorm_relink
+             AFTER UPDATE OF message_id ON message_folders
+             BEGIN
+                 UPDATE message_folders
+                 SET (date, is_read, is_deleted, thread_key) = (
+                     SELECT {date}, {is_read}, {is_deleted}, {thread_key}
+                     FROM messages m WHERE m.id = NEW.message_id
+                 )
+                 WHERE message_id = NEW.message_id AND folder_id = NEW.folder_id
+                   AND EXISTS (SELECT 1 FROM messages m WHERE m.id = NEW.message_id);
+             END;"
+        ))?;
+
+        let has_all_sources = column_exists(tx, "messages", "date")?
+            && column_exists(tx, "messages", "is_read")?
+            && column_exists(tx, "messages", "is_deleted")?
+            && column_exists(tx, "messages", "thread_id")?;
+        if has_all_sources {
+            tx.execute_batch(
+                "DROP TRIGGER IF EXISTS trg_messages_denorm_folders;
+                 CREATE TRIGGER trg_messages_denorm_folders
+                 AFTER UPDATE OF date, is_read, is_deleted, thread_id ON messages
+                 WHEN OLD.date IS NOT NEW.date
+                   OR OLD.is_read IS NOT NEW.is_read
+                   OR OLD.is_deleted IS NOT NEW.is_deleted
+                   OR OLD.thread_id IS NOT NEW.thread_id
+                 BEGIN
+                     UPDATE message_folders
+                     SET date = NEW.date,
+                         is_read = NEW.is_read,
+                         is_deleted = NEW.is_deleted,
+                         thread_key = COALESCE(NEW.thread_id, NEW.id)
+                     WHERE message_id = NEW.id;
+                 END;",
+            )?;
+        }
+
+        tx.execute_batch(
+            "DROP INDEX IF EXISTS idx_message_folders_folder_id;
+             CREATE INDEX IF NOT EXISTS idx_mf_folder_date
+                 ON message_folders(folder_id, date, message_id, thread_key)
+                 WHERE is_deleted = 0;
+             CREATE INDEX IF NOT EXISTS idx_mf_folder_thread
+                 ON message_folders(folder_id, thread_key, date, message_id)
+                 WHERE is_deleted = 0;
+             CREATE INDEX IF NOT EXISTS idx_mf_folder_unread
+                 ON message_folders(folder_id)
+                 WHERE is_read = 0 AND is_deleted = 0;",
+        )?;
+    }
+
+    // --- autocomplete correspondents ----------------------------------------
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS message_correspondents (
+             account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+             normalized_address TEXT NOT NULL,
+             address TEXT NOT NULL,
+             name TEXT,
+             last_interaction_at INTEGER NOT NULL,
+             PRIMARY KEY (account_id, normalized_address)
+         ) WITHOUT ROWID;
+         CREATE INDEX IF NOT EXISTS idx_message_correspondents_recent
+             ON message_correspondents(account_id, last_interaction_at);",
+    )?;
+    let can_backfill_correspondents = table_exists(tx, "accounts")?
+        && [
+            "account_id",
+            "from_name",
+            "from_address",
+            "to_list",
+            "cc_list",
+            "bcc_list",
+            "date",
+            "is_deleted",
+        ]
+        .iter()
+        .map(|column| column_exists(tx, "messages", column))
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .all(|exists| exists);
+    if can_backfill_correspondents {
+        tx.execute_batch(
+            "WITH raw(account_id, name, address, date) AS (
+                 SELECT account_id, from_name, from_address, date
+                 FROM messages WHERE is_deleted = 0
+                 UNION ALL
+                 SELECT m.account_id, json_extract(j.value, '$.name'),
+                        json_extract(j.value, '$.address'), m.date
+                 FROM messages m,
+                      json_each(CASE WHEN json_valid(m.to_list) THEN m.to_list ELSE '[]' END) j
+                 WHERE m.is_deleted = 0
+                 UNION ALL
+                 SELECT m.account_id, json_extract(j.value, '$.name'),
+                        json_extract(j.value, '$.address'), m.date
+                 FROM messages m,
+                      json_each(CASE WHEN json_valid(m.cc_list) THEN m.cc_list ELSE '[]' END) j
+                 WHERE m.is_deleted = 0
+                 UNION ALL
+                 SELECT m.account_id, json_extract(j.value, '$.name'),
+                        json_extract(j.value, '$.address'), m.date
+                 FROM messages m,
+                      json_each(CASE WHEN json_valid(m.bcc_list) THEN m.bcc_list ELSE '[]' END) j
+                 WHERE m.is_deleted = 0
+             ),
+             cleaned AS (
+                 SELECT account_id,
+                        lower(trim(address)) AS normalized_address,
+                        trim(address) AS address,
+                        NULLIF(trim(COALESCE(name, '')), '') AS name,
+                        date
+                 FROM raw
+                 WHERE typeof(address) = 'text'
+                   AND trim(address) LIKE '%_@_%'
+                   AND account_id IN (SELECT id FROM accounts)
+                 ORDER BY date ASC
+             )
+             INSERT INTO message_correspondents
+                 (account_id, normalized_address, address, name, last_interaction_at)
+             SELECT account_id, normalized_address, address, name, date FROM cleaned WHERE 1
+             ON CONFLICT(account_id, normalized_address) DO UPDATE SET
+                 address = CASE WHEN excluded.last_interaction_at > last_interaction_at
+                                THEN excluded.address ELSE address END,
+                 name = CASE WHEN excluded.last_interaction_at > last_interaction_at
+                             THEN excluded.name
+                             WHEN name IS NULL THEN excluded.name
+                             ELSE name END,
+                 last_interaction_at = MAX(last_interaction_at, excluded.last_interaction_at);",
+        )?;
+    }
+    Ok(())
+}
+
+const PENDING_MAIL_OPS_COLUMNS: [&str; 11] = [
+    "id",
+    "account_id",
+    "message_id",
+    "op_type",
+    "payload_json",
+    "status",
+    "attempts",
+    "last_error",
+    "created_at",
+    "updated_at",
+    "next_retry_at",
+];
+
+/// V22: add the missing foreign keys by rebuilding the (small) child tables.
+///
+/// * `pending_mail_ops.account_id -> accounts(id) ON DELETE CASCADE`.
+/// * `labels.rule_id -> rules(id) ON DELETE SET NULL` (a label outlives the
+///   rule that created it).
+///
+/// Deliberately NOT foreign-keyed (see the store-perf report):
+/// * `pending_mail_ops.message_id` — ops carry the provider identity in their
+///   payload and must outlive the local row (`delete_permanent` and send
+///   finalisation remove the message while the op is still being settled).
+/// * `search_pending.message_id` — `remove` markers are written for messages
+///   that were just hard-deleted, precisely so crash recovery can drop them
+///   from the index.
+/// * `mail_archives.account_id` — archives intentionally survive account
+///   deletion (see mail_archive_schema.sql).
+///
+/// Orphans are cleaned first, and only the rebuilt tables are FK-checked so
+/// unrelated legacy damage cannot brick startup.
+fn migrate_v22_foreign_keys(tx: &Connection) -> Result<()> {
+    if table_exists(tx, "pending_mail_ops")? && table_exists(tx, "accounts")? {
+        let complete = PENDING_MAIL_OPS_COLUMNS
+            .iter()
+            .map(|column| column_exists(tx, "pending_mail_ops", column))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .all(|exists| exists);
+        if complete {
+            let columns = PENDING_MAIL_OPS_COLUMNS.join(", ");
+            tx.execute_batch(&format!(
+                "DELETE FROM pending_mail_ops
+                 WHERE account_id NOT IN (SELECT id FROM accounts);
+                 CREATE TABLE pending_mail_ops_v22 (
+                     id TEXT PRIMARY KEY,
+                     account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                     message_id TEXT NOT NULL,
+                     op_type TEXT NOT NULL,
+                     payload_json TEXT NOT NULL,
+                     status TEXT NOT NULL CHECK(status IN ('pending', 'in_progress', 'failed', 'done')),
+                     attempts INTEGER NOT NULL DEFAULT 0,
+                     last_error TEXT,
+                     created_at INTEGER NOT NULL,
+                     updated_at INTEGER NOT NULL,
+                     next_retry_at INTEGER
+                 );
+                 INSERT INTO pending_mail_ops_v22 (rowid, {columns})
+                     SELECT rowid, {columns} FROM pending_mail_ops ORDER BY rowid;
+                 DROP TABLE pending_mail_ops;
+                 ALTER TABLE pending_mail_ops_v22 RENAME TO pending_mail_ops;
+                 CREATE INDEX IF NOT EXISTS idx_pending_mail_ops_account_status
+                     ON pending_mail_ops(account_id, status, updated_at);
+                 CREATE INDEX IF NOT EXISTS idx_pending_mail_ops_retry
+                     ON pending_mail_ops(status, next_retry_at, updated_at);
+                 CREATE INDEX IF NOT EXISTS idx_pending_mail_ops_message
+                     ON pending_mail_ops(message_id);"
+            ))?;
+            ensure_no_fk_violations(tx, "pending_mail_ops")?;
+        }
+    }
+
+    if table_exists(tx, "labels")? && table_exists(tx, "rules")? {
+        let complete = ["id", "name", "color", "is_system", "rule_id"]
+            .iter()
+            .map(|column| column_exists(tx, "labels", column))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .all(|exists| exists);
+        if complete {
+            tx.execute_batch(
+                "UPDATE labels SET rule_id = NULL
+                 WHERE rule_id IS NOT NULL AND rule_id NOT IN (SELECT id FROM rules);
+                 CREATE TABLE labels_v22 (
+                     id TEXT PRIMARY KEY,
+                     name TEXT NOT NULL,
+                     color TEXT NOT NULL DEFAULT '#808080',
+                     is_system INTEGER NOT NULL DEFAULT 0,
+                     rule_id TEXT REFERENCES rules(id) ON DELETE SET NULL
+                 );
+                 INSERT INTO labels_v22 (id, name, color, is_system, rule_id)
+                     SELECT id, name, color, is_system, rule_id FROM labels;
+                 DROP TABLE labels;
+                 ALTER TABLE labels_v22 RENAME TO labels;
+                 CREATE INDEX IF NOT EXISTS idx_labels_name ON labels(name);",
+            )?;
+            ensure_no_fk_violations(tx, "labels")?;
+            if table_exists(tx, "message_labels")? && table_exists(tx, "messages")? {
+                tx.execute_batch(
+                    "DELETE FROM message_labels
+                     WHERE label_id NOT IN (SELECT id FROM labels)
+                        OR message_id NOT IN (SELECT id FROM messages);",
+                )?;
+                ensure_no_fk_violations(tx, "message_labels")?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn ensure_no_fk_violations(tx: &Connection, table: &str) -> Result<()> {
+    let violation = tx
+        .query_row(
+            &format!("PRAGMA foreign_key_check({table})"),
+            [],
+            |_| Ok(()),
+        )
+        .optional()?;
+    if violation.is_some() {
+        return Err(PebbleError::Storage(format!(
+            "foreign key violations remain in {table}"
+        )));
+    }
     Ok(())
 }
 
@@ -1157,7 +1687,7 @@ mod tests {
         conn.execute_batch("DROP TABLE mail_archive_fts; DROP TABLE mail_archive_messages; DROP TABLE mail_archive_folders; DROP TABLE mail_archives; PRAGMA user_version=19;").unwrap();
         conn.execute_batch("INSERT INTO accounts (id,email,provider,created_at,updated_at) VALUES ('a','a@example.com','imap',1,1); INSERT INTO scheduled_sends VALUES ('job','a','scheduled',200,'pending',X'0102',0,100);").unwrap();
         run_migrations(&conn).unwrap();
-        assert_eq!(get_schema_version(&conn), 20);
+        assert_eq!(get_schema_version(&conn), CURRENT_VERSION);
         let payload: Vec<u8> = conn
             .query_row(
                 "SELECT payload FROM scheduled_sends WHERE id='job'",
@@ -1435,8 +1965,9 @@ mod tests {
 
         let retained: (String, String) = conn
             .query_row(
-                "SELECT id, body_text FROM messages
-                 WHERE account_id='acct' AND remote_id='UID:42' AND is_deleted=0",
+                "SELECT m.id, b.body_text FROM messages m
+                 JOIN message_bodies b ON b.message_id = m.id
+                 WHERE m.account_id='acct' AND m.remote_id='UID:42' AND m.is_deleted=0",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -1542,8 +2073,8 @@ mod tests {
         // but an additional tombstone (is_deleted=1) is still allowed.
         let dup_live = conn.execute(
             "INSERT INTO messages
-                (id, account_id, remote_id, body_text, is_deleted, created_at, updated_at)
-             VALUES ('m-extra','acct','UID:42','extra',0,3,3)",
+                (id, account_id, remote_id, is_deleted, created_at, updated_at)
+             VALUES ('m-extra','acct','UID:42',0,3,3)",
             [],
         );
         assert!(
@@ -1553,8 +2084,8 @@ mod tests {
 
         let dup_tomb = conn.execute(
             "INSERT INTO messages
-                (id, account_id, remote_id, body_text, is_deleted, created_at, updated_at)
-             VALUES ('m-tomb2','acct','UID:42','tombstone 2',1,3,3)",
+                (id, account_id, remote_id, is_deleted, created_at, updated_at)
+             VALUES ('m-tomb2','acct','UID:42',1,3,3)",
             [],
         );
         assert!(
@@ -1563,8 +2094,8 @@ mod tests {
         );
         let another_local = conn.execute(
             "INSERT INTO messages
-                (id, account_id, remote_id, body_text, is_deleted, created_at, updated_at)
-             VALUES ('m-local-c','acct','','draft three',0,3,3)",
+                (id, account_id, remote_id, is_deleted, created_at, updated_at)
+             VALUES ('m-local-c','acct','',0,3,3)",
             [],
         );
         assert!(
@@ -2045,5 +2576,308 @@ mod tests {
             .pragma_query_value(None, "foreign_keys", |row| row.get(0))
             .unwrap();
         assert_eq!(foreign_keys, 1, "foreign key enforcement must be restored");
+    }
+
+    fn seed_v20_mailbox(conn: &Connection) {
+        conn.execute_batch(
+            r#"INSERT INTO accounts (id, email, provider, created_at, updated_at)
+                   VALUES ('acct', 'me@example.com', 'imap', 1, 1);
+               INSERT INTO folders (id, account_id, remote_id, name, folder_type, role)
+                   VALUES ('inbox', 'acct', 'INBOX', 'Inbox', 'folder', 'inbox');
+               INSERT INTO messages (id, account_id, remote_id, thread_id, subject, from_address,
+                   from_name, to_list, body_text, body_html_raw, is_read, date, created_at, updated_at)
+               VALUES ('m1', 'acct', '1', 't1', 'Hello', 'alice@example.com', 'Alice',
+                   '[{"name":"Bob","address":"Bob@Example.com"}]', 'plain one', '<p>one</p>', 0, 100, 1, 1),
+                      ('m2', 'acct', '2', NULL, 'Again', 'carol@example.com', '',
+                   '[]', 'plain two', '', 1, 200, 1, 1);
+               INSERT INTO message_folders (message_id, folder_id) VALUES ('m1', 'inbox'), ('m2', 'inbox');
+               INSERT INTO rules (id, name, created_at, updated_at) VALUES ('r1', 'Rule', 1, 1);
+               INSERT INTO labels (id, name, rule_id) VALUES ('l-live', 'Live', 'r1'),
+                                                             ('l-dangling', 'Dangling', 'gone');
+               INSERT INTO message_labels (message_id, label_id) VALUES ('m1', 'l-live');
+               INSERT INTO pending_mail_ops (id, account_id, message_id, op_type, payload_json,
+                   status, created_at, updated_at)
+               VALUES ('op-live', 'acct', 'm1', 'archive', '{}', 'pending', 1, 1),
+                      ('op-orphan', 'deleted-account', 'mx', 'archive', '{}', 'pending', 1, 1);"#,
+        )
+        .unwrap();
+    }
+
+    fn count(conn: &Connection, sql: &str) -> i64 {
+        conn.query_row(sql, [], |row| row.get(0)).unwrap()
+    }
+
+    #[test]
+    fn v21_v22_move_bodies_denormalise_folders_and_add_foreign_keys() {
+        let conn = Connection::open_in_memory().unwrap();
+        run_migrations_up_to(&conn, 20).unwrap();
+        assert_eq!(get_schema_version(&conn), 20);
+        seed_v20_mailbox(&conn);
+        conn.execute_batch("UPDATE pending_mail_ops SET rowid = 42 WHERE id = 'op-live';")
+            .unwrap();
+
+        run_migrations(&conn).unwrap();
+        assert_eq!(get_schema_version(&conn), CURRENT_VERSION);
+
+        // Bodies moved out of `messages`.
+        assert!(!column_exists(&conn, "messages", "body_text").unwrap());
+        assert!(!column_exists(&conn, "messages", "body_html_raw").unwrap());
+        let body: (String, String) = conn
+            .query_row(
+                "SELECT body_text, body_html_raw FROM message_bodies WHERE message_id = 'm1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(body, ("plain one".into(), "<p>one</p>".into()));
+
+        // message_folders denormalised and kept in sync by triggers.
+        let row: (i64, i64, i64, String) = conn
+            .query_row(
+                "SELECT date, is_read, is_deleted, thread_key FROM message_folders WHERE message_id = 'm2'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(row, (200, 1, 0, "m2".into()));
+        conn.execute_batch(
+            "UPDATE messages SET is_read = 1, date = 150, thread_id = 't9', is_deleted = 1 WHERE id = 'm1';",
+        )
+        .unwrap();
+        let row: (i64, i64, i64, String) = conn
+            .query_row(
+                "SELECT date, is_read, is_deleted, thread_key FROM message_folders WHERE message_id = 'm1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(row, (150, 1, 1, "t9".into()));
+        conn.execute_batch(
+            "INSERT INTO folders (id, account_id, remote_id, name, folder_type) VALUES ('arch', 'acct', 'Archive', 'Archive', 'folder');
+             INSERT INTO message_folders (message_id, folder_id) VALUES ('m2', 'arch');",
+        )
+        .unwrap();
+        assert_eq!(
+            count(
+                &conn,
+                "SELECT date FROM message_folders WHERE message_id = 'm2' AND folder_id = 'arch'"
+            ),
+            200
+        );
+
+        // Autocomplete correspondents were backfilled (normalised, named).
+        let bob: (String, Option<String>, i64) = conn
+            .query_row(
+                "SELECT address, name, last_interaction_at FROM message_correspondents
+                 WHERE account_id = 'acct' AND normalized_address = 'bob@example.com'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(bob, ("Bob@Example.com".into(), Some("Bob".into()), 100));
+        assert_eq!(
+            count(&conn, "SELECT COUNT(*) FROM message_correspondents"),
+            3
+        );
+
+        for index in [
+            "idx_mf_folder_date",
+            "idx_mf_folder_thread",
+            "idx_mf_folder_unread",
+            "idx_messages_tombstones",
+        ] {
+            assert_eq!(
+                count(
+                    &conn,
+                    &format!("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = '{index}'")
+                ),
+                1,
+                "{index} must exist"
+            );
+        }
+
+        // V22: orphaned op removed (rowids preserved for replay ordering),
+        // account FK cascades.
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM pending_mail_ops"), 1);
+        assert_eq!(
+            count(
+                &conn,
+                "SELECT rowid FROM pending_mail_ops WHERE id = 'op-live'"
+            ),
+            42
+        );
+        assert!(conn
+            .execute(
+                "INSERT INTO pending_mail_ops (id, account_id, message_id, op_type, payload_json, status, created_at, updated_at)
+                 VALUES ('op-bad', 'nobody', 'm1', 'archive', '{}', 'pending', 1, 1)",
+                [],
+            )
+            .is_err());
+        // labels.rule_id: dangling reference cleared, deleting the rule nulls it.
+        assert_eq!(
+            count(
+                &conn,
+                "SELECT COUNT(*) FROM labels WHERE id = 'l-dangling' AND rule_id IS NULL"
+            ),
+            1
+        );
+        conn.execute("DELETE FROM rules WHERE id = 'r1'", [])
+            .unwrap();
+        assert_eq!(
+            count(
+                &conn,
+                "SELECT COUNT(*) FROM labels WHERE id = 'l-live' AND rule_id IS NULL"
+            ),
+            1
+        );
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM message_labels"), 1);
+        conn.execute("DELETE FROM accounts WHERE id = 'acct'", [])
+            .unwrap();
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM pending_mail_ops"), 0);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM message_bodies"), 0);
+        assert_eq!(
+            count(&conn, "SELECT COUNT(*) FROM message_correspondents"),
+            0
+        );
+        let fk_on: i64 = conn
+            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+            .unwrap();
+        assert_eq!(fk_on, 1);
+
+        // Re-running is a no-op.
+        run_migrations(&conn).unwrap();
+    }
+
+    #[test]
+    fn failed_v21_rolls_back_body_move_and_keeps_version() {
+        let conn = Connection::open_in_memory().unwrap();
+        run_migrations_up_to(&conn, 20).unwrap();
+        seed_v20_mailbox(&conn);
+        // A conflicting legacy table makes the correspondents backfill fail
+        // after the body columns were already dropped inside the transaction.
+        conn.execute_batch(
+            "CREATE TABLE message_correspondents (sentinel TEXT);
+             INSERT INTO message_correspondents VALUES ('preserve');",
+        )
+        .unwrap();
+
+        assert!(run_migrations(&conn).is_err());
+        assert_eq!(get_schema_version(&conn), 20);
+        assert!(column_exists(&conn, "messages", "body_text").unwrap());
+        assert!(!table_exists(&conn, "message_bodies").unwrap());
+        assert!(!column_exists(&conn, "message_folders", "date").unwrap());
+        let body: String = conn
+            .query_row(
+                "SELECT body_text FROM messages WHERE id = 'm1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(body, "plain one");
+        let sentinel: String = conn
+            .query_row("SELECT sentinel FROM message_correspondents", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(sentinel, "preserve");
+    }
+
+    #[test]
+    fn failed_v22_rolls_back_rebuilds_and_restores_fk_enforcement() {
+        let conn = Connection::open_in_memory().unwrap();
+        run_migrations_up_to(&conn, 21).unwrap();
+        seed_v20_mailbox_v21(&conn);
+        conn.execute_batch("CREATE TABLE labels_v22 (sentinel TEXT);")
+            .unwrap();
+
+        assert!(run_migrations(&conn).is_err());
+        assert_eq!(get_schema_version(&conn), 21);
+        // pending_mail_ops rebuild (which runs first) was rolled back too.
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM pending_mail_ops"), 2);
+        assert_eq!(
+            count(&conn, "SELECT COUNT(*) FROM labels WHERE rule_id = 'gone'"),
+            1
+        );
+        let fk_on: i64 = conn
+            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+            .unwrap();
+        assert_eq!(fk_on, 1);
+    }
+
+    fn seed_v20_mailbox_v21(conn: &Connection) {
+        conn.execute_batch(
+            "INSERT INTO accounts (id, email, provider, created_at, updated_at)
+                 VALUES ('acct', 'me@example.com', 'imap', 1, 1);
+             INSERT INTO rules (id, name, created_at, updated_at) VALUES ('r1', 'Rule', 1, 1);
+             INSERT INTO labels (id, name, rule_id) VALUES ('l-dangling', 'Dangling', 'gone');
+             INSERT INTO pending_mail_ops (id, account_id, message_id, op_type, payload_json,
+                 status, created_at, updated_at)
+             VALUES ('op-live', 'acct', 'm1', 'archive', '{}', 'pending', 1, 1),
+                    ('op-orphan', 'deleted-account', 'mx', 'archive', '{}', 'pending', 1, 1);",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn newer_schema_version_is_refused_without_touching_the_database() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&format!(
+            "CREATE TABLE future (x TEXT); PRAGMA user_version = {};",
+            CURRENT_VERSION + 1
+        ))
+        .unwrap();
+        let err = run_migrations(&conn).unwrap_err().to_string();
+        assert!(err.contains("newer"), "unexpected error: {err}");
+        assert_eq!(get_schema_version(&conn), CURRENT_VERSION + 1);
+        assert!(!table_exists(&conn, "accounts").unwrap());
+    }
+
+    #[test]
+    fn pending_migrations_back_up_the_file_and_keep_the_newest_two() {
+        let dir = std::env::temp_dir().join(format!("pebble-migrate-{}", pebble_core::new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("pebble.db");
+        {
+            let conn = Connection::open(&db).unwrap();
+            run_migrations_up_to(&conn, 20).unwrap();
+            seed_v20_mailbox(&conn);
+        }
+        // Two stale backups from earlier upgrades.
+        for name in ["pebble.db.v18-1.bak", "pebble.db.v19-2.bak"] {
+            std::fs::write(dir.join(name), b"old").unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        // Fresh databases (user_version 0) are never backed up.
+        let fresh = dir.join("fresh.db");
+        run_migrations(&Connection::open(&fresh).unwrap()).unwrap();
+
+        let conn = Connection::open(&db).unwrap();
+        run_migrations(&conn).unwrap();
+        drop(conn);
+
+        let mut backups: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok()?.file_name().into_string().ok())
+            .filter(|n| n.ends_with(".bak"))
+            .collect();
+        backups.sort();
+        assert_eq!(backups.len(), 2, "{backups:?}");
+        assert!(backups.contains(&"pebble.db.v19-2.bak".to_string()));
+        let snapshot = backups
+            .iter()
+            .find(|n| n.starts_with("pebble.db.v20-"))
+            .expect("v20 snapshot must exist");
+        let restored = Connection::open(dir.join(snapshot)).unwrap();
+        assert_eq!(get_schema_version(&restored), 20);
+        let body: String = restored
+            .query_row(
+                "SELECT body_text FROM messages WHERE id = 'm1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(body, "plain one");
+        drop(restored);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
