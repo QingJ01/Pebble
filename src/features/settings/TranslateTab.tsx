@@ -75,6 +75,10 @@ export default function TranslateTab() {
   const [llmModel, setLlmModel] = useState("");
   const [llmMode, setLlmMode] = useState<"completions" | "responses">("completions");
 
+  // The backend never returns the saved API key, only `has_api_key`. A blank
+  // key field then keeps the saved key (same provider and endpoint only).
+  const [savedKeyProvider, setSavedKeyProvider] = useState<ProviderType | null>(null);
+
   const [statusMsg, setStatusMsg] = useState("");
   const [statusType, setStatusType] = useState<"success" | "error" | "">("");
   const [saving, setSaving] = useState(false);
@@ -93,6 +97,7 @@ export default function TranslateTab() {
       setIsEnabled(cfg.is_enabled);
 
       const parsed = JSON.parse(cfg.config);
+      setSavedKeyProvider(parsed.has_api_key ? (parsed.type as ProviderType) : null);
       switch (parsed.type) {
         case "deeplx":
           setDeeplxEndpoint(parsed.endpoint || "");
@@ -191,6 +196,12 @@ export default function TranslateTab() {
     }
   }
 
+  function apiKeyPlaceholder(provider: ProviderType, fallback: string) {
+    return savedKeyProvider === provider
+      ? t("translate.savedApiKeyPlaceholder", "Saved — leave blank to keep")
+      : fallback;
+  }
+
   function renderProviderFields() {
     switch (providerType) {
       case "deeplx":
@@ -222,7 +233,7 @@ export default function TranslateTab() {
                 type="password"
                 value={deeplApiKey}
                 onChange={(e) => setDeeplApiKey(e.target.value)}
-                placeholder="your-deepl-api-key"
+                placeholder={apiKeyPlaceholder("deepl", "your-deepl-api-key")}
                 autoComplete="current-password"
               />
             </div>
@@ -265,7 +276,7 @@ export default function TranslateTab() {
                 type="password"
                 value={genericApiKey}
                 onChange={(e) => setGenericApiKey(e.target.value)}
-                placeholder={t("translate.apiKeyOptional")}
+                placeholder={apiKeyPlaceholder("generic_api", t("translate.apiKeyOptional"))}
                 autoComplete="current-password"
               />
             </div>
@@ -341,7 +352,7 @@ export default function TranslateTab() {
                 type="password"
                 value={llmApiKey}
                 onChange={(e) => setLlmApiKey(e.target.value)}
-                placeholder="your-api-key"
+                placeholder={apiKeyPlaceholder("llm", "your-api-key")}
                 autoComplete="current-password"
               />
             </div>

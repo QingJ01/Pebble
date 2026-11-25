@@ -213,10 +213,13 @@ impl OAuthManager {
         redirect::bind_redirect_listener(self.config.redirect_port).await
     }
 
-    /// Wait for the OAuth redirect on the configured port and return the
-    /// authorization code together with the callback state.
-    pub async fn wait_for_redirect(&self) -> Result<OAuthRedirect, OAuthError> {
-        redirect::wait_for_redirect(self.config.redirect_port).await
+    /// Wait for the OAuth redirect on the configured port. Only a callback
+    /// carrying `expected_state` completes the wait.
+    pub async fn wait_for_redirect(
+        &self,
+        expected_state: &str,
+    ) -> Result<OAuthRedirect, OAuthError> {
+        redirect::wait_for_redirect(self.config.redirect_port, expected_state).await
     }
 }
 

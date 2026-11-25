@@ -113,8 +113,14 @@ pub fn decrypt_enveloped(key: &[u8; 32], data: &[u8], aad: &[u8]) -> Result<Decr
         });
     }
 
+    // Legacy ciphertext without AAD. Callers re-encrypt it lazily after a
+    // successful read; keep the fallback but make it visible in the logs.
+    let plaintext = decrypt(key, data)?;
+    tracing::warn!(
+        "decrypted legacy ciphertext without authenticated context; it should be re-encrypted"
+    );
     Ok(DecryptedEnvelope {
-        plaintext: decrypt(key, data)?,
+        plaintext,
         needs_migration: true,
     })
 }

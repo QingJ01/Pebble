@@ -136,7 +136,8 @@ mod tests {
 
     #[test]
     fn passphrase_encrypted_blob_rejects_wrong_passphrase() {
-        let encrypted = passphrase::encrypt_with_passphrase(b"secret", "right passphrase").unwrap();
+        let encrypted =
+            passphrase::encrypt_with_passphrase(b"secret", "right passphrase!").unwrap();
 
         let err = passphrase::decrypt_with_passphrase(&encrypted, "wrong passphrase")
             .unwrap_err()
@@ -157,24 +158,24 @@ mod tests {
     #[test]
     fn passphrase_encrypted_blob_rejects_unsupported_iterations_before_decrypting() {
         let mut encrypted =
-            passphrase::encrypt_with_passphrase(b"secret", "right passphrase").unwrap();
+            passphrase::encrypt_with_passphrase(b"secret", "right passphrase!").unwrap();
         encrypted.iterations = 1;
 
-        let err = passphrase::decrypt_with_passphrase(&encrypted, "right passphrase")
+        let err = passphrase::decrypt_with_passphrase(&encrypted, "right passphrase!")
             .unwrap_err()
             .to_string();
 
-        assert!(err.contains("Unsupported backup secret KDF iterations"));
+        assert!(err.contains("Unsupported backup secret KDF parameters"));
     }
 
     #[test]
     fn passphrase_encrypted_blob_rejects_non_ascii_hex_without_panicking() {
         let mut encrypted =
-            passphrase::encrypt_with_passphrase(b"secret", "right passphrase").unwrap();
+            passphrase::encrypt_with_passphrase(b"secret", "right passphrase!").unwrap();
         encrypted.salt_hex = "aéx".to_string();
 
         let result = std::panic::catch_unwind(|| {
-            passphrase::decrypt_with_passphrase(&encrypted, "right passphrase")
+            passphrase::decrypt_with_passphrase(&encrypted, "right passphrase!")
         });
 
         assert!(result.is_ok(), "invalid backup hex must not panic");

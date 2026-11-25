@@ -607,6 +607,11 @@ export async function translateText(text: string, fromLang: string, toLang: stri
   return invoke<TranslateResult>("translate_text", { text, fromLang, toLang });
 }
 
+/**
+ * The returned `config` JSON never contains the API key: `api_key` is blank and
+ * `has_api_key` says whether one is saved. Saving or testing with a blank key
+ * reuses the saved key for the same provider and endpoint.
+ */
 export async function getTranslateConfig(): Promise<TranslateConfig | null> {
   return invoke<TranslateConfig | null>("get_translate_config");
 }
@@ -698,6 +703,11 @@ export async function restoreFromWebdav(
 
 // ─── Auto Backup API ────────────────────────────────────────────────────────
 
+/**
+ * Auto-backup settings sent to the backend. A blank `password` keeps the saved
+ * WebDAV password (for the same URL and username); `secret_passphrase: ""`
+ * keeps the saved passphrase and `null` disables secret backup.
+ */
 export interface AutoBackupConfig {
   url: string;
   username: string;
@@ -707,12 +717,24 @@ export interface AutoBackupConfig {
   enabled: boolean;
 }
 
+/** Saved auto-backup settings as returned by the backend: secrets are never exposed. */
+export interface AutoBackupConfigView {
+  url: string;
+  username: string;
+  has_password: boolean;
+  has_secret_passphrase: boolean;
+  /** The saved passphrase is shorter than the current minimum; backups still work. */
+  secret_passphrase_is_weak: boolean;
+  interval_minutes: number;
+  enabled: boolean;
+}
+
 export async function saveAutoBackupConfig(config: AutoBackupConfig): Promise<void> {
   return invoke<void>("save_auto_backup_config", { config });
 }
 
-export async function loadAutoBackupConfig(): Promise<AutoBackupConfig | null> {
-  return invoke<AutoBackupConfig | null>("load_auto_backup_config");
+export async function loadAutoBackupConfig(): Promise<AutoBackupConfigView | null> {
+  return invoke<AutoBackupConfigView | null>("load_auto_backup_config");
 }
 
 export async function deleteAutoBackupConfig(): Promise<void> {

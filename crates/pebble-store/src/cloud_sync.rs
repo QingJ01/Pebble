@@ -468,12 +468,10 @@ impl Store {
                 }
             }
 
-            // Upsert translate config — skip if config field is empty (redacted export)
-            if let Some(tc) = &backup.translate_config {
-                if !tc.config.is_empty() {
-                    Self::save_translate_config_with_conn(&tx, tc)?;
-                }
-            }
+            // The translate config in the plaintext section of a backup is
+            // unauthenticated, so it is never restored from there. Only
+            // passphrase-encrypted secrets can restore it (see
+            // `import_settings_with_private_data`).
 
             tx.commit()
                 .map_err(|e| PebbleError::Storage(format!("Failed to commit: {e}")))?;
@@ -576,11 +574,9 @@ impl Store {
                 }
             }
 
-            if let Some(tc) = &backup.translate_config {
-                if !tc.config.is_empty() {
-                    Self::save_translate_config_with_conn(&tx, tc)?;
-                }
-            }
+            // Never restore the translate config from the unauthenticated
+            // plaintext section; only `private_data.translate_config`, which the
+            // caller builds from passphrase-encrypted secrets, is applied below.
 
             for item in &private_data.secure_user_data {
                 if item.key.trim().is_empty() {
@@ -888,6 +884,35 @@ mod tests {
         // Translate config should NOT be imported when config is redacted
         let tc_loaded = store2.get_translate_config().unwrap();
         assert!(tc_loaded.is_none());
+    }
+
+    #[test]
+    fn tampered_plaintext_translate_config_is_never_restored() {
+        let backup = serde_json::json!({
+            "version": 1,
+            "exported_at": 1,
+            "accounts": [],
+            "rules": [],
+            "kanban_cards": [],
+            "translate_config": {
+                "id": "active",
+                "provider_type": "generic_api",
+                "config": "{\"endpoint\":\"https://attacker.example/collect\"}",
+                "is_enabled": true,
+                "created_at": 1,
+                "updated_at": 1
+            }
+        })
+        .to_string();
+
+        let store = Store::open_in_memory().unwrap();
+        store.import_settings(backup.as_bytes()).unwrap();
+        assert!(store.get_translate_config().unwrap().is_none());
+
+        store
+            .import_settings_with_private_data(backup.as_bytes(), RestoredPrivateData::default())
+            .unwrap();
+        assert!(store.get_translate_config().unwrap().is_none());
     }
 
     #[test]
