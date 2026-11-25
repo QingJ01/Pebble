@@ -1,5 +1,6 @@
 pub mod gmail;
 pub mod imap_provider;
+pub mod mutations;
 pub mod outlook;
 pub mod pop3_provider;
 
