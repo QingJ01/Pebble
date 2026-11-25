@@ -38,8 +38,9 @@ fn is_windows_reserved_name(name: &str) -> bool {
 /// Directories (relative to the home directory) whose contents are executed
 /// automatically at login. Attachments must never be written there.
 const AUTOSTART_DIRS: &[&[&str]] = &[
-    // macOS launch agents
+    // macOS launch agents/daemons
     &["Library", "LaunchAgents"],
+    &["Library", "LaunchDaemons"],
     // XDG autostart entries and systemd user units (Linux)
     &[".config", "autostart"],
     &[".config", "systemd", "user"],
@@ -62,34 +63,97 @@ fn user_home_dir(app: &tauri::AppHandle) -> Result<PathBuf, PebbleError> {
         .map_err(|_| PebbleError::Internal("Home directory is unavailable".to_string()))
 }
 
-/// Case-insensitive component prefix check (macOS and Windows file systems
-/// are usually case-insensitive, so be conservative everywhere).
-fn path_starts_with_ignore_case(path: &Path, prefix: &Path) -> bool {
+/// Operating-system directories attachments must never be written into.
+#[cfg(windows)]
+fn system_save_roots() -> Vec<PathBuf> {
+    let env_dir = |name: &str| std::env::var_os(name).map(PathBuf::from);
+    let mut roots = vec![
+        env_dir("WINDIR").unwrap_or_else(|| PathBuf::from(r"C:\Windows")),
+        env_dir("ProgramFiles").unwrap_or_else(|| PathBuf::from(r"C:\Program Files")),
+        env_dir("ProgramFiles(x86)").unwrap_or_else(|| PathBuf::from(r"C:\Program Files (x86)")),
+        env_dir("ProgramData")
+            .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"))
+            .join("Microsoft")
+            .join("Windows")
+            .join("Start Menu"),
+    ];
+    if let Some(app_data) = env_dir("APPDATA") {
+        roots.push(
+            app_data
+                .join("Microsoft")
+                .join("Windows")
+                .join("Start Menu")
+                .join("Programs")
+                .join("Startup"),
+        );
+    }
+    roots
+}
+
+#[cfg(target_os = "macos")]
+fn system_save_roots() -> Vec<PathBuf> {
+    [
+        "/System",
+        "/Library",
+        "/usr",
+        "/bin",
+        "/sbin",
+        "/etc",
+        "/private/etc",
+        "/Applications",
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .collect()
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn system_save_roots() -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = [
+        "/etc", "/usr", "/bin", "/sbin", "/boot", "/proc", "/sys", "/dev",
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .collect();
+    // /lib, /lib32, /lib64, /libx32, ...
+    if let Ok(entries) = std::fs::read_dir("/") {
+        roots.extend(
+            entries
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| entry.file_name().to_string_lossy().starts_with("lib"))
+                .map(|entry| entry.path()),
+        );
+    }
+    roots
+}
+
+/// Component prefix check. Windows and macOS file systems are usually
+/// case-insensitive, so compare case-insensitively there.
+fn path_starts_with_os(path: &Path, prefix: &Path) -> bool {
+    let ignore_case = cfg!(any(windows, target_os = "macos"));
+    let normalize = |component: std::path::Component<'_>| {
+        let text = component.as_os_str().to_string_lossy().into_owned();
+        if ignore_case {
+            text.to_lowercase()
+        } else {
+            text
+        }
+    };
     let mut path_components = path.components();
     prefix.components().all(|prefix_component| {
-        path_components.next().is_some_and(|component| {
-            component.as_os_str().to_string_lossy().to_lowercase()
-                == prefix_component
-                    .as_os_str()
-                    .to_string_lossy()
-                    .to_lowercase()
-        })
+        path_components
+            .next()
+            .is_some_and(|component| normalize(component) == normalize(prefix_component))
     })
 }
 
-/// Ensure a canonical directory lies inside the user's home directory and
-/// outside any autostart location.
+/// Ensure a canonical directory is not an autostart location or an OS
+/// system directory. Any other location (including other drives and mounted
+/// volumes) is allowed.
 fn ensure_allowed_save_directory(canonical_dir: &Path, home: &Path) -> Result<(), PebbleError> {
-    let home = home
-        .canonicalize()
-        .map_err(|_| PebbleError::Internal("Home directory is unavailable".to_string()))?;
-    if !canonical_dir.starts_with(&home) {
-        return Err(PebbleError::Validation(
-            "Attachments can only be saved inside your home folder".to_string(),
-        ));
-    }
+    let home = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
     let xdg_config = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
-    let blocked = AUTOSTART_DIRS
+    let autostart = AUTOSTART_DIRS
         .iter()
         .map(|parts| {
             parts
@@ -101,19 +165,31 @@ fn ensure_allowed_save_directory(canonical_dir: &Path, home: &Path) -> Result<()
                 .into_iter()
                 .map(|config| config.join("autostart")),
         );
-    for blocked_dir in blocked {
+    for blocked_dir in autostart {
         let blocked_dir = blocked_dir.canonicalize().unwrap_or(blocked_dir);
-        if path_starts_with_ignore_case(canonical_dir, &blocked_dir) {
+        if path_starts_with_os(canonical_dir, &blocked_dir) {
             return Err(PebbleError::Validation(
                 "Attachments cannot be saved into a startup folder".to_string(),
+            ));
+        }
+    }
+    for system_dir in system_save_roots() {
+        let canonical_system = system_dir
+            .canonicalize()
+            .unwrap_or_else(|_| system_dir.clone());
+        if path_starts_with_os(canonical_dir, &system_dir)
+            || path_starts_with_os(canonical_dir, &canonical_system)
+        {
+            return Err(PebbleError::Validation(
+                "Attachments cannot be saved into a system folder".to_string(),
             ));
         }
     }
     Ok(())
 }
 
-/// Validate that save_to path is within a safe directory (user's home, but
-/// never an autostart location).
+/// Validate that save_to path is a safe destination: an existing directory
+/// that is neither an autostart location nor an OS system directory.
 ///
 /// This is the security gate for attachment writes: it *rejects* suspicious
 /// paths rather than normalizing them. The FE helper at `src/lib/sanitizeFilename.ts`
@@ -708,11 +784,12 @@ mod tests {
     }
 
     #[test]
-    fn save_path_must_stay_inside_home_and_out_of_autostart_dirs() {
+    fn save_path_allows_any_folder_except_autostart_and_system_dirs() {
         let base = std::env::temp_dir().join(format!("pebble-save-home-{}", pebble_core::new_id()));
         let home = base.join("home");
-        let outside = base.join("outside");
+        let other_volume = base.join("other-volume");
         let launch_agents = home.join("Library").join("LaunchAgents");
+        let user_library = home.join("Library").join("Mail Downloads");
         let autostart = home.join(".config").join("autostart");
         let startup = home
             .join("AppData")
@@ -723,28 +800,33 @@ mod tests {
             .join("Programs")
             .join("Startup");
         let downloads = home.join("Downloads");
-        for dir in [&outside, &launch_agents, &autostart, &startup, &downloads] {
+        for dir in [
+            &other_volume,
+            &launch_agents,
+            &user_library,
+            &autostart,
+            &startup,
+            &downloads,
+        ] {
             std::fs::create_dir_all(dir).unwrap();
         }
 
         assert!(validate_save_path(&downloads.join("a.pdf").to_string_lossy(), &home).is_ok());
-        assert!(validate_save_path(&outside.join("a.pdf").to_string_lossy(), &home).is_err());
-        assert!(validate_save_path(
-            &downloads
-                .join("..")
-                .join("..")
-                .join("outside")
-                .join("a.pdf")
-                .to_string_lossy(),
-            &home
-        )
-        .is_err());
+        // Folders outside home (other drives, mounted volumes) are allowed.
+        assert!(validate_save_path(&other_volume.join("a.pdf").to_string_lossy(), &home).is_ok());
+        assert!(validate_save_path(&user_library.join("a.pdf").to_string_lossy(), &home).is_ok());
         for blocked in [&launch_agents, &autostart, &startup] {
             assert!(
                 validate_save_path(&blocked.join("evil.plist").to_string_lossy(), &home).is_err(),
                 "{}",
                 blocked.display()
             );
+        }
+        if cfg!(any(windows, target_os = "macos")) {
+            let upper = home.join("LIBRARY").join("launchagents");
+            if upper.canonicalize().is_ok() {
+                assert!(validate_save_path(&upper.join("x").to_string_lossy(), &home).is_err());
+            }
         }
         assert!(save_attachments_to_directory(
             &base,
@@ -754,11 +836,39 @@ mod tests {
             |_, _, _| {}
         )
         .is_err());
-        assert!(
-            save_attachments_to_directory(&base, &outside, &home, Vec::new(), |_, _, _| {})
-                .is_err()
-        );
+        assert!(save_attachments_to_directory(
+            &base,
+            &other_volume,
+            &home,
+            Vec::new(),
+            |_, _, _| {}
+        )
+        .is_ok());
+
+        // OS system directories are rejected.
+        for system_dir in system_save_roots() {
+            if system_dir.is_dir() {
+                assert!(
+                    validate_save_path(&system_dir.join("evil").to_string_lossy(), &home).is_err(),
+                    "{}",
+                    system_dir.display()
+                );
+            }
+        }
         let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn os_prefix_matching_respects_platform_case_rules() {
+        assert!(path_starts_with_os(
+            Path::new("/usr/local/x"),
+            Path::new("/usr")
+        ));
+        assert!(!path_starts_with_os(Path::new("/usrx"), Path::new("/usr")));
+        assert_eq!(
+            path_starts_with_os(Path::new("/USR/local"), Path::new("/usr")),
+            cfg!(any(windows, target_os = "macos"))
+        );
     }
 
     #[test]

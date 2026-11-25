@@ -56,6 +56,7 @@ describe("CloudSyncTab automatic backup configuration", () => {
       username: "old-user",
       has_password: true,
       has_secret_passphrase: false,
+      secret_passphrase_is_weak: false,
       interval_minutes: 60,
       enabled: true,
     });
@@ -135,6 +136,7 @@ describe("CloudSyncTab automatic backup configuration", () => {
         username: "old-user",
         has_password: false,
         has_secret_passphrase: false,
+      secret_passphrase_is_weak: false,
         interval_minutes: 60,
         enabled: true,
       });
@@ -185,6 +187,7 @@ describe("CloudSyncTab automatic backup configuration", () => {
       username: "",
       has_password: false,
       has_secret_passphrase: false,
+      secret_passphrase_is_weak: false,
       interval_minutes: 60,
       enabled: true,
     });
@@ -219,6 +222,7 @@ describe("CloudSyncTab automatic backup configuration", () => {
       username: "old-user",
       has_password: true,
       has_secret_passphrase: true,
+      secret_passphrase_is_weak: false,
       interval_minutes: 60,
       enabled: true,
     });
@@ -243,6 +247,30 @@ describe("CloudSyncTab automatic backup configuration", () => {
         interval_minutes: 60,
         enabled: true,
       });
+    });
+  });
+
+  it("keeps a weak saved passphrase working and only shows a hint", async () => {
+    vi.mocked(loadAutoBackupConfig).mockResolvedValueOnce({
+      url: "https://dav.example.com/old",
+      username: "old-user",
+      has_password: true,
+      has_secret_passphrase: true,
+      secret_passphrase_is_weak: true,
+      interval_minutes: 60,
+      enabled: true,
+    });
+    render(<CloudSyncTab />);
+
+    expect((await screen.findByRole("note")).textContent).toContain("shorter than 12 characters");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save Auto-Backup Configuration" }),
+    );
+
+    await waitFor(() => {
+      expect(saveAutoBackupConfig).toHaveBeenCalledWith(
+        expect.objectContaining({ secret_passphrase: "" }),
+      );
     });
   });
 

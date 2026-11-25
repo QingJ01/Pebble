@@ -311,7 +311,8 @@
     "autoBackupInterval": "间隔",
     "autoBackupFillFields": "请先填写上方的 WebDAV 连接信息以启用自动备份。",
     "secretPassphraseTooShort": "备份加密密码至少需要 12 个字符。",
-    "savedSecretPlaceholder": "已保存 — 留空则保持不变"
+    "savedSecretPlaceholder": "已保存 — 留空则保持不变",
+    "weakPassphraseHint": "已保存的备份加密密码少于 12 个字符。备份仍可正常进行，但建议设置更强的密码。"
   },
   "pendingOps": {
     "retrySend": "重试发送",

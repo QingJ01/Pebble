@@ -40,11 +40,24 @@ pub struct PassphraseEncryptedBlob {
     pub ciphertext_hex: String,
 }
 
+/// Encrypt with a passphrase the user is setting now: the passphrase must
+/// satisfy the minimum-length policy.
 pub fn encrypt_with_passphrase(
     plaintext: &[u8],
     passphrase: &str,
 ) -> Result<PassphraseEncryptedBlob> {
     validate_new_passphrase(passphrase)?;
+    encrypt_with_stored_passphrase(plaintext, passphrase)
+}
+
+/// Encrypt with a passphrase that was already saved before the minimum-length
+/// policy existed (e.g. the auto-backup passphrase). Only a non-empty
+/// passphrase is required, so existing configurations keep working.
+pub fn encrypt_with_stored_passphrase(
+    plaintext: &[u8],
+    passphrase: &str,
+) -> Result<PassphraseEncryptedBlob> {
+    validate_passphrase_present(passphrase)?;
 
     let mut salt = [0u8; SALT_SIZE];
     rand::thread_rng().fill_bytes(&mut salt);
@@ -269,6 +282,16 @@ mod tests {
             decrypt_with_passphrase(&blob, "passphrase").unwrap(),
             b"legacy backup secrets"
         );
+    }
+
+    #[test]
+    fn stored_short_passphrases_can_still_encrypt() {
+        let encrypted = encrypt_with_stored_passphrase(b"secret", "short").unwrap();
+        assert_eq!(
+            decrypt_with_passphrase(&encrypted, "short").unwrap(),
+            b"secret"
+        );
+        assert!(encrypt_with_stored_passphrase(b"secret", "  ").is_err());
     }
 
     #[test]

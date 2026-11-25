@@ -723,6 +723,8 @@ export interface AutoBackupConfigView {
   username: string;
   has_password: boolean;
   has_secret_passphrase: boolean;
+  /** The saved passphrase is shorter than the current minimum; backups still work. */
+  secret_passphrase_is_weak: boolean;
   interval_minutes: number;
   enabled: boolean;
 }

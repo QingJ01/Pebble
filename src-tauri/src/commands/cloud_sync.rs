@@ -13,8 +13,8 @@ use crate::commands::translate::{
 use crate::state::AppState;
 use pebble_core::PebbleError;
 use pebble_crypto::passphrase::{
-    decrypt_with_passphrase, encrypt_with_passphrase, validate_new_passphrase,
-    PassphraseEncryptedBlob,
+    decrypt_with_passphrase, encrypt_with_passphrase, encrypt_with_stored_passphrase,
+    validate_new_passphrase, PassphraseEncryptedBlob, MIN_PASSPHRASE_CHARS,
 };
 use pebble_store::cloud_sync::{
     preview_backup, serialize_backup, BackupPreview, BackupSecretSummary, RestoredAuthData,
@@ -52,13 +52,43 @@ fn secret_summary(secrets: &BackupSecrets) -> BackupSecretSummary {
     }
 }
 
+/// A passphrase used to create a backup, and where it came from.
+#[derive(Debug, Clone, PartialEq)]
+struct BackupPassphrase {
+    value: String,
+    /// Already saved in the auto-backup config. Such passphrases may predate
+    /// the minimum-length policy and must keep working; the policy is only
+    /// enforced when the user sets or changes a passphrase.
+    stored: bool,
+}
+
+impl BackupPassphrase {
+    fn entered(value: String) -> Self {
+        Self {
+            value,
+            stored: false,
+        }
+    }
+
+    fn stored(value: String) -> Self {
+        Self {
+            value,
+            stored: true,
+        }
+    }
+}
+
 fn encrypt_backup_secrets(
     secrets: &BackupSecrets,
-    passphrase: &str,
+    passphrase: &BackupPassphrase,
 ) -> std::result::Result<PassphraseEncryptedBlob, PebbleError> {
     let plaintext = serde_json::to_vec(secrets)
         .map_err(|e| PebbleError::Internal(format!("Failed to serialize backup secrets: {e}")))?;
-    encrypt_with_passphrase(&plaintext, passphrase)
+    if passphrase.stored {
+        encrypt_with_stored_passphrase(&plaintext, &passphrase.value)
+    } else {
+        encrypt_with_passphrase(&plaintext, &passphrase.value)
+    }
 }
 
 fn decrypt_backup_secrets(
@@ -105,7 +135,7 @@ fn collect_backup_secrets(state: &AppState) -> std::result::Result<BackupSecrets
 fn attach_encrypted_secrets(
     state: &AppState,
     backup: &mut SettingsBackup,
-    secret_passphrase: Option<String>,
+    secret_passphrase: Option<BackupPassphrase>,
 ) -> std::result::Result<(), PebbleError> {
     let Some(passphrase) = secret_passphrase else {
         return Ok(());
@@ -213,7 +243,7 @@ fn provider_slug(provider: &pebble_core::ProviderType) -> &'static str {
 
 fn build_backup_data(
     state: &AppState,
-    secret_passphrase: Option<String>,
+    secret_passphrase: Option<BackupPassphrase>,
 ) -> std::result::Result<Vec<u8>, PebbleError> {
     let exported = state.store.export_settings()?;
     let mut backup: SettingsBackup = serde_json::from_slice(&exported)
@@ -274,15 +304,18 @@ fn resolve_webdav_password(
 fn resolve_secret_passphrase(
     state: &AppState,
     passphrase: Option<String>,
-) -> std::result::Result<Option<String>, PebbleError> {
+) -> std::result::Result<Option<BackupPassphrase>, PebbleError> {
     match passphrase {
         Some(value) if value.trim().is_empty() => {
             let stored = load_auto_backup_config_inner(&state.store, &state.crypto)?
                 .and_then(|config| config.secret_passphrase)
                 .filter(|stored| !stored.trim().is_empty());
-            Ok(Some(stored.unwrap_or(value)))
+            Ok(Some(match stored {
+                Some(stored) => BackupPassphrase::stored(stored),
+                None => BackupPassphrase::entered(value),
+            }))
         }
-        other => Ok(other),
+        other => Ok(other.map(BackupPassphrase::entered)),
     }
 }
 
@@ -337,7 +370,8 @@ pub fn import_backup_file(
     data: String,
     secret_passphrase: Option<String>,
 ) -> std::result::Result<String, PebbleError> {
-    let secret_passphrase = resolve_secret_passphrase(&state, secret_passphrase)?;
+    let secret_passphrase =
+        resolve_secret_passphrase(&state, secret_passphrase)?.map(|passphrase| passphrase.value);
     restore_backup_data(&state, data.as_bytes(), secret_passphrase)
 }
 
@@ -366,7 +400,8 @@ pub async fn restore_from_webdav(
     secret_passphrase: Option<String>,
 ) -> std::result::Result<String, PebbleError> {
     let password = resolve_webdav_password(&state, &url, &username, password)?;
-    let secret_passphrase = resolve_secret_passphrase(&state, secret_passphrase)?;
+    let secret_passphrase =
+        resolve_secret_passphrase(&state, secret_passphrase)?.map(|passphrase| passphrase.value);
     let client = WebDavClient::new(url, username, password)?;
     let data = client.download(SETTINGS_BACKUP_FILENAME).await?;
     restore_backup_data(&state, &data, secret_passphrase)
@@ -408,6 +443,9 @@ pub struct AutoBackupConfigView {
     pub username: String,
     pub has_password: bool,
     pub has_secret_passphrase: bool,
+    /// The stored passphrase predates the minimum-length policy. Backups keep
+    /// working; the UI only suggests updating it.
+    pub secret_passphrase_is_weak: bool,
     pub interval_minutes: u64,
     pub enabled: bool,
 }
@@ -422,6 +460,12 @@ impl From<&AutoBackupConfig> for AutoBackupConfigView {
                 .secret_passphrase
                 .as_deref()
                 .is_some_and(|passphrase| !passphrase.trim().is_empty()),
+            secret_passphrase_is_weak: config.secret_passphrase.as_deref().is_some_and(
+                |passphrase| {
+                    !passphrase.trim().is_empty()
+                        && passphrase.trim().chars().count() < MIN_PASSPHRASE_CHARS
+                },
+            ),
             interval_minutes: config.interval_minutes,
             enabled: config.enabled,
         }
@@ -548,7 +592,12 @@ pub async fn run_auto_backup_worker(app: tauri::AppHandle) {
 
         tracing::info!("[auto-backup] starting scheduled WebDAV backup");
         let backup_result: std::result::Result<(), PebbleError> = async {
-            let data = build_backup_data(&state, config.secret_passphrase.clone())?;
+            // The stored passphrase may predate the 12-character minimum.
+            let passphrase = config
+                .secret_passphrase
+                .clone()
+                .map(BackupPassphrase::stored);
+            let data = build_backup_data(&state, passphrase)?;
             let client = WebDavClient::new(config.url, config.username, config.password)?;
             client.upload(SETTINGS_BACKUP_FILENAME, &data).await?;
             Ok(())
@@ -599,7 +648,8 @@ mod tests {
             translate_config: Some(r#"{"type":"deepl","api_key":"deepl-secret"}"#.to_string()),
         };
 
-        let encrypted = encrypt_backup_secrets(&secrets, "backup passphrase long").unwrap();
+        let passphrase = BackupPassphrase::entered("backup passphrase long".to_string());
+        let encrypted = encrypt_backup_secrets(&secrets, &passphrase).unwrap();
         let serialized = serde_json::to_string(&encrypted).unwrap();
 
         assert!(!serialized.contains("imap-secret"));
@@ -643,6 +693,33 @@ mod tests {
             interval_minutes: 60,
             enabled: true,
         }
+    }
+
+    #[test]
+    fn stored_short_passphrase_keeps_working_but_new_short_one_is_rejected() {
+        let secrets = BackupSecrets {
+            account_auth: vec![],
+            translate_config: Some(r#"{"type":"deeplx","endpoint":"http://localhost:1"}"#.into()),
+        };
+        let stored =
+            encrypt_backup_secrets(&secrets, &BackupPassphrase::stored("short".into())).unwrap();
+        assert_eq!(decrypt_backup_secrets(&stored, "short").unwrap(), secrets);
+        assert!(
+            encrypt_backup_secrets(&secrets, &BackupPassphrase::entered("short".into())).is_err()
+        );
+
+        // Keeping a stored short passphrase on save is allowed and flagged as weak.
+        let merged = merge_auto_backup_config(
+            auto_config("", Some("")),
+            Some(auto_config("pw", Some("short"))),
+        )
+        .unwrap();
+        assert_eq!(merged.secret_passphrase.as_deref(), Some("short"));
+        assert!(AutoBackupConfigView::from(&merged).secret_passphrase_is_weak);
+        assert!(
+            !AutoBackupConfigView::from(&auto_config("pw", Some("long enough passphrase")))
+                .secret_passphrase_is_weak
+        );
     }
 
     #[test]

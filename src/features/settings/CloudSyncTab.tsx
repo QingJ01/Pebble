@@ -66,6 +66,7 @@ export default function CloudSyncTab() {
   // The saved WebDAV password is only reused for the server it was saved for.
   const [storedServer, setStoredServer] = useState<{ url: string; username: string } | null>(null);
   const [hasStoredPassphrase, setHasStoredPassphrase] = useState(false);
+  const [storedPassphraseIsWeak, setStoredPassphraseIsWeak] = useState(false);
 
   const [statusMsg, setStatusMsg] = useState("");
   const [statusType, setStatusType] = useState<"success" | "error" | "">("");
@@ -94,6 +95,7 @@ export default function CloudSyncTab() {
         if (config.has_secret_passphrase) {
           setIncludeSecrets(true);
           setHasStoredPassphrase(true);
+          setStoredPassphraseIsWeak(Boolean(config.secret_passphrase_is_weak));
         }
       }
       setAutoLoaded(true);
@@ -167,8 +169,14 @@ export default function CloudSyncTab() {
       });
       setHasStoredPassword(Boolean(password) || storedPasswordApplies);
       setStoredServer({ url, username });
-      if (includeSecrets && secretPassphrase.trim()) setHasStoredPassphrase(true);
-      if (!includeSecrets) setHasStoredPassphrase(false);
+      if (includeSecrets && secretPassphrase.trim()) {
+        setHasStoredPassphrase(true);
+        setStoredPassphraseIsWeak(false);
+      }
+      if (!includeSecrets) {
+        setHasStoredPassphrase(false);
+        setStoredPassphraseIsWeak(false);
+      }
       setStatusMsg(
         t(
           "cloudSync.autoBackupConfigSaved",
@@ -577,6 +585,17 @@ export default function CloudSyncTab() {
           }
           autoComplete="new-password"
         />
+        {includeSecrets && storedPassphraseIsWeak && !secretPassphrase && (
+          <p
+            role="note"
+            style={{ margin: "6px 0 0", fontSize: "12px", color: "var(--color-warning, #e67e22)" }}
+          >
+            {t(
+              "cloudSync.weakPassphraseHint",
+              "Your saved backup encryption password is shorter than 12 characters. Backups still work, but please set a stronger password.",
+            )}
+          </p>
+        )}
       </div>
 
       {/* Action buttons */}
