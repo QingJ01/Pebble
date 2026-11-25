@@ -98,15 +98,18 @@ export function useSidebarFolderManagement({ accounts, folders, accountId }: Arg
       </div>,
       document.body,
     )}
-    <button
-      ref={keyboardButtonRef}
-      type="button"
-      className="sidebar-keyboard-only-action"
-      onClick={() => setManagerOpen(true)}
-    >
-      {menuLabel}
-    </button>
-    {managerOpen && (
+    {accounts.length > 0 && (
+      <button
+        ref={keyboardButtonRef}
+        type="button"
+        className="sidebar-keyboard-only-action"
+        onKeyDown={(event) => event.stopPropagation()}
+        onClick={() => setManagerOpen(true)}
+      >
+        {menuLabel}
+      </button>
+    )}
+    {managerOpen && accounts.length > 0 && (
       <FolderManagementModal
         accounts={accounts}
         folders={folders}

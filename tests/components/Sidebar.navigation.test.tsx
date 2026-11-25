@@ -153,6 +153,23 @@ describe("Sidebar navigation", () => {
     expect(screen.queryByRole("menuitem", { name: "Manage folders" })).toBeNull();
   });
 
+  it("keeps sidebar key events on the keyboard-only folder management entry", () => {
+    useUIStore.setState({ sidebarStyle: "grouped", activeView: "inbox" });
+    useComposeStore.setState({ composeDirty: false, composeMode: null });
+    render(<Sidebar />);
+
+    const listener = vi.fn();
+    document.addEventListener("keydown", listener);
+    try {
+      const keyboardButton = document.querySelector<HTMLButtonElement>(".sidebar-keyboard-only-action");
+      expect(keyboardButton).toBeTruthy();
+      fireEvent.keyDown(keyboardButton!, { key: "Enter" });
+      expect(listener).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener("keydown", listener);
+    }
+  });
+
   it("keeps a keyboard-only folder management entry and restores focus to it", async () => {
     useUIStore.setState({ sidebarStyle: "grouped", activeView: "inbox" });
     useComposeStore.setState({ composeDirty: false, composeMode: null });
