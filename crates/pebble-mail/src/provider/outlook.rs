@@ -1519,16 +1519,6 @@ impl DraftProvider for OutlookProvider {
     }
 }
 
-impl MailProvider for OutlookProvider {
-    fn as_category_provider(&self) -> Option<&dyn CategoryProvider> {
-        Some(self)
-    }
-
-    fn as_draft_provider(&self) -> Option<&dyn DraftProvider> {
-        Some(self)
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Helper functions
 // ---------------------------------------------------------------------------

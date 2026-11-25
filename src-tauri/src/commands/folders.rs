@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use tauri::State;
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct ImapSyncFolderSettings {
     pub folders: Vec<Folder>,
     pub selected_remote_ids: Vec<String>,

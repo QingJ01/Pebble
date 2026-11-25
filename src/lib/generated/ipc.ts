@@ -53,6 +53,8 @@ export type FolderType = "folder" | "label" | "category";
 
 export type HttpProxyConfig = { host: string, port: number, };
 
+export type ImapSyncFolderSettings = { folders: Array<Folder>, selected_remote_ids: Array<string>, };
+
 export type ImportedBackgroundImage = { path: string, filename: string, size: number, };
 
 export type KanbanCard = { message_id: string, column: KanbanColumn, position: number, created_at: number, updated_at: number, };
@@ -69,6 +71,10 @@ export type MessageSummary = { id: string, account_id: string, remote_id: string
 
 export type NotificationStatus = { enabled: boolean, attention_active: boolean, platform: string, app_id: string | null, };
 
+export type PendingMailOp = { id: string, account_id: string, message_id: string, op_type: string, status: "pending" | "in_progress" | "failed" | "done", attempts: number, last_error: string | null, created_at: number, updated_at: number, next_retry_at: number | null, };
+
+export type PendingMailOpsSummary = { pending_count: number, in_progress_count: number, failed_count: number, total_active_count: number, last_error: string | null, updated_at: number | null, };
+
 export type PrivacyMode = "Strict" | { "TrustSender": string } | "LoadOnce" | "Off";
 
 export type ProviderType = "imap" | "pop3" | "gmail" | "outlook";
@@ -76,6 +82,8 @@ export type ProviderType = "imap" | "pop3" | "gmail" | "outlook";
 export type RenderedHtml = { html: string, trackers_blocked: Array<TrackerInfo>, images_blocked: number, };
 
 export type Rule = { id: string, name: string, priority: number, conditions: string, actions: string, is_enabled: boolean, created_at: number, updated_at: number, };
+
+export type SearchHit = { message_id: string, score: number, snippet: string, subject?: string, from_address?: string, date?: number, };
 
 export type SnoozedMessage = { message_id: string, snoozed_at: number, unsnoozed_at: number, return_to: string, };
 

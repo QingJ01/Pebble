@@ -39,6 +39,8 @@ pub fn retry_failed_send(
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "PendingMailOpsSummary"))]
 pub struct PendingMailOpsSummaryResponse {
     pub pending_count: i64,
     pub in_progress_count: i64,
@@ -62,11 +64,17 @@ impl From<PendingMailOpsSummary> for PendingMailOpsSummaryResponse {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "PendingMailOp"))]
 pub struct PendingMailOpResponse {
     pub id: String,
     pub account_id: String,
     pub message_id: String,
     pub op_type: String,
+    #[cfg_attr(
+        test,
+        ts(type = "\"pending\" | \"in_progress\" | \"failed\" | \"done\"")
+    )]
     pub status: String,
     pub attempts: i64,
     pub last_error: Option<String>,

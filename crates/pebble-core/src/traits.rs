@@ -70,16 +70,19 @@ pub enum SearchQuery {
     Structured(StructuredQuery),
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 pub struct SearchHit {
     pub message_id: String,
     pub score: f32,
     pub snippet: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub subject: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub from_address: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub date: Option<i64>,
 }
 
@@ -309,22 +312,9 @@ pub trait RemoteMailOps: Send + Sync {
     async fn close(&self) {}
 }
 
-pub trait MailProvider: MailTransport + FolderProvider {
-    fn as_label_provider(&self) -> Option<&dyn LabelProvider> {
-        None
-    }
-    fn as_category_provider(&self) -> Option<&dyn CategoryProvider> {
-        None
-    }
-    fn as_draft_provider(&self) -> Option<&dyn DraftProvider> {
-        None
-    }
-}
-
-// Compile-time assertion: MailProvider must be object-safe.
+// Compile-time assertion: the provider traits must be object-safe.
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn _assert_object_safe(_: &dyn MailProvider) {}
     fn _assert_remote_ops_object_safe(_: &dyn RemoteMailOps) {}
 }

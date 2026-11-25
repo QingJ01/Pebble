@@ -66,6 +66,10 @@ fn render() -> String {
         crate::commands::appearance::ImportedBackgroundImage,
         crate::commands::notifications::NotificationStatus,
         crate::commands::advanced_search::AdvancedSearchQuery,
+        crate::commands::folders::ImapSyncFolderSettings,
+        crate::commands::pending_mail_ops::PendingMailOpsSummaryResponse,
+        crate::commands::pending_mail_ops::PendingMailOpResponse,
+        pebble_core::traits::SearchHit,
     ];
     decls.sort_by(|a, b| a.0.cmp(&b.0));
     let mut out = String::from(

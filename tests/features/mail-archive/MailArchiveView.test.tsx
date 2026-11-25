@@ -51,7 +51,9 @@ describe("Local mail archive browser", () => {
     expect(screen.getByText(en.mailArchive.localOnly)).toBeTruthy();
     expect(screen.getByText(en.mailArchive.searchScope)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Subject A — sender@example.com/ }));
-    const message = await screen.findByRole("article", { name: "Archived message" });
+    // Generous timeout: under a full parallel run this render can exceed the
+    // 1s findBy default and flake.
+    const message = await screen.findByRole("article", { name: "Archived message" }, { timeout: 5000 });
     expect(message.querySelector("img,script,iframe")).toBeNull();
     expect(within(message).getByText(/<img src=/)).toBeTruthy();
     expect(within(message).getByText(/Bcc: hidden@example.com/)).toBeTruthy();

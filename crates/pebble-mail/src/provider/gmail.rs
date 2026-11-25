@@ -965,16 +965,6 @@ impl DraftProvider for GmailProvider {
     }
 }
 
-impl MailProvider for GmailProvider {
-    fn as_label_provider(&self) -> Option<&dyn LabelProvider> {
-        Some(self)
-    }
-
-    fn as_draft_provider(&self) -> Option<&dyn DraftProvider> {
-        Some(self)
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Helper functions
 // ---------------------------------------------------------------------------

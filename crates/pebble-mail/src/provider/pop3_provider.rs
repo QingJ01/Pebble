@@ -92,5 +92,3 @@ impl FolderProvider for Pop3MailProvider {
         ))
     }
 }
-
-impl pebble_core::traits::MailProvider for Pop3MailProvider {}

@@ -4,7 +4,7 @@ use pebble_core::{Folder, PebbleError, ProviderCapabilities, Result};
 
 use crate::imap::ImapProvider;
 
-/// Wraps ImapProvider to implement the MailProvider trait hierarchy.
+/// Wraps ImapProvider to implement the MailTransport/FolderProvider traits.
 pub struct ImapMailProvider {
     inner: ImapProvider,
     account_id: String,
@@ -116,5 +116,3 @@ impl FolderProvider for ImapMailProvider {
         ))
     }
 }
-
-impl pebble_core::traits::MailProvider for ImapMailProvider {}
