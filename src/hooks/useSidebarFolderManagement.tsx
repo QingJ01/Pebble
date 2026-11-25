@@ -103,7 +103,9 @@ export function useSidebarFolderManagement({ accounts, folders, accountId }: Arg
         ref={keyboardButtonRef}
         type="button"
         className="sidebar-keyboard-only-action"
-        onKeyDown={(event) => event.stopPropagation()}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") event.stopPropagation();
+        }}
         onClick={() => setManagerOpen(true)}
       >
         {menuLabel}

@@ -165,6 +165,8 @@ describe("Sidebar navigation", () => {
       expect(keyboardButton).toBeTruthy();
       fireEvent.keyDown(keyboardButton!, { key: "Enter" });
       expect(listener).not.toHaveBeenCalled();
+      fireEvent.keyDown(keyboardButton!, { key: "k", ctrlKey: true });
+      expect(listener).toHaveBeenCalledTimes(1);
     } finally {
       document.removeEventListener("keydown", listener);
     }
