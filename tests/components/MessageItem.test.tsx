@@ -259,6 +259,23 @@ describe("MessageItem", () => {
     expect(screen.queryByRole("menu", { name: "Message actions" })).toBeNull();
   });
 
+  it("does not let keyboard activation bubble from the portal menu to the row", () => {
+    const onClick = vi.fn();
+    render(
+      <MessageItem
+        message={makeMessage({ is_read: true })}
+        isSelected={false}
+        onClick={onClick}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("option"), { clientX: 120, clientY: 80 });
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Mark as unread" }), { key: "Enter" });
+
+    expect(onClick).not.toHaveBeenCalled();
+    expect(screen.getByRole("menu", { name: "Message actions" })).toBeTruthy();
+  });
+
   it("marks an unread message read from the row context menu", async () => {
     render(
       <MessageItem
