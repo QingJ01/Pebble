@@ -213,6 +213,109 @@ fn should_search_incremental_uids(next_uid: u32, mailbox_uid_next: Option<u32>) 
     mailbox_uid_next.is_none_or(|uid_next| next_uid < uid_next)
 }
 
+/// Longest UID-set argument placed on one command line. Many servers reject
+/// command lines above ~8KB, so stay comfortably below that.
+pub(crate) const MAX_UID_SET_CHARS: usize = 7_000;
+
+/// Messages larger than this are never downloaded in full; only their
+/// headers are kept and the body is reported as too large.
+pub const MAX_IMAP_MESSAGE_BYTES: u32 = 50 * 1024 * 1024;
+
+/// Upper bounds for one `UID FETCH ... BODY.PEEK[]` round trip so a single
+/// batch never holds an unbounded amount of message data in memory.
+pub(crate) const IMAP_BODY_BATCH_MAX_MESSAGES: usize = 50;
+pub(crate) const IMAP_BODY_BATCH_MAX_BYTES: u64 = 32 * 1024 * 1024;
+
+/// Compress UIDs into IMAP sequence-set syntax (`1:5,7,9:12`), split into
+/// chunks whose textual length never exceeds [`MAX_UID_SET_CHARS`].
+/// Input order and duplicates do not matter; UID 0 (invalid) is dropped.
+pub fn compress_uid_set(uids: &[u32]) -> Vec<String> {
+    compress_uid_set_with_limit(uids, MAX_UID_SET_CHARS)
+}
+
+fn compress_uid_set_with_limit(uids: &[u32], max_chars: usize) -> Vec<String> {
+    let mut sorted: Vec<u32> = uids.iter().copied().filter(|uid| *uid > 0).collect();
+    sorted.sort_unstable();
+    sorted.dedup();
+
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+    let mut index = 0;
+    while index < sorted.len() {
+        let start = sorted[index];
+        let mut end = start;
+        while index + 1 < sorted.len() && end.checked_add(1) == Some(sorted[index + 1]) {
+            index += 1;
+            end = sorted[index];
+        }
+        index += 1;
+        let token = if start == end {
+            start.to_string()
+        } else {
+            format!("{start}:{end}")
+        };
+        if !current.is_empty() && current.len() + 1 + token.len() > max_chars {
+            chunks.push(std::mem::take(&mut current));
+        }
+        if !current.is_empty() {
+            current.push(',');
+        }
+        current.push_str(&token);
+    }
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+    chunks
+}
+
+/// How a set of messages should be downloaded given their RFC822.SIZE.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ImapBodyFetchPlan {
+    /// UID batches to fetch with `BODY.PEEK[]`, each bounded by count and bytes.
+    pub batches: Vec<Vec<u32>>,
+    /// `(uid, size)` of messages too large to download in full.
+    pub oversized: Vec<(u32, u32)>,
+}
+
+/// Split `(uid, size)` pairs into bounded body-fetch batches, setting aside
+/// messages above `max_message_bytes`. Input order is preserved.
+pub fn plan_imap_body_batches(
+    sizes: &[(u32, u32)],
+    max_message_bytes: u32,
+    max_batch_messages: usize,
+    max_batch_bytes: u64,
+) -> ImapBodyFetchPlan {
+    let max_batch_messages = max_batch_messages.max(1);
+    let mut plan = ImapBodyFetchPlan::default();
+    let mut batch = Vec::new();
+    let mut batch_bytes = 0u64;
+    for &(uid, size) in sizes {
+        if size > max_message_bytes {
+            plan.oversized.push((uid, size));
+            continue;
+        }
+        let size = u64::from(size);
+        if !batch.is_empty()
+            && (batch.len() >= max_batch_messages || batch_bytes + size > max_batch_bytes)
+        {
+            plan.batches.push(std::mem::take(&mut batch));
+            batch_bytes = 0;
+        }
+        batch.push(uid);
+        batch_bytes += size;
+    }
+    if !batch.is_empty() {
+        plan.batches.push(batch);
+    }
+    plan
+}
+
+/// Bytes replayed into the IMAP client after a STARTTLS upgrade: none. The
+/// plaintext greeting must not be trusted once TLS is negotiated.
+fn starttls_session_prefix() -> Vec<u8> {
+    Vec::new()
+}
+
 /// Stream wrapper that replays buffered prefix bytes, then delegates to inner.
 /// Used to replay the IMAP greeting after manually sending an ID command.
 #[derive(Debug)]
@@ -389,6 +492,12 @@ fn imap_since_search_criteria(cutoff: i64, since_uid: Option<u32>) -> Option<Str
         criteria.push_str(&format!(" UID {next_uid}:*"));
     }
     Some(criteria)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UidSection {
+    Body,
+    Header,
 }
 
 /// An IMAP provider that manages a connection and session.
@@ -675,15 +784,18 @@ impl ImapProvider {
     ) -> Result<ImapSession> {
         let mut tcp = tcp;
 
-        // Read greeting
+        // Read and discard the plaintext greeting. Anything it advertises
+        // (including CAPABILITY) was sent before TLS and could have been
+        // injected by an attacker, so it must never be replayed into the
+        // TLS session (RFC 3501 section 6.2.1, RFC 2595 section 3.1).
         let mut greeting = vec![0u8; 8192];
-        let n = with_imap_timeout(
+        let _ = with_imap_timeout(
             "Read greeting",
             IMAP_COMMAND_TIMEOUT_SECS,
             tcp.read(&mut greeting),
         )
         .await?;
-        greeting.truncate(n);
+        drop(greeting);
 
         // Send ID command before STARTTLS if needed (on plain connection)
         if needs_id {
@@ -732,16 +844,35 @@ impl ImapProvider {
             InnerStream::Tls(Box::new(tls))
         };
 
-        // Replay the original greeting so Client::new() is happy
-        let stream = PrefixedStream::with_prefix(greeting, inner);
+        // The server sends no new greeting after STARTTLS; start the client
+        // on the bare TLS stream so no pre-TLS bytes reach the session.
+        let stream = PrefixedStream::with_prefix(starttls_session_prefix(), inner);
         let client = Client::new(stream);
-        tokio::time::timeout(
+        let mut session = tokio::time::timeout(
             Duration::from_secs(IMAP_COMMAND_TIMEOUT_SECS),
             client.login(&self.config.username, &self.config.password),
         )
         .await
         .map_err(|_| imap_timeout_error("IMAP login", IMAP_COMMAND_TIMEOUT_SECS))?
-        .map_err(|(e, _)| PebbleError::Auth(format!("IMAP login failed: {e}")))
+        .map_err(|(e, _)| PebbleError::Auth(format!("IMAP login failed: {e}")))?;
+
+        // Re-learn capabilities over the protected channel; pre-TLS
+        // capabilities are discarded above.
+        match with_imap_timeout(
+            "CAPABILITY after STARTTLS",
+            IMAP_COMMAND_TIMEOUT_SECS,
+            session.capabilities(),
+        )
+        .await
+        {
+            Ok(caps) => debug!(
+                "IMAP capabilities after STARTTLS: CONDSTORE={} IDLE={}",
+                caps.has_str("CONDSTORE"),
+                caps.has_str("IDLE")
+            ),
+            Err(error) => debug!("CAPABILITY after STARTTLS failed: {error}"),
+        }
+        Ok(session)
     }
 
     /// Establish a TCP connection, optionally through a SOCKS5 proxy.
@@ -1327,30 +1458,21 @@ impl ImapProvider {
                     if fetch_uids.is_empty() {
                         return Ok(Vec::new());
                     }
-                    let uid_set = fetch_uids
-                        .iter()
-                        .map(u32::to_string)
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    let fetches = with_imap_timeout(
-                        "UID FETCH",
-                        IMAP_COMMAND_TIMEOUT_SECS,
-                        $s.uid_fetch(&uid_set, "(UID BODY.PEEK[])"),
-                    )
-                    .await?;
-                    let fetches: Vec<async_imap::types::Fetch> = with_imap_timeout(
-                        "UID FETCH collect",
-                        IMAP_COMMAND_TIMEOUT_SECS,
-                        fetches.try_collect(),
-                    )
-                    .await?;
-                    for fetch in fetches {
-                        if let Some(uid) = fetch.uid {
-                            if let Some(body) = fetch.body() {
-                                results.push((uid, body.to_vec()));
+                    for uid_set in compress_uid_set(&fetch_uids) {
+                        let fetches =
+                            Self::uid_fetch_collect($s, &uid_set, "(UID BODY.PEEK[])", "UID FETCH")
+                                .await?;
+                        for fetch in fetches {
+                            if let Some(uid) = fetch.uid {
+                                if let Some(body) = fetch.body() {
+                                    results.push((uid, body.to_vec()));
+                                }
+                            } else {
+                                tracing::warn!(
+                                    "Skipping message without UID (seq={})",
+                                    fetch.message
+                                );
                             }
-                        } else {
-                            tracing::warn!("Skipping message without UID (seq={})", fetch.message);
                         }
                     }
                 } else {
@@ -1438,58 +1560,307 @@ impl ImapProvider {
         Ok((uids, mailbox_info.uid_next))
     }
 
+    /// Fetch full message bodies for exactly `uids`; errors when the server
+    /// does not return every requested UID.
     pub async fn fetch_messages_by_uids(
         &self,
         mailbox: &str,
         uids: &[u32],
     ) -> Result<Vec<(u32, Vec<u8>)>> {
+        self.fetch_uid_sections(mailbox, uids, UidSection::Body, true)
+            .await
+    }
+
+    /// Fetch full message bodies for `uids`, tolerating UIDs that were
+    /// expunged in the meantime. Callers are expected to bound `uids` (see
+    /// [`plan_imap_body_batches`]).
+    pub async fn fetch_bodies_by_uids(
+        &self,
+        mailbox: &str,
+        uids: &[u32],
+    ) -> Result<Vec<(u32, Vec<u8>)>> {
+        self.fetch_uid_sections(mailbox, uids, UidSection::Body, false)
+            .await
+    }
+
+    /// Fetch only the header section of `uids` (used for oversized messages).
+    pub async fn fetch_headers_by_uids(
+        &self,
+        mailbox: &str,
+        uids: &[u32],
+    ) -> Result<Vec<(u32, Vec<u8>)>> {
+        self.fetch_uid_sections(mailbox, uids, UidSection::Header, false)
+            .await
+    }
+
+    async fn fetch_uid_sections(
+        &self,
+        mailbox: &str,
+        uids: &[u32],
+        section: UidSection,
+        strict: bool,
+    ) -> Result<Vec<(u32, Vec<u8>)>> {
         if uids.is_empty() {
             return Ok(Vec::new());
         }
-        let uid_set = uids
-            .iter()
-            .map(u32::to_string)
-            .collect::<Vec<_>>()
-            .join(",");
+        let query = match section {
+            UidSection::Body => "(UID BODY.PEEK[])",
+            UidSection::Header => "(UID BODY.PEEK[HEADER])",
+        };
         let mut guard = self.session.lock().await;
         let sess = guard
             .as_mut()
             .ok_or_else(|| PebbleError::Network("Not connected".to_string()))?;
         let _ =
             with_imap_timeout("SELECT", IMAP_COMMAND_TIMEOUT_SECS, sess.select(mailbox)).await?;
-        let fetches = with_imap_timeout(
-            "UID FETCH",
-            IMAP_COMMAND_TIMEOUT_SECS,
-            sess.uid_fetch(&uid_set, "(UID BODY.PEEK[])"),
-        )
-        .await?;
-        let fetches: Vec<async_imap::types::Fetch> = with_imap_timeout(
-            "UID FETCH collect",
-            IMAP_COMMAND_TIMEOUT_SECS,
-            fetches.try_collect(),
-        )
-        .await?;
         let requested: HashSet<_> = uids.iter().copied().collect();
         let mut fetched = Vec::with_capacity(requested.len());
         let mut fetched_uids = HashSet::with_capacity(requested.len());
-        for fetch in fetches {
-            let Some(uid) = fetch.uid else {
-                continue;
-            };
-            let Some(body) = fetch.body() else {
-                return Err(PebbleError::Network(format!(
-                    "IMAP UID FETCH returned no body for UID {uid}"
-                )));
-            };
-            fetched_uids.insert(uid);
-            fetched.push((uid, body.to_vec()));
+        for uid_set in compress_uid_set(uids) {
+            let fetches = Self::uid_fetch_collect(sess, &uid_set, query, "UID FETCH").await?;
+            for fetch in fetches {
+                let Some(uid) = fetch.uid else {
+                    continue;
+                };
+                if !requested.contains(&uid) {
+                    continue;
+                }
+                let bytes = match section {
+                    UidSection::Body => fetch.body(),
+                    UidSection::Header => fetch.header(),
+                };
+                let Some(bytes) = bytes else {
+                    if strict {
+                        return Err(PebbleError::Network(format!(
+                            "IMAP UID FETCH returned no body for UID {uid}"
+                        )));
+                    }
+                    continue;
+                };
+                if fetched_uids.insert(uid) {
+                    fetched.push((uid, bytes.to_vec()));
+                }
+            }
         }
-        if fetched_uids != requested {
+        if strict && fetched_uids != requested {
             return Err(PebbleError::Network(
                 "IMAP UID FETCH did not return every requested UID".to_string(),
             ));
         }
         Ok(fetched)
+    }
+
+    /// Return `(uid, RFC822.SIZE)` for the requested UIDs without fetching
+    /// any message content. UIDs no longer on the server are omitted.
+    pub async fn fetch_uid_sizes(&self, mailbox: &str, uids: &[u32]) -> Result<Vec<(u32, u32)>> {
+        if uids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut guard = self.session.lock().await;
+        let sess = guard
+            .as_mut()
+            .ok_or_else(|| PebbleError::Network("Not connected".to_string()))?;
+        with_imap_timeout("SELECT", IMAP_COMMAND_TIMEOUT_SECS, sess.select(mailbox)).await?;
+        let mut sizes = Vec::with_capacity(uids.len());
+        for uid_set in compress_uid_set(uids) {
+            let fetches =
+                Self::uid_fetch_collect(sess, &uid_set, "(UID RFC822.SIZE)", "UID FETCH SIZE")
+                    .await?;
+            for fetch in fetches {
+                if let Some(uid) = fetch.uid {
+                    sizes.push((uid, fetch.size.unwrap_or(0)));
+                }
+            }
+        }
+        Ok(sizes)
+    }
+
+    /// Run `UID SEARCH <criteria>` after selecting `mailbox`. Returns the
+    /// sorted UIDs together with the SELECT status snapshot.
+    pub async fn search_uids(
+        &self,
+        mailbox: &str,
+        criteria: &str,
+    ) -> Result<(Vec<u32>, ImapMailboxStatus)> {
+        let mut guard = self.session.lock().await;
+        let sess = guard
+            .as_mut()
+            .ok_or_else(|| PebbleError::Network("Not connected".to_string()))?;
+        let mailbox_info =
+            with_imap_timeout("SELECT", IMAP_COMMAND_TIMEOUT_SECS, sess.select(mailbox)).await?;
+        let status = ImapMailboxStatus {
+            uid_validity: mailbox_info.uid_validity,
+            highest_modseq: mailbox_info.highest_modseq,
+            uid_next: mailbox_info.uid_next,
+            exists: mailbox_info.exists,
+        };
+        if status.exists == 0 {
+            return Ok((Vec::new(), status));
+        }
+        let mut uids = with_imap_timeout(
+            "UID SEARCH",
+            IMAP_COMMAND_TIMEOUT_SECS,
+            sess.uid_search(criteria),
+        )
+        .await?
+        .into_iter()
+        .collect::<Vec<_>>();
+        uids.sort_unstable();
+        uids.dedup();
+        Ok((uids, status))
+    }
+
+    /// UIDs strictly greater than `since_uid`, ascending. Skips the search
+    /// entirely when UIDNEXT shows nothing new arrived.
+    pub async fn search_uids_after(&self, mailbox: &str, since_uid: u32) -> Result<Vec<u32>> {
+        let Some(next_uid) = since_uid.checked_add(1) else {
+            return Ok(Vec::new());
+        };
+        let mut guard = self.session.lock().await;
+        let sess = guard
+            .as_mut()
+            .ok_or_else(|| PebbleError::Network("Not connected".to_string()))?;
+        let mailbox_info =
+            with_imap_timeout("SELECT", IMAP_COMMAND_TIMEOUT_SECS, sess.select(mailbox)).await?;
+        if mailbox_info.exists == 0
+            || !should_search_incremental_uids(next_uid, mailbox_info.uid_next)
+        {
+            return Ok(Vec::new());
+        }
+        let searched: Vec<u32> = with_imap_timeout(
+            "UID SEARCH",
+            IMAP_COMMAND_TIMEOUT_SECS,
+            sess.uid_search(format!("UID {next_uid}:*")),
+        )
+        .await?
+        .into_iter()
+        .collect();
+        Ok(incremental_fetch_uids(Some(since_uid), &searched))
+    }
+
+    /// Return the UIDs among `uids` that still exist on the server. Commands
+    /// are issued per compressed chunk so they stay below line-length limits.
+    pub async fn existing_uids_among(&self, mailbox: &str, uids: &[u32]) -> Result<Vec<u32>> {
+        if uids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut guard = self.session.lock().await;
+        let sess = guard
+            .as_mut()
+            .ok_or_else(|| PebbleError::Network("Not connected".to_string()))?;
+        let mailbox_info =
+            with_imap_timeout("SELECT", IMAP_COMMAND_TIMEOUT_SECS, sess.select(mailbox)).await?;
+        if mailbox_info.exists == 0 {
+            return Ok(Vec::new());
+        }
+        let mut existing = Vec::new();
+        for uid_set in compress_uid_set(uids) {
+            let hits = with_imap_timeout(
+                "UID SEARCH",
+                IMAP_COMMAND_TIMEOUT_SECS,
+                sess.uid_search(format!("UID {uid_set}")),
+            )
+            .await?;
+            existing.extend(hits);
+        }
+        existing.sort_unstable();
+        existing.dedup();
+        Ok(existing)
+    }
+
+    /// CONDSTORE flag delta: `UID FETCH 1:* (FLAGS) (CHANGEDSINCE modseq)`.
+    /// Returns `(uid, is_read, is_starred)` for every message whose flags
+    /// changed after `modseq`, plus the highest MODSEQ observed (0 if none).
+    pub async fn fetch_flags_changed_since(
+        &self,
+        mailbox: &str,
+        modseq: u64,
+    ) -> Result<(Vec<(u32, bool, bool)>, u64)> {
+        let mut guard = self.session.lock().await;
+        let sess = guard
+            .as_mut()
+            .ok_or_else(|| PebbleError::Network("Not connected".to_string()))?;
+        let mailbox_info =
+            with_imap_timeout("SELECT", IMAP_COMMAND_TIMEOUT_SECS, sess.select(mailbox)).await?;
+        if mailbox_info.exists == 0 {
+            return Ok((Vec::new(), 0));
+        }
+        let query = format!("(UID FLAGS) (CHANGEDSINCE {modseq})");
+        let fetches =
+            Self::uid_fetch_collect(sess, "1:*", &query, "UID FETCH CHANGEDSINCE").await?;
+        let mut highest = 0u64;
+        let mut results = Vec::with_capacity(fetches.len());
+        for fetch in fetches {
+            let Some(uid) = fetch.uid else {
+                continue;
+            };
+            if let Some(ms) = fetch.modseq {
+                highest = highest.max(ms);
+            }
+            let (is_read, is_starred) = parse_flags(fetch.flags());
+            results.push((uid, is_read, is_starred));
+        }
+        Ok((results, highest))
+    }
+
+    /// UID of the newest message in the mailbox (0 when empty), together
+    /// with the SELECT status. Uses `FETCH * (UID)` instead of listing every
+    /// UID in the mailbox.
+    pub async fn highest_uid(&self, mailbox: &str) -> Result<(ImapMailboxStatus, u32)> {
+        let mut guard = self.session.lock().await;
+        let sess = guard
+            .as_mut()
+            .ok_or_else(|| PebbleError::Network("Not connected".to_string()))?;
+        let mailbox_info =
+            with_imap_timeout("SELECT", IMAP_COMMAND_TIMEOUT_SECS, sess.select(mailbox)).await?;
+        let status = ImapMailboxStatus {
+            uid_validity: mailbox_info.uid_validity,
+            highest_modseq: mailbox_info.highest_modseq,
+            uid_next: mailbox_info.uid_next,
+            exists: mailbox_info.exists,
+        };
+        if status.exists == 0 {
+            return Ok((status, 0));
+        }
+        let fetches = with_imap_timeout(
+            "FETCH * (UID)",
+            IMAP_COMMAND_TIMEOUT_SECS,
+            sess.fetch("*", "(UID)"),
+        )
+        .await?;
+        let fetches: Vec<async_imap::types::Fetch> = with_imap_timeout(
+            "FETCH * (UID) collect",
+            IMAP_COMMAND_TIMEOUT_SECS,
+            fetches.try_collect(),
+        )
+        .await?;
+        let highest = fetches
+            .iter()
+            .filter_map(|fetch| fetch.uid)
+            .max()
+            .unwrap_or(0);
+        Ok((status, highest))
+    }
+
+    /// Run one `UID FETCH` and collect its responses.
+    async fn uid_fetch_collect(
+        sess: &mut ImapSession,
+        uid_set: &str,
+        query: &str,
+        operation: &str,
+    ) -> Result<Vec<async_imap::types::Fetch>> {
+        let fetches = with_imap_timeout(
+            operation,
+            IMAP_COMMAND_TIMEOUT_SECS,
+            sess.uid_fetch(uid_set, query),
+        )
+        .await?;
+        with_imap_timeout(
+            &format!("{operation} collect"),
+            IMAP_COMMAND_TIMEOUT_SECS,
+            fetches.try_collect(),
+        )
+        .await
     }
 
     /// Fetch the raw bytes of the messages whose sequence numbers fall within
@@ -1532,57 +1903,7 @@ impl ImapProvider {
 
     /// Fetch flags for a set of UIDs. Returns `(uid, is_read, is_starred)`.
     pub async fn fetch_flags(&self, mailbox: &str, uids: &[u32]) -> Result<Vec<(u32, bool, bool)>> {
-        if uids.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let uid_set: String = uids
-            .iter()
-            .map(|u| u.to_string())
-            .collect::<Vec<_>>()
-            .join(",");
-
-        let mut guard = self.session.lock().await;
-        let sess = guard
-            .as_mut()
-            .ok_or_else(|| PebbleError::Network("Not connected".to_string()))?;
-
-        macro_rules! do_flags {
-            ($s:expr) => {{
-                with_imap_timeout("SELECT", IMAP_COMMAND_TIMEOUT_SECS, $s.select(mailbox)).await?;
-
-                let fetches = with_imap_timeout(
-                    "UID FETCH FLAGS",
-                    IMAP_COMMAND_TIMEOUT_SECS,
-                    $s.uid_fetch(&uid_set, "FLAGS"),
-                )
-                .await?;
-                let fetches: Vec<async_imap::types::Fetch> = with_imap_timeout(
-                    "FLAGS collect",
-                    IMAP_COMMAND_TIMEOUT_SECS,
-                    fetches.try_collect(),
-                )
-                .await?;
-
-                fetches
-                    .into_iter()
-                    .filter_map(|fetch| {
-                        let uid = fetch.uid.or_else(|| {
-                            tracing::warn!(
-                                "Skipping flags for message without UID (seq={})",
-                                fetch.message
-                            );
-                            None
-                        })?;
-                        let (is_read, is_starred) = parse_flags(fetch.flags());
-                        Some((uid, is_read, is_starred))
-                    })
-                    .collect::<Vec<_>>()
-            }};
-        }
-
-        let results = do_flags!(sess);
-        Ok(results)
+        Ok(self.fetch_flags_with_modseq(mailbox, uids).await?.0)
     }
 
     /// Set flags on a message identified by UID.
@@ -1976,6 +2297,10 @@ impl ImapProvider {
     /// Fetch flags for a set of UIDs along with per-message MODSEQ values.
     /// Returns `(flags_vec, highest_modseq)` where highest_modseq is the maximum
     /// MODSEQ seen across all fetched messages (or 0 if the server did not return any).
+    ///
+    /// The UID set is compressed into ranges and split across several
+    /// commands so each command line stays below server limits. MODSEQ is
+    /// only requested when the server advertised HIGHESTMODSEQ on SELECT.
     pub async fn fetch_flags_with_modseq(
         &self,
         mailbox: &str,
@@ -1985,62 +2310,38 @@ impl ImapProvider {
             return Ok((Vec::new(), 0));
         }
 
-        let uid_set: String = uids
-            .iter()
-            .map(|u| u.to_string())
-            .collect::<Vec<_>>()
-            .join(",");
-
         let mut guard = self.session.lock().await;
         let sess = guard
             .as_mut()
             .ok_or_else(|| PebbleError::Network("Not connected".to_string()))?;
+        let mailbox_info =
+            with_imap_timeout("SELECT", IMAP_COMMAND_TIMEOUT_SECS, sess.select(mailbox)).await?;
+        let query = if mailbox_info.highest_modseq.is_some() {
+            "(UID FLAGS MODSEQ)"
+        } else {
+            "(UID FLAGS)"
+        };
 
-        macro_rules! do_flags_modseq {
-            ($s:expr) => {{
-                with_imap_timeout("SELECT", IMAP_COMMAND_TIMEOUT_SECS, $s.select(mailbox)).await?;
-
-                let fetches = with_imap_timeout(
-                    "UID FETCH FLAGS MODSEQ",
-                    IMAP_COMMAND_TIMEOUT_SECS,
-                    $s.uid_fetch(&uid_set, "(FLAGS MODSEQ)"),
-                )
-                .await?;
-                let fetches: Vec<async_imap::types::Fetch> = with_imap_timeout(
-                    "FLAGS MODSEQ collect",
-                    IMAP_COMMAND_TIMEOUT_SECS,
-                    fetches.try_collect(),
-                )
-                .await?;
-
-                let mut highest = 0u64;
-                let results: Vec<(u32, bool, bool)> = fetches
-                    .into_iter()
-                    .filter_map(|fetch| {
-                        let uid = fetch.uid.or_else(|| {
-                            tracing::warn!(
-                                "Skipping modseq flags for message without UID (seq={})",
-                                fetch.message
-                            );
-                            None
-                        })?;
-                        if let Some(ms) = fetch.modseq {
-                            if ms > highest {
-                                highest = ms;
-                            }
-                        }
-                        let (is_read, is_starred) = parse_flags(fetch.flags());
-                        Some((uid, is_read, is_starred))
-                    })
-                    .collect();
-
-                (results, highest)
-            }};
+        let mut highest = 0u64;
+        let mut results = Vec::with_capacity(uids.len());
+        for uid_set in compress_uid_set(uids) {
+            let fetches = Self::uid_fetch_collect(sess, &uid_set, query, "UID FETCH FLAGS").await?;
+            for fetch in fetches {
+                let Some(uid) = fetch.uid else {
+                    tracing::warn!(
+                        "Skipping flags for message without UID (seq={})",
+                        fetch.message
+                    );
+                    continue;
+                };
+                if let Some(ms) = fetch.modseq {
+                    highest = highest.max(ms);
+                }
+                let (is_read, is_starred) = parse_flags(fetch.flags());
+                results.push((uid, is_read, is_starred));
+            }
         }
-
-        let results = do_flags_modseq!(sess);
-
-        Ok(results)
+        Ok((results, highest))
     }
 
     /// Check if the server advertises the IDLE capability (RFC 2177).
@@ -2337,7 +2638,9 @@ mod folder_list_tests {
 #[cfg(test)]
 mod incremental_uid_tests {
     use super::{
-        imap_since_search_criteria, incremental_fetch_uids, should_search_incremental_uids,
+        compress_uid_set, compress_uid_set_with_limit, imap_since_search_criteria,
+        incremental_fetch_uids, plan_imap_body_batches, should_search_incremental_uids,
+        starttls_session_prefix, ImapBodyFetchPlan, MAX_UID_SET_CHARS,
     };
 
     #[test]
@@ -2350,6 +2653,61 @@ mod incremental_uid_tests {
             imap_since_search_criteria(1_704_067_200, Some(u32::MAX)),
             None
         );
+    }
+
+    #[test]
+    fn uid_set_compresses_contiguous_runs_into_ranges() {
+        assert_eq!(compress_uid_set(&[]), Vec::<String>::new());
+        assert_eq!(compress_uid_set(&[7]), vec!["7".to_string()]);
+        assert_eq!(
+            compress_uid_set(&[5, 3, 4, 1, 9, 10, 11, 4, 0]),
+            vec!["1,3:5,9:11".to_string()]
+        );
+        assert_eq!(
+            compress_uid_set(&[u32::MAX - 1, u32::MAX]),
+            vec![format!("{}:{}", u32::MAX - 1, u32::MAX)]
+        );
+    }
+
+    #[test]
+    fn uid_set_of_100k_contiguous_uids_is_one_short_range() {
+        let uids: Vec<u32> = (1..=100_000).collect();
+        assert_eq!(compress_uid_set(&uids), vec!["1:100000".to_string()]);
+    }
+
+    #[test]
+    fn uid_set_chunks_stay_below_the_line_limit_and_cover_every_uid() {
+        // Every other UID: no ranges possible, forcing many chunks.
+        let uids: Vec<u32> = (1..=200_000).step_by(2).collect();
+        let chunks = compress_uid_set(&uids);
+        assert!(chunks.len() > 1);
+        assert!(chunks.iter().all(|chunk| chunk.len() <= MAX_UID_SET_CHARS));
+        let mut covered = Vec::new();
+        for chunk in &chunks {
+            for token in chunk.split(',') {
+                covered.push(token.parse::<u32>().unwrap());
+            }
+        }
+        assert_eq!(covered, uids);
+
+        let small = compress_uid_set_with_limit(&[1, 3, 5, 7], 3);
+        assert_eq!(small, vec!["1,3", "5,7"]);
+    }
+
+    #[test]
+    fn body_batches_are_bounded_and_oversized_messages_are_set_aside() {
+        let sizes = [(1, 10), (2, 10), (3, 500), (4, 10), (5, 10), (6, 60)];
+        let plan = plan_imap_body_batches(&sizes, 100, 2, 25);
+        assert_eq!(plan.oversized, vec![(3, 500)]);
+        assert_eq!(plan.batches, vec![vec![1, 2], vec![4, 5], vec![6]]);
+
+        let plan = plan_imap_body_batches(&[], 100, 2, 25);
+        assert_eq!(plan, ImapBodyFetchPlan::default());
+    }
+
+    #[test]
+    fn starttls_never_replays_pre_tls_bytes() {
+        assert!(starttls_session_prefix().is_empty());
     }
 
     #[test]

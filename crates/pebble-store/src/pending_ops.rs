@@ -1882,3 +1882,157 @@ mod tests {
         );
     }
 }
+
+impl Store {
+    /// Return the subset of `message_ids` (local message ids) belonging to
+    /// `account_id` that still have an active queued mail operation: one that
+    /// is `pending`, `in_progress`, or `failed` but still retryable.
+    ///
+    /// Sync paths use this to avoid overwriting optimistic local changes
+    /// (flags, folder membership) with stale server state before the queued
+    /// operation has been written back to the provider.
+    pub fn message_ids_with_active_pending_ops(
+        &self,
+        account_id: &str,
+        message_ids: &[String],
+    ) -> Result<std::collections::HashSet<String>> {
+        let mut active = std::collections::HashSet::new();
+        if message_ids.is_empty() {
+            return Ok(active);
+        }
+        self.with_read(|conn| {
+            for chunk in message_ids.chunks(500) {
+                let placeholders = (0..chunk.len())
+                    .map(|index| format!("?{}", index + 3))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let sql = format!(
+                    "SELECT DISTINCT message_id FROM pending_mail_ops
+                     WHERE account_id = ?1
+                       AND (status IN ('pending', 'in_progress')
+                            OR (status = 'failed' AND attempts < ?2))
+                       AND message_id IN ({placeholders})"
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let mut values: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(chunk.len() + 2);
+                values.push(&account_id);
+                values.push(&MAX_PENDING_MAIL_OP_ATTEMPTS);
+                for id in chunk {
+                    values.push(id);
+                }
+                let rows = stmt.query_map(values.as_slice(), |row| row.get::<_, String>(0))?;
+                for row in rows {
+                    active.insert(row?);
+                }
+            }
+            Ok(())
+        })?;
+        Ok(active)
+    }
+}
+
+#[cfg(test)]
+mod active_pending_ops_tests {
+    use super::*;
+    use pebble_core::{new_id, now_timestamp, Account, Message, ProviderType};
+
+    fn test_account() -> Account {
+        let now = now_timestamp();
+        Account {
+            account_label: None,
+            provider_display_name: None,
+            id: new_id(),
+            email: "active-ops@example.com".to_string(),
+            display_name: "Active Ops".to_string(),
+            color: None,
+            provider: ProviderType::Imap,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn test_message(account_id: &str) -> Message {
+        let now = now_timestamp();
+        let id = new_id();
+        Message {
+            id: id.clone(),
+            account_id: account_id.to_string(),
+            remote_id: format!("remote-{id}"),
+            message_id_header: None,
+            in_reply_to: None,
+            references_header: None,
+            thread_id: None,
+            subject: "Test".to_string(),
+            snippet: String::new(),
+            from_address: "from@example.com".to_string(),
+            from_name: "From".to_string(),
+            to_list: vec![],
+            cc_list: vec![],
+            bcc_list: vec![],
+            body_text: String::new(),
+            body_html_raw: String::new(),
+            has_attachments: false,
+            is_read: false,
+            is_starred: false,
+            is_draft: false,
+            date: now,
+            remote_version: None,
+            is_deleted: false,
+            deleted_at: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn active_pending_ops_cover_pending_in_progress_and_retryable_failures() {
+        let store = Store::open_in_memory().unwrap();
+        let account = test_account();
+        store.insert_account(&account).unwrap();
+        let mut ids = Vec::new();
+        for _ in 0..5 {
+            let message = test_message(&account.id);
+            store.insert_message(&message, &[]).unwrap();
+            ids.push(message.id);
+        }
+        store
+            .insert_pending_mail_op(&account.id, &ids[0], "update_flags", "{}")
+            .unwrap();
+        let in_progress = store
+            .insert_pending_mail_op(&account.id, &ids[1], "move", "{}")
+            .unwrap();
+        store
+            .mark_pending_mail_op_in_progress(&in_progress)
+            .unwrap();
+        let retryable = store
+            .insert_pending_mail_op(&account.id, &ids[2], "update_flags", "{}")
+            .unwrap();
+        store
+            .mark_pending_mail_op_failed(&retryable, "offline")
+            .unwrap();
+        let exhausted = store
+            .insert_pending_mail_op(&account.id, &ids[3], "update_flags", "{}")
+            .unwrap();
+        store
+            .mark_pending_mail_op_stopped(&exhausted, "gave up")
+            .unwrap();
+
+        let active = store
+            .message_ids_with_active_pending_ops(&account.id, &ids)
+            .unwrap();
+        assert!(active.contains(&ids[0]));
+        assert!(active.contains(&ids[1]));
+        assert!(active.contains(&ids[2]));
+        assert!(!active.contains(&ids[3]));
+        assert!(!active.contains(&ids[4]));
+
+        assert!(store
+            .message_ids_with_active_pending_ops("other-account", &ids)
+            .unwrap()
+            .is_empty());
+        assert!(store
+            .message_ids_with_active_pending_ops(&account.id, &[])
+            .unwrap()
+            .is_empty());
+    }
+}

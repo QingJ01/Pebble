@@ -17,7 +17,7 @@ use crate::sync::{
     store_new_message_with_attachments_atomically, StoredMessage, SyncConfig, SyncError,
     SyncProgress, SyncWorkerBase,
 };
-use crate::thread::compute_thread_id;
+use crate::thread::{compute_thread_id, merge_thread_aliases, thread_merge_aliases, ThreadMerge};
 
 const POP3_SEEN_UIDLS_KEY: &str = "pop3_seen_uidls";
 const POP3_INBOX_REMOTE_ID: &str = "INBOX";
@@ -345,6 +345,18 @@ impl Pop3SyncWorker {
             parsed.attachments,
         )
         .await?;
+        if let Some(thread_id) = msg.thread_id.clone() {
+            let aliases = thread_merge_aliases(&msg, &thread_id);
+            if let Err(e) = merge_thread_aliases(
+                &self.base.store,
+                &self.base.account_id,
+                vec![ThreadMerge { thread_id, aliases }],
+            )
+            .await
+            {
+                warn!("Failed to merge POP3 threads: {e}");
+            }
+        }
         self.base.emit_message(StoredMessage {
             message: msg,
             folder_ids,
