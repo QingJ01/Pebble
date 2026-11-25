@@ -645,6 +645,7 @@ pub fn run() {
             commands::messages::rendering::get_rendered_html,
             commands::messages::rendering::get_message_with_html,
             commands::messages::flags::update_message_flags,
+            commands::messages::flags::update_thread_read_flags_in_folders,
             commands::messages::rendering::is_trusted_sender,
             commands::messages::lifecycle::archive_message,
             commands::messages::lifecycle::delete_message,

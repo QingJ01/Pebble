@@ -180,6 +180,7 @@ export default function InboxView() {
           {threadView ? (
             <ThreadList
               threads={threads}
+              folderIds={selectedFolderIds}
               selectedThreadId={selectedThreadId}
               onSelectThread={setSelectedThreadId}
               loading={loadingThreads}
@@ -218,8 +219,9 @@ export default function InboxView() {
 }
 
 // Inline ThreadList component using virtualizer
-function ThreadList({ threads, selectedThreadId, onSelectThread, loading }: {
+function ThreadList({ threads, folderIds, selectedThreadId, onSelectThread, loading }: {
   threads: { thread_id: string; subject: string; snippet: string; last_date: number; message_count: number; unread_count: number; is_starred: boolean; participants: string[]; has_attachments: boolean }[];
+  folderIds: string[];
   selectedThreadId: string | null;
   onSelectThread: (id: string) => void;
   loading: boolean;
@@ -280,6 +282,7 @@ function ThreadList({ threads, selectedThreadId, onSelectThread, loading }: {
                 thread={thread}
                 isSelected={thread.thread_id === selectedThreadId}
                 onClick={() => onSelectThread(thread.thread_id)}
+                folderIds={folderIds}
               />
             </div>
           );

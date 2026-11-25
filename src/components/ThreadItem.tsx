@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Star, Paperclip, Mail, MailOpen } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ThreadSummary } from "@/lib/api";
-import { batchMarkRead, listThreadMessages } from "@/lib/api";
+import { updateThreadReadFlagsInFolders } from "@/lib/api";
 import { useClickOutside } from "@/hooks/useClickOutside";
 import { useToastStore } from "@/stores/toast.store";
 
@@ -12,6 +12,7 @@ interface Props {
   thread: ThreadSummary;
   isSelected: boolean;
   onClick: () => void;
+  folderIds: string[];
 }
 
 function formatDate(timestamp: number): string {
@@ -27,7 +28,7 @@ function formatDate(timestamp: number): string {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-function ThreadItem({ thread, isSelected, onClick }: Props) {
+function ThreadItem({ thread, isSelected, onClick, folderIds }: Props) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -54,10 +55,7 @@ function ThreadItem({ thread, isSelected, onClick }: Props) {
     const nextReadState = hasUnread;
     setContextMenu(null);
     try {
-      const messages = await listThreadMessages(thread.thread_id);
-      if (messages.length > 0) {
-        await batchMarkRead(messages.map((message) => message.id), nextReadState);
-      }
+      await updateThreadReadFlagsInFolders(thread.thread_id, folderIds, nextReadState);
       queryClient.invalidateQueries({ queryKey: ["messages"] });
       queryClient.invalidateQueries({ queryKey: ["threads"] });
       queryClient.invalidateQueries({ queryKey: ["threadMessages", thread.thread_id] });

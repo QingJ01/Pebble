@@ -316,3 +316,25 @@ pub async fn update_message_flags(
 
     Ok(())
 }
+
+#[tauri::command]
+pub async fn update_thread_read_flags_in_folders(
+    state: State<'_, AppState>,
+    thread_id: String,
+    folder_ids: Vec<String>,
+    is_read: bool,
+) -> std::result::Result<u32, PebbleError> {
+    let store = state.store.clone();
+    let ids = tokio::task::spawn_blocking(move || {
+        store.list_message_ids_by_thread_in_folders(&thread_id, &folder_ids)
+    })
+    .await
+    .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))??;
+
+    let mut updated = 0;
+    for message_id in ids {
+        update_message_flags(state.clone(), message_id, Some(is_read), None).await?;
+        updated += 1;
+    }
+    Ok(updated)
+}
