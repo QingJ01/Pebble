@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClientProvider } from "@tanstack/react-query";
 import Sidebar from "../../src/components/Sidebar";
+import { queryClient } from "../../src/lib/query-client";
 import { useComposeStore } from "../../src/stores/compose.store";
 import { useConfirmStore } from "../../src/stores/confirm.store";
 import { useMailStore } from "../../src/stores/mail.store";
@@ -131,11 +133,45 @@ describe("Sidebar navigation", () => {
     render(<Sidebar />);
 
     expect(screen.queryByRole("menuitem", { name: "Manage folders" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Manage folders" })).toBeNull();
+    expect(document.querySelector(".folder-action-button")).toBeNull();
 
     fireEvent.contextMenu(screen.getByLabelText("Sidebar"), { clientX: 32, clientY: 500 });
 
     expect(screen.getByRole("menuitem", { name: "Manage folders" })).toBeTruthy();
+  });
+
+  it("does not open folder management when right-clicking a sidebar button icon", () => {
+    useUIStore.setState({ sidebarStyle: "grouped", activeView: "inbox" });
+    useComposeStore.setState({ composeDirty: false, composeMode: null });
+    render(<Sidebar />);
+
+    const overview = screen.getByRole("button", { name: /Overview|sidebar.overview/ });
+    const icon = overview.querySelector("svg");
+    expect(icon).toBeTruthy();
+    fireEvent.contextMenu(icon!, { clientX: 24, clientY: 100 });
+
+    expect(screen.queryByRole("menuitem", { name: "Manage folders" })).toBeNull();
+  });
+
+  it("keeps a keyboard-only folder management entry and restores focus to it", async () => {
+    useUIStore.setState({ sidebarStyle: "grouped", activeView: "inbox" });
+    useComposeStore.setState({ composeDirty: false, composeMode: null });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <Sidebar />
+      </QueryClientProvider>,
+    );
+
+    const keyboardButton = document.querySelector<HTMLButtonElement>(".sidebar-keyboard-only-action");
+    expect(keyboardButton).toBeTruthy();
+    keyboardButton!.focus();
+    fireEvent.click(keyboardButton!);
+
+    expect(await screen.findByRole("dialog", { name: "Manage folders" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Manage folders" })).toBeNull());
+    expect(document.activeElement).toBe(keyboardButton);
   });
 
   it("keeps the sidebar from shrinking under wide message content", () => {

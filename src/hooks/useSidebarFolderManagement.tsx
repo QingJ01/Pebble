@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import type { Account, Folder } from "@/lib/api";
 import { useClickOutside } from "@/hooks/useClickOutside";
 import { FolderManagementModal } from "@/components/FolderManagementButton";
+import "./sidebar-folder-management.css";
 
 interface Args {
   accounts: Account[];
@@ -13,7 +14,7 @@ interface Args {
 }
 
 function isInteractiveTarget(target: EventTarget | null) {
-  return target instanceof HTMLElement
+  return target instanceof Element
     && Boolean(target.closest("button, a, input, select, textarea, [role='button'], [role='menu'], [role='option']"));
 }
 
@@ -22,6 +23,7 @@ export function useSidebarFolderManagement({ accounts, folders, accountId }: Arg
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [managerOpen, setManagerOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const keyboardButtonRef = useRef<HTMLButtonElement>(null);
 
   useClickOutside(menuRef, Boolean(menuPosition), () => setMenuPosition(null));
 
@@ -71,6 +73,7 @@ export function useSidebarFolderManagement({ accounts, folders, accountId }: Arg
           role="menuitem"
           autoFocus
           onClick={() => {
+            keyboardButtonRef.current?.focus();
             setMenuPosition(null);
             setManagerOpen(true);
           }}
@@ -95,6 +98,14 @@ export function useSidebarFolderManagement({ accounts, folders, accountId }: Arg
       </div>,
       document.body,
     )}
+    <button
+      ref={keyboardButtonRef}
+      type="button"
+      className="sidebar-keyboard-only-action"
+      onClick={() => setManagerOpen(true)}
+    >
+      {menuLabel}
+    </button>
     {managerOpen && (
       <FolderManagementModal
         accounts={accounts}
