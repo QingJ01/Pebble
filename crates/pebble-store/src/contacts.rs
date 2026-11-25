@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use pebble_core::{
     Contact, ContactEmail, ContactEmailInput, ContactEmailLabel, ContactInput, ContactSuggestion,
-    ContactSuggestionSource, EmailAddress, KnownContact, PebbleError, Result,
+    ContactSuggestionSource, KnownContact, PebbleError, Result,
 };
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
@@ -640,52 +640,31 @@ impl Store {
                 values
             };
 
+            // Recent correspondents come from the derived, per-account
+            // `message_correspondents` table (maintained on message writes)
+            // instead of a `%x%` LIKE scan over every message's recipient
+            // JSON on each keystroke.
             let mut recent = HashMap::new();
-            let mut history_stmt = conn.prepare(
-                "SELECT from_name, from_address, to_list, cc_list, bcc_list, date
-                 FROM messages
-                 WHERE account_id = ?1 AND is_deleted = 0
+            let mut history_stmt = conn.prepare_cached(
+                "SELECT name, address, last_interaction_at
+                 FROM message_correspondents
+                 WHERE account_id = ?1
                    AND (?2 = ''
-                        OR from_name LIKE ?3 ESCAPE '\\' COLLATE NOCASE
-                        OR from_address LIKE ?3 ESCAPE '\\' COLLATE NOCASE
-                        OR to_list LIKE ?3 ESCAPE '\\' COLLATE NOCASE
-                        OR cc_list LIKE ?3 ESCAPE '\\' COLLATE NOCASE
-                        OR bcc_list LIKE ?3 ESCAPE '\\' COLLATE NOCASE)
-                 ORDER BY date DESC
+                        OR normalized_address LIKE ?3 ESCAPE '\\' COLLATE NOCASE
+                        OR name LIKE ?3 ESCAPE '\\' COLLATE NOCASE)
+                 ORDER BY last_interaction_at DESC
                  LIMIT 1000",
             )?;
             let history_rows = history_stmt.query_map(params![account_id, query, pattern], |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(0)?,
                     row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(2)?,
                 ))
             })?;
             for row in history_rows {
-                let (from_name, from_address, to_json, cc_json, bcc_json, date) = row?;
-                add_recent_candidate(
-                    &mut recent,
-                    &self_address,
-                    (!from_name.trim().is_empty()).then_some(from_name),
-                    from_address,
-                    date,
-                );
-                for json in [&to_json, &cc_json, &bcc_json] {
-                    if let Ok(addresses) = serde_json::from_str::<Vec<EmailAddress>>(json) {
-                        for address in addresses {
-                            add_recent_candidate(
-                                &mut recent,
-                                &self_address,
-                                address.name,
-                                address.address,
-                                date,
-                            );
-                        }
-                    }
-                }
+                let (name, address, date) = row?;
+                add_recent_candidate(&mut recent, &self_address, name, address, date);
             }
             drop(history_stmt);
 
@@ -774,11 +753,10 @@ impl Store {
         })
     }
 
-    /// Query distinct contacts from the messages table matching a prefix.
-    ///
-    /// Searches `from_address`/`from_name` columns and also parses `to_list`
-    /// JSON arrays to extract recipient contacts.  Results are deduplicated by
-    /// email address (case-insensitive) and limited to `limit` rows.
+    /// Known correspondents of an account whose address or name contains
+    /// `query`, most recent first. Backed by `message_correspondents`
+    /// (sender plus To/Cc/Bcc of every stored live message), deduplicated by
+    /// address (case-insensitive) and limited to `limit` rows.
     pub fn list_known_contacts(
         &self,
         account_id: &str,
@@ -792,92 +770,24 @@ impl Store {
                 .replace('_', "\\_");
             let pattern = format!("%{}%", escaped);
 
-            // First: collect contacts from from_address / from_name columns
-            let mut stmt = conn.prepare(
-                "SELECT DISTINCT from_name, from_address
-                     FROM messages
-                     WHERE account_id = ?1
-                       AND is_deleted = 0
-                       AND (from_address LIKE ?2 ESCAPE '\\' OR from_name LIKE ?2 ESCAPE '\\')
-                     LIMIT ?3",
+            let mut stmt = conn.prepare_cached(
+                "SELECT name, address
+                 FROM message_correspondents
+                 WHERE account_id = ?1
+                   AND (normalized_address LIKE ?2 ESCAPE '\\' COLLATE NOCASE
+                        OR name LIKE ?2 ESCAPE '\\' COLLATE NOCASE)
+                 ORDER BY last_interaction_at DESC
+                 LIMIT ?3",
             )?;
-
-            let from_rows = stmt.query_map(params![account_id, pattern, limit], |row| {
-                let name: String = row.get(0)?;
-                let address: String = row.get(1)?;
+            let rows = stmt.query_map(params![account_id, pattern, limit], |row| {
                 Ok(KnownContact {
-                    name: if name.is_empty() { None } else { Some(name) },
-                    address,
+                    name: row
+                        .get::<_, Option<String>>(0)?
+                        .filter(|name| !name.is_empty()),
+                    address: row.get(1)?,
                 })
             })?;
-
-            let mut seen = std::collections::HashSet::new();
-            let mut contacts = Vec::new();
-
-            for row in from_rows {
-                let contact = row?;
-                let key = contact.address.to_lowercase();
-                if seen.insert(key) {
-                    contacts.push(contact);
-                }
-            }
-
-            // Second: search inside recipient JSON for matching To/Cc/Bcc entries.
-            if (contacts.len() as i64) < limit {
-                let remaining = limit - contacts.len() as i64;
-                let mut stmt2 = conn.prepare(
-                    "SELECT DISTINCT to_list, cc_list, bcc_list
-                         FROM messages
-                         WHERE account_id = ?1
-                           AND is_deleted = 0
-                           AND (to_list LIKE ?2 ESCAPE '\\'
-                                OR cc_list LIKE ?2 ESCAPE '\\'
-                                OR bcc_list LIKE ?2 ESCAPE '\\')
-                          LIMIT ?3",
-                )?;
-
-                let recipient_rows =
-                    stmt2.query_map(params![account_id, pattern, remaining * 5], |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
-                        ))
-                    })?;
-
-                for row in recipient_rows {
-                    if contacts.len() as i64 >= limit {
-                        break;
-                    }
-                    let (to_json, cc_json, bcc_json) = row?;
-                    for json_str in [to_json, cc_json, bcc_json] {
-                        if let Ok(addrs) = serde_json::from_str::<Vec<EmailAddress>>(&json_str) {
-                            let lower_query = query.to_lowercase();
-                            for addr in addrs {
-                                if contacts.len() as i64 >= limit {
-                                    break;
-                                }
-                                let matches = addr.address.to_lowercase().contains(&lower_query)
-                                    || addr
-                                        .name
-                                        .as_ref()
-                                        .map(|n| n.to_lowercase().contains(&lower_query))
-                                        .unwrap_or(false);
-                                if matches {
-                                    let key = addr.address.to_lowercase();
-                                    if seen.insert(key) {
-                                        contacts.push(KnownContact {
-                                            name: addr.name,
-                                            address: addr.address,
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
+            let contacts = rows.collect::<std::result::Result<Vec<_>, _>>()?;
             Ok(contacts)
         })
     }

@@ -22,11 +22,17 @@ export default function ThreadView() {
   const selectedFolderIds = folderIdsForSelection(activeFolderId, folders);
   const queryFolderId = selectedFolderIds[0] ?? null;
   const queryFolderIds = selectedFolderIds.length > 1 ? selectedFolderIds : undefined;
-  const { data: threadMessages = [], isLoading } = useThreadMessagesQuery(selectedThreadId);
   const { data: threads = [] } = useThreadsQuery(queryFolderId, 50, 0, queryFolderIds);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const thread = threads.find((t) => t.thread_id === selectedThreadId);
+  // In the unified view prefer a thread row from the active account; the
+  // row's account scopes the fetch so another account's copy of the same
+  // conversation (same thread id) is never mixed in.
+  const thread =
+    threads.find((t) => t.thread_id === selectedThreadId && (!activeAccountId || t.account_id === activeAccountId))
+    ?? threads.find((t) => t.thread_id === selectedThreadId);
+  const threadAccountId = thread?.account_id ?? activeAccountId ?? null;
+  const { data: threadMessages = [], isLoading } = useThreadMessagesQuery(selectedThreadId, threadAccountId);
 
   useEffect(() => {
     if (scrollRef.current && threadMessages.length > 0) {

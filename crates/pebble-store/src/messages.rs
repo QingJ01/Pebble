@@ -30,58 +30,79 @@ pub struct ImapFolderReconcileResult {
 /// 16=has_attachments, 17=is_read, 18=is_starred, 19=is_draft,
 /// 20=date, 21=remote_version, 22=is_deleted, 23=deleted_at, 24=created_at, 25=updated_at
 fn row_to_message(row: &Row) -> rusqlite::Result<Message> {
-    let to_json: String = row.get(11)?;
-    let cc_json: String = row.get(12)?;
-    let bcc_json: String = row.get(13)?;
-    let has_attachments: i32 = row.get(16)?;
-    let is_read: i32 = row.get(17)?;
-    let is_starred: i32 = row.get(18)?;
-    let is_draft: i32 = row.get(19)?;
-    let is_deleted: i32 = row.get(22)?;
+    row_to_message_at(row, 0)
+}
+
+/// [`row_to_message`] for a SELECT whose message columns start at `base`.
+fn row_to_message_at(row: &Row, base: usize) -> rusqlite::Result<Message> {
+    let to_json: String = row.get(base + 11)?;
+    let cc_json: String = row.get(base + 12)?;
+    let bcc_json: String = row.get(base + 13)?;
+    let has_attachments: i32 = row.get(base + 16)?;
+    let is_read: i32 = row.get(base + 17)?;
+    let is_starred: i32 = row.get(base + 18)?;
+    let is_draft: i32 = row.get(base + 19)?;
+    let is_deleted: i32 = row.get(base + 22)?;
 
     Ok(Message {
-        id: row.get(0)?,
-        account_id: row.get(1)?,
-        remote_id: row.get(2)?,
-        message_id_header: row.get(3)?,
-        in_reply_to: row.get(4)?,
-        references_header: row.get(5)?,
-        thread_id: row.get(6)?,
-        subject: row.get(7)?,
-        snippet: row.get(8)?,
-        from_address: row.get(9)?,
-        from_name: row.get(10)?,
+        id: row.get(base)?,
+        account_id: row.get(base + 1)?,
+        remote_id: row.get(base + 2)?,
+        message_id_header: row.get(base + 3)?,
+        in_reply_to: row.get(base + 4)?,
+        references_header: row.get(base + 5)?,
+        thread_id: row.get(base + 6)?,
+        subject: row.get(base + 7)?,
+        snippet: row.get(base + 8)?,
+        from_address: row.get(base + 9)?,
+        from_name: row.get(base + 10)?,
         to_list: serde_json::from_str(&to_json).unwrap_or_default(),
         cc_list: serde_json::from_str(&cc_json).unwrap_or_default(),
         bcc_list: serde_json::from_str(&bcc_json).unwrap_or_default(),
-        body_text: row.get(14)?,
-        body_html_raw: row.get(15)?,
+        body_text: row.get(base + 14)?,
+        body_html_raw: row.get(base + 15)?,
         has_attachments: has_attachments != 0,
         is_read: is_read != 0,
         is_starred: is_starred != 0,
         is_draft: is_draft != 0,
-        date: row.get(20)?,
-        remote_version: row.get(21)?,
+        date: row.get(base + 20)?,
+        remote_version: row.get(base + 21)?,
         is_deleted: is_deleted != 0,
-        deleted_at: row.get(23)?,
-        created_at: row.get(24)?,
-        updated_at: row.get(25)?,
+        deleted_at: row.get(base + 23)?,
+        created_at: row.get(base + 24)?,
+        updated_at: row.get(base + 25)?,
     })
 }
 
-const MSG_SELECT: &str = "id, account_id, remote_id, message_id_header, in_reply_to, \
-     references_header, thread_id, subject, snippet, from_address, \
-     from_name, to_list, cc_list, bcc_list, \
-     body_text, body_html_raw, \
-     has_attachments, is_read, is_starred, is_draft, \
-     date, remote_version, is_deleted, deleted_at, created_at, updated_at";
+/// Full message column list. Bodies live in `message_bodies` (V21) so that
+/// list/summary reads never touch body overflow pages; always pair this with
+/// [`MSG_FROM`].
+const MSG_SELECT: &str = "m.id, m.account_id, m.remote_id, m.message_id_header, m.in_reply_to, \
+     m.references_header, m.thread_id, m.subject, m.snippet, m.from_address, \
+     m.from_name, m.to_list, m.cc_list, m.bcc_list, \
+     COALESCE(b.body_text, ''), COALESCE(b.body_html_raw, ''), \
+     m.has_attachments, m.is_read, m.is_starred, m.is_draft, \
+     m.date, m.remote_version, m.is_deleted, m.deleted_at, m.created_at, m.updated_at";
+
+/// FROM clause matching [`MSG_SELECT`].
+const MSG_FROM: &str = "messages m LEFT JOIN message_bodies b ON b.message_id = m.id";
 
 /// Column list for list queries (excludes body_text and body_html_raw).
-const MSG_SUMMARY_SELECT: &str = "id, account_id, remote_id, message_id_header, in_reply_to, \
-     references_header, thread_id, subject, snippet, from_address, \
-     from_name, to_list, cc_list, bcc_list, \
-     has_attachments, is_read, is_starred, is_draft, \
-     date, remote_version, is_deleted, deleted_at, created_at, updated_at";
+/// Expects the `messages` table to be aliased as `m`.
+const MSG_SUMMARY_SELECT: &str =
+    "m.id, m.account_id, m.remote_id, m.message_id_header, m.in_reply_to, \
+     m.references_header, m.thread_id, m.subject, m.snippet, m.from_address, \
+     m.from_name, m.to_list, m.cc_list, m.bcc_list, \
+     m.has_attachments, m.is_read, m.is_starred, m.is_draft, \
+     m.date, m.remote_version, m.is_deleted, m.deleted_at, m.created_at, m.updated_at";
+
+/// Keyset cursor for folder message pages: the `(date, id)` of the last
+/// message already shown. The next page contains strictly older messages.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MessageCursor {
+    pub date: i64,
+    pub id: String,
+}
 
 /// Maps a row to a MessageSummary (no body fields).
 ///
@@ -157,18 +178,16 @@ fn upsert_message_with_conn(conn: &rusqlite::Connection, msg: &Message) -> Resul
            to_list = ?12,
            cc_list = ?13,
            bcc_list = ?14,
-           body_text = ?15,
-           body_html_raw = ?16,
-           has_attachments = ?17,
-           is_read = ?18,
-           is_starred = ?19,
-           is_draft = ?20,
-           date = ?21,
-           remote_version = ?22,
-           is_deleted = ?23,
-           deleted_at = ?24,
-           created_at = ?25,
-           updated_at = ?26
+           has_attachments = ?15,
+           is_read = ?16,
+           is_starred = ?17,
+           is_draft = ?18,
+           date = ?19,
+           remote_version = ?20,
+           is_deleted = ?21,
+           deleted_at = ?22,
+           created_at = ?23,
+           updated_at = ?24
          WHERE id = ?1",
         params![
             msg.id,
@@ -185,8 +204,6 @@ fn upsert_message_with_conn(conn: &rusqlite::Connection, msg: &Message) -> Resul
             &to_json,
             &cc_json,
             &bcc_json,
-            msg.body_text,
-            msg.body_html_raw,
             msg.has_attachments as i32,
             msg.is_read as i32,
             msg.is_starred as i32,
@@ -199,94 +216,278 @@ fn upsert_message_with_conn(conn: &rusqlite::Connection, msg: &Message) -> Resul
             msg.updated_at,
         ],
     )?;
-    if updated != 0 {
-        return Ok(());
+    if updated == 0 {
+        insert_message_row(conn, msg, &to_json, &cc_json, &bcc_json)?;
+    } else {
+        write_message_body(conn, msg)?;
+        record_correspondents(conn, msg)?;
     }
+    Ok(())
+}
 
-    conn.execute(
+/// INSERT a brand-new message row plus its body and autocomplete entries.
+fn insert_message_row(
+    conn: &rusqlite::Connection,
+    msg: &Message,
+    to_json: &str,
+    cc_json: &str,
+    bcc_json: &str,
+) -> Result<()> {
+    conn.prepare_cached(
         "INSERT INTO messages (id, account_id, remote_id, message_id_header, in_reply_to,
          references_header, thread_id, subject, snippet, from_address, from_name,
-         to_list, cc_list, bcc_list, body_text, body_html_raw,
+         to_list, cc_list, bcc_list,
          has_attachments, is_read, is_starred, is_draft,
          date, remote_version, is_deleted, deleted_at, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,?21, ?22, ?23, ?24, ?25, ?26)",
-        params![
-            msg.id,
-            msg.account_id,
-            msg.remote_id,
-            msg.message_id_header,
-            msg.in_reply_to,
-            msg.references_header,
-            msg.thread_id,
-            msg.subject,
-            msg.snippet,
-            msg.from_address,
-            msg.from_name,
-            to_json,
-            cc_json,
-            bcc_json,
-            msg.body_text,
-            msg.body_html_raw,
-            msg.has_attachments as i32,
-            msg.is_read as i32,
-            msg.is_starred as i32,
-            msg.is_draft as i32,
-            msg.date,
-            msg.remote_version,
-            msg.is_deleted as i32,
-            msg.deleted_at,
-            msg.created_at,
-            msg.updated_at,
-        ],
-    )?;
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
+                 ?19, ?20, ?21, ?22, ?23, ?24)",
+    )?
+    .execute(params![
+        msg.id,
+        msg.account_id,
+        msg.remote_id,
+        msg.message_id_header,
+        msg.in_reply_to,
+        msg.references_header,
+        msg.thread_id,
+        msg.subject,
+        msg.snippet,
+        msg.from_address,
+        msg.from_name,
+        to_json,
+        cc_json,
+        bcc_json,
+        msg.has_attachments as i32,
+        msg.is_read as i32,
+        msg.is_starred as i32,
+        msg.is_draft as i32,
+        msg.date,
+        msg.remote_version,
+        msg.is_deleted as i32,
+        msg.deleted_at,
+        msg.created_at,
+        msg.updated_at,
+    ])?;
+    write_message_body(conn, msg)?;
+    record_correspondents(conn, msg)?;
     Ok(())
+}
+
+fn write_message_body(conn: &rusqlite::Connection, msg: &Message) -> Result<()> {
+    conn.prepare_cached(
+        "INSERT INTO message_bodies (message_id, body_text, body_html_raw) VALUES (?1, ?2, ?3)
+         ON CONFLICT(message_id) DO UPDATE SET
+             body_text = excluded.body_text,
+             body_html_raw = excluded.body_html_raw",
+    )?
+    .execute(params![msg.id, msg.body_text, msg.body_html_raw])?;
+    Ok(())
+}
+
+/// Maintain `message_correspondents` (autocomplete source) for a live message.
+/// Mirrors `contacts::add_recent_candidate`: the most recent interaction wins
+/// the display address/name; an older interaction only fills a missing name.
+fn record_correspondents(conn: &rusqlite::Connection, msg: &Message) -> Result<()> {
+    if msg.is_deleted {
+        return Ok(());
+    }
+    let mut stmt = conn.prepare_cached(
+        "INSERT INTO message_correspondents
+             (account_id, normalized_address, address, name, last_interaction_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(account_id, normalized_address) DO UPDATE SET
+             address = CASE WHEN excluded.last_interaction_at > last_interaction_at
+                            THEN excluded.address ELSE address END,
+             name = CASE WHEN excluded.last_interaction_at > last_interaction_at
+                         THEN excluded.name
+                         WHEN name IS NULL THEN excluded.name
+                         ELSE name END,
+             last_interaction_at = MAX(last_interaction_at, excluded.last_interaction_at)",
+    )?;
+    let mut upsert = |name: Option<&str>, address: &str| -> Result<()> {
+        let address = address.trim();
+        if !address.contains('@') {
+            return Ok(());
+        }
+        let name = name.map(str::trim).filter(|value| !value.is_empty());
+        stmt.execute(params![
+            msg.account_id,
+            address.to_lowercase(),
+            address,
+            name,
+            msg.date
+        ])?;
+        Ok(())
+    };
+    upsert(Some(msg.from_name.as_str()), &msg.from_address)?;
+    for address in msg.to_list.iter().chain(&msg.cc_list).chain(&msg.bcc_list) {
+        upsert(address.name.as_deref(), &address.address)?;
+    }
+    Ok(())
+}
+
+/// Append `items` as `?N` placeholders starting at `start`.
+fn placeholders(start: usize, count: usize) -> String {
+    (start..start + count)
+        .map(|i| format!("?{i}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// SQL for one folder's newest-first page of message ids, read straight off
+/// `idx_mf_folder_date` (partial on `is_deleted = 0`).
+const FOLDER_PAGE_SQL: &str = "SELECT message_id, date FROM message_folders
+     WHERE folder_id = ?1 AND is_deleted = 0
+     ORDER BY date DESC, message_id DESC
+     LIMIT ?2 OFFSET ?3";
+const FOLDER_PAGE_AFTER_SQL: &str = "SELECT message_id, date FROM message_folders
+     WHERE folder_id = ?1 AND is_deleted = 0 AND (date, message_id) < (?4, ?5)
+     ORDER BY date DESC, message_id DESC
+     LIMIT ?2 OFFSET ?3";
+
+fn folder_page(
+    conn: &rusqlite::Connection,
+    folder_id: &str,
+    cursor: Option<&MessageCursor>,
+    limit: u32,
+    offset: u32,
+) -> Result<Vec<(String, i64)>> {
+    let map = |row: &Row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?));
+    let rows = match cursor {
+        Some(cursor) => conn
+            .prepare_cached(FOLDER_PAGE_AFTER_SQL)?
+            .query_map(
+                params![folder_id, limit, offset, cursor.date, cursor.id],
+                map,
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?,
+        None => conn
+            .prepare_cached(FOLDER_PAGE_SQL)?
+            .query_map(params![folder_id, limit, offset], map)?
+            .collect::<rusqlite::Result<Vec<_>>>()?,
+    };
+    Ok(rows)
+}
+
+/// Resolve a page of message ids (newest first) across `folder_ids`.
+/// Each folder contributes at most `offset + limit` rows from its index; the
+/// small union is merged in memory, deduplicating multi-folder messages.
+fn page_message_ids(
+    conn: &rusqlite::Connection,
+    folder_ids: &[String],
+    cursor: Option<&MessageCursor>,
+    limit: u32,
+    offset: u32,
+) -> Result<Vec<String>> {
+    if folder_ids.len() == 1 {
+        return Ok(folder_page(conn, &folder_ids[0], cursor, limit, offset)?
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect());
+    }
+    let window = limit.saturating_add(offset);
+    let mut merged: HashMap<String, i64> = HashMap::new();
+    let mut seen_folders = HashSet::new();
+    for folder_id in folder_ids {
+        if !seen_folders.insert(folder_id.as_str()) {
+            continue;
+        }
+        for (id, date) in folder_page(conn, folder_id, cursor, window, 0)? {
+            merged.insert(id, date);
+        }
+    }
+    let mut rows: Vec<(String, i64)> = merged.into_iter().collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| b.0.cmp(&a.0)));
+    Ok(rows
+        .into_iter()
+        .skip(offset as usize)
+        .take(limit as usize)
+        .map(|(id, _)| id)
+        .collect())
+}
+
+/// Fetch summaries for `ids` (primary-key lookups only) in the given order.
+fn fetch_summaries_ordered(
+    conn: &rusqlite::Connection,
+    ids: &[String],
+) -> Result<Vec<MessageSummary>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut by_id = HashMap::with_capacity(ids.len());
+    for chunk in ids.chunks(500) {
+        let sql = format!(
+            "SELECT {MSG_SUMMARY_SELECT} FROM messages m WHERE m.id IN ({})",
+            placeholders(1, chunk.len())
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(chunk.iter()),
+            row_to_message_summary,
+        )?;
+        for row in rows {
+            let summary = row?;
+            by_id.insert(summary.id.clone(), summary);
+        }
+    }
+    Ok(ids.iter().filter_map(|id| by_id.remove(id)).collect())
+}
+
+/// Walk one folder newest-first and collect the first `want` distinct
+/// `(account_id, thread key)` pairs with their most recent date in that folder. The walk is a covering
+/// scan of `idx_mf_folder_date` that stops as soon as enough threads are
+/// found, so page cost is proportional to the page, not the folder.
+fn folder_thread_keys(
+    conn: &rusqlite::Connection,
+    folder_id: &str,
+    want: usize,
+) -> Result<Vec<((String, String), i64)>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT m.account_id, mf.thread_key, mf.date
+         FROM message_folders mf
+         JOIN messages m ON m.id = mf.message_id
+         WHERE mf.folder_id = ?1 AND mf.is_deleted = 0
+         ORDER BY mf.date DESC, mf.message_id DESC",
+    )?;
+    let mut rows = stmt.query(params![folder_id])?;
+    let mut seen = HashSet::new();
+    let mut keys = Vec::new();
+    while keys.len() < want {
+        let Some(row) = rows.next()? else { break };
+        let key: (String, String) = (row.get(0)?, row.get(1)?);
+        let date: i64 = row.get(2)?;
+        if seen.insert(key.clone()) {
+            keys.push((key, date));
+        }
+    }
+    Ok(keys)
+}
+
+#[derive(Default)]
+struct ThreadAccumulator {
+    account_id: String,
+    subject: String,
+    last_date: i64,
+    snippet: String,
+    message_ids: HashSet<String>,
+    unread: u32,
+    starred: bool,
+    has_attachments: bool,
+    participants: Vec<String>,
 }
 
 impl Store {
     pub fn insert_message(&self, msg: &Message, folder_ids: &[String]) -> Result<()> {
         self.with_write(|conn| {
-            let to_json = serde_json::to_string(&msg.to_list).map_err(|e| PebbleError::Storage(e.to_string()))?;
-            let cc_json = serde_json::to_string(&msg.cc_list).map_err(|e| PebbleError::Storage(e.to_string()))?;
-            let bcc_json = serde_json::to_string(&msg.bcc_list).map_err(|e| PebbleError::Storage(e.to_string()))?;
+            let to_json = serde_json::to_string(&msg.to_list)
+                .map_err(|e| PebbleError::Storage(e.to_string()))?;
+            let cc_json = serde_json::to_string(&msg.cc_list)
+                .map_err(|e| PebbleError::Storage(e.to_string()))?;
+            let bcc_json = serde_json::to_string(&msg.bcc_list)
+                .map_err(|e| PebbleError::Storage(e.to_string()))?;
 
             let tx = conn.unchecked_transaction()?;
-
-            tx.execute(
-                "INSERT INTO messages (id, account_id, remote_id, message_id_header, in_reply_to,
-                 references_header, thread_id, subject, snippet, from_address, from_name,
-                 to_list, cc_list, bcc_list, body_text, body_html_raw,
-                 has_attachments, is_read, is_starred, is_draft,
-                 date, remote_version, is_deleted, deleted_at, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,?21, ?22, ?23, ?24, ?25, ?26)",
-                params![
-                    msg.id,
-                    msg.account_id,
-                    msg.remote_id,
-                    msg.message_id_header,
-                    msg.in_reply_to,
-                    msg.references_header,
-                    msg.thread_id,
-                    msg.subject,
-                    msg.snippet,
-                    msg.from_address,
-                    msg.from_name,
-                    to_json,
-                    cc_json,
-                    bcc_json,
-                    msg.body_text,
-                    msg.body_html_raw,
-                    msg.has_attachments as i32,
-                    msg.is_read as i32,
-                    msg.is_starred as i32,
-                    msg.is_draft as i32,
-                    msg.date,
-                    msg.remote_version,
-                    msg.is_deleted as i32,
-                    msg.deleted_at,
-                    msg.created_at,
-                    msg.updated_at,
-                ],
-            )?;
+            insert_message_row(&tx, msg, &to_json, &cc_json, &bcc_json)?;
 
             for folder_id in folder_ids {
                 tx.execute(
@@ -488,11 +689,10 @@ impl Store {
     ) -> Result<Vec<MessageSummary>> {
         self.with_read(|conn| {
             let sql = format!(
-                "SELECT m.{} FROM messages m
+                "SELECT {MSG_SUMMARY_SELECT} FROM messages m
                  WHERE m.account_id = ?1 AND m.is_starred = 1 AND m.is_deleted = 0
-                 ORDER BY m.date DESC
-                 LIMIT ?2 OFFSET ?3",
-                MSG_SUMMARY_SELECT.replace(", ", ", m.")
+                 ORDER BY m.date DESC, m.id DESC
+                 LIMIT ?2 OFFSET ?3"
             );
             let mut stmt = conn.prepare(&sql)?;
             let rows =
@@ -505,28 +705,43 @@ impl Store {
         })
     }
 
+    /// Newest-first page of a folder (offset pagination; prefer
+    /// [`Store::list_messages_page`] with a cursor for deep pages).
     pub fn list_messages_by_folder(
         &self,
         folder_id: &str,
         limit: u32,
         offset: u32,
     ) -> Result<Vec<MessageSummary>> {
+        self.list_messages_page(
+            std::slice::from_ref(&folder_id.to_string()),
+            None,
+            limit,
+            offset,
+        )
+    }
+
+    /// Newest-first page across one or more folders (a message in several of
+    /// them is returned once). With `cursor`, returns messages strictly older
+    /// than `(cursor.date, cursor.id)` (keyset pagination, `offset` is then
+    /// applied after the cursor and should normally be 0).
+    ///
+    /// Each folder is read through `idx_mf_folder_date` (a backwards index
+    /// range scan with no sort) and only the page's rows are fetched from
+    /// `messages`.
+    pub fn list_messages_page(
+        &self,
+        folder_ids: &[String],
+        cursor: Option<&MessageCursor>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<MessageSummary>> {
+        if folder_ids.is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
         self.with_read(|conn| {
-            let sql = format!(
-                "SELECT m.{} FROM messages m
-                 JOIN message_folders mf ON m.id = mf.message_id
-                 WHERE mf.folder_id = ?1 AND m.is_deleted = 0
-                 ORDER BY m.date DESC
-                 LIMIT ?2 OFFSET ?3",
-                MSG_SUMMARY_SELECT.replace(", ", ", m.")
-            );
-            let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt.query_map(params![folder_id, limit, offset], row_to_message_summary)?;
-            let mut messages = Vec::new();
-            for row in rows {
-                messages.push(row?);
-            }
-            Ok(messages)
+            let ids = page_message_ids(conn, folder_ids, cursor, limit, offset)?;
+            fetch_summaries_ordered(conn, &ids)
         })
     }
 
@@ -539,12 +754,12 @@ impl Store {
     ) -> Result<Vec<Message>> {
         self.with_read(|conn| {
             let sql = format!(
-                "SELECT m.{} FROM messages m
-                 JOIN message_folders mf ON m.id = mf.message_id
-                 WHERE mf.folder_id = ?1 AND m.is_deleted = 0
-                 ORDER BY m.date DESC
-                 LIMIT ?2 OFFSET ?3",
-                MSG_SELECT.replace(", ", ", m.")
+                "SELECT {MSG_SELECT} FROM message_folders mf
+                 JOIN messages m ON m.id = mf.message_id
+                 LEFT JOIN message_bodies b ON b.message_id = m.id
+                 WHERE mf.folder_id = ?1 AND mf.is_deleted = 0
+                 ORDER BY mf.date DESC, mf.message_id DESC
+                 LIMIT ?2 OFFSET ?3"
             );
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt.query_map(params![folder_id, limit, offset], row_to_message)?;
@@ -559,9 +774,7 @@ impl Store {
     /// List full messages for an entire account, paginated by `(date DESC, id)`.
     ///
     /// Unlike [`list_full_messages_by_folder`], each message is returned at most
-    /// once, even if it lives in multiple folders (e.g. Gmail labels). Intended
-    /// for operations that must visit each stored message exactly once, such as
-    /// search reindexing.
+    /// once, even if it lives in multiple folders (e.g. Gmail labels).
     pub fn list_full_messages_by_account(
         &self,
         account_id: &str,
@@ -570,14 +783,44 @@ impl Store {
     ) -> Result<Vec<Message>> {
         self.with_read(|conn| {
             let sql = format!(
-                "SELECT {} FROM messages
-                 WHERE account_id = ?1 AND is_deleted = 0
-                 ORDER BY date DESC, id ASC
+                "SELECT {MSG_SELECT} FROM {MSG_FROM}
+                 WHERE m.account_id = ?1 AND m.is_deleted = 0
+                 ORDER BY m.date DESC, m.id ASC
                  LIMIT ?2 OFFSET ?3",
-                MSG_SELECT,
             );
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt.query_map(params![account_id, limit, offset], row_to_message)?;
+            let mut messages = Vec::new();
+            for row in rows {
+                messages.push(row?);
+            }
+            Ok(messages)
+        })
+    }
+
+    /// Iterate every live message exactly once, in rowid order, for full
+    /// search reindexing. Returns `(rowid, message)` pairs with
+    /// `rowid > after_rowid`; pass the last rowid back to continue. Unlike
+    /// OFFSET pagination each batch is an O(batch) rowid range seek, and rows
+    /// inserted during the walk are appended after the cursor.
+    pub fn list_full_messages_after_rowid(
+        &self,
+        after_rowid: i64,
+        limit: u32,
+    ) -> Result<Vec<(i64, Message)>> {
+        self.with_read(|conn| {
+            let sql = format!(
+                "SELECT m.rowid, {MSG_SELECT} FROM {MSG_FROM}
+                 WHERE m.rowid > ?1 AND m.is_deleted = 0
+                 ORDER BY m.rowid
+                 LIMIT ?2"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(params![after_rowid, limit], |row| {
+                let rowid: i64 = row.get(0)?;
+                let message = row_to_message_at(row, 1)?;
+                Ok((rowid, message))
+            })?;
             let mut messages = Vec::new();
             for row in rows {
                 messages.push(row?);
@@ -599,25 +842,21 @@ impl Store {
             return Ok(HashMap::new());
         }
         self.with_read(|conn| {
-            let placeholders: Vec<String> =
-                (1..=message_ids.len()).map(|i| format!("?{}", i)).collect();
-            let sql = format!(
-                "SELECT message_id, folder_id FROM message_folders
-                 WHERE message_id IN ({})",
-                placeholders.join(", "),
-            );
-            let mut stmt = conn.prepare(&sql)?;
-            let param_values: Vec<&dyn rusqlite::types::ToSql> = message_ids
-                .iter()
-                .map(|s| s as &dyn rusqlite::types::ToSql)
-                .collect();
-            let rows = stmt.query_map(param_values.as_slice(), |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?;
             let mut out: HashMap<String, Vec<String>> = HashMap::new();
-            for row in rows {
-                let (mid, fid) = row?;
-                out.entry(mid).or_default().push(fid);
+            for chunk in message_ids.chunks(500) {
+                let sql = format!(
+                    "SELECT message_id, folder_id FROM message_folders
+                     WHERE message_id IN ({})",
+                    placeholders(1, chunk.len()),
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?;
+                for row in rows {
+                    let (mid, fid) = row?;
+                    out.entry(mid).or_default().push(fid);
+                }
             }
             Ok(out)
         })
@@ -630,49 +869,12 @@ impl Store {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<MessageSummary>> {
-        if folder_ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        if folder_ids.len() == 1 {
-            return self.list_messages_by_folder(&folder_ids[0], limit, offset);
-        }
-        self.with_read(|conn| {
-            let placeholders: Vec<String> =
-                (1..=folder_ids.len()).map(|i| format!("?{}", i)).collect();
-            let sql = format!(
-                "SELECT DISTINCT m.{} FROM messages m
-                 JOIN message_folders mf ON m.id = mf.message_id
-                 WHERE mf.folder_id IN ({}) AND m.is_deleted = 0
-                 ORDER BY m.date DESC
-                 LIMIT ?{} OFFSET ?{}",
-                MSG_SUMMARY_SELECT.replace(", ", ", m."),
-                placeholders.join(", "),
-                folder_ids.len() + 1,
-                folder_ids.len() + 2,
-            );
-            let mut stmt = conn.prepare(&sql)?;
-
-            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-            for fid in folder_ids {
-                param_values.push(Box::new(fid.clone()));
-            }
-            param_values.push(Box::new(limit));
-            param_values.push(Box::new(offset));
-
-            let params_ref: Vec<&dyn rusqlite::types::ToSql> =
-                param_values.iter().map(|v| v.as_ref()).collect();
-            let rows = stmt.query_map(params_ref.as_slice(), row_to_message_summary)?;
-            let mut messages = Vec::new();
-            for row in rows {
-                messages.push(row?);
-            }
-            Ok(messages)
-        })
+        self.list_messages_page(folder_ids, None, limit, offset)
     }
 
     pub fn get_message(&self, id: &str) -> Result<Option<Message>> {
         self.with_read(|conn| {
-            let sql = format!("SELECT {MSG_SELECT} FROM messages WHERE id = ?1");
+            let sql = format!("SELECT {MSG_SELECT} FROM {MSG_FROM} WHERE m.id = ?1");
             let result = conn
                 .query_row(&sql, params![id], row_to_message)
                 .optional()?;
@@ -686,27 +888,19 @@ impl Store {
         }
 
         self.with_read(|conn| {
-            let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("?{i}")).collect();
-            let sql = format!(
-                "SELECT {MSG_SELECT} FROM messages WHERE id IN ({})",
-                placeholders.join(", ")
-            );
-            let mut stmt = conn.prepare(&sql)?;
-
-            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
-                Vec::with_capacity(ids.len());
-            for id in ids {
-                param_values.push(Box::new(id.clone()));
-            }
-            let params: Vec<&dyn rusqlite::types::ToSql> =
-                param_values.iter().map(|v| v.as_ref()).collect();
-
-            let rows = stmt.query_map(params.as_slice(), row_to_message)?;
-
             let mut by_id = HashMap::new();
-            for row in rows {
-                let message = row?;
-                by_id.insert(message.id.clone(), message);
+            for chunk in ids.chunks(500) {
+                let sql = format!(
+                    "SELECT {MSG_SELECT} FROM {MSG_FROM} WHERE m.id IN ({})",
+                    placeholders(1, chunk.len())
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let rows =
+                    stmt.query_map(rusqlite::params_from_iter(chunk.iter()), row_to_message)?;
+                for row in rows {
+                    let message = row?;
+                    by_id.insert(message.id.clone(), message);
+                }
             }
 
             let mut ordered = Vec::with_capacity(ids.len());
@@ -1141,8 +1335,8 @@ impl Store {
             let tx = conn.unchecked_transaction()?;
             let old_messages = {
                 let sql = format!(
-                    "SELECT m.{MSG_SELECT}
-                     FROM messages m
+                    "SELECT {MSG_SELECT}
+                     FROM {MSG_FROM}
                      JOIN message_folders mf ON mf.message_id = m.id
                      WHERE m.account_id = ?1
                        AND mf.folder_id = ?2
@@ -1556,15 +1750,27 @@ impl Store {
         })
     }
 
-    /// List all messages in a thread, ordered chronologically.
-    pub fn list_messages_by_thread(&self, thread_id: &str) -> Result<Vec<Message>> {
+    /// List all messages of one account's thread, ordered chronologically.
+    ///
+    /// Thread ids are derived from Message-ID headers, so the same
+    /// conversation delivered to two local accounts shares a thread id; the
+    /// account filter keeps their copies apart. `None` (legacy callers that
+    /// cannot resolve the account) returns every account's copy.
+    pub fn list_messages_by_thread(
+        &self,
+        account_id: Option<&str>,
+        thread_id: &str,
+    ) -> Result<Vec<Message>> {
         self.with_read(|conn| {
             let sql = format!(
-                "SELECT {} FROM messages WHERE (thread_id = ?1 OR (thread_id IS NULL AND id = ?1)) AND is_deleted = 0 ORDER BY date ASC",
-                MSG_SELECT
+                "SELECT {MSG_SELECT} FROM {MSG_FROM}
+                 WHERE (m.thread_id = ?1 OR (m.thread_id IS NULL AND m.id = ?1))
+                   AND (?2 IS NULL OR m.account_id = ?2)
+                   AND m.is_deleted = 0
+                 ORDER BY m.date ASC, m.id ASC"
             );
             let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt.query_map(params![thread_id], row_to_message)?;
+            let rows = stmt.query_map(params![thread_id, account_id], row_to_message)?;
             let mut messages = Vec::new();
             for row in rows {
                 messages.push(row?);
@@ -1575,196 +1781,155 @@ impl Store {
 
     /// List thread summaries for a folder, ordered by most recent message.
     ///
-    /// The `max_date` subquery is scoped to the target folder so we aggregate
-    /// only over messages that actually live in this folder. This avoids a
-    /// full-table thread scan and also ensures the snippet reflects the most
-    /// recent message *in this folder* (not a possibly-newer message that sits
-    /// in a different folder, which previously produced an empty snippet).
+    /// Aggregates only over messages that actually live in this folder, so
+    /// the snippet reflects the most recent message *in this folder*.
     pub fn list_threads_by_folder(
         &self,
         folder_id: &str,
         limit: u32,
         offset: u32,
     ) -> Result<Vec<pebble_core::ThreadSummary>> {
-        self.with_read(|conn| {
-            let mut stmt = conn.prepare(
-                "WITH thread_participants AS (
-                        SELECT thread_id,
-                               GROUP_CONCAT(from_address, '||') AS participants
-                        FROM (
-                            SELECT DISTINCT COALESCE(m3.thread_id, m3.id) AS thread_id, m3.from_address
-                            FROM messages m3
-                            JOIN message_folders mf3 ON m3.id = mf3.message_id
-                            WHERE mf3.folder_id = ?1
-                              AND m3.is_deleted = 0
-                        )
-                        GROUP BY thread_id
-                     )
-                     SELECT
-                        COALESCE(m.thread_id, m.id),
-                        MAX(m.subject) as subject,
-                        MAX(CASE WHEN m.date = max_date.md THEN m.snippet ELSE '' END) as snippet,
-                        MAX(m.date) as last_date,
-                        COUNT(*) as message_count,
-                        SUM(CASE WHEN m.is_read = 0 THEN 1 ELSE 0 END) as unread_count,
-                        MAX(m.is_starred) as is_starred,
-                        COALESCE(tp.participants, '') as participants,
-                        MAX(m.has_attachments) as has_attachments
-                     FROM messages m
-                     JOIN message_folders mf ON m.id = mf.message_id
-                     JOIN (
-                        SELECT COALESCE(m2.thread_id, m2.id) AS thread_id, MAX(m2.date) as md
-                        FROM messages m2
-                        JOIN message_folders mf2 ON m2.id = mf2.message_id
-                        WHERE mf2.folder_id = ?1
-                          AND m2.is_deleted = 0
-                        GROUP BY COALESCE(m2.thread_id, m2.id)
-                     ) max_date ON COALESCE(m.thread_id, m.id) = max_date.thread_id
-                     LEFT JOIN thread_participants tp ON COALESCE(m.thread_id, m.id) = tp.thread_id
-                     WHERE mf.folder_id = ?1 AND m.is_deleted = 0
-                     GROUP BY COALESCE(m.thread_id, m.id)
-                     ORDER BY last_date DESC
-                     LIMIT ?2 OFFSET ?3",
-            )?;
-
-            let rows = stmt.query_map(params![folder_id, limit, offset], |row| {
-                let participants_str: String = row.get(7)?;
-                let participants: Vec<String> = participants_str
-                    .split("||")
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                let is_starred: i32 = row.get(6)?;
-                let has_attachments: i32 = row.get(8)?;
-                Ok(pebble_core::ThreadSummary {
-                    thread_id: row.get(0)?,
-                    subject: row.get(1)?,
-                    snippet: row.get(2)?,
-                    last_date: row.get(3)?,
-                    message_count: row.get::<_, i64>(4)? as u32,
-                    unread_count: row.get::<_, i64>(5)? as u32,
-                    is_starred: is_starred != 0,
-                    participants,
-                    has_attachments: has_attachments != 0,
-                })
-            })?;
-
-            let mut results = Vec::new();
-            for row in rows {
-                results.push(row?);
-            }
-            Ok(results)
-        })
+        self.list_threads_by_folders(std::slice::from_ref(&folder_id.to_string()), limit, offset)
     }
 
-    /// List thread summaries across multiple folders, ordered by most recent
-    /// selected message. Messages that are present in more than one selected
-    /// folder are counted once.
+    /// List thread summaries across folders, ordered by most recent selected
+    /// message. Messages present in more than one selected folder are counted
+    /// once; threads are keyed by `(account_id, thread key)` so two accounts'
+    /// copies of one conversation stay separate.
+    ///
+    /// Two phases: (1) walk each folder's date index newest-first until
+    /// `offset + limit` distinct threads are known, (2) aggregate only the
+    /// page's threads via `idx_mf_folder_thread`.
     pub fn list_threads_by_folders(
         &self,
         folder_ids: &[String],
         limit: u32,
         offset: u32,
     ) -> Result<Vec<pebble_core::ThreadSummary>> {
-        if folder_ids.is_empty() {
+        if folder_ids.is_empty() || limit == 0 {
             return Ok(Vec::new());
         }
-        if folder_ids.len() == 1 {
-            return self.list_threads_by_folder(&folder_ids[0], limit, offset);
+        let mut unique_folders: Vec<String> = Vec::new();
+        for folder_id in folder_ids {
+            if !unique_folders.contains(folder_id) {
+                unique_folders.push(folder_id.clone());
+            }
         }
 
         self.with_read(|conn| {
-            let placeholders: Vec<String> =
-                (1..=folder_ids.len()).map(|i| format!("?{}", i)).collect();
+            // Phase 1: the page's thread keys.
+            let want = limit.saturating_add(offset) as usize;
+            let mut latest: HashMap<(String, String), i64> = HashMap::new();
+            for folder_id in &unique_folders {
+                for (key, date) in folder_thread_keys(conn, folder_id, want)? {
+                    let entry = latest.entry(key).or_insert(date);
+                    *entry = (*entry).max(date);
+                }
+            }
+            let mut ranked: Vec<((String, String), i64)> = latest.into_iter().collect();
+            ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| b.0.cmp(&a.0)));
+            let page: Vec<(String, String)> = ranked
+                .into_iter()
+                .skip(offset as usize)
+                .take(limit as usize)
+                .map(|(key, _)| key)
+                .collect();
+            if page.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            // Phase 2: aggregate only those threads.
+            let mut thread_keys: Vec<&str> = page.iter().map(|(_, key)| key.as_str()).collect();
+            thread_keys.sort_unstable();
+            thread_keys.dedup();
+            let mut accumulators: HashMap<(String, String), ThreadAccumulator> = page
+                .iter()
+                .map(|key| {
+                    (
+                        key.clone(),
+                        ThreadAccumulator {
+                            account_id: key.0.clone(),
+                            ..Default::default()
+                        },
+                    )
+                })
+                .collect();
             let sql = format!(
-                "WITH selected_messages AS (
-                        SELECT DISTINCT
-                               m.id,
-                               COALESCE(m.thread_id, m.id) AS thread_id,
-                               m.subject,
-                               m.snippet,
-                               m.date,
-                               m.is_read,
-                               m.is_starred,
-                               m.from_address,
-                               m.has_attachments
-                        FROM messages m
-                        JOIN message_folders mf ON m.id = mf.message_id
-                        WHERE mf.folder_id IN ({})
-                          AND m.is_deleted = 0
-                     ),
-                     thread_participants AS (
-                        SELECT thread_id,
-                               GROUP_CONCAT(from_address, '||') AS participants
-                        FROM (
-                            SELECT DISTINCT thread_id, from_address
-                            FROM selected_messages
-                        )
-                        GROUP BY thread_id
-                     ),
-                     max_date AS (
-                        SELECT thread_id, MAX(date) AS md
-                        FROM selected_messages
-                        GROUP BY thread_id
-                     )
-                     SELECT
-                        sm.thread_id,
-                        MAX(sm.subject) AS subject,
-                        MAX(CASE WHEN sm.date = max_date.md THEN sm.snippet ELSE '' END) AS snippet,
-                        MAX(sm.date) AS last_date,
-                        COUNT(*) AS message_count,
-                        SUM(CASE WHEN sm.is_read = 0 THEN 1 ELSE 0 END) AS unread_count,
-                        MAX(sm.is_starred) AS is_starred,
-                        COALESCE(tp.participants, '') AS participants,
-                        MAX(sm.has_attachments) AS has_attachments
-                     FROM selected_messages sm
-                     JOIN max_date ON sm.thread_id = max_date.thread_id
-                     LEFT JOIN thread_participants tp ON sm.thread_id = tp.thread_id
-                     GROUP BY sm.thread_id
-                     ORDER BY last_date DESC
-                     LIMIT ?{} OFFSET ?{}",
-                placeholders.join(", "),
-                folder_ids.len() + 1,
-                folder_ids.len() + 2,
+                "SELECT m.account_id, mf.thread_key, m.id, m.subject, m.snippet, m.date,
+                        m.is_read, m.is_starred, m.from_address, m.has_attachments
+                 FROM message_folders mf
+                 JOIN messages m ON m.id = mf.message_id
+                 WHERE mf.folder_id IN ({})
+                   AND mf.thread_key IN ({})
+                   AND mf.is_deleted = 0
+                 ORDER BY m.date ASC, m.id ASC",
+                placeholders(1, unique_folders.len()),
+                placeholders(unique_folders.len() + 1, thread_keys.len()),
             );
             let mut stmt = conn.prepare(&sql)?;
+            let params = unique_folders
+                .iter()
+                .map(String::as_str)
+                .chain(thread_keys.iter().copied());
+            let mut rows = stmt.query(rusqlite::params_from_iter(params))?;
+            while let Some(row) = rows.next()? {
+                let key = (row.get::<_, String>(0)?, row.get::<_, String>(1)?);
+                let Some(acc) = accumulators.get_mut(&key) else {
+                    continue;
+                };
+                let message_id: String = row.get(2)?;
+                if !acc.message_ids.insert(message_id) {
+                    continue;
+                }
+                let subject: String = row.get(3)?;
+                let snippet: String = row.get(4)?;
+                let date: i64 = row.get(5)?;
+                let is_read: bool = row.get::<_, i64>(6)? != 0;
+                let is_starred: bool = row.get::<_, i64>(7)? != 0;
+                let from_address: String = row.get(8)?;
+                let has_attachments: bool = row.get::<_, i64>(9)? != 0;
 
-            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-            for fid in folder_ids {
-                param_values.push(Box::new(fid.clone()));
+                if acc.message_ids.len() == 1 || subject > acc.subject {
+                    acc.subject = subject;
+                }
+                if acc.message_ids.len() == 1 || date > acc.last_date {
+                    acc.last_date = date;
+                    acc.snippet = snippet;
+                } else if date == acc.last_date && snippet > acc.snippet {
+                    acc.snippet = snippet;
+                }
+                if !is_read {
+                    acc.unread += 1;
+                }
+                acc.starred |= is_starred;
+                acc.has_attachments |= has_attachments;
+                let from_address = from_address.trim().to_string();
+                if !from_address.is_empty() && !acc.participants.contains(&from_address) {
+                    acc.participants.push(from_address);
+                }
             }
-            param_values.push(Box::new(limit));
-            param_values.push(Box::new(offset));
-            let params_ref: Vec<&dyn rusqlite::types::ToSql> =
-                param_values.iter().map(|v| v.as_ref()).collect();
 
-            let rows = stmt.query_map(params_ref.as_slice(), |row| {
-                let participants_str: String = row.get(7)?;
-                let participants: Vec<String> = participants_str
-                    .split("||")
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                let is_starred: i32 = row.get(6)?;
-                let has_attachments: i32 = row.get(8)?;
-                Ok(pebble_core::ThreadSummary {
-                    thread_id: row.get(0)?,
-                    subject: row.get(1)?,
-                    snippet: row.get(2)?,
-                    last_date: row.get(3)?,
-                    message_count: row.get::<_, i64>(4)? as u32,
-                    unread_count: row.get::<_, i64>(5)? as u32,
-                    is_starred: is_starred != 0,
-                    participants,
-                    has_attachments: has_attachments != 0,
+            Ok(page
+                .into_iter()
+                .filter_map(|key| {
+                    let acc = accumulators.remove(&key)?;
+                    if acc.message_ids.is_empty() {
+                        return None;
+                    }
+                    Some(pebble_core::ThreadSummary {
+                        thread_id: key.1,
+                        account_id: acc.account_id,
+                        subject: acc.subject,
+                        snippet: acc.snippet,
+                        last_date: acc.last_date,
+                        message_count: acc.message_ids.len() as u32,
+                        unread_count: acc.unread,
+                        is_starred: acc.starred,
+                        participants: acc.participants,
+                        has_attachments: acc.has_attachments,
+                    })
                 })
-            })?;
-
-            let mut results = Vec::new();
-            for row in rows {
-                results.push(row?);
-            }
-            Ok(results)
+                .collect())
         })
     }
 
@@ -1861,9 +2026,10 @@ impl Store {
         self.with_read(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT mf.folder_id, COUNT(*)
-                 FROM messages m
-                 JOIN message_folders mf ON m.id = mf.message_id
-                 WHERE m.account_id = ?1 AND m.is_read = 0 AND m.is_deleted = 0
+                 FROM folders f
+                 JOIN message_folders mf
+                   ON mf.folder_id = f.id AND mf.is_read = 0 AND mf.is_deleted = 0
+                 WHERE f.account_id = ?1
                  GROUP BY mf.folder_id",
             )?;
             let rows = stmt.query_map(params![account_id], |row| {
@@ -2883,7 +3049,9 @@ mod thread_listing_tests {
             .unwrap();
         assert_eq!(multi.len(), 2);
         assert_eq!(multi[0].message_count, 1);
-        let opened = store.list_messages_by_thread(&first.id).unwrap();
+        let opened = store
+            .list_messages_by_thread(Some(&account), &first.id)
+            .unwrap();
         assert_eq!(opened.len(), 1);
         assert_eq!(opened[0].in_reply_to, first.in_reply_to);
         assert!(opened[0].thread_id.is_none());
@@ -2894,7 +3062,10 @@ mod thread_listing_tests {
         store
             .hard_delete_messages(std::slice::from_ref(&first.id))
             .unwrap();
-        assert!(store.list_messages_by_thread(&first.id).unwrap().is_empty());
+        assert!(store
+            .list_messages_by_thread(Some(&account), &first.id)
+            .unwrap()
+            .is_empty());
         assert_eq!(
             store.list_threads_by_folder(&folder, 50, 0).unwrap().len(),
             1
@@ -3036,5 +3207,343 @@ mod thread_listing_tests {
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].message_count, 2);
         assert_eq!(threads[0].snippet, format!("snippet-{base}"));
+    }
+}
+
+#[cfg(test)]
+mod list_perf_tests {
+    use super::{insert_message_row, MessageCursor, FOLDER_PAGE_AFTER_SQL, FOLDER_PAGE_SQL};
+    use crate::Store;
+    use pebble_core::*;
+    use rusqlite::params;
+
+    const MESSAGES: usize = 20_000;
+
+    fn account(id: &str) -> Account {
+        Account {
+            account_label: None,
+            provider_display_name: None,
+            id: id.to_string(),
+            email: format!("{id}@example.com"),
+            display_name: id.to_string(),
+            color: None,
+            provider: ProviderType::Imap,
+            created_at: 1,
+            updated_at: 1,
+        }
+    }
+
+    fn folder(id: &str, account_id: &str) -> Folder {
+        Folder {
+            id: id.to_string(),
+            account_id: account_id.to_string(),
+            remote_id: id.to_string(),
+            name: id.to_string(),
+            folder_type: FolderType::Folder,
+            role: None,
+            parent_id: None,
+            color: None,
+            is_system: false,
+            sort_order: 0,
+        }
+    }
+
+    fn message(id: String, account_id: &str, thread: Option<String>, date: i64) -> Message {
+        Message {
+            id,
+            account_id: account_id.to_string(),
+            remote_id: String::new(),
+            message_id_header: None,
+            in_reply_to: None,
+            references_header: None,
+            thread_id: thread,
+            subject: format!("subject {date}"),
+            snippet: format!("snippet {date}"),
+            from_address: format!("sender{}@example.com", date % 7),
+            from_name: String::new(),
+            to_list: vec![],
+            cc_list: vec![],
+            bcc_list: vec![],
+            body_text: "x".repeat(6000),
+            body_html_raw: String::new(),
+            has_attachments: false,
+            is_read: date % 3 == 0,
+            is_starred: false,
+            is_draft: false,
+            date,
+            remote_version: None,
+            is_deleted: false,
+            deleted_at: None,
+            created_at: date,
+            updated_at: date,
+        }
+    }
+
+    /// 20k messages in "inbox" (dates collide in pairs to exercise the
+    /// id tie-break), every 4th also in "archive", 3 messages per thread.
+    fn big_store() -> Store {
+        let store = Store::open_in_memory().unwrap();
+        store.insert_account(&account("acct")).unwrap();
+        store.insert_folder(&folder("inbox", "acct")).unwrap();
+        store.insert_folder(&folder("archive", "acct")).unwrap();
+        store
+            .with_write(|conn| {
+                let tx = conn.unchecked_transaction()?;
+                for i in 0..MESSAGES {
+                    let msg = message(
+                        format!("m{i:05}"),
+                        "acct",
+                        Some(format!("t{:05}", i / 3)),
+                        (i / 2) as i64,
+                    );
+                    insert_message_row(&tx, &msg, "[]", "[]", "[]")?;
+                    tx.execute(
+                        "INSERT INTO message_folders (message_id, folder_id) VALUES (?1, 'inbox')",
+                        params![msg.id],
+                    )?;
+                    if i % 4 == 0 {
+                        tx.execute(
+                            "INSERT INTO message_folders (message_id, folder_id) VALUES (?1, 'archive')",
+                            params![msg.id],
+                        )?;
+                    }
+                }
+                tx.commit()?;
+                Ok(())
+            })
+            .unwrap();
+        store
+    }
+
+    fn plan(store: &Store, sql: &str, args: &[&dyn rusqlite::ToSql]) -> String {
+        store
+            .with_read(|conn| {
+                let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
+                let rows = stmt.query_map(args, |row| row.get::<_, String>(3))?;
+                Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?.join(" | "))
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn folder_page_queries_use_the_date_index_without_sorting() {
+        let store = big_store();
+        let checks: Vec<(&str, String, &str)> = vec![
+            (
+                "first page",
+                plan(&store, FOLDER_PAGE_SQL, &[&"inbox", &50, &0]),
+                "idx_mf_folder_date",
+            ),
+            (
+                "keyset page",
+                plan(
+                    &store,
+                    FOLDER_PAGE_AFTER_SQL,
+                    &[&"inbox", &50, &0, &5000i64, &"m10000"],
+                ),
+                "idx_mf_folder_date",
+            ),
+            (
+                "thread walk",
+                plan(
+                    &store,
+                    "SELECT m.account_id, mf.thread_key, mf.date
+                     FROM message_folders mf JOIN messages m ON m.id = mf.message_id
+                     WHERE mf.folder_id = ?1 AND mf.is_deleted = 0
+                     ORDER BY mf.date DESC, mf.message_id DESC",
+                    &[&"inbox"],
+                ),
+                "idx_mf_folder_date",
+            ),
+            (
+                "thread aggregate",
+                plan(
+                    &store,
+                    "SELECT m.account_id, mf.thread_key, m.id
+                     FROM message_folders mf JOIN messages m ON m.id = mf.message_id
+                     WHERE mf.folder_id IN (?1) AND mf.thread_key IN (?2, ?3)
+                       AND mf.is_deleted = 0",
+                    &[&"inbox", &"t00001", &"t00002"],
+                ),
+                "idx_mf_folder_thread",
+            ),
+            (
+                "unread counts",
+                plan(
+                    &store,
+                    "SELECT mf.folder_id, COUNT(*) FROM folders f
+                     JOIN message_folders mf
+                       ON mf.folder_id = f.id AND mf.is_read = 0 AND mf.is_deleted = 0
+                     WHERE f.account_id = ?1 GROUP BY mf.folder_id",
+                    &[&"acct"],
+                ),
+                "idx_mf_folder_unread",
+            ),
+            (
+                "tombstone purge",
+                plan(
+                    &store,
+                    "DELETE FROM messages WHERE is_deleted = 1 AND deleted_at IS NOT NULL AND deleted_at < ?1",
+                    &[&10i64],
+                ),
+                "idx_messages_tombstones",
+            ),
+        ];
+        for (name, plan, index) in checks {
+            eprintln!("{name}: {plan}");
+            assert!(plan.contains(index), "{name} must use {index}: {plan}");
+            assert!(
+                !plan.contains("TEMP B-TREE FOR ORDER BY"),
+                "{name} must not sort: {plan}"
+            );
+            assert!(
+                !plan.contains("SCAN mf") && !plan.contains("SCAN message_folders"),
+                "{name} must not scan the folder table: {plan}"
+            );
+        }
+    }
+
+    #[test]
+    fn keyset_pages_match_offset_pages_and_cover_the_folder_once() {
+        let store = big_store();
+        let mut cursor: Option<MessageCursor> = None;
+        let mut seen = Vec::new();
+        loop {
+            let page = store
+                .list_messages_page(&["inbox".to_string()], cursor.as_ref(), 997, 0)
+                .unwrap();
+            if page.is_empty() {
+                break;
+            }
+            if seen.is_empty() {
+                let offset_page = store.list_messages_by_folder("inbox", 997, 0).unwrap();
+                assert_eq!(
+                    offset_page.iter().map(|m| &m.id).collect::<Vec<_>>(),
+                    page.iter().map(|m| &m.id).collect::<Vec<_>>()
+                );
+            }
+            let last = page.last().unwrap();
+            cursor = Some(MessageCursor {
+                date: last.date,
+                id: last.id.clone(),
+            });
+            seen.extend(page.into_iter().map(|m| (m.date, m.id)));
+        }
+        assert_eq!(seen.len(), MESSAGES);
+        let mut expected = seen.clone();
+        expected.sort_by(|a, b| b.cmp(a));
+        assert_eq!(seen, expected, "pages must be strictly newest-first");
+
+        // Multi-folder pages deduplicate messages present in both folders.
+        let both = store
+            .list_messages_page(&["inbox".to_string(), "archive".to_string()], None, 10, 0)
+            .unwrap();
+        let ids: Vec<_> = both.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "m19999", "m19998", "m19997", "m19996", "m19995", "m19994", "m19993", "m19992",
+                "m19991", "m19990"
+            ]
+        );
+    }
+
+    #[test]
+    fn thread_pages_and_unread_counts_follow_flag_changes() {
+        let store = big_store();
+        let page = store.list_threads_by_folder("inbox", 3, 0).unwrap();
+        assert_eq!(
+            page.iter()
+                .map(|t| t.thread_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["t06666", "t06665", "t06664"]
+        );
+        assert_eq!(page[0].message_count, 2); // m19998, m19999
+        assert_eq!(page[1].message_count, 3);
+        assert!(page.iter().all(|t| t.account_id == "acct"));
+        let second = store.list_threads_by_folder("inbox", 3, 3).unwrap();
+        assert_eq!(second[0].thread_id, "t06663");
+
+        let before = store.get_folder_unread_counts("acct").unwrap()["inbox"];
+        // m19996/m19997 (date 9998) start unread.
+        store
+            .update_message_flags("m19996", Some(true), None)
+            .unwrap();
+        store
+            .bulk_update_flags(&[("m19997".to_string(), Some(true), None)])
+            .unwrap();
+        let after = store.get_folder_unread_counts("acct").unwrap()["inbox"];
+        assert_eq!(after, before - 2);
+        store.bulk_soft_delete(&["m19998".to_string()]).unwrap();
+        let page = store.list_messages_by_folder("inbox", 3, 0).unwrap();
+        assert_eq!(
+            page.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            vec!["m19999", "m19997", "m19996"]
+        );
+        assert!(page[1].is_read);
+        // Bodies are still returned for full reads.
+        let full = store.get_message("m00001").unwrap().unwrap();
+        assert_eq!(full.body_text.len(), 6000);
+    }
+
+    #[test]
+    fn thread_messages_are_scoped_to_one_account() {
+        let store = Store::open_in_memory().unwrap();
+        for id in ["a1", "a2"] {
+            store.insert_account(&account(id)).unwrap();
+            store
+                .insert_folder(&folder(&format!("{id}-inbox"), id))
+                .unwrap();
+        }
+        // The same conversation delivered to both local accounts.
+        for (idx, acct) in ["a1", "a2"].iter().enumerate() {
+            for n in 0..2 {
+                let msg = message(
+                    format!("{acct}-m{n}"),
+                    acct,
+                    Some("shared-thread".to_string()),
+                    10 + n as i64 + idx as i64,
+                );
+                store
+                    .insert_message(&msg, &[format!("{acct}-inbox")])
+                    .unwrap();
+            }
+        }
+        let a1 = store
+            .list_messages_by_thread(Some("a1"), "shared-thread")
+            .unwrap();
+        assert_eq!(a1.len(), 2);
+        assert!(a1.iter().all(|m| m.account_id == "a1"));
+        assert_eq!(
+            store
+                .list_messages_by_thread(None, "shared-thread")
+                .unwrap()
+                .len(),
+            4
+        );
+
+        let unified = store
+            .list_threads_by_folders(&["a1-inbox".to_string(), "a2-inbox".to_string()], 50, 0)
+            .unwrap();
+        assert_eq!(unified.len(), 2, "one thread per account");
+        assert_eq!(unified[0].account_id, "a2");
+        assert_eq!(unified[1].account_id, "a1");
+        assert!(unified.iter().all(|t| t.message_count == 2));
+    }
+
+    #[test]
+    fn rowid_walk_visits_every_live_message_once() {
+        let store = big_store();
+        store.bulk_soft_delete(&["m00010".to_string()]).unwrap();
+        let mut after = 0i64;
+        let mut total = 0usize;
+        loop {
+            let batch = store.list_full_messages_after_rowid(after, 1500).unwrap();
+            let Some((last, _)) = batch.last() else { break };
+            after = *last;
+            assert!(batch.iter().all(|(_, m)| m.body_text.len() == 6000));
+            total += batch.len();
+        }
+        assert_eq!(total, MESSAGES - 1);
     }
 }

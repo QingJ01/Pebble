@@ -6,12 +6,15 @@ use crate::state::AppState;
 #[tauri::command]
 pub async fn list_thread_messages(
     state: State<'_, AppState>,
+    account_id: Option<String>,
     thread_id: String,
 ) -> std::result::Result<Vec<Message>, PebbleError> {
     let store = state.store.clone();
-    tokio::task::spawn_blocking(move || store.list_messages_by_thread(&thread_id))
-        .await
-        .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))?
+    tokio::task::spawn_blocking(move || {
+        store.list_messages_by_thread(account_id.as_deref(), &thread_id)
+    })
+    .await
+    .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))?
 }
 
 #[tauri::command]

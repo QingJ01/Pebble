@@ -20,8 +20,11 @@ pub async fn run_snooze_watcher(
     let mut last_purge = Instant::now();
     const PURGE_INTERVAL: Duration = Duration::from_secs(3600); // 1 hour
     const TOMBSTONE_MAX_AGE_SECS: i64 = 30 * 24 * 3600; // 30 days
-    let mut last_vacuum = Instant::now();
-    const VACUUM_INTERVAL: Duration = Duration::from_secs(7 * 24 * 3600); // 1 week
+    let mut last_maintenance = Instant::now();
+    // Incremental reclamation frees a bounded number of pages per step, so it
+    // can run often without long writer holds (a full VACUUM used to block
+    // sync and flag writes for its whole duration once a week).
+    const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(6 * 3600);
 
     loop {
         // Check for stop signal (non-blocking) — also stop on channel disconnect
@@ -116,14 +119,15 @@ pub async fn run_snooze_watcher(
             last_purge = Instant::now();
         }
 
-        if last_vacuum.elapsed() >= VACUUM_INTERVAL {
+        if last_maintenance.elapsed() >= MAINTENANCE_INTERVAL {
             let store_clone = store.clone();
-            match tokio::task::spawn_blocking(move || store_clone.vacuum()).await {
-                Ok(Ok(())) => info!("Database VACUUM completed"),
-                Ok(Err(e)) => warn!("Database VACUUM failed: {e}"),
-                Err(e) => warn!("Database VACUUM task error: {e}"),
+            match tokio::task::spawn_blocking(move || store_clone.run_maintenance()).await {
+                Ok(Ok(pebble_store::MaintenanceReport::Nothing)) => {}
+                Ok(Ok(report)) => info!("Database maintenance: {report:?}"),
+                Ok(Err(e)) => warn!("Database maintenance failed: {e}"),
+                Err(e) => warn!("Database maintenance task error: {e}"),
             }
-            last_vacuum = Instant::now();
+            last_maintenance = Instant::now();
         }
     }
 }

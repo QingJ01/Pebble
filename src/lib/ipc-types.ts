@@ -303,6 +303,9 @@ export interface TranslateResult {
 /** @rust pebble-core/src/types.rs → ThreadSummary */
 export interface ThreadSummary {
   thread_id: string;
+  /** Owning account (thread ids are not unique across accounts). Always sent
+   *  by the backend; optional only so older fixtures stay valid. */
+  account_id?: string;
   subject: string;
   snippet: string;
   last_date: number;

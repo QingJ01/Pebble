@@ -13,7 +13,7 @@ use pebble_rules::RuleEngine;
 use pebble_search::TantivySearch;
 use pebble_store::Store;
 use serde_json::json;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
@@ -29,47 +29,68 @@ use tauri_plugin_notification::NotificationExt;
 #[cfg(any(target_os = "linux", windows))]
 const NOTIFICATION_OPEN_ACTION: &str = "open";
 
+/// Serialises "read latest DB state, then write the search index" sections
+/// between the live indexer, the full rebuild and other removers, so a stale
+/// snapshot can never overwrite a newer one (e.g. the rebuild re-adding a
+/// message the indexer just removed). Hold it only around short batches.
+static SEARCH_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+pub(crate) fn search_write_guard() -> std::sync::MutexGuard<'static, ()> {
+    SEARCH_WRITE_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Rebuild the search index from all messages in the store.
 ///
-/// Iterates messages per account (not per folder) so that a Gmail message
-/// tagged with multiple labels is indexed exactly once, with all of its
-/// folder IDs attached in a single call.
+/// Walks live messages once each in rowid order (`rowid > cursor`, never
+/// OFFSET), so every batch is a cheap range seek and Gmail messages with
+/// several labels are indexed exactly once with all folder IDs attached.
+///
+/// Safe to run while sync workers are active: messages committed before the
+/// clear are visited by the walk, and anything stored afterwards is indexed
+/// by the live indexer; each batch holds [`search_write_guard`] so the two
+/// never interleave a read-then-write.
 pub fn do_reindex(store: &Store, search: &TantivySearch) -> std::result::Result<u32, PebbleError> {
-    search.clear_index()?;
+    const BATCH_SIZE: u32 = 500;
+    const COMMIT_EVERY: u32 = 5_000;
 
-    let accounts = store.list_accounts()?;
+    {
+        let _guard = search_write_guard();
+        search.clear_index()?;
+    }
+
     let mut count: u32 = 0;
-    let batch_size = 200u32;
+    let mut since_commit: u32 = 0;
+    let mut after_rowid = 0i64;
+    loop {
+        let _guard = search_write_guard();
+        let messages = store.list_full_messages_after_rowid(after_rowid, BATCH_SIZE)?;
+        let Some((last_rowid, _)) = messages.last() else {
+            break;
+        };
+        after_rowid = *last_rowid;
 
-    for account in &accounts {
-        let mut offset = 0u32;
-        loop {
-            let messages = store.list_full_messages_by_account(&account.id, batch_size, offset)?;
-            if messages.is_empty() {
-                break;
-            }
-
-            let ids: Vec<String> = messages.iter().map(|m| m.id.clone()).collect();
-            let folder_map = store.get_message_folder_ids_batch(&ids)?;
-
-            let batch: Vec<_> = messages
-                .iter()
-                .map(|msg| {
-                    let folder_ids = folder_map.get(&msg.id).cloned().unwrap_or_default();
-                    (msg.clone(), folder_ids)
-                })
-                .collect();
-            let batch_len = batch.len() as u32;
-            if let Err(e) = search.index_messages_batch(&batch) {
-                warn!("Failed to index batch of {} messages: {}", batch_len, e);
-            } else {
-                count += batch_len;
-            }
-
-            offset += messages.len() as u32;
-            if (messages.len() as u32) < batch_size {
-                break;
-            }
+        let ids: Vec<String> = messages.iter().map(|(_, m)| m.id.clone()).collect();
+        let mut folder_map = store.get_message_folder_ids_batch(&ids)?;
+        let batch: Vec<_> = messages
+            .into_iter()
+            .map(|(_, msg)| {
+                let folder_ids = folder_map.remove(&msg.id).unwrap_or_default();
+                (msg, folder_ids)
+            })
+            .collect();
+        let batch_len = batch.len() as u32;
+        if let Err(e) = search.index_messages_batch(&batch) {
+            warn!("Failed to index batch of {} messages: {}", batch_len, e);
+        } else {
+            count += batch_len;
+            since_commit += batch_len;
+        }
+        if since_commit >= COMMIT_EVERY {
+            // Periodic commits keep search usable during long rebuilds.
+            search.commit()?;
+            since_commit = 0;
         }
     }
 
@@ -93,23 +114,53 @@ fn new_mail_event_payload(stored: &pebble_mail::StoredMessage) -> serde_json::Va
     })
 }
 
+#[cfg(test)]
 fn should_send_new_mail_notification(
     store: &Store,
+    stored: &pebble_mail::StoredMessage,
+) -> pebble_core::Result<bool> {
+    should_notify_with_cache(store, &mut InboxFolderCache::default(), stored)
+}
+
+/// Inbox folder ids per account, loaded once per flush instead of calling
+/// `list_folders` for every stored message.
+#[derive(Default)]
+struct InboxFolderCache {
+    inboxes: HashMap<String, HashSet<String>>,
+}
+
+impl InboxFolderCache {
+    fn inboxes(
+        &mut self,
+        store: &Store,
+        account_id: &str,
+    ) -> pebble_core::Result<&HashSet<String>> {
+        if !self.inboxes.contains_key(account_id) {
+            let ids = store
+                .list_folders(account_id)?
+                .into_iter()
+                .filter(|folder| folder.role == Some(FolderRole::Inbox))
+                .map(|folder| folder.id)
+                .collect();
+            self.inboxes.insert(account_id.to_string(), ids);
+        }
+        Ok(&self.inboxes[account_id])
+    }
+}
+
+fn should_notify_with_cache(
+    store: &Store,
+    cache: &mut InboxFolderCache,
     stored: &pebble_mail::StoredMessage,
 ) -> pebble_core::Result<bool> {
     if !stored.notify || stored.message.is_deleted || stored.message.is_draft {
         return Ok(false);
     }
-
-    let folder_ids: HashSet<&str> = stored.folder_ids.iter().map(String::as_str).collect();
-    if folder_ids.is_empty() {
+    if stored.folder_ids.is_empty() {
         return Ok(false);
     }
-
-    let folders = store.list_folders(&stored.message.account_id)?;
-    Ok(folders.iter().any(|folder| {
-        folder.role == Some(FolderRole::Inbox) && folder_ids.contains(folder.id.as_str())
-    }))
+    let inboxes = cache.inboxes(store, &stored.message.account_id)?;
+    Ok(stored.folder_ids.iter().any(|id| inboxes.contains(id)))
 }
 
 fn new_mail_notification_body(stored: &pebble_mail::StoredMessage) -> String {
@@ -286,68 +337,101 @@ fn show_windows_new_mail_notification(
 
 fn show_new_mail_notification(
     app: &tauri::AppHandle,
-    stored: &pebble_mail::StoredMessage,
+    body: &str,
+    account_id: &str,
+    message_id: &str,
 ) -> Result<(), String> {
-    let body = new_mail_notification_body(stored);
-
     #[cfg(windows)]
     {
-        match show_windows_new_mail_notification(
-            app,
-            &body,
-            &stored.message.account_id,
-            &stored.message.id,
-        ) {
+        match show_windows_new_mail_notification(app, body, account_id, message_id) {
             Ok(()) => Ok(()),
             Err(e) => {
                 warn!("Failed to show clickable Windows notification, falling back: {e}");
-                show_default_new_mail_notification(app, &body)
+                show_default_new_mail_notification(app, body)
             }
         }
     }
 
     #[cfg(target_os = "linux")]
     {
-        show_linux_new_mail_notification(app, &body, &stored.message.account_id, &stored.message.id)
+        show_linux_new_mail_notification(app, body, account_id, message_id)
     }
 
     #[cfg(target_os = "macos")]
     {
-        show_macos_new_mail_notification(app, &body, &stored.message.account_id, &stored.message.id)
+        show_macos_new_mail_notification(app, body, account_id, message_id)
     }
 
     #[cfg(all(not(windows), not(target_os = "linux"), not(target_os = "macos")))]
     {
-        show_default_new_mail_notification(app, &body)
+        let _ = (account_id, message_id);
+        show_default_new_mail_notification(app, body)
     }
 }
 
-fn maybe_send_new_mail_notification(
-    app: &tauri::AppHandle,
-    store: &Store,
-    stored: &pebble_mail::StoredMessage,
-) {
+/// At most this many individual notifications per account per flush; a
+/// larger burst (catch-up after sleep, bulk arrival) becomes one summary.
+const MAX_INDIVIDUAL_NOTIFICATIONS: usize = 3;
+
+/// A notification-eligible message, trimmed to what the toast needs.
+#[derive(Debug, Clone)]
+struct NotifyItem {
+    account_id: String,
+    message_id: String,
+    body: String,
+    date: i64,
+}
+
+/// Decide which toasts to show for one flush: per account, up to
+/// [`MAX_INDIVIDUAL_NOTIFICATIONS`] individual toasts, otherwise a single
+/// summary that opens the newest message. Returns `(body, account, message)`.
+fn plan_notifications(items: Vec<NotifyItem>) -> Vec<(String, String, String)> {
+    let mut by_account: Vec<(String, Vec<NotifyItem>)> = Vec::new();
+    for item in items {
+        match by_account
+            .iter_mut()
+            .find(|(account, _)| *account == item.account_id)
+        {
+            Some((_, list)) => list.push(item),
+            None => by_account.push((item.account_id.clone(), vec![item])),
+        }
+    }
+    let mut toasts = Vec::new();
+    for (account_id, mut list) in by_account {
+        if list.len() <= MAX_INDIVIDUAL_NOTIFICATIONS {
+            toasts.extend(
+                list.into_iter()
+                    .map(|item| (item.body, item.account_id, item.message_id)),
+            );
+        } else {
+            list.sort_by_key(|item| item.date);
+            let newest = list.last().expect("non-empty");
+            toasts.push((
+                format!("{} new messages — latest: {}", list.len(), newest.body),
+                account_id,
+                newest.message_id.clone(),
+            ));
+        }
+    }
+    toasts
+}
+
+fn send_planned_notifications(app: &tauri::AppHandle, items: Vec<NotifyItem>) {
+    if items.is_empty() {
+        return;
+    }
     let notifications_enabled = app
         .try_state::<AppState>()
         .is_some_and(|state| state.notifications_enabled.load(Ordering::SeqCst));
-
     if !notifications_enabled {
         return;
     }
-
-    match should_send_new_mail_notification(store, stored) {
-        Ok(true) => {
-            if let Err(e) = show_new_mail_notification(app, stored) {
-                warn!("Failed to show new mail notification: {e}");
-            }
-            notifications::mark_attention_indicator(app);
+    for (body, account_id, message_id) in plan_notifications(items) {
+        if let Err(e) = show_new_mail_notification(app, &body, &account_id, &message_id) {
+            warn!("Failed to show new mail notification: {e}");
         }
-        Ok(false) => {}
-        Err(e) => warn!(
-            "Failed to evaluate new mail notification eligibility for message {}: {e}",
-            stored.message.id
-        ),
     }
+    notifications::mark_attention_indicator(app);
 }
 
 /// Replay crash-recovery search operations. Only operations that were applied
@@ -394,161 +478,254 @@ pub(crate) fn recover_pending_search_operations(
     Ok(applied_ids.len())
 }
 
+/// Flush policy for the live indexer: commit after this many documents or
+/// this long after the first unflushed message, whichever comes first.
+const FLUSH_MAX_DOCS: usize = 1_000;
+const FLUSH_MAX_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Result of processing one flush window on a blocking thread.
+#[derive(Default)]
+struct FlushOutcome {
+    /// One coalesced `mail:new` payload per account.
+    events: Vec<serde_json::Value>,
+    notifications: Vec<NotifyItem>,
+}
+
+/// Receive newly stored messages from the sync worker, apply rules, index
+/// them for search and notify the frontend.
+///
+/// Messages are processed in flush windows (≤ [`FLUSH_MAX_DOCS`] or
+/// [`FLUSH_MAX_DELAY`]); each window does one batched DB read, one Tantivy
+/// commit, and emits at most one `mail:new` per account (same event name and
+/// payload shape as before; `folder_ids` is the union for that account).
+/// All store/index work runs on the blocking pool.
 pub async fn index_new_messages(
     search: &Arc<TantivySearch>,
     store: &Arc<Store>,
     rx: &mut mpsc::UnboundedReceiver<pebble_mail::StoredMessage>,
     app: Option<tauri::AppHandle>,
 ) {
-    const COMMIT_BATCH_SIZE: u32 = 20;
-    const COMMIT_IDLE_SECS: u64 = 2;
+    let mut engine: Option<Arc<RuleEngine>> = None;
+    let mut rules_fingerprint: Option<(i64, i64)> = None;
+    let mut reconciliation_pending_ids: Vec<String> = Vec::new();
+    let mut closed = false;
 
-    // Rules are reloaded at each batch boundary so edits made mid-sync take
-    // effect within ~20 messages (or ~2s idle) rather than waiting for the
-    // next full sync session.
-    let load_engine = |store: &Arc<Store>| -> Option<RuleEngine> {
-        match store.list_rules() {
-            Ok(rules) if !rules.is_empty() => Some(RuleEngine::new(&rules)),
-            Ok(_) => None,
-            Err(e) => {
-                warn!("Failed to load rules: {e}");
-                None
+    while !closed {
+        let Some(first) = rx.recv().await else {
+            break;
+        };
+        let mut batch = vec![first];
+        let deadline = tokio::time::Instant::now() + FLUSH_MAX_DELAY;
+        while batch.len() < FLUSH_MAX_DOCS {
+            match tokio::time::timeout_at(deadline, rx.recv()).await {
+                Ok(Some(stored)) => batch.push(stored),
+                Ok(None) => {
+                    closed = true;
+                    break;
+                }
+                Err(_) => break,
             }
         }
-    };
-    let mut engine = load_engine(store);
-    if let Some(ref e) = engine {
-        info!("Rule engine loaded with {} rules", e.rule_count());
-    }
 
-    let mut pending = 0u32;
-    let mut reconciliation_pending_ids = Vec::new();
-    loop {
-        let stored = match tokio::time::timeout(
-            tokio::time::Duration::from_secs(COMMIT_IDLE_SECS),
-            rx.recv(),
-        )
-        .await
+        // Reload rules only when the rules table changed.
+        match store
+            .with_read_async(|conn| {
+                conn.query_row(
+                    "SELECT COUNT(*), COALESCE(MAX(updated_at), 0) FROM rules",
+                    [],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .map_err(Into::into)
+            })
+            .await
         {
-            Ok(Some(stored)) => stored,
-            Ok(None) => break,
-            Err(_) => {
-                if pending > 0 {
-                    if let Err(e) = commit_search_batch_and_clear_recovery(
-                        search,
-                        store,
-                        &mut reconciliation_pending_ids,
-                    ) {
-                        error!("Failed to commit search index after idle flush: {}", e);
-                    } else {
-                        pending = 0;
+            Ok(fingerprint) if Some(fingerprint) != rules_fingerprint => {
+                let store = Arc::clone(store);
+                match tokio::task::spawn_blocking(move || store.list_rules()).await {
+                    Ok(Ok(rules)) => {
+                        engine = (!rules.is_empty()).then(|| Arc::new(RuleEngine::new(&rules)));
+                        if let Some(ref e) = engine {
+                            info!("Rule engine loaded with {} rules", e.rule_count());
+                        }
+                        rules_fingerprint = Some(fingerprint);
                     }
+                    Ok(Err(e)) => warn!("Failed to load rules: {e}"),
+                    Err(e) => warn!("Failed to load rules: {e}"),
                 }
-                // Idle — take the opportunity to refresh rules.
-                engine = load_engine(store);
+            }
+            Ok(_) => {}
+            Err(e) => warn!("Failed to check rules for changes: {e}"),
+        }
+
+        let search_for_batch = Arc::clone(search);
+        let store_for_batch = Arc::clone(store);
+        let engine_for_batch = engine.clone();
+        let mut pending_ids = std::mem::take(&mut reconciliation_pending_ids);
+        let result = tokio::task::spawn_blocking(move || {
+            let outcome = process_flush_window(
+                &store_for_batch,
+                &search_for_batch,
+                engine_for_batch.as_deref(),
+                batch,
+                &mut pending_ids,
+            );
+            (outcome, pending_ids)
+        })
+        .await;
+        let outcome = match result {
+            Ok((outcome, pending_ids)) => {
+                reconciliation_pending_ids = pending_ids;
+                outcome
+            }
+            Err(e) => {
+                error!("Search indexing task failed: {e}");
                 continue;
             }
         };
 
-        if !stored.reconciliation {
-            if let Some(ref app) = app {
-                let _ = app.emit(events::MAIL_NEW, new_mail_event_payload(&stored));
-                maybe_send_new_mail_notification(app, store, &stored);
+        if let Some(ref app) = app {
+            for payload in outcome.events {
+                let _ = app.emit(events::MAIL_NEW, payload);
             }
+            send_planned_notifications(app, outcome.notifications);
+        }
+    }
+}
 
-            if let Some(ref engine) = engine {
-                let actions = engine.evaluate(&stored.message);
-                for action in actions {
-                    if let Err(e) = apply_rule_action(
-                        store,
-                        &stored.message.account_id,
-                        &stored.message.id,
-                        &action,
-                    ) {
-                        warn!("Rule action failed for message {}: {e}", stored.message.id);
+/// Apply rules, refresh the search documents of a flush window from the
+/// latest DB state (one batched read), and commit once.
+fn process_flush_window(
+    store: &Store,
+    search: &TantivySearch,
+    engine: Option<&RuleEngine>,
+    batch: Vec<pebble_mail::StoredMessage>,
+    reconciliation_pending_ids: &mut Vec<String>,
+) -> FlushOutcome {
+    let mut outcome = FlushOutcome::default();
+    let mut inbox_cache = InboxFolderCache::default();
+    // account_id -> (newest stored message, union of folder ids)
+    let mut per_account: Vec<(String, usize, Vec<String>)> = Vec::new();
+
+    for (idx, stored) in batch.iter().enumerate() {
+        if stored.reconciliation {
+            continue;
+        }
+        let account_id = &stored.message.account_id;
+        match per_account
+            .iter_mut()
+            .find(|(account, _, _)| account == account_id)
+        {
+            Some((_, newest, folders)) => {
+                if stored.message.date >= batch[*newest].message.date {
+                    *newest = idx;
+                }
+                for folder_id in &stored.folder_ids {
+                    if !folders.contains(folder_id) {
+                        folders.push(folder_id.clone());
                     }
                 }
             }
+            None => per_account.push((account_id.clone(), idx, stored.folder_ids.clone())),
         }
 
-        let message_id = stored.message.id.clone();
-        let latest_message = match store.get_message(&message_id) {
-            Ok(message) => message,
+        match should_notify_with_cache(store, &mut inbox_cache, stored) {
+            Ok(true) => outcome.notifications.push(NotifyItem {
+                account_id: account_id.clone(),
+                message_id: stored.message.id.clone(),
+                body: new_mail_notification_body(stored),
+                date: stored.message.date,
+            }),
+            Ok(false) => {}
+            Err(e) => warn!(
+                "Failed to evaluate new mail notification eligibility for message {}: {e}",
+                stored.message.id
+            ),
+        }
+
+        if let Some(engine) = engine {
+            for action in engine.evaluate(&stored.message) {
+                if let Err(e) = apply_rule_action(store, account_id, &stored.message.id, &action) {
+                    warn!("Rule action failed for message {}: {e}", stored.message.id);
+                }
+            }
+        }
+    }
+
+    for (_, newest, folders) in per_account {
+        let mut payload = new_mail_event_payload(&batch[newest]);
+        payload["folder_ids"] = json!(folders);
+        outcome.events.push(payload);
+    }
+
+    let mut ids: Vec<String> = Vec::with_capacity(batch.len());
+    let mut seen = HashSet::new();
+    for stored in &batch {
+        if seen.insert(stored.message.id.as_str()) {
+            ids.push(stored.message.id.clone());
+        }
+    }
+
+    {
+        let _guard = search_write_guard();
+        let refreshed = store.get_messages_batch(&ids).and_then(|messages| {
+            store
+                .get_message_folder_ids_batch(&ids)
+                .map(|folders| (messages, folders))
+        });
+        let (messages, mut folder_map) = match refreshed {
+            Ok(value) => value,
             Err(e) => {
                 warn!(
-                    "Failed to reload message {} before indexing: {}",
-                    message_id, e
+                    "Failed to reload {} messages before indexing: {e}",
+                    ids.len()
                 );
-                continue;
+                return outcome;
             }
         };
-
-        match latest_message {
-            Some(message) if !message.is_deleted => {
-                let folder_ids = match store.get_message_folder_ids(&message_id) {
-                    Ok(folder_ids) => folder_ids,
-                    Err(e) => {
-                        warn!(
-                            "Failed to load folders for indexed message {}: {}",
-                            message_id, e
-                        );
-                        continue;
+        let mut live: HashMap<String, pebble_core::Message> = messages
+            .into_iter()
+            .filter(|message| !message.is_deleted)
+            .map(|message| (message.id.clone(), message))
+            .collect();
+        let mut docs = Vec::new();
+        let mut applied = HashSet::new();
+        for id in &ids {
+            let folder_ids = folder_map.remove(id).unwrap_or_default();
+            match live.remove(id) {
+                Some(message) if !folder_ids.is_empty() => docs.push((message, folder_ids)),
+                _ => match search.remove_message(id) {
+                    Ok(()) => {
+                        applied.insert(id.clone());
                     }
-                };
-
-                if folder_ids.is_empty() {
-                    if let Err(e) = search.remove_message(&message_id) {
-                        warn!(
-                            "Failed to remove folderless search document {}: {}",
-                            message_id, e
-                        );
-                        continue;
-                    }
-                } else if let Err(e) = search.index_message(&message, &folder_ids) {
-                    warn!("Failed to index message {}: {}", message_id, e);
-                    continue;
-                }
-            }
-            Some(_) | None => {
-                if let Err(e) = search.remove_message(&message_id) {
-                    warn!(
-                        "Failed to remove stale search document {}: {}",
-                        message_id, e
-                    );
-                    continue;
-                }
+                    Err(e) => warn!("Failed to remove stale search document {id}: {e}"),
+                },
             }
         }
-        if stored.reconciliation
-            && !reconciliation_pending_ids
-                .iter()
-                .any(|pending_id| pending_id == &message_id)
-        {
-            reconciliation_pending_ids.push(message_id);
-        }
-        pending += 1;
-
-        if pending >= COMMIT_BATCH_SIZE {
-            if let Err(e) = commit_search_batch_and_clear_recovery(
-                search,
-                store,
-                &mut reconciliation_pending_ids,
-            ) {
-                error!("Failed to commit search index: {}", e);
-            } else {
-                pending = 0;
+        if !docs.is_empty() {
+            match search.index_messages_batch(&docs) {
+                Ok(()) => applied.extend(docs.iter().map(|(message, _)| message.id.clone())),
+                Err(e) => warn!("Failed to index batch of {} messages: {e}", docs.len()),
             }
-            engine = load_engine(store);
         }
-    }
 
-    if pending > 0 {
+        for stored in &batch {
+            if stored.reconciliation
+                && applied.contains(&stored.message.id)
+                && !reconciliation_pending_ids.contains(&stored.message.id)
+            {
+                reconciliation_pending_ids.push(stored.message.id.clone());
+            }
+        }
+
         if let Err(e) =
-            commit_search_batch_and_clear_recovery(search, store, &mut reconciliation_pending_ids)
+            commit_search_batch_and_clear_recovery(search, store, reconciliation_pending_ids)
         {
-            error!("Failed to commit search index on close: {}", e);
+            // Documents stay buffered in the writer and markers are kept;
+            // the next flush retries the commit.
+            error!("Failed to commit search index: {e}");
         }
     }
+    outcome
 }
 
 fn commit_search_batch_and_clear_recovery(
@@ -770,8 +947,8 @@ mod rule_writeback_tests {
     use super::is_notification_open_action;
     use super::{
         apply_rule_action, finalize_recovery_markers_after_commit, new_mail_event_payload,
-        notification_open_payload, recover_pending_search_operations,
-        should_send_new_mail_notification,
+        notification_open_payload, plan_notifications, process_flush_window,
+        recover_pending_search_operations, should_send_new_mail_notification, NotifyItem,
     };
     use pebble_core::*;
     use pebble_rules::types::RuleAction;
@@ -984,6 +1161,67 @@ mod rule_writeback_tests {
         };
 
         assert!(should_send_new_mail_notification(&store, &stored).unwrap());
+    }
+
+    #[test]
+    fn notification_bursts_collapse_to_one_summary_per_account() {
+        let item = |account: &str, id: &str, date: i64| NotifyItem {
+            account_id: account.to_string(),
+            message_id: id.to_string(),
+            body: format!("body {id}"),
+            date,
+        };
+        let mut items: Vec<NotifyItem> =
+            (0..50).map(|i| item("bulk", &format!("b{i}"), i)).collect();
+        items.push(item("quiet", "q1", 5));
+        items.push(item("quiet", "q2", 6));
+        let toasts = plan_notifications(items);
+        assert_eq!(toasts.len(), 3);
+        assert_eq!(toasts[0].1, "bulk");
+        assert_eq!(toasts[0].2, "b49", "summary opens the newest message");
+        assert!(toasts[0].0.starts_with("50 new messages"));
+        assert_eq!(toasts[1].2, "q1");
+        assert_eq!(toasts[2].2, "q2");
+    }
+
+    #[test]
+    fn flush_window_coalesces_mail_new_and_indexes_once() {
+        let store = Store::open_in_memory().unwrap();
+        let search = TantivySearch::open_in_memory().unwrap();
+        let account = test_account();
+        store.insert_account(&account).unwrap();
+        let folder = test_folder(&account.id);
+        store.insert_folder(&folder).unwrap();
+        let mut batch = Vec::new();
+        for i in 0..30 {
+            let mut message = test_message(&account.id);
+            message.remote_id = format!("r{i}");
+            message.date = 1_000 + i;
+            store
+                .insert_message(&message, std::slice::from_ref(&folder.id))
+                .unwrap();
+            batch.push(pebble_mail::StoredMessage {
+                message,
+                folder_ids: vec![folder.id.clone()],
+                notify: false,
+                reconciliation: false,
+            });
+        }
+        let newest = batch.last().unwrap().message.id.clone();
+        let mut pending = Vec::new();
+        let outcome = process_flush_window(&store, &search, None, batch, &mut pending);
+        assert_eq!(
+            outcome.events.len(),
+            1,
+            "one mail:new per account per flush"
+        );
+        assert_eq!(outcome.events[0]["account_id"], account.id.as_str());
+        assert_eq!(outcome.events[0]["message_id"], newest.as_str());
+        assert!(
+            outcome.notifications.is_empty(),
+            "initial sync must not notify"
+        );
+        assert_eq!(search.doc_count(), 30);
     }
 
     #[test]

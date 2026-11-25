@@ -288,13 +288,31 @@ export async function updateImapSyncFolders(
 
 // ─── Message API ─────────────────────────────────────────────────────────────
 
+/** Keyset cursor: the `(date, id)` of the last message already shown. */
+export interface MessageCursor {
+  date: number;
+  id: string;
+}
+
+/**
+ * Newest-first folder page. Pass `before` (from the last message of the
+ * previous page) for keyset pagination, which stays O(page) at any depth;
+ * `offset` is applied after the cursor and should then be 0.
+ */
 export async function listMessages(
   folderId: string,
   limit: number,
   offset: number,
   folderIds?: string[],
+  before?: MessageCursor | null,
 ): Promise<MessageSummary[]> {
-  return invoke<MessageSummary[]>("list_messages", { folderId, folderIds, limit, offset });
+  return invoke<MessageSummary[]>("list_messages", {
+    folderId,
+    folderIds,
+    limit,
+    offset,
+    before: before ?? null,
+  });
 }
 
 export async function listStarredMessages(
@@ -635,8 +653,12 @@ export async function listThreads(
   return invoke<ThreadSummary[]>("list_threads", { folderId, folderIds, limit, offset });
 }
 
-export async function listThreadMessages(threadId: string): Promise<Message[]> {
-  return invoke<Message[]>("list_thread_messages", { threadId });
+/**
+ * Messages of one account's thread (thread ids can repeat across accounts).
+ * `accountId` null falls back to every account's copy.
+ */
+export async function listThreadMessages(accountId: string | null, threadId: string): Promise<Message[]> {
+  return invoke<Message[]>("list_thread_messages", { accountId, threadId });
 }
 
 // ─── Labels API ──────────────────────────────────────────────────────────────
