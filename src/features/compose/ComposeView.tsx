@@ -160,7 +160,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [showSaveTemplate, setShowSaveTemplate] = useState(false);
   const [templateName, setTemplateName] = useState("");
-  const [showQuotedReply, setShowQuotedReply] = useState(false);
+  const [showQuotedReply, setShowQuotedReply] = useState(true);
 
   async function refreshTemplates() {
     try {
@@ -1130,7 +1130,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
               }
             }}
           >
-            <div className="compose-editor-surface">
+            <div className={`compose-editor-surface${quotedReplyHtml ? " compose-editor-surface--with-quote" : ""}`}>
               {editorMode === "rich" ? (
                 <EditorContent
                   editor={editor}
@@ -1165,28 +1165,28 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
                   className={`compose-source-input${editorMode === "html" ? " is-code" : ""}`}
                 />
               )}
+              {quotedReplyHtml && (
+                <div className="compose-quoted-reply">
+                  <button
+                    type="button"
+                    className="compose-quoted-reply-toggle"
+                    aria-expanded={showQuotedReply}
+                    onClick={() => setShowQuotedReply((value) => !value)}
+                  >
+                    {showQuotedReply ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    {showQuotedReply
+                      ? t("compose.hideQuotedReply", "Hide quoted message")
+                      : t("compose.showQuotedReply", "Show quoted message")}
+                  </button>
+                  {showQuotedReply && (
+                    <div
+                      className="compose-quoted-reply-content"
+                      dangerouslySetInnerHTML={{ __html: quotedReplyHtml }}
+                    />
+                  )}
+                </div>
+              )}
             </div>
-            {quotedReplyHtml && (
-              <div className="compose-quoted-reply">
-                <button
-                  type="button"
-                  className="compose-quoted-reply-toggle"
-                  aria-expanded={showQuotedReply}
-                  onClick={() => setShowQuotedReply((value) => !value)}
-                >
-                  {showQuotedReply ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                  {showQuotedReply
-                    ? t("compose.hideQuotedReply", "Hide quoted message")
-                    : t("compose.showQuotedReply", "Show quoted message")}
-                </button>
-                {showQuotedReply && (
-                  <div
-                    className="scroll-region compose-quoted-reply-content"
-                    dangerouslySetInnerHTML={{ __html: quotedReplyHtml }}
-                  />
-                )}
-              </div>
-            )}
             {isDragging && (
               <div className="compose-drop-overlay">
                 <Paperclip size={20} />

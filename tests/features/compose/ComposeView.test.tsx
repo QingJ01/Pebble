@@ -515,17 +515,20 @@ describe("ComposeView", () => {
     ));
   });
 
-  it("keeps quoted replies collapsed until the user expands them", () => {
+  it("shows quoted replies inline by default and lets the user collapse them", () => {
     mocks.quotedReplyHtml = "<blockquote><p>Original message body</p></blockquote>";
 
     render(<ComposeView />);
 
-    expect(screen.getByRole("button", { name: "Show quoted message" })).toBeTruthy();
+    const quotedBody = screen.getByText("Original message body");
+    expect(quotedBody).toBeTruthy();
+    expect(document.querySelector(".compose-editor-surface")?.contains(quotedBody)).toBe(true);
+    expect(screen.getByRole("button", { name: "Hide quoted message" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide quoted message" }));
+
     expect(screen.queryByText("Original message body")).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "Show quoted message" }));
-
-    expect(screen.getByText("Original message body")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show quoted message" })).toBeTruthy();
   });
 
   it("uses the first attached filename as an empty subject", async () => {

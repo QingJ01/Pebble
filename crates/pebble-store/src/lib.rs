@@ -29,6 +29,10 @@ use rusqlite::{Connection, OpenFlags};
 use std::path::Path;
 use std::sync::Arc;
 
+// SQLite limits the number of bound variables per statement. Keep dynamic
+// IN batches far below that ceiling instead of depending on caller batch sizes.
+pub(crate) const SQL_IN_CHUNK_SIZE: usize = 500;
+
 pub struct Store {
     read_pool: Pool<SqliteConnectionManager>,
     write_pool: Pool<SqliteConnectionManager>,

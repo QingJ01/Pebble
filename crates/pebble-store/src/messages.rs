@@ -3,7 +3,7 @@ use rusqlite::{params, OptionalExtension, Row};
 use std::collections::{HashMap, HashSet};
 
 use crate::pending_ops::PendingMailOpStatus;
-use crate::Store;
+use crate::{Store, SQL_IN_CHUNK_SIZE};
 
 pub type FolderRemoteMessageState = (String, String, bool, bool, i64);
 
@@ -599,25 +599,27 @@ impl Store {
             return Ok(HashMap::new());
         }
         self.with_read(|conn| {
-            let placeholders: Vec<String> =
-                (1..=message_ids.len()).map(|i| format!("?{}", i)).collect();
-            let sql = format!(
-                "SELECT message_id, folder_id FROM message_folders
-                 WHERE message_id IN ({})",
-                placeholders.join(", "),
-            );
-            let mut stmt = conn.prepare(&sql)?;
-            let param_values: Vec<&dyn rusqlite::types::ToSql> = message_ids
-                .iter()
-                .map(|s| s as &dyn rusqlite::types::ToSql)
-                .collect();
-            let rows = stmt.query_map(param_values.as_slice(), |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?;
             let mut out: HashMap<String, Vec<String>> = HashMap::new();
-            for row in rows {
-                let (mid, fid) = row?;
-                out.entry(mid).or_default().push(fid);
+            for chunk in message_ids.chunks(SQL_IN_CHUNK_SIZE) {
+                let placeholders: Vec<String> =
+                    (1..=chunk.len()).map(|i| format!("?{}", i)).collect();
+                let sql = format!(
+                    "SELECT message_id, folder_id FROM message_folders
+                     WHERE message_id IN ({})",
+                    placeholders.join(", "),
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let param_values: Vec<&dyn rusqlite::types::ToSql> = chunk
+                    .iter()
+                    .map(|s| s as &dyn rusqlite::types::ToSql)
+                    .collect();
+                let rows = stmt.query_map(param_values.as_slice(), |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?;
+                for row in rows {
+                    let (mid, fid) = row?;
+                    out.entry(mid).or_default().push(fid);
+                }
             }
             Ok(out)
         })
@@ -686,27 +688,29 @@ impl Store {
         }
 
         self.with_read(|conn| {
-            let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("?{i}")).collect();
-            let sql = format!(
-                "SELECT {MSG_SELECT} FROM messages WHERE id IN ({})",
-                placeholders.join(", ")
-            );
-            let mut stmt = conn.prepare(&sql)?;
-
-            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
-                Vec::with_capacity(ids.len());
-            for id in ids {
-                param_values.push(Box::new(id.clone()));
-            }
-            let params: Vec<&dyn rusqlite::types::ToSql> =
-                param_values.iter().map(|v| v.as_ref()).collect();
-
-            let rows = stmt.query_map(params.as_slice(), row_to_message)?;
-
             let mut by_id = HashMap::new();
-            for row in rows {
-                let message = row?;
-                by_id.insert(message.id.clone(), message);
+            for chunk in ids.chunks(SQL_IN_CHUNK_SIZE) {
+                let placeholders: Vec<String> =
+                    (1..=chunk.len()).map(|i| format!("?{i}")).collect();
+                let sql = format!(
+                    "SELECT {MSG_SELECT} FROM messages WHERE id IN ({})",
+                    placeholders.join(", ")
+                );
+                let mut stmt = conn.prepare(&sql)?;
+
+                let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
+                    Vec::with_capacity(chunk.len());
+                for id in chunk {
+                    param_values.push(Box::new(id.clone()));
+                }
+                let params: Vec<&dyn rusqlite::types::ToSql> =
+                    param_values.iter().map(|v| v.as_ref()).collect();
+
+                let rows = stmt.query_map(params.as_slice(), row_to_message)?;
+                for row in rows {
+                    let message = row?;
+                    by_id.insert(message.id.clone(), message);
+                }
             }
 
             let mut ordered = Vec::with_capacity(ids.len());
@@ -946,24 +950,26 @@ impl Store {
             return Ok(HashSet::new());
         }
         self.with_read(|conn| {
-            let placeholders: Vec<String> = (0..remote_ids.len())
-                .map(|i| format!("?{}", i + 2))
-                .collect();
-            let sql = format!(
-                "SELECT remote_id FROM messages WHERE account_id = ?1 AND remote_id IN ({}) AND is_deleted = 0",
-                placeholders.join(", ")
-            );
-            let mut stmt = conn.prepare(&sql)?;
-            let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::with_capacity(remote_ids.len() + 1);
-            params_vec.push(Box::new(account_id.to_string()));
-            for rid in remote_ids {
-                params_vec.push(Box::new(rid.clone()));
-            }
-            let param_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
-            let rows = stmt.query_map(param_refs.as_slice(), |row| row.get::<_, String>(0))?;
             let mut result = HashSet::new();
-            for row in rows {
-                result.insert(row?);
+            for chunk in remote_ids.chunks(SQL_IN_CHUNK_SIZE) {
+                let placeholders: Vec<String> = (0..chunk.len())
+                    .map(|i| format!("?{}", i + 2))
+                    .collect();
+                let sql = format!(
+                    "SELECT remote_id FROM messages WHERE account_id = ?1 AND remote_id IN ({}) AND is_deleted = 0",
+                    placeholders.join(", ")
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::with_capacity(chunk.len() + 1);
+                params_vec.push(Box::new(account_id.to_string()));
+                for rid in chunk {
+                    params_vec.push(Box::new(rid.clone()));
+                }
+                let param_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+                let rows = stmt.query_map(param_refs.as_slice(), |row| row.get::<_, String>(0))?;
+                for row in rows {
+                    result.insert(row?);
+                }
             }
             Ok(result)
         })
@@ -984,34 +990,35 @@ impl Store {
         }
 
         self.with_read(|conn| {
-            let placeholders: Vec<String> = (0..remote_ids.len())
-                .map(|i| format!("?{}", i + 3))
-                .collect();
-            let sql = format!(
-                "SELECT DISTINCT m.remote_id
-                 FROM messages m
-                 JOIN message_folders mf ON m.id = mf.message_id
-                 WHERE m.account_id = ?1
-                   AND mf.folder_id = ?2
-                   AND m.remote_id IN ({})
-                   AND m.is_deleted = 0",
-                placeholders.join(", ")
-            );
-            let mut stmt = conn.prepare(&sql)?;
-            let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> =
-                Vec::with_capacity(remote_ids.len() + 2);
-            params_vec.push(Box::new(account_id.to_string()));
-            params_vec.push(Box::new(folder_id.to_string()));
-            for rid in remote_ids {
-                params_vec.push(Box::new(rid.clone()));
-            }
-            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                params_vec.iter().map(|p| p.as_ref()).collect();
-            let rows = stmt.query_map(param_refs.as_slice(), |row| row.get::<_, String>(0))?;
-
             let mut result = HashSet::new();
-            for row in rows {
-                result.insert(row?);
+            for chunk in remote_ids.chunks(SQL_IN_CHUNK_SIZE) {
+                let placeholders: Vec<String> =
+                    (0..chunk.len()).map(|i| format!("?{}", i + 3)).collect();
+                let sql = format!(
+                    "SELECT DISTINCT m.remote_id
+                     FROM messages m
+                     JOIN message_folders mf ON m.id = mf.message_id
+                     WHERE m.account_id = ?1
+                       AND mf.folder_id = ?2
+                       AND m.remote_id IN ({})
+                       AND m.is_deleted = 0",
+                    placeholders.join(", ")
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> =
+                    Vec::with_capacity(chunk.len() + 2);
+                params_vec.push(Box::new(account_id.to_string()));
+                params_vec.push(Box::new(folder_id.to_string()));
+                for rid in chunk {
+                    params_vec.push(Box::new(rid.clone()));
+                }
+                let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                    params_vec.iter().map(|p| p.as_ref()).collect();
+                let rows = stmt.query_map(param_refs.as_slice(), |row| row.get::<_, String>(0))?;
+
+                for row in rows {
+                    result.insert(row?);
+                }
             }
             Ok(result)
         })
@@ -1027,33 +1034,32 @@ impl Store {
         }
 
         self.with_read(|conn| {
-            let placeholders: Vec<String> = (0..remote_ids.len())
-                .map(|i| format!("?{}", i + 2))
-                .collect();
-            let sql = format!(
-                "SELECT remote_id, id FROM messages WHERE account_id = ?1 AND remote_id IN ({}) AND is_deleted = 0",
-                placeholders.join(", ")
-            );
-            let mut stmt = conn
-                .prepare(&sql)?;
-            let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> =
-                Vec::with_capacity(remote_ids.len() + 1);
-            params_vec.push(Box::new(account_id.to_string()));
-            for remote_id in remote_ids {
-                params_vec.push(Box::new(remote_id.clone()));
-            }
-            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                params_vec.iter().map(|p| p.as_ref()).collect();
-            let rows = stmt
-                .query_map(param_refs.as_slice(), |row| {
+            let mut result = HashMap::new();
+            for chunk in remote_ids.chunks(SQL_IN_CHUNK_SIZE) {
+                let placeholders: Vec<String> = (0..chunk.len())
+                    .map(|i| format!("?{}", i + 2))
+                    .collect();
+                let sql = format!(
+                    "SELECT remote_id, id FROM messages WHERE account_id = ?1 AND remote_id IN ({}) AND is_deleted = 0",
+                    placeholders.join(", ")
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> =
+                    Vec::with_capacity(chunk.len() + 1);
+                params_vec.push(Box::new(account_id.to_string()));
+                for remote_id in chunk {
+                    params_vec.push(Box::new(remote_id.clone()));
+                }
+                let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                    params_vec.iter().map(|p| p.as_ref()).collect();
+                let rows = stmt.query_map(param_refs.as_slice(), |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                 })?;
 
-            let mut result = HashMap::new();
-            for row in rows {
-                let (remote_id, message_id) =
-                    row?;
-                result.insert(remote_id, message_id);
+                for row in rows {
+                    let (remote_id, message_id) = row?;
+                    result.insert(remote_id, message_id);
+                }
             }
             Ok(result)
         })
@@ -1073,53 +1079,55 @@ impl Store {
         }
 
         self.with_read(|conn| {
-            let first_remote_param = if folder_id.is_some() { 3 } else { 2 };
-            let placeholders: Vec<String> = (0..remote_ids.len())
-                .map(|index| format!("?{}", index + first_remote_param))
-                .collect();
-            let folder_join = if folder_id.is_some() {
-                "JOIN message_folders mf ON mf.message_id = m.id"
-            } else {
-                ""
-            };
-            let folder_filter = if folder_id.is_some() {
-                "AND mf.folder_id = ?2"
-            } else {
-                ""
-            };
-            let sql = format!(
-                "SELECT m.remote_id, m.id
-                 FROM messages m
-                 {folder_join}
-                 WHERE m.account_id = ?1
-                   {folder_filter}
-                   AND m.remote_id IN ({})
-                   AND m.is_deleted = 0
-                   AND m.has_attachments = 1
-                   AND NOT EXISTS (
-                       SELECT 1 FROM attachments a WHERE a.message_id = m.id
-                   )",
-                placeholders.join(", ")
-            );
-            let mut values: Vec<Box<dyn rusqlite::types::ToSql>> =
-                Vec::with_capacity(remote_ids.len() + 2);
-            values.push(Box::new(account_id.to_string()));
-            if let Some(folder_id) = folder_id {
-                values.push(Box::new(folder_id.to_string()));
-            }
-            for remote_id in remote_ids {
-                values.push(Box::new(remote_id.clone()));
-            }
-            let params: Vec<&dyn rusqlite::types::ToSql> =
-                values.iter().map(|value| value.as_ref()).collect();
-            let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt.query_map(params.as_slice(), |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?;
             let mut result = HashMap::new();
-            for row in rows {
-                let (remote_id, message_id) = row?;
-                result.insert(remote_id, message_id);
+            for chunk in remote_ids.chunks(SQL_IN_CHUNK_SIZE) {
+                let first_remote_param = if folder_id.is_some() { 3 } else { 2 };
+                let placeholders: Vec<String> = (0..chunk.len())
+                    .map(|index| format!("?{}", index + first_remote_param))
+                    .collect();
+                let folder_join = if folder_id.is_some() {
+                    "JOIN message_folders mf ON mf.message_id = m.id"
+                } else {
+                    ""
+                };
+                let folder_filter = if folder_id.is_some() {
+                    "AND mf.folder_id = ?2"
+                } else {
+                    ""
+                };
+                let sql = format!(
+                    "SELECT m.remote_id, m.id
+                     FROM messages m
+                     {folder_join}
+                     WHERE m.account_id = ?1
+                       {folder_filter}
+                       AND m.remote_id IN ({})
+                       AND m.is_deleted = 0
+                       AND m.has_attachments = 1
+                       AND NOT EXISTS (
+                           SELECT 1 FROM attachments a WHERE a.message_id = m.id
+                       )",
+                    placeholders.join(", ")
+                );
+                let mut values: Vec<Box<dyn rusqlite::types::ToSql>> =
+                    Vec::with_capacity(chunk.len() + 2);
+                values.push(Box::new(account_id.to_string()));
+                if let Some(folder_id) = folder_id {
+                    values.push(Box::new(folder_id.to_string()));
+                }
+                for remote_id in chunk {
+                    values.push(Box::new(remote_id.clone()));
+                }
+                let params: Vec<&dyn rusqlite::types::ToSql> =
+                    values.iter().map(|value| value.as_ref()).collect();
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt.query_map(params.as_slice(), |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?;
+                for row in rows {
+                    let (remote_id, message_id) = row?;
+                    result.insert(remote_id, message_id);
+                }
             }
             Ok(result)
         })
@@ -1475,20 +1483,22 @@ impl Store {
         }
         self.with_write(|conn| {
             let now = pebble_core::now_timestamp();
-            let placeholders: Vec<String> = (0..message_ids.len())
-                .map(|i| format!("?{}", i + 2))
-                .collect();
-            let sql = format!(
-                "UPDATE messages SET is_deleted = 1, deleted_at = ?1, updated_at = ?1 WHERE id IN ({})",
-                placeholders.join(", ")
-            );
-            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::with_capacity(message_ids.len() + 1);
-            param_values.push(Box::new(now));
-            for id in message_ids {
-                param_values.push(Box::new(id.clone()));
+            for chunk in message_ids.chunks(SQL_IN_CHUNK_SIZE) {
+                let placeholders: Vec<String> = (0..chunk.len())
+                    .map(|i| format!("?{}", i + 2))
+                    .collect();
+                let sql = format!(
+                    "UPDATE messages SET is_deleted = 1, deleted_at = ?1, updated_at = ?1 WHERE id IN ({})",
+                    placeholders.join(", ")
+                );
+                let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::with_capacity(chunk.len() + 1);
+                param_values.push(Box::new(now));
+                for id in chunk {
+                    param_values.push(Box::new(id.clone()));
+                }
+                let params: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|v| v.as_ref()).collect();
+                conn.execute(&sql, params.as_slice())?;
             }
-            let params: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|v| v.as_ref()).collect();
-            conn.execute(&sql, params.as_slice())?;
             Ok(())
         })
     }
@@ -3036,5 +3046,36 @@ mod thread_listing_tests {
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].message_count, 2);
         assert_eq!(threads[0].snippet, format!("snippet-{base}"));
+    }
+}
+
+#[cfg(test)]
+mod sql_batching_tests {
+    use crate::Store;
+
+    #[test]
+    fn large_in_batches_are_chunked_below_sqlite_variable_limit() {
+        let store = Store::open_in_memory().unwrap();
+        let ids: Vec<String> = (0..33_000).map(|i| i.to_string()).collect();
+
+        assert!(store.get_message_folder_ids_batch(&ids).unwrap().is_empty());
+        assert!(store.get_messages_batch(&ids).unwrap().is_empty());
+        assert!(store
+            .get_existing_remote_ids("account", &ids)
+            .unwrap()
+            .is_empty());
+        assert!(store
+            .get_existing_remote_ids_in_folder("account", "folder", &ids)
+            .unwrap()
+            .is_empty());
+        assert!(store
+            .get_existing_message_map_by_remote_ids("account", &ids)
+            .unwrap()
+            .is_empty());
+        assert!(store
+            .get_incomplete_attachment_message_map_by_remote_ids("account", None, &ids)
+            .unwrap()
+            .is_empty());
+        store.bulk_soft_delete(&ids).unwrap();
     }
 }

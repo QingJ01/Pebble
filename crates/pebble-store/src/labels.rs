@@ -2,7 +2,7 @@ use pebble_core::{new_id, Result};
 use rusqlite::OptionalExtension;
 use std::collections::HashMap;
 
-use crate::Store;
+use crate::{Store, SQL_IN_CHUNK_SIZE};
 
 /// A label entity (matches the `labels` table).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -101,47 +101,50 @@ impl Store {
         }
 
         self.with_read(|conn| {
-            let placeholders: Vec<String> =
-                (1..=message_ids.len()).map(|i| format!("?{i}")).collect();
-            let sql = format!(
-                "SELECT ml.message_id, l.id, l.name, l.color, l.is_system, l.rule_id
-                 FROM message_labels ml
-                 INNER JOIN labels l ON l.id = ml.label_id
-                 WHERE ml.message_id IN ({})
-                 ORDER BY ml.message_id, l.name",
-                placeholders.join(", ")
-            );
-            let mut stmt = conn.prepare(&sql)?;
-
-            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
-                Vec::with_capacity(message_ids.len());
-            for message_id in message_ids {
-                param_values.push(Box::new(message_id.clone()));
-            }
-            let params: Vec<&dyn rusqlite::types::ToSql> =
-                param_values.iter().map(|v| v.as_ref()).collect();
-
-            let rows = stmt.query_map(params.as_slice(), |row| {
-                let is_system: i32 = row.get(4)?;
-                Ok((
-                    row.get::<_, String>(0)?,
-                    Label {
-                        id: row.get(1)?,
-                        name: row.get(2)?,
-                        color: row.get(3)?,
-                        is_system: is_system != 0,
-                        rule_id: row.get(5)?,
-                    },
-                ))
-            })?;
-
             let mut result: HashMap<String, Vec<Label>> = HashMap::new();
             for message_id in message_ids {
                 result.entry(message_id.clone()).or_default();
             }
-            for row in rows {
-                let (message_id, label) = row?;
-                result.entry(message_id).or_default().push(label);
+
+            for chunk in message_ids.chunks(SQL_IN_CHUNK_SIZE) {
+                let placeholders: Vec<String> =
+                    (1..=chunk.len()).map(|i| format!("?{i}")).collect();
+                let sql = format!(
+                    "SELECT ml.message_id, l.id, l.name, l.color, l.is_system, l.rule_id
+                     FROM message_labels ml
+                     INNER JOIN labels l ON l.id = ml.label_id
+                     WHERE ml.message_id IN ({})
+                     ORDER BY ml.message_id, l.name",
+                    placeholders.join(", ")
+                );
+                let mut stmt = conn.prepare(&sql)?;
+
+                let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
+                    Vec::with_capacity(chunk.len());
+                for message_id in chunk {
+                    param_values.push(Box::new(message_id.clone()));
+                }
+                let params: Vec<&dyn rusqlite::types::ToSql> =
+                    param_values.iter().map(|v| v.as_ref()).collect();
+
+                let rows = stmt.query_map(params.as_slice(), |row| {
+                    let is_system: i32 = row.get(4)?;
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        Label {
+                            id: row.get(1)?,
+                            name: row.get(2)?,
+                            color: row.get(3)?,
+                            is_system: is_system != 0,
+                            rule_id: row.get(5)?,
+                        },
+                    ))
+                })?;
+
+                for row in rows {
+                    let (message_id, label) = row?;
+                    result.entry(message_id).or_default().push(label);
+                }
             }
             Ok(result)
         })
@@ -168,5 +171,19 @@ impl Store {
             }
             Ok(labels)
         })
+    }
+}
+
+#[cfg(test)]
+mod sql_batching_tests {
+    use crate::Store;
+
+    #[test]
+    fn large_label_batches_are_chunked_below_sqlite_variable_limit() {
+        let store = Store::open_in_memory().unwrap();
+        let ids: Vec<String> = (0..33_000).map(|i| i.to_string()).collect();
+        let result = store.get_message_labels_batch(&ids).unwrap();
+        assert_eq!(result.len(), ids.len());
+        assert!(result.values().all(|labels| labels.is_empty()));
     }
 }
