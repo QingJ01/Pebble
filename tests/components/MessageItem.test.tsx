@@ -47,9 +47,12 @@ vi.mock("../../src/lib/api", () => ({
   moveToFolder: mocks.moveToFolder,
 }));
 
-vi.mock("../../src/stores/kanban.store", () => ({
-  useKanbanStore: (selector: (state: { cardIdSet: Set<string> }) => unknown) =>
-    selector({ cardIdSet: new Set() }),
+vi.mock("../../src/hooks/queries/useKanbanCardsQuery", () => ({
+  useIsInKanban: () => false,
+}));
+
+vi.mock("../../src/hooks/mutations/useKanbanMutations", () => ({
+  addKanbanCard: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../../src/stores/toast.store", () => ({

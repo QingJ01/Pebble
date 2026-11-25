@@ -5,7 +5,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Star, Paperclip, Archive, LayoutGrid, ShieldAlert, RotateCcw } from "lucide-react";
 import type { EmailAddress, Folder, Label, MessageSummary } from "@/lib/api";
 import { updateMessageFlags, archiveMessage, moveToFolder } from "@/lib/api";
-import { useKanbanStore } from "@/stores/kanban.store";
+import { useIsInKanban } from "@/hooks/queries/useKanbanCardsQuery";
+import { addKanbanCard } from "@/hooks/mutations/useKanbanMutations";
 import { useToastStore } from "@/stores/toast.store";
 import { patchMessagesCache, restoreMessagesCache, snapshotMessagesCache } from "@/hooks/queries";
 
@@ -51,7 +52,7 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [showActions, setShowActions] = useState(false);
-  const inKanban = useKanbanStore((s) => s.cardIdSet.has(message.id));
+  const inKanban = useIsInKanban(message.id);
   const archiveActionLabel = folderRole === "archive"
     ? t("messageActions.unarchive", "Unarchive")
     : t("messageActions.archive", "Archive");
@@ -319,7 +320,7 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
           <button
             onClick={(e) => {
               e.stopPropagation();
-              useKanbanStore.getState().addCard(message.id, "todo")
+              addKanbanCard(message.id, "todo", queryClient)
                 .then(() => {
                   useToastStore.getState().addToast({ message: t("messageActions.kanbanSuccess", "Added to kanban board"), type: "success" });
                 })

@@ -6,6 +6,7 @@ import { Inbox, Archive, Trash2, MailOpen, MailCheck, Star, X } from "lucide-rea
 import type { MessageSummary } from "@/lib/api";
 import { getMessageLabelsBatch, batchArchive, batchDelete, batchMarkRead, batchStar } from "@/lib/api";
 import { useAccountsQuery, useFoldersForAccountsQuery } from "@/hooks/queries";
+import { invalidateKanbanQueries } from "@/hooks/queries/useKanbanCardsQuery";
 import { useMailStore } from "@/stores/mail.store";
 import { useToastStore } from "@/stores/toast.store";
 import { useConfirmStore } from "@/stores/confirm.store";
@@ -121,6 +122,8 @@ export default function MessageList({
     queryClient.invalidateQueries({ queryKey: ["messages"] });
     queryClient.invalidateQueries({ queryKey: ["threads"] });
     queryClient.invalidateQueries({ queryKey: ["starred-messages"] });
+    // Batch deletes must drop the cards from the board too.
+    void invalidateKanbanQueries(queryClient);
   }
 
   function batchActionChangesUnreadCounts(action: "archive" | "delete" | "markRead" | "markUnread" | "star" | "unstar") {

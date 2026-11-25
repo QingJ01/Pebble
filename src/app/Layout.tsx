@@ -13,7 +13,7 @@ import { useConfirmStore } from "../stores/confirm.store";
 import { useComposeStore } from "../stores/compose.store";
 import { useUIStore, applyThemeToDom, resolveTheme } from "../stores/ui.store";
 import { useCommandStore } from "../stores/command.store";
-import { useKanbanStore } from "../stores/kanban.store";
+import { useKanbanCardsQuery } from "@/hooks/queries/useKanbanCardsQuery";
 import { useKeyboard } from "../hooks/useKeyboard";
 import { useNetworkStatus } from "../hooks/useNetworkStatus";
 import { buildCommands } from "../features/command-palette/commands";
@@ -72,9 +72,7 @@ export default function Layout() {
   useKeyboard();
 
   // Load kanban cards at startup so MessageItem can show kanban indicators
-  useEffect(() => {
-    useKanbanStore.getState().fetchCards();
-  }, []);
+  useKanbanCardsQuery();
 
   useEffect(() => scheduleLazyViewPreload(preloadLazyViews), []);
 

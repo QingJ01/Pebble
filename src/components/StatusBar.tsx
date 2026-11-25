@@ -8,6 +8,7 @@ import { useUIStore, type RealtimeStatus } from "../stores/ui.store";
 import { useMailStore } from "@/stores/mail.store";
 import { stopSync } from "@/lib/api";
 import { useSyncMutation } from "@/hooks/mutations/useSyncMutation";
+import { invalidateKanbanQueries } from "@/hooks/queries/useKanbanCardsQuery";
 import {
   pendingMailOpsSummaryQueryKey,
   usePendingMailOpsSummary,
@@ -84,6 +85,7 @@ export default function StatusBar() {
     queryClient.invalidateQueries({ queryKey: ["messages"] });
     queryClient.invalidateQueries({ queryKey: ["threads"] });
     queryClient.invalidateQueries({ queryKey: ["folder-unread-counts"] });
+    void invalidateKanbanQueries(queryClient);
   }
 
   function isActiveAccountEvent(accountId?: string | null) {
@@ -144,6 +146,8 @@ export default function StatusBar() {
       queryClient.invalidateQueries({ queryKey: ["folders"] });
       queryClient.invalidateQueries({ queryKey: ["messages"] });
       queryClient.invalidateQueries({ queryKey: ["threads"] });
+      // Reverted/abandoned ops can move or delete messages on the board.
+      void invalidateKanbanQueries(queryClient);
     });
     return () => { unlisten.then((fn) => fn()); };
   }, [activeAccountId, queryClient]);
