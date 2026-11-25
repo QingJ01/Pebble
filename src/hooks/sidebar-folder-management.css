@@ -23,6 +23,9 @@
   opacity: 1;
   pointer-events: auto;
   transform: none;
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
+}
+
+.sidebar-context-menu-item:focus-visible {
+  outline: none;
+  background: var(--color-bg-hover);
 }
