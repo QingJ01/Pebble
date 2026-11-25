@@ -15,7 +15,7 @@ use crate::realtime_policy::{RealtimePollPolicy, RealtimeRuntimeState, SyncTrigg
 use crate::sync::{
     preserve_local_state_for_attachment_repair, recv_sync_trigger, remote_message_requires_fetch,
     store_new_message_with_attachments_atomically, StoredMessage, SyncConfig, SyncError,
-    SyncProgress, SyncWorkerBase,
+    SyncProgress, SyncWorkerBase, ThreadRefresh,
 };
 use crate::thread::{compute_thread_id, merge_thread_aliases, thread_merge_aliases, ThreadMerge};
 
@@ -45,6 +45,7 @@ impl Pop3SyncWorker {
                 message_tx: None,
                 runtime_status_tx: None,
                 progress_tx: None,
+                thread_refresh_tx: None,
             },
             provider,
             stop_rx,
@@ -66,6 +67,12 @@ impl Pop3SyncWorker {
         self
     }
 
+    /// Receive a [`ThreadRefresh`] whenever stored messages change thread.
+    pub fn with_thread_refresh_tx(mut self, tx: mpsc::UnboundedSender<ThreadRefresh>) -> Self {
+        self.base.thread_refresh_tx = Some(tx);
+        self
+    }
+
     pub async fn run(
         &self,
         config: SyncConfig,
@@ -82,6 +89,7 @@ impl Pop3SyncWorker {
                 self.base.emit_sync_error("initial", &e.to_string());
             }
         }
+        self.base.rethread_legacy_threads_once().await;
 
         if config.manual_only() {
             info!("POP3 manual sync completed for {}", self.base.account_id);
@@ -347,14 +355,15 @@ impl Pop3SyncWorker {
         .await?;
         if let Some(thread_id) = msg.thread_id.clone() {
             let aliases = thread_merge_aliases(&msg, &thread_id);
-            if let Err(e) = merge_thread_aliases(
+            match merge_thread_aliases(
                 &self.base.store,
                 &self.base.account_id,
                 vec![ThreadMerge { thread_id, aliases }],
             )
             .await
             {
-                warn!("Failed to merge POP3 threads: {e}");
+                Ok(moved) => self.base.emit_thread_refresh(moved).await,
+                Err(e) => warn!("Failed to merge POP3 threads: {e}"),
             }
         }
         self.base.emit_message(StoredMessage {

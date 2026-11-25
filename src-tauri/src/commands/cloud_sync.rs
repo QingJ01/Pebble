@@ -18,9 +18,10 @@ use pebble_crypto::passphrase::{
 };
 use pebble_store::cloud_sync::{
     preview_backup, serialize_backup, BackupPreview, BackupSecretSummary, RestoredAuthData,
-    RestoredPrivateData, RestoredSecureUserData, SettingsBackup, WebDavClient,
+    RestoredPrivateData, RestoredSecureUserData, SettingsBackup, MAX_BACKUP_SIZE_BYTES,
     SETTINGS_BACKUP_FILENAME,
 };
+use pebble_webdav::WebDavClient;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager, State};
 
@@ -284,6 +285,16 @@ fn restore_backup_data(
 /// A blank WebDAV password from the UI means "use the saved one". The saved
 /// password is only reused for the exact URL and username it was saved for,
 /// so it can never be sent to a different server.
+/// Backup WebDAV client: https-only, no redirects/proxies, downloads capped at
+/// the store's maximum backup size.
+fn webdav_client(
+    url: String,
+    username: String,
+    password: String,
+) -> Result<WebDavClient, PebbleError> {
+    Ok(WebDavClient::new(url, username, password)?.with_max_download_bytes(MAX_BACKUP_SIZE_BYTES))
+}
+
 fn resolve_webdav_password(
     state: &AppState,
     url: &str,
@@ -327,7 +338,7 @@ pub async fn test_webdav_connection(
     password: String,
 ) -> std::result::Result<String, PebbleError> {
     let password = resolve_webdav_password(&state, &url, &username, password)?;
-    let client = WebDavClient::new(url, username, password)?;
+    let client = webdav_client(url, username, password)?;
     client.test_connection().await?;
     Ok("Connection successful".to_string())
 }
@@ -343,7 +354,7 @@ pub async fn backup_to_webdav(
     let password = resolve_webdav_password(&state, &url, &username, password)?;
     let secret_passphrase = resolve_secret_passphrase(&state, secret_passphrase)?;
     let data = build_backup_data(&state, secret_passphrase)?;
-    let client = WebDavClient::new(url, username, password)?;
+    let client = webdav_client(url, username, password)?;
     client.upload(SETTINGS_BACKUP_FILENAME, &data).await?;
     Ok("Settings backup completed successfully".to_string())
 }
@@ -386,7 +397,7 @@ pub async fn preview_webdav_backup(
     password: String,
 ) -> std::result::Result<BackupPreview, PebbleError> {
     let password = resolve_webdav_password(&state, &url, &username, password)?;
-    let client = WebDavClient::new(url, username, password)?;
+    let client = webdav_client(url, username, password)?;
     let data = client.download(SETTINGS_BACKUP_FILENAME).await?;
     preview_backup(&data)
 }
@@ -402,7 +413,7 @@ pub async fn restore_from_webdav(
     let password = resolve_webdav_password(&state, &url, &username, password)?;
     let secret_passphrase =
         resolve_secret_passphrase(&state, secret_passphrase)?.map(|passphrase| passphrase.value);
-    let client = WebDavClient::new(url, username, password)?;
+    let client = webdav_client(url, username, password)?;
     let data = client.download(SETTINGS_BACKUP_FILENAME).await?;
     restore_backup_data(&state, &data, secret_passphrase)
 }
@@ -598,7 +609,7 @@ pub async fn run_auto_backup_worker(app: tauri::AppHandle) {
                 .clone()
                 .map(BackupPassphrase::stored);
             let data = build_backup_data(&state, passphrase)?;
-            let client = WebDavClient::new(config.url, config.username, config.password)?;
+            let client = webdav_client(config.url, config.username, config.password)?;
             client.upload(SETTINGS_BACKUP_FILENAME, &data).await?;
             Ok(())
         }

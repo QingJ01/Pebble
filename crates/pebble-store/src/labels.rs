@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::Store;
 
 /// A label entity (matches the `labels` table).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 pub struct Label {
     pub id: String,
     pub name: String,

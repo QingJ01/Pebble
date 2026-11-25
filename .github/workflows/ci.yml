@@ -101,6 +101,12 @@ jobs:
       - name: Run Rust tests
         run: cargo test --workspace --all-targets
 
+      # Fails when src/lib/generated/ipc.ts no longer matches the Rust IPC types
+      # (also covered by the workspace run above; kept explicit for a clear
+      # failure message). Regenerate: UPDATE_IPC_BINDINGS=1 cargo test -p pebble ipc_bindings
+      - name: Check generated IPC bindings
+        run: cargo test -p pebble --lib ipc_bindings
+
       - name: Run frontend tests
         run: pnpm test
 

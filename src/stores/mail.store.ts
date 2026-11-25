@@ -1,11 +1,34 @@
 import { create } from "zustand";
 
-interface MailState {
+/**
+ * A thread row is identified by (account_id, thread_id): thread ids are only
+ * unique within one account, so the unified view can show two accounts'
+ * threads with the same id side by side.
+ */
+export interface ThreadKey {
+  thread_id: string;
+  account_id?: string | null;
+}
+
+/** Whether `thread` is the selected thread (account-aware when known). */
+export function isThreadSelected(
+  state: Pick<MailState, "selectedThreadId" | "selectedThreadAccountId">,
+  thread: ThreadKey,
+): boolean {
+  if (state.selectedThreadId === null || thread.thread_id !== state.selectedThreadId) return false;
+  return !state.selectedThreadAccountId
+    || !thread.account_id
+    || thread.account_id === state.selectedThreadAccountId;
+}
+
+export interface MailState {
   // ─── UI State ──────────────────────────────────────────────────────────────
   activeAccountId: string | null;
   activeFolderId: string | null;
   selectedMessageId: string | null;
   selectedThreadId: string | null;
+  /** Account owning the selected thread (null when unknown). */
+  selectedThreadAccountId: string | null;
   threadView: boolean;
   // ─── Batch Selection ───────────────────────────────────────────────────────
   selectedMessageIds: Set<string>;
@@ -14,7 +37,9 @@ interface MailState {
   setActiveAccountId: (accountId: string | null) => void;
   setActiveFolderId: (folderId: string | null) => void;
   setSelectedMessage: (messageId: string | null) => void;
-  setSelectedThreadId: (threadId: string | null) => void;
+  setSelectedThreadId: (threadId: string | null, accountId?: string | null) => void;
+  /** Select a thread row by its (account_id, thread_id) key. */
+  selectThread: (thread: ThreadKey | null) => void;
   toggleThreadView: () => void;
   toggleBatchMode: () => void;
   toggleMessageSelection: (messageId: string) => void;
@@ -27,6 +52,7 @@ export const useMailStore = create<MailState>((set, get) => ({
   activeFolderId: null,
   selectedMessageId: null,
   selectedThreadId: null,
+  selectedThreadAccountId: null,
   threadView: false,
   selectedMessageIds: new Set<string>(),
   batchMode: false,
@@ -37,6 +63,7 @@ export const useMailStore = create<MailState>((set, get) => ({
       activeFolderId: null,
       selectedMessageId: null,
       selectedThreadId: null,
+      selectedThreadAccountId: null,
       selectedMessageIds: new Set(),
       batchMode: false,
     });
@@ -47,6 +74,7 @@ export const useMailStore = create<MailState>((set, get) => ({
       activeFolderId: folderId,
       selectedMessageId: null,
       selectedThreadId: null,
+      selectedThreadAccountId: null,
       selectedMessageIds: new Set(),
       batchMode: false,
     });
@@ -56,14 +84,22 @@ export const useMailStore = create<MailState>((set, get) => ({
     set({ selectedMessageId: messageId });
   },
 
-  setSelectedThreadId: (threadId) => {
-    set({ selectedThreadId: threadId });
+  setSelectedThreadId: (threadId, accountId = null) => {
+    set({ selectedThreadId: threadId, selectedThreadAccountId: threadId ? accountId : null });
+  },
+
+  selectThread: (thread) => {
+    set({
+      selectedThreadId: thread?.thread_id ?? null,
+      selectedThreadAccountId: thread?.account_id ?? null,
+    });
   },
 
   toggleThreadView: () => {
     set({
       threadView: !get().threadView,
       selectedThreadId: null,
+      selectedThreadAccountId: null,
       selectedMessageId: null,
       selectedMessageIds: new Set(),
       batchMode: false,

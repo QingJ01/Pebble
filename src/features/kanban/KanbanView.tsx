@@ -5,7 +5,7 @@ import { DndContext, DragEndEvent, KeyboardSensor, PointerSensor, useSensor, use
 import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import type { KanbanCard, KanbanColumnType, Message } from "@/lib/api";
 import { getMessagesBatch } from "@/lib/api";
-import { useKanbanStore } from "@/stores/kanban.store";
+import { useKanbanContextNotesQuery, type KanbanContextNotes } from "@/hooks/queries/useKanbanContextNotesQuery";
 import { useKanbanCardsQuery } from "@/hooks/queries/useKanbanCardsQuery";
 import {
   addKanbanCard,
@@ -26,14 +26,15 @@ const COLUMN_IDS: { id: KanbanColumnType; titleKey: string }[] = [
 ];
 
 const NO_CARDS: KanbanCard[] = [];
+const NO_NOTES: KanbanContextNotes = {};
 
 export default function KanbanView() {
   const { t } = useTranslation();
   // Always refetch when the board opens: cards can go stale while messages
   // are deleted or moved elsewhere in the app.
   const { data: cards = NO_CARDS, isPending } = useKanbanCardsQuery({ refetchOnMount: "always" });
-  const contextNotes = useKanbanStore((s) => s.contextNotes);
-  const fetchContextNotes = useKanbanStore((s) => s.fetchContextNotes);
+  // Notes are optional: a failed load leaves the board usable without them.
+  const { data: contextNotes = NO_NOTES } = useKanbanContextNotesQuery({ refetchOnMount: "always" });
   const queryClient = useQueryClient();
   const moveCard = useMoveKanbanCardMutation();
   const reorderColumn = useReorderKanbanColumnMutation();
@@ -44,10 +45,6 @@ export default function KanbanView() {
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
-
-  useEffect(() => {
-    fetchContextNotes().catch(() => { /* notes are optional; keep the board usable */ });
-  }, [fetchContextNotes]);
 
   // Load message details for all cards (batch)
   useEffect(() => {

@@ -9,7 +9,7 @@ use pebble_translate::TranslateService;
 use tauri::State;
 
 /// Decode a hex string to bytes.
-fn hex_decode(s: &str) -> std::result::Result<Vec<u8>, PebbleError> {
+pub(crate) fn hex_decode(s: &str) -> std::result::Result<Vec<u8>, PebbleError> {
     let bytes = s.as_bytes();
     if !bytes.len().is_multiple_of(2) {
         return Err(PebbleError::Internal(
@@ -40,7 +40,7 @@ fn hex_nibble(byte: u8) -> Option<u8> {
 }
 
 /// Encode bytes to a hex string.
-fn hex_encode(bytes: &[u8]) -> String {
+pub(crate) fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
@@ -53,7 +53,7 @@ pub(crate) fn decrypt_config(
     decrypt_config_with_store(&state.crypto, &state.store, stored)
 }
 
-fn decrypt_config_with_store(
+pub(crate) fn decrypt_config_with_store(
     crypto: &CryptoService,
     store: &Store,
     stored: &str,

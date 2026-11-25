@@ -111,13 +111,26 @@ pub fn compute_thread_id(message: &Message, existing_threads: &HashMap<String, S
 /// thread named after `message`'s own Message-ID or one of its ancestors is
 /// the same conversation and must be merged into `thread_id`.
 pub fn thread_merge_aliases(message: &Message, thread_id: &str) -> Vec<String> {
+    merge_aliases_from_headers(
+        message.message_id_header.as_ref(),
+        message.in_reply_to.as_ref(),
+        message.references_header.as_ref(),
+        thread_id,
+    )
+}
+
+fn merge_aliases_from_headers(
+    message_id_header: Option<&String>,
+    in_reply_to: Option<&String>,
+    references_header: Option<&String>,
+    thread_id: &str,
+) -> Vec<String> {
     let mut aliases: Vec<String> = Vec::new();
-    let candidates = message
-        .message_id_header
-        .iter()
+    let candidates = message_id_header
+        .into_iter()
         .map(|id| id.trim())
-        .chain(header_ids(message.in_reply_to.as_ref()))
-        .chain(header_ids(message.references_header.as_ref()));
+        .chain(header_ids(in_reply_to))
+        .chain(header_ids(references_header));
     for candidate in candidates {
         if candidate != thread_id && !aliases.iter().any(|alias| alias == candidate) {
             aliases.push(candidate.to_string());
@@ -152,40 +165,25 @@ pub struct ThreadMerge {
 }
 
 /// Apply thread merges in order inside one write transaction. Returns the
-/// number of messages whose thread id changed.
+/// ids of the messages whose thread id changed.
 pub async fn merge_thread_aliases(
     store: &std::sync::Arc<pebble_store::Store>,
     account_id: &str,
     merges: Vec<ThreadMerge>,
-) -> pebble_core::Result<usize> {
-    let merges: Vec<ThreadMerge> = merges
+) -> pebble_core::Result<Vec<String>> {
+    let merges: Vec<(String, Vec<String>)> = merges
         .into_iter()
         .filter(|merge| !merge.aliases.is_empty())
+        .map(|merge| (merge.thread_id, merge.aliases))
         .collect();
     if merges.is_empty() {
-        return Ok(0);
+        return Ok(Vec::new());
     }
+    let store = std::sync::Arc::clone(store);
     let account_id = account_id.to_string();
-    store
-        .with_write_async(move |conn| {
-            let tx = conn.unchecked_transaction()?;
-            let mut changed = 0usize;
-            {
-                let mut stmt = tx.prepare(
-                    "UPDATE messages SET thread_id = ?1
-                     WHERE account_id = ?2 AND thread_id = ?3",
-                )?;
-                for merge in &merges {
-                    for alias in &merge.aliases {
-                        changed +=
-                            stmt.execute([merge.thread_id.as_str(), account_id.as_str(), alias])?;
-                    }
-                }
-            }
-            tx.commit()?;
-            Ok(changed)
-        })
+    tokio::task::spawn_blocking(move || store.merge_thread_aliases(&account_id, &merges))
         .await
+        .map_err(|e| pebble_core::PebbleError::Internal(format!("spawn_blocking: {e}")))?
 }
 
 /// Re-file stored messages under provider-native thread ids. Each entry is
@@ -198,32 +196,88 @@ pub async fn assign_thread_ids(
     if assignments.is_empty() {
         return Ok(Vec::new());
     }
+    let store = std::sync::Arc::clone(store);
     let account_id = account_id.to_string();
-    store
-        .with_write_async(move |conn| {
-            let tx = conn.unchecked_transaction()?;
-            let mut changed = Vec::new();
-            {
-                let mut stmt = tx.prepare(
-                    "UPDATE messages SET thread_id = ?1
-                     WHERE id = ?2 AND account_id = ?3
-                       AND (thread_id IS NULL OR thread_id <> ?1)",
-                )?;
-                for (message_id, thread_id) in &assignments {
-                    if stmt.execute([
-                        thread_id.as_str(),
-                        message_id.as_str(),
-                        account_id.as_str(),
-                    ])? > 0
-                    {
-                        changed.push(message_id.clone());
-                    }
-                }
-            }
-            tx.commit()?;
-            Ok(changed)
-        })
+    tokio::task::spawn_blocking(move || store.assign_thread_ids(&account_id, &assignments))
         .await
+        .map_err(|e| pebble_core::PebbleError::Internal(format!("spawn_blocking: {e}")))?
+}
+
+/// Plan a re-merge of conversations stored before the live alias merge
+/// existed: every message's thread is unioned with the threads named after
+/// its own Message-ID and its ancestors (exactly what the live merge does
+/// when a message arrives). Each merged group adopts the thread id of its
+/// earliest message. Returns only the `(message_id, thread_id)` changes.
+pub fn plan_rethread(rows: &[pebble_store::threads::ThreadHeaderRow]) -> Vec<(String, String)> {
+    let mut order: Vec<&pebble_store::threads::ThreadHeaderRow> =
+        rows.iter().filter(|row| row.thread_id.is_some()).collect();
+    order.sort_by(|a, b| a.date.cmp(&b.date).then_with(|| a.id.cmp(&b.id)));
+
+    // Union-find over thread ids; rank = first-seen position (earliest date).
+    let mut index: HashMap<&str, usize> = HashMap::new();
+    let mut names: Vec<&str> = Vec::new();
+    for row in &order {
+        let thread_id = row.thread_id.as_deref().unwrap_or_default();
+        if !index.contains_key(thread_id) {
+            index.insert(thread_id, names.len());
+            names.push(thread_id);
+        }
+    }
+    let mut parent: Vec<usize> = (0..names.len()).collect();
+    fn find(parent: &mut [usize], mut x: usize) -> usize {
+        while parent[x] != x {
+            parent[x] = parent[parent[x]];
+            x = parent[x];
+        }
+        x
+    }
+    for row in &order {
+        let thread_id = row.thread_id.as_deref().unwrap_or_default();
+        let aliases = merge_aliases_from_headers(
+            row.message_id_header.as_ref(),
+            row.in_reply_to.as_ref(),
+            row.references_header.as_ref(),
+            thread_id,
+        );
+        for alias in aliases {
+            let Some(&alias_idx) = index.get(alias.as_str()) else {
+                continue;
+            };
+            let a = find(&mut parent, index[thread_id]);
+            let b = find(&mut parent, alias_idx);
+            if a != b {
+                // Earlier-seen thread id wins.
+                let (root, child) = if a < b { (a, b) } else { (b, a) };
+                parent[child] = root;
+            }
+        }
+    }
+    let mut changes = Vec::new();
+    for row in &order {
+        let thread_id = row.thread_id.as_deref().unwrap_or_default();
+        let root = find(&mut parent, index[thread_id]);
+        if root != index[thread_id] {
+            changes.push((row.id.clone(), names[root].to_string()));
+        }
+    }
+    changes
+}
+
+/// Re-merge an account's stored conversations (see [`plan_rethread`]) and
+/// return the ids of the messages that moved.
+pub async fn rethread_account(
+    store: &std::sync::Arc<pebble_store::Store>,
+    account_id: &str,
+) -> pebble_core::Result<Vec<String>> {
+    let store = std::sync::Arc::clone(store);
+    let account_id = account_id.to_string();
+    tokio::task::spawn_blocking(move || {
+        let rows = store.list_thread_headers(&account_id)?;
+        let changes = plan_rethread(&rows);
+        store.assign_thread_ids(&account_id, &changes)
+    })
+    .await
+    .map_err(|e| pebble_core::PebbleError::Internal(format!("spawn_blocking: {e}")))?
 }
 
 #[cfg(test)]
@@ -549,5 +603,153 @@ mod tests {
             .await
             .unwrap();
         assert!(unchanged.is_empty());
+    }
+
+    /// Store a message with the thread id the pre-merge code would have given
+    /// it (compute only, no alias merge).
+    fn store_without_merge(
+        store: &pebble_store::Store,
+        folder_id: &str,
+        mut message: Message,
+        date: i64,
+    ) -> String {
+        let refs: Vec<String> = header_ids(message.in_reply_to.as_ref())
+            .chain(header_ids(message.references_header.as_ref()))
+            .map(str::to_string)
+            .collect();
+        let mappings = store.get_thread_mappings_for_refs("acct1", &refs).unwrap();
+        message.thread_id = Some(compute_thread_id(&message, &mappings));
+        message.remote_id = message.id.clone();
+        message.date = date;
+        store
+            .insert_message(&message, &[folder_id.to_string()])
+            .unwrap();
+        message.id
+    }
+
+    #[tokio::test]
+    async fn rethread_pass_merges_legacy_split_conversations_once() {
+        let (store, folder_id) = thread_test_store();
+        // Out-of-order arrival without the live merge leaves three threads.
+        let grandchild = store_without_merge(
+            &store,
+            &folder_id,
+            make_message(Some("<c@example.com>"), Some("<p@example.com>"), None),
+            300,
+        );
+        let parent = store_without_merge(
+            &store,
+            &folder_id,
+            make_message(
+                Some("<p@example.com>"),
+                Some("<r@example.com>"),
+                Some("<r@example.com>"),
+            ),
+            200,
+        );
+        let unrelated = store_without_merge(
+            &store,
+            &folder_id,
+            make_message(Some("<u@example.com>"), None, None),
+            250,
+        );
+        let root = store_without_merge(
+            &store,
+            &folder_id,
+            make_message(Some("<r@example.com>"), None, None),
+            100,
+        );
+        assert_ne!(
+            stored_thread(&store, &grandchild),
+            stored_thread(&store, &root)
+        );
+
+        let mut changed = rethread_account(&store, "acct1").await.unwrap();
+        changed.sort();
+        let thread = stored_thread(&store, &root);
+        assert_eq!(stored_thread(&store, &parent), thread);
+        assert_eq!(stored_thread(&store, &grandchild), thread);
+        assert_eq!(stored_thread(&store, &unrelated), "<u@example.com>");
+        assert!(changed.contains(&grandchild));
+        assert!(!changed.contains(&unrelated));
+
+        // Idempotent: a second pass changes nothing.
+        assert!(rethread_account(&store, "acct1").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn live_merge_reports_the_messages_it_moved() {
+        let (store, folder_id) = thread_test_store();
+        let child = store_without_merge(
+            &store,
+            &folder_id,
+            make_message(Some("<c@example.com>"), Some("<p@example.com>"), None),
+            200,
+        );
+        let mut parent = make_message(Some("<p@example.com>"), None, None);
+        parent.thread_id = Some("<p-thread>".to_string());
+        let aliases = thread_merge_aliases(&parent, "<p-thread>");
+        let moved = merge_thread_aliases(
+            &store,
+            "acct1",
+            vec![ThreadMerge {
+                thread_id: "<p-thread>".to_string(),
+                aliases,
+            }],
+        )
+        .await
+        .unwrap();
+        assert_eq!(moved, vec![child.clone()]);
+        assert_eq!(stored_thread(&store, &child), "<p-thread>");
+    }
+
+    #[tokio::test]
+    async fn worker_rethread_pass_runs_once_and_announces_refresh() {
+        let (store, folder_id) = thread_test_store();
+        let child = store_without_merge(
+            &store,
+            &folder_id,
+            make_message(Some("<c@example.com>"), Some("<p@example.com>"), None),
+            200,
+        );
+        store_without_merge(
+            &store,
+            &folder_id,
+            make_message(
+                Some("<p@example.com>"),
+                Some("<r@example.com>"),
+                Some("<r@example.com>"),
+            ),
+            100,
+        );
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let base = crate::sync::SyncWorkerBase {
+            account_id: "acct1".to_string(),
+            store: std::sync::Arc::clone(&store),
+            attachments_dir: std::env::temp_dir(),
+            error_tx: None,
+            message_tx: None,
+            runtime_status_tx: None,
+            progress_tx: None,
+            thread_refresh_tx: Some(tx),
+        };
+
+        base.rethread_legacy_threads_once().await;
+        let refresh = rx.try_recv().expect("re-thread must announce a refresh");
+        assert_eq!(refresh.account_id, "acct1");
+        assert_eq!(refresh.folder_ids, vec![folder_id.clone()]);
+        assert_eq!(refresh.message_ids, vec![child.clone()]);
+        assert_eq!(
+            store
+                .get_sync_state("acct1")
+                .unwrap()
+                .unwrap()
+                .rethread_version,
+            1
+        );
+
+        // Tracked per account: the second start does nothing.
+        base.rethread_legacy_threads_once().await;
+        assert!(rx.try_recv().is_err());
     }
 }

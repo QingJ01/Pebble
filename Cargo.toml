@@ -10,6 +10,7 @@ members = [
     "crates/pebble-translate",
     "crates/pebble-crypto",
     "crates/pebble-oauth",
+    "crates/pebble-webdav",
 ]
 resolver = "2"
 
@@ -41,6 +42,7 @@ rand = "0.8"
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native-sync-persistent", "crypto-rust"] }
 hex = "0.4"
 semver = "1"
+ts-rs = { version = "12", default-features = false, features = ["serde-compat", "no-serde-warnings"] }
 
 [profile.release]
 opt-level = "s"

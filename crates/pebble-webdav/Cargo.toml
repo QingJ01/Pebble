@@ -1,0 +1,11 @@
+[package]
+name = "pebble-webdav"
+version = "0.1.6"
+edition = "2021"
+
+[dependencies]
+pebble-core = { path = "../pebble-core" }
+reqwest = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

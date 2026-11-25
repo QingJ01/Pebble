@@ -32,13 +32,13 @@ pub enum LLMMode {
     Responses,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 pub struct TranslateResult {
     pub translated: String,
     pub segments: Vec<BilingualSegment>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 pub struct BilingualSegment {
     pub source: String,
     pub target: String,

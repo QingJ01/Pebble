@@ -13,7 +13,7 @@ interface Props {
   onClear: () => void;
 }
 
-function timestampToDateInput(timestamp?: number): string {
+function timestampToDateInput(timestamp?: number | null): string {
   if (!timestamp) return "";
 
   const date = new Date(timestamp * 1000);

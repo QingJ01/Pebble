@@ -25,6 +25,7 @@ pebble-rules = { path = "../crates/pebble-rules" }
 pebble-translate = { path = "../crates/pebble-translate" }
 pebble-crypto = { path = "../crates/pebble-crypto" }
 pebble-oauth = { path = "../crates/pebble-oauth" }
+pebble-webdav = { path = "../crates/pebble-webdav" }
 tauri-plugin-notification = "2"
 tauri-plugin-deep-link = "2"
 lettre = { workspace = true }
@@ -42,6 +43,7 @@ chrono = { version = "0.4.44", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 rusqlite = { workspace = true }
+ts-rs = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 tauri-winrt-notification = "0.7"

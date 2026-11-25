@@ -7,6 +7,7 @@ edition = "2021"
 pebble-core = { path = "../pebble-core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+ts-rs = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
 reqwest = { workspace = true }
