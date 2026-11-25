@@ -597,6 +597,10 @@ export async function batchMarkRead(messageIds: string[], isRead: boolean): Prom
   return invoke<number>("batch_mark_read", { messageIds, isRead });
 }
 
+export async function updateThreadReadFlagsInFolders(threadId: string, folderIds: string[], isRead: boolean): Promise<number> {
+  return invoke<number>("update_thread_read_flags_in_folders", { threadId, folderIds, isRead });
+}
+
 export async function batchStar(messageIds: string[], starred: boolean): Promise<number> {
   return invoke<number>("batch_star", { messageIds, starred });
 }

@@ -631,6 +631,48 @@ impl Store {
         })
     }
 
+    /// List message IDs in a thread restricted to the given folders.
+    pub fn list_message_ids_by_thread_in_folders(
+        &self,
+        thread_id: &str,
+        folder_ids: &[String],
+    ) -> Result<Vec<String>> {
+        if folder_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut seen = HashSet::new();
+        let unique_folder_ids: Vec<&String> = folder_ids.iter().filter(|id| seen.insert(*id)).collect();
+        self.with_read(|conn| {
+            let mut out = Vec::new();
+            for chunk in unique_folder_ids.chunks(SQL_IN_CHUNK_SIZE) {
+                let placeholders: Vec<String> = (3..=chunk.len() + 2).map(|i| format!("?{i}")).collect();
+                let sql = format!(
+                    "SELECT m.id FROM messages m
+                     JOIN message_folders mf ON mf.message_id = m.id
+                     WHERE (m.thread_id = ?1 OR (m.thread_id IS NULL AND m.id = ?1))
+                       AND mf.folder_id IN ({}) AND m.is_deleted = 0
+                     ORDER BY m.date ASC",
+                    placeholders.join(", "),
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = vec![
+                    Box::new(thread_id.to_string()),
+                    Box::new(thread_id.to_string()),
+                ];
+                for folder_id in chunk {
+                    param_values.push(Box::new((*folder_id).clone()));
+                }
+                let params: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|v| v.as_ref()).collect();
+                let rows = stmt.query_map(params.as_slice(), |row| row.get::<_, String>(0))?;
+                for row in rows {
+                    let id = row?;
+                    if !out.contains(&id) { out.push(id); }
+                }
+            }
+            Ok(out)
+        })
+    }
+
     /// List messages across multiple folders.
     pub fn list_messages_by_folders(
         &self,
@@ -3125,6 +3167,26 @@ mod sql_batching_tests {
             })
             .unwrap();
         assert_eq!(deleted_count, 0);
+    }
+
+
+    #[test]
+    fn thread_ids_in_folders_are_scoped_to_selected_folder() {
+        let store = Store::open_in_memory().unwrap();
+        store.with_write(|conn| {
+            conn.execute_batch(
+                "INSERT INTO accounts (id, email, display_name, provider, created_at, updated_at) VALUES
+                 ('a1','a1@example.com','A1','imap',0,0),('a2','a2@example.com','A2','imap',0,0);
+                 INSERT INTO folders (id, account_id, remote_id, name, folder_type, is_system, sort_order) VALUES
+                 ('f1','a1','INBOX','Inbox','folder',1,0),('f2','a2','INBOX','Inbox','folder',1,0);
+                 INSERT INTO messages (id, account_id, remote_id, thread_id, date, created_at, updated_at) VALUES
+                 ('m1','a1','m1','t',0,0,0),('m2','a2','m2','t',0,0,0);
+                 INSERT INTO message_folders (message_id, folder_id) VALUES ('m1','f1'),('m2','f2');"
+            )?;
+            Ok(())
+        }).unwrap();
+        assert_eq!(store.list_message_ids_by_thread_in_folders("t", &["f1".into()]).unwrap(), vec!["m1"]);
+        assert_eq!(store.list_message_ids_by_thread_in_folders("t", &["f2".into()]).unwrap(), vec!["m2"]);
     }
 
     #[test]

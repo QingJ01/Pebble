@@ -6,8 +6,7 @@ import ThreadItem from "../../src/components/ThreadItem";
 
 const mocks = vi.hoisted(() => ({
   invalidateQueries: vi.fn(),
-  listThreadMessages: vi.fn(),
-  batchMarkRead: vi.fn(),
+  updateThreadReadFlagsInFolders: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -15,8 +14,7 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 
 vi.mock("../../src/lib/api", () => ({
-  listThreadMessages: mocks.listThreadMessages,
-  batchMarkRead: mocks.batchMarkRead,
+  updateThreadReadFlagsInFolders: mocks.updateThreadReadFlagsInFolders,
 }));
 
 vi.mock("react-i18next", () => ({
@@ -43,8 +41,7 @@ function makeThread(overrides: Partial<ThreadSummary> = {}): ThreadSummary {
 describe("ThreadItem", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.listThreadMessages.mockResolvedValue([{ id: "m-1" }, { id: "m-2" }]);
-    mocks.batchMarkRead.mockResolvedValue(2);
+    mocks.updateThreadReadFlagsInFolders.mockResolvedValue(2);
   });
 
   it("marks unread rows with a row class", () => {
@@ -53,6 +50,7 @@ describe("ThreadItem", () => {
         thread={makeThread({ unread_count: 2 })}
         isSelected={false}
         onClick={vi.fn()}
+        folderIds={["folder-1"]}
       />,
     );
 
@@ -65,6 +63,7 @@ describe("ThreadItem", () => {
         thread={makeThread({ unread_count: 0 })}
         isSelected={false}
         onClick={vi.fn()}
+        folderIds={["folder-1"]}
       />,
     );
 
@@ -77,6 +76,7 @@ describe("ThreadItem", () => {
         thread={makeThread({ unread_count: 0 })}
         isSelected={false}
         onClick={vi.fn()}
+        folderIds={["folder-1"]}
       />,
     );
 
@@ -91,6 +91,7 @@ describe("ThreadItem", () => {
         thread={makeThread({ unread_count: 0 })}
         isSelected={false}
         onClick={vi.fn()}
+        folderIds={["folder-1"]}
       />,
     );
 
@@ -103,6 +104,7 @@ describe("ThreadItem", () => {
         thread={makeThread({ unread_count: 1 })}
         isSelected={false}
         onClick={vi.fn()}
+        folderIds={["folder-1"]}
       />,
     );
 
@@ -114,14 +116,14 @@ describe("ThreadItem", () => {
         thread={makeThread({ unread_count: 0 })}
         isSelected={false}
         onClick={vi.fn()}
+        folderIds={["folder-1"]}
       />,
     );
 
     fireEvent.contextMenu(screen.getByRole("option"), { clientX: 20, clientY: 30 });
     fireEvent.click(screen.getByRole("menuitem", { name: "Mark thread as unread" }));
 
-    await waitFor(() => expect(mocks.batchMarkRead).toHaveBeenCalledWith(["m-1", "m-2"], false));
-    expect(mocks.listThreadMessages).toHaveBeenCalledWith("thread-1");
+    await waitFor(() => expect(mocks.updateThreadReadFlagsInFolders).toHaveBeenCalledWith("thread-1", ["folder-1"], false));
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["threads"] });
   });
 
@@ -131,13 +133,14 @@ describe("ThreadItem", () => {
         thread={makeThread({ unread_count: 2 })}
         isSelected={false}
         onClick={vi.fn()}
+        folderIds={["folder-1"]}
       />,
     );
 
     fireEvent.contextMenu(screen.getByRole("option"), { clientX: 20, clientY: 30 });
     fireEvent.click(screen.getByRole("menuitem", { name: "Mark thread as read" }));
 
-    await waitFor(() => expect(mocks.batchMarkRead).toHaveBeenCalledWith(["m-1", "m-2"], true));
+    await waitFor(() => expect(mocks.updateThreadReadFlagsInFolders).toHaveBeenCalledWith("thread-1", ["folder-1"], true));
   });
 
 });
