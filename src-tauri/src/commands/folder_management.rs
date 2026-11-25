@@ -1,13 +1,17 @@
 //! Server-first folder edits and durable, account-scoped Move To operations.
-use super::messages::{
-    connect_gmail, connect_imap, connect_outlook, imap_move_tracked, refresh_search_document,
-};
+use super::messages::{connect_imap, connect_remote, refresh_search_document};
 use crate::state::AppState;
-use pebble_core::traits::{FolderProvider, LabelProvider};
+use pebble_core::traits::{
+    CreateFolderRequest, LabelDelta, MoveRequest, RemoteFolderRef, RemoteIdUpdate,
+    RemoteMessageRef, RenameFolderRequest,
+};
 use pebble_core::{new_id, Folder, FolderType, Message, PebbleError, ProviderType, Result};
 use pebble_mail::imap::folder_management::encode_folder_segment;
+use pebble_mail::provider::mutations::{
+    editable_folder, folder_name_collision as collision, imap_rename_changes,
+};
+use pebble_store::pending_ops::{MailOp, MailOpEnvelope, ManagedMoveOp};
 use serde::Serialize;
-use serde_json::{json, Value};
 use std::{
     collections::HashMap,
     sync::{Arc, OnceLock},
@@ -58,38 +62,6 @@ fn owned_folder(folders: &[Folder], id: &str) -> Result<Folder> {
         .find(|f| f.id == id)
         .cloned()
         .ok_or_else(|| PebbleError::Validation("Folder does not belong to this account".into()))
-}
-
-fn editable_folder(folder: &Folder) -> Result<()> {
-    if folder.is_system
-        || folder.role.is_some()
-        || (folder.remote_id.starts_with("__local_")
-            && !folder.remote_id.starts_with("__local_folder_"))
-    {
-        return Err(PebbleError::Validation(
-            "System folders cannot be renamed".into(),
-        ));
-    }
-    Ok(())
-}
-
-fn collision(
-    folders: &[Folder],
-    remote_id: Option<&str>,
-    name: &str,
-    parent: Option<&str>,
-    exclude: Option<&str>,
-) -> Result<()> {
-    if folders.iter().any(|f| {
-        Some(f.id.as_str()) != exclude
-            && (remote_id.is_some_and(|r| f.remote_id.eq_ignore_ascii_case(r))
-                || (f.parent_id.as_deref() == parent && f.name.eq_ignore_ascii_case(name)))
-    }) {
-        return Err(PebbleError::Validation(
-            "A folder with that name already exists".into(),
-        ));
-    }
-    Ok(())
 }
 
 #[tauri::command]
@@ -172,93 +144,8 @@ async fn create_folder_inner(
         ));
     }
     collision(&folders, None, name, parent_id, None)?;
-    let mut created = match account.provider {
-        ProviderType::Imap => {
-            let imap = connect_imap(state, account_id).await?;
-            let result: Result<Folder> = async {
-                let available = imap.folder_parents().await?;
-                let parent_remote = parent
-                    .as_ref()
-                    .map(|p| p.remote_id.as_str())
-                    .or(parent_remote_id);
-                let delimiter = if let Some(remote) = parent_remote {
-                    available
-                        .iter()
-                        .find(|p| p.remote_id == remote)
-                        .ok_or_else(|| {
-                            PebbleError::Validation("Parent namespace no longer exists".into())
-                        })?
-                        .delimiter
-                        .clone()
-                } else {
-                    imap.folder_delimiter(None).await?
-                };
-                let segment = encode_folder_segment(name, delimiter.as_deref())?;
-                let remote = if let Some(parent_remote) = parent_remote {
-                    let delimiter = delimiter.as_deref().ok_or_else(|| {
-                        PebbleError::Validation(
-                            "This IMAP namespace does not support child folders".into(),
-                        )
-                    })?;
-                    format!("{parent_remote}{delimiter}{segment}")
-                } else {
-                    segment
-                };
-                if available
-                    .iter()
-                    .any(|p| p.remote_id.eq_ignore_ascii_case(&remote))
-                {
-                    return Err(PebbleError::Validation(
-                        "A folder with that name already exists".into(),
-                    ));
-                }
-                imap.create_folder(&remote).await?;
-                // Tagged OK is the server receipt; no local row is created on failure.
-                Ok(Folder {
-                    id: new_id(),
-                    account_id: account_id.into(),
-                    name: pebble_mail::imap::decode_folder_name(&remote),
-                    remote_id: remote,
-                    folder_type: FolderType::Folder,
-                    role: None,
-                    parent_id: parent_id.or(parent_remote_id).map(str::to_owned),
-                    color: None,
-                    is_system: false,
-                    sort_order: 100,
-                })
-            }
-            .await;
-            let _ = imap.disconnect().await;
-            result?
-        }
-        ProviderType::Gmail => {
-            if name.contains('/') {
-                return Err(PebbleError::Validation(
-                    "Use the parent picker to create a nested label".into(),
-                ));
-            }
-            let full = parent
-                .as_ref()
-                .map_or_else(|| name.to_owned(), |p| format!("{}/{name}", p.name));
-            let provider = connect_gmail(state, account_id).await?;
-            collision(&provider.list_folders().await?, None, &full, None, None)?;
-            provider.create_folder_label(&full).await?
-        }
-        ProviderType::Outlook => {
-            let provider = connect_outlook(state, account_id).await?;
-            let fresh = provider.list_folders().await?;
-            collision(
-                &fresh,
-                None,
-                name,
-                parent.as_ref().map(|f| f.remote_id.as_str()),
-                None,
-            )?;
-            provider
-                .create_managed_folder(parent.as_ref().map(|f| f.remote_id.as_str()), name)
-                .await?
-        }
-        ProviderType::Pop3 => Folder {
+    let mut created = if account.provider == ProviderType::Pop3 {
+        Folder {
             id: new_id(),
             account_id: account_id.into(),
             remote_id: format!("__local_folder_{}", new_id()),
@@ -269,7 +156,19 @@ async fn create_folder_inner(
             color: None,
             is_system: false,
             sort_order: 100,
-        },
+        }
+    } else {
+        let remote = connect_remote(state, account_id, &account.provider).await?;
+        let result = remote
+            .create_remote_folder(CreateFolderRequest {
+                account_id,
+                name,
+                parent: parent.as_ref(),
+                parent_remote_id,
+            })
+            .await;
+        remote.close().await;
+        result?
     };
     created.account_id = account_id.into();
     created.parent_id = parent_id.or(parent_remote_id).map(str::to_owned);
@@ -332,157 +231,30 @@ async fn rename_folder_inner(
             "System folders cannot be renamed".into(),
         ));
     }
-    let changes = match account.provider {
-        ProviderType::Imap => {
-            let imap = connect_imap(state, account_id).await?;
-            let result = async {
-                let fresh = imap.list_folders(account_id).await?;
-                let server = fresh
-                    .iter()
-                    .find(|f| f.remote_id == folder.remote_id)
-                    .ok_or_else(|| {
-                        PebbleError::Validation("Folder no longer exists on the server".into())
-                    })?;
-                editable_folder(server)?;
-                let delimiter = imap.folder_delimiter(Some(&folder.remote_id)).await?;
-                let segment = encode_folder_segment(name, delimiter.as_deref())?;
-                let new_remote = delimiter
-                    .as_deref()
-                    .and_then(|d| {
-                        folder
-                            .remote_id
-                            .rsplit_once(d)
-                            .map(|(p, _)| format!("{p}{d}{segment}"))
-                    })
-                    .unwrap_or(segment);
-                if new_remote == folder.remote_id {
-                    return Err(PebbleError::Validation(
-                        "The folder already has this name".into(),
-                    ));
-                }
-                collision(&fresh, Some(&new_remote), &new_remote, None, None)?;
-                let changes =
-                    imap_rename_changes(&folders, &folder, &new_remote, delimiter.as_deref());
-                for changed in &changes {
-                    let prior = folders.iter().find(|f| f.id == changed.id).ok_or_else(|| {
-                        PebbleError::Internal(format!(
-                            "Renamed folder {} is missing from the local folder list",
-                            changed.id
-                        ))
-                    })?;
-                    if fresh.iter().any(|f| {
-                        f.remote_id != prior.remote_id
-                            && f.remote_id.eq_ignore_ascii_case(&changed.remote_id)
-                    }) {
-                        return Err(PebbleError::Validation(
-                            "The renamed hierarchy would collide with an existing folder".into(),
-                        ));
-                    }
-                }
-                let prefix = delimiter
-                    .as_deref()
-                    .map(|d| format!("{}{d}", folder.remote_id));
-                if fresh.iter().any(|f| {
-                    prefix.as_ref().is_some_and(|p| f.remote_id.starts_with(p)) && f.is_system
-                }) {
-                    return Err(PebbleError::Validation(
-                        "A hierarchy containing system folders cannot be renamed".into(),
-                    ));
-                }
-                for changed in &changes {
-                    collision(
-                        &folders,
-                        Some(&changed.remote_id),
-                        &changed.name,
-                        changed.parent_id.as_deref(),
-                        Some(&changed.id),
-                    )?;
-                }
-                imap.rename_folder(&folder.remote_id, &new_remote).await?;
-                Ok(changes)
-            }
+    let changes = if account.provider == ProviderType::Pop3 {
+        collision(
+            &folders,
+            None,
+            name,
+            folder.parent_id.as_deref(),
+            Some(&folder.id),
+        )?;
+        vec![Folder {
+            name: name.into(),
+            ..folder
+        }]
+    } else {
+        let remote = connect_remote(state, account_id, &account.provider).await?;
+        let result = remote
+            .rename_remote_folder(RenameFolderRequest {
+                account_id,
+                local_folders: &folders,
+                folder: &folder,
+                name,
+            })
             .await;
-            let _ = imap.disconnect().await;
-            result?
-        }
-        ProviderType::Gmail => {
-            if name.contains('/') {
-                return Err(PebbleError::Validation(
-                    "A label name cannot contain '/' here".into(),
-                ));
-            }
-            let provider = connect_gmail(state, account_id).await?;
-            let fresh = provider.list_folders().await?;
-            let server = fresh
-                .iter()
-                .find(|f| f.remote_id == folder.remote_id)
-                .ok_or_else(|| PebbleError::Validation("Label no longer exists".into()))?;
-            editable_folder(server)?;
-            if fresh
-                .iter()
-                .any(|f| f.name.starts_with(&format!("{}/", folder.name)))
-            {
-                return Err(PebbleError::UnsupportedProvider("Gmail does not support atomic label hierarchy rename; rename leaf labels individually".into()));
-            }
-            let full = folder
-                .name
-                .rsplit_once('/')
-                .map_or_else(|| name.to_owned(), |(parent, _)| format!("{parent}/{name}"));
-            if full == folder.name {
-                return Err(PebbleError::Validation(
-                    "The label already has this name".into(),
-                ));
-            }
-            collision(&fresh, None, &full, None, Some(&server.id))?;
-            let updated = provider
-                .rename_folder_label(&folder.remote_id, &full)
-                .await?;
-            vec![Folder {
-                name: updated.name,
-                ..folder
-            }]
-        }
-        ProviderType::Outlook => {
-            let provider = connect_outlook(state, account_id).await?;
-            let fresh = provider.list_folders().await?;
-            let server = fresh
-                .iter()
-                .find(|f| f.remote_id == folder.remote_id)
-                .ok_or_else(|| PebbleError::Validation("Folder no longer exists".into()))?;
-            editable_folder(server)?;
-            if name == folder.name {
-                return Err(PebbleError::Validation(
-                    "The folder already has this name".into(),
-                ));
-            }
-            collision(
-                &fresh,
-                None,
-                name,
-                server.parent_id.as_deref(),
-                Some(&server.id),
-            )?;
-            provider
-                .rename_managed_folder(&folder.remote_id, name)
-                .await?;
-            vec![Folder {
-                name: name.into(),
-                ..folder
-            }]
-        }
-        ProviderType::Pop3 => {
-            collision(
-                &folders,
-                None,
-                name,
-                folder.parent_id.as_deref(),
-                Some(&folder.id),
-            )?;
-            vec![Folder {
-                name: name.into(),
-                ..folder
-            }]
-        }
+        remote.close().await;
+        result?
     };
     state.store.reconcile_folder_rename(account_id, &changes)?;
     state.store.list_folders(account_id)
@@ -598,29 +370,6 @@ async fn rename_namespace_inner(
     .await;
     let _ = imap.disconnect().await;
     result
-}
-
-fn imap_rename_changes(
-    folders: &[Folder],
-    source: &Folder,
-    new_remote: &str,
-    delimiter: Option<&str>,
-) -> Vec<Folder> {
-    let prefix = delimiter.map(|d| format!("{}{d}", source.remote_id));
-    folders
-        .iter()
-        .filter(|f| {
-            f.id == source.id || prefix.as_ref().is_some_and(|p| f.remote_id.starts_with(p))
-        })
-        .map(|f| {
-            let remote_id = format!("{new_remote}{}", &f.remote_id[source.remote_id.len()..]);
-            Folder {
-                name: pebble_mail::imap::decode_folder_name(&remote_id),
-                remote_id,
-                ..f.clone()
-            }
-        })
-        .collect()
 }
 
 #[derive(Serialize)]
@@ -744,31 +493,69 @@ async fn move_messages_inner(
     let mut result = MoveResult::default();
     for message in messages {
         let outcome = async {
-            if message.is_draft { return Err(PebbleError::Validation("Drafts cannot be moved; finish editing first".into())); }
+            if message.is_draft {
+                return Err(PebbleError::Validation(
+                    "Drafts cannot be moved; finish editing first".into(),
+                ));
+            }
             let memberships = state.store.get_message_folder_ids(&message.id)?;
-            if memberships.contains(&target.id) { return Err(PebbleError::Validation("Message is already in this folder".into())); }
+            if memberships.contains(&target.id) {
+                return Err(PebbleError::Validation(
+                    "Message is already in this folder".into(),
+                ));
+            }
             let source = if let Some(id) = source_folder_id.as_deref() {
-                let source = owned_folder(&folders,id)?;
-                if !memberships.contains(&source.id) { return Err(PebbleError::Validation("Message is not in the selected source folder".into())); }
+                let source = owned_folder(&folders, id)?;
+                if !memberships.contains(&source.id) {
+                    return Err(PebbleError::Validation(
+                        "Message is not in the selected source folder".into(),
+                    ));
+                }
                 source
             } else {
                 // A thread/search can have multiple labels; make the source explicit
                 // instead of silently removing an arbitrary label.
-                if memberships.len() != 1 { return Err(PebbleError::Validation("Choose a source folder for messages with multiple labels".into())); }
-                owned_folder(&folders,&memberships[0])?
+                if memberships.len() != 1 {
+                    return Err(PebbleError::Validation(
+                        "Choose a source folder for messages with multiple labels".into(),
+                    ));
+                }
+                owned_folder(&folders, &memberships[0])?
             };
-            let payload = json!({"source_folder_id":source.id,"target_folder_id":target.id,"source_folder_remote_id":source.remote_id,"target_folder_remote_id":target.remote_id});
+            let managed = ManagedMoveOp {
+                source_folder_id: Some(source.id.clone()),
+                target_folder_id: Some(target.id.clone()),
+                source_folder_remote_id: Some(source.remote_id.clone()),
+                target_folder_remote_id: Some(target.remote_id.clone()),
+            };
             validate_move_route(state, &message, &source, &target)?;
-            let envelope = json!({"provider_account_id":account_id,"remote_id":message.remote_id,"payload":payload});
-            let op_id = state.store.stage_managed_move(account_id,&message.id,&envelope.to_string())?;
-            match replay_managed_move(state,&message,&payload).await {
-                Ok(()) => { state.store.mark_pending_mail_op_done(&op_id)?; Ok(()) },
+            // Committed locally only after the server acknowledges the move.
+            let envelope = MailOpEnvelope::new(
+                account_id,
+                &message.remote_id,
+                MailOp::ManagedMove(managed.clone()),
+            )
+            .with_local_commit(None);
+            let op_id =
+                state
+                    .store
+                    .stage_managed_move(account_id, &message.id, &envelope.to_json())?;
+            match replay_managed_move(state, &message, &managed).await {
+                Ok(()) => {
+                    state.store.mark_pending_mail_op_done(&op_id)?;
+                    Ok(())
+                }
                 Err(error) => {
-                    state.store.mark_pending_mail_op_failed(&op_id,&error.to_string())?;
-                    Err(PebbleError::Network(format!("Move failed and is queued for retry: {error}")))
+                    state
+                        .store
+                        .mark_pending_mail_op_failed(&op_id, &error.to_string())?;
+                    Err(PebbleError::Network(format!(
+                        "Move failed and is queued for retry: {error}"
+                    )))
                 }
             }
-        }.await;
+        }
+        .await;
         match outcome {
             Ok(()) => result.moved_ids.push(message.id),
             Err(error) => result.failures.push(MoveFailure {
@@ -841,17 +628,16 @@ fn validate_move_route(
 pub async fn replay_managed_move(
     state: &AppState,
     message: &Message,
-    payload: &Value,
+    op: &ManagedMoveOp,
 ) -> Result<()> {
-    let field = |key| {
-        payload
-            .get(key)
-            .and_then(Value::as_str)
+    let field = |value: &Option<String>| {
+        value
+            .clone()
             .ok_or_else(|| PebbleError::Validation("Invalid move payload".into()))
     };
     let folders = state.store.list_folders(&message.account_id)?;
-    let source = owned_folder(&folders, field("source_folder_id")?)?;
-    let target = owned_folder(&folders, field("target_folder_id")?)?;
+    let source = owned_folder(&folders, &field(&op.source_folder_id)?)?;
+    let target = owned_folder(&folders, &field(&op.target_folder_id)?)?;
     let provider = validate_move_route(state, message, &source, &target)?;
     let memberships = state.store.get_message_folder_ids(&message.id)?;
     if memberships.contains(&target.id) && !memberships.contains(&source.id) {
@@ -870,72 +656,38 @@ pub async fn replay_managed_move(
             .store
             .move_message_to_folder(&message.id, &target.id)?;
     } else {
-        match provider {
-            ProviderType::Imap => {
-                let uid = message
-                    .remote_id
-                    .parse::<u32>()
-                    .map_err(|_| PebbleError::Validation("Invalid IMAP UID".into()))?;
-                let imap = connect_imap(state, &message.account_id).await?;
-                let result = imap_move_tracked(
-                    state,
-                    &imap,
-                    message,
-                    &source.remote_id,
-                    uid,
-                    &target.remote_id,
-                )
-                .await;
-                let _ = imap.disconnect().await;
-                result?;
-            }
-            ProviderType::Outlook => {
-                let outlook = connect_outlook(state, &message.account_id).await?;
-                let id = if let Some(header) = message
-                    .message_id_header
-                    .as_deref()
-                    .filter(|h| !h.trim().is_empty())
-                {
-                    match outlook
-                        .recover_managed_move(&message.remote_id, &target.remote_id, header)
-                        .await?
-                    {
-                        Some(id) => id,
-                        None => {
-                            outlook
-                                .move_message(&message.remote_id, &target.remote_id)
-                                .await?
-                        }
-                    }
-                } else {
-                    outlook
-                        .move_message(&message.remote_id, &target.remote_id)
-                        .await?
-                };
+        let remote = connect_remote(state, &message.account_id, &provider).await?;
+        // Labels: remove exactly the source label; labels on other messages
+        // and the other labels on this message stay unchanged.
+        let labels = LabelDelta {
+            add_labels: vec![target.remote_id.clone()],
+            remove_labels: vec![source.remote_id.clone()],
+        };
+        let result = remote
+            .move_to_folder(
+                RemoteMessageRef {
+                    remote_id: &message.remote_id,
+                    message_id_header: message.message_id_header.as_deref(),
+                },
+                MoveRequest {
+                    source: Some(RemoteFolderRef::of(&source)),
+                    target: RemoteFolderRef::of(&target),
+                    labels: Some(&labels),
+                    recover_previous_attempt: true,
+                },
+            )
+            .await;
+        remote.close().await;
+        match result? {
+            // Same id everywhere (labels): swap exactly the one membership.
+            RemoteIdUpdate::Unchanged => {
                 state
                     .store
-                    .move_message_to_folder_with_remote_id(&message.id, &target.id, &id)?;
+                    .move_message_label_membership(&message.id, &source.id, &target.id)?
             }
-            ProviderType::Gmail => {
-                // Remove exactly the source label; labels on other messages and the
-                // other labels on this message stay unchanged.
-                connect_gmail(state, &message.account_id)
-                    .await?
-                    .modify_labels(
-                        &message.remote_id,
-                        std::slice::from_ref(&target.remote_id),
-                        std::slice::from_ref(&source.remote_id),
-                    )
-                    .await?;
-                state
-                    .store
-                    .move_message_label_membership(&message.id, &source.id, &target.id)?;
-            }
-            ProviderType::Pop3 => {
-                return Err(PebbleError::UnsupportedProvider(
-                    "POP3 accounts cannot move messages between remote folders".into(),
-                ))
-            }
+            RemoteIdUpdate::Global(id) | RemoteIdUpdate::InFolder { remote_id: id, .. } => state
+                .store
+                .move_message_to_folder_with_remote_id(&message.id, &target.id, &id)?,
         }
     }
     refresh_search_document(state, &message.id)
@@ -944,6 +696,7 @@ pub async fn replay_managed_move(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     fn folder(id: &str, remote: &str) -> Folder {
         Folder {
             id: id.into(),
@@ -1205,7 +958,7 @@ mod tests {
         replay_managed_move(
             &state,
             &state.store.get_message("moving").unwrap().unwrap(),
-            &payload,
+            &serde_json::from_value(payload).unwrap(),
         )
         .await
         .unwrap();

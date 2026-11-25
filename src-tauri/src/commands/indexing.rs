@@ -4,8 +4,8 @@
 //! Tantivy, and applies rule-engine actions. Split out of `sync_cmd.rs`
 //! so the sync lifecycle and the indexing pipeline can evolve independently.
 
+use crate::commands::messages::queue_mail_op;
 use crate::commands::notifications;
-use crate::commands::pending_mail_ops::queue_pending_mail_op;
 use crate::events;
 use crate::state::AppState;
 use pebble_core::{FolderRole, PebbleError};
@@ -838,8 +838,12 @@ fn queue_remote_rule_action(
     action: &pebble_rules::types::RuleAction,
 ) -> pebble_core::Result<bool> {
     use crate::commands::gmail_labels::gmail_move_label_delta;
+    use crate::commands::messages::provider_dispatch::{
+        archives_without_folder, folder_change, remote_ids_are_folder_scoped,
+    };
     use pebble_core::{FolderRole, ProviderType};
     use pebble_rules::types::RuleAction;
+    use pebble_store::pending_ops::{FlagsOp, MailOp};
 
     let Some(account) = store.get_account(account_id)? else {
         return Ok(false);
@@ -862,29 +866,23 @@ fn queue_remote_rule_action(
                 .find(|folder| folder.id == folder_id)
         });
 
-    match action {
+    let op = match action {
         RuleAction::MarkRead => {
-            if account.provider == ProviderType::Imap
+            if remote_ids_are_folder_scoped(&account.provider)
                 && source_folder
                     .as_ref()
                     .is_some_and(|folder| folder.remote_id.starts_with("__local_"))
             {
                 return Ok(false);
             }
-
-            let mut payload = json!({
-                "is_read": true,
-                "is_starred": null,
-            });
-            if account.provider == ProviderType::Gmail {
-                payload["add_labels"] = json!([]);
-                payload["remove_labels"] = json!(["UNREAD"]);
-            }
-            if let Some(folder) = source_folder.as_ref() {
-                payload["folder_remote_id"] = json!(folder.remote_id);
-            }
-            queue_pending_mail_op(store, &message, "update_flags", payload)?;
-            Ok(true)
+            MailOp::UpdateFlags(FlagsOp {
+                is_read: Some(true),
+                is_starred: None,
+                folder_remote_id: source_folder
+                    .as_ref()
+                    .map(|folder| folder.remote_id.clone()),
+                ..FlagsOp::default()
+            })
         }
         RuleAction::Archive => {
             let archive_folder = store.find_folder_by_role(account_id, FolderRole::Archive)?;
@@ -892,22 +890,13 @@ fn queue_remote_rule_action(
                 if archive.remote_id.starts_with("__local_") {
                     return Ok(false);
                 }
-            } else if account.provider != ProviderType::Gmail {
+            } else if !archives_without_folder(&account.provider) {
                 return Ok(false);
             }
-
-            let mut payload = json!({
-                "source_folder_id": source_folder.as_ref().map(|folder| folder.id.as_str()),
-                "source_folder_remote_id": source_folder.as_ref().map(|folder| folder.remote_id.as_str()),
-                "target_folder_id": archive_folder.as_ref().map(|folder| folder.id.as_str()),
-                "target_folder_remote_id": archive_folder.as_ref().map(|folder| folder.remote_id.as_str()),
-            });
-            if account.provider == ProviderType::Gmail {
-                payload["add_labels"] = json!([]);
-                payload["remove_labels"] = json!(["INBOX"]);
-            }
-            queue_pending_mail_op(store, &message, "archive", payload)?;
-            Ok(true)
+            MailOp::Archive(folder_change(
+                source_folder.as_ref(),
+                archive_folder.as_ref(),
+            ))
         }
         RuleAction::MoveToFolder(folder_name) => {
             let Some(target_folder) = store.find_folder_by_name(account_id, folder_name)? else {
@@ -916,29 +905,28 @@ fn queue_remote_rule_action(
             if target_folder.remote_id.starts_with("__local_") {
                 return Ok(false);
             }
-
-            let mut payload = json!({
-                "source_folder_id": source_folder.as_ref().map(|folder| folder.id.as_str()),
-                "source_folder_remote_id": source_folder.as_ref().map(|folder| folder.remote_id.as_str()),
-                "target_folder_id": target_folder.id.as_str(),
-                "target_folder_remote_id": target_folder.remote_id.as_str(),
-            });
+            let mut change = folder_change(source_folder.as_ref(), Some(&target_folder));
             if account.provider == ProviderType::Gmail {
+                // Record the exact label edit, decided against the folders
+                // as they are now.
                 let delta = gmail_move_label_delta(
                     source_folder
                         .as_ref()
                         .map(|folder| folder.remote_id.as_str()),
                     &target_folder.remote_id,
-                    target_folder.role,
+                    target_folder.role.clone(),
                 );
-                payload["add_labels"] = json!(delta.add_labels);
-                payload["remove_labels"] = json!(delta.remove_labels);
+                change.add_labels = Some(delta.add_labels);
+                change.remove_labels = Some(delta.remove_labels);
             }
-            queue_pending_mail_op(store, &message, "move_to_folder", payload)?;
-            Ok(true)
+            MailOp::MoveToFolder(change)
         }
-        RuleAction::AddLabel(_) | RuleAction::SetKanbanColumn(_) => Ok(false),
-    }
+        RuleAction::AddLabel(_) | RuleAction::SetKanbanColumn(_) => return Ok(false),
+    };
+    // The rule's local change is applied when the op replays. If the op
+    // cancels an opposite queued op instead, apply it locally right away.
+    let outcome = queue_mail_op(store, &message, op, false, None)?;
+    Ok(outcome != crate::commands::messages::RemoteMutationOutcome::LocalOnly)
 }
 
 #[cfg(test)]
