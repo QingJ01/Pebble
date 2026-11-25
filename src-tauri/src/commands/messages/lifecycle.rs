@@ -684,8 +684,10 @@ pub async fn delete_message(
                 let uid = parse_imap_uid(&msg.remote_id)?;
                 match connect_imap(&state, &msg.account_id).await {
                     Ok(imap) => {
-                        let result = if !is_permanent && can_move_to_remote_trash {
-                            let trash = trash_folder.as_ref().expect("checked above");
+                        let remote_trash = trash_folder
+                            .as_ref()
+                            .filter(|_| !is_permanent && can_move_to_remote_trash);
+                        let result = if let Some(trash) = remote_trash {
                             imap.move_message(&source_folder.remote_id, uid, &trash.remote_id)
                                 .await
                         } else {
@@ -905,7 +907,11 @@ pub async fn restore_message(
             if local_only {
                 RemoteMutationOutcome::LocalOnly
             } else {
-                let source_folder = source_folder.as_ref().expect("checked above");
+                let Some(source_folder) = source_folder.as_ref() else {
+                    return Err(PebbleError::Internal(
+                        "Restore source folder disappeared while preparing the remote move".into(),
+                    ));
+                };
                 let uid = parse_imap_uid(&msg.remote_id)?;
                 match connect_imap(&state, &msg.account_id).await {
                     Ok(imap) => {

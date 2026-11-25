@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   addToast: vi.fn(),
   openCompose: vi.fn(),
   addCard: vi.fn(),
+  invalidateKanbanQueries: vi.fn(),
   mutate: vi.fn(),
 }));
 
@@ -64,14 +65,14 @@ vi.mock("../../src/stores/compose.store", () => ({
     selector({ openCompose: mocks.openCompose }),
 }));
 
-vi.mock("../../src/stores/kanban.store", () => {
-  const useKanbanStore = Object.assign(
-    (selector: (state: { cardIdSet: Set<string> }) => unknown) =>
-      selector({ cardIdSet: new Set() }),
-    { getState: () => ({ addCard: mocks.addCard }) },
-  );
-  return { useKanbanStore };
-});
+vi.mock("../../src/hooks/queries/useKanbanCardsQuery", () => ({
+  useIsInKanban: () => false,
+  invalidateKanbanQueries: mocks.invalidateKanbanQueries,
+}));
+
+vi.mock("../../src/hooks/mutations/useKanbanMutations", () => ({
+  addKanbanCard: mocks.addCard,
+}));
 
 vi.mock("../../src/stores/toast.store", () => ({
   useToastStore: {
@@ -182,5 +183,7 @@ describe("MessageActionToolbar", () => {
 
     await waitFor(() => expect(mocks.deleteMessage).toHaveBeenCalledWith("message-1"));
     expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
+    // A deleted message must drop off the kanban board as well.
+    expect(mocks.invalidateKanbanQueries).toHaveBeenCalledWith(mocks.queryClient);
   });
 });

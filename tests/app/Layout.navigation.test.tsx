@@ -155,12 +155,8 @@ vi.mock("../../src/app/lazyViewPreload", () => ({
   scheduleLazyViewPreload: vi.fn(),
 }));
 
-vi.mock("../../src/stores/kanban.store", () => ({
-  useKanbanStore: {
-    getState: () => ({
-      fetchCards: vi.fn().mockResolvedValue(undefined),
-    }),
-  },
+vi.mock("../../src/hooks/queries/useKanbanCardsQuery", () => ({
+  useKanbanCardsQuery: vi.fn(() => ({ data: [] })),
 }));
 
 describe("Layout navigation", () => {

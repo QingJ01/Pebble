@@ -117,7 +117,7 @@ pub async fn list_kanban_cards(
     state: State<'_, AppState>,
     column: Option<KanbanColumn>,
 ) -> std::result::Result<Vec<KanbanCard>, PebbleError> {
-    state.store.list_kanban_cards(column.as_ref())
+    state.store.list_visible_kanban_cards(column.as_ref())
 }
 
 #[tauri::command]

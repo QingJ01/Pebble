@@ -364,10 +364,12 @@ async fn rename_folder_inner(
                 let changes =
                     imap_rename_changes(&folders, &folder, &new_remote, delimiter.as_deref());
                 for changed in &changes {
-                    let prior = folders
-                        .iter()
-                        .find(|f| f.id == changed.id)
-                        .expect("rename source exists");
+                    let prior = folders.iter().find(|f| f.id == changed.id).ok_or_else(|| {
+                        PebbleError::Internal(format!(
+                            "Renamed folder {} is missing from the local folder list",
+                            changed.id
+                        ))
+                    })?;
                     if fresh.iter().any(|f| {
                         f.remote_id != prior.remote_id
                             && f.remote_id.eq_ignore_ascii_case(&changed.remote_id)
@@ -929,7 +931,11 @@ pub async fn replay_managed_move(
                     .store
                     .move_message_label_membership(&message.id, &source.id, &target.id)?;
             }
-            ProviderType::Pop3 => unreachable!(),
+            ProviderType::Pop3 => {
+                return Err(PebbleError::UnsupportedProvider(
+                    "POP3 accounts cannot move messages between remote folders".into(),
+                ))
+            }
         }
     }
     refresh_search_document(state, &message.id)

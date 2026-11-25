@@ -16,6 +16,7 @@ use pebble_core::{FolderRole, Message, PebbleError};
 use pebble_crypto::CryptoService;
 use pebble_mail::{GmailProvider, ImapConfig, ImapProvider, OutlookProvider, Pop3Config};
 use pebble_search::TantivySearch;
+use pebble_store::pending_ops::PendingMailOpEnqueue;
 use pebble_store::Store;
 use serde_json::json;
 
@@ -139,22 +140,11 @@ pub(super) fn queue_pending_remote_op(
     payload: serde_json::Value,
     error: &str,
 ) -> std::result::Result<RemoteMutationOutcome, PebbleError> {
-    let payload = json!({
-        "provider_account_id": message.account_id,
-        "remote_id": message.remote_id,
-        "op": op_type,
-        "payload": payload,
-    });
-    let op_id = state.store.insert_pending_mail_op(
-        &message.account_id,
-        &message.id,
-        op_type,
-        &payload.to_string(),
-    )?;
-    state.store.mark_pending_mail_op_failed(&op_id, error)?;
-    Ok(RemoteMutationOutcome::Queued)
+    queue_pending_remote_op_inner(state, message, op_type, payload, error, false)
 }
 
+/// Queue a remote op whose local change is committed optimistically. The
+/// pre-change local state is recorded so an abandoned op can be reverted.
 pub(super) fn queue_pending_remote_op_for_local_commit(
     state: &AppState,
     message: &Message,
@@ -162,9 +152,66 @@ pub(super) fn queue_pending_remote_op_for_local_commit(
     payload: serde_json::Value,
     error: &str,
 ) -> std::result::Result<RemoteMutationOutcome, PebbleError> {
-    let outcome = queue_pending_remote_op(state, message, op_type, payload, error)?;
-    debug_assert_eq!(outcome, RemoteMutationOutcome::Queued);
-    Ok(RemoteMutationOutcome::QueuedLocalCommit)
+    queue_pending_remote_op_inner(state, message, op_type, payload, error, true)
+}
+
+/// Snapshot of the local state an optimistic commit is about to change.
+pub(crate) fn local_previous_state(
+    store: &Store,
+    message: &Message,
+) -> std::result::Result<serde_json::Value, PebbleError> {
+    Ok(json!({
+        "is_read": message.is_read,
+        "is_starred": message.is_starred,
+        "is_deleted": message.is_deleted,
+        "deleted_at": message.deleted_at,
+        "remote_id": message.remote_id,
+        "folder_ids": store.get_message_folder_ids(&message.id)?,
+    }))
+}
+
+fn queue_pending_remote_op_inner(
+    state: &AppState,
+    message: &Message,
+    op_type: &str,
+    payload: serde_json::Value,
+    error: &str,
+    local_commit: bool,
+) -> std::result::Result<RemoteMutationOutcome, PebbleError> {
+    let mut envelope = json!({
+        "provider_account_id": message.account_id,
+        "remote_id": message.remote_id,
+        "op": op_type,
+        "payload": payload,
+        "local_committed": local_commit,
+    });
+    if local_commit {
+        envelope["previous_state"] = local_previous_state(&state.store, message)?;
+    }
+    match state.store.enqueue_pending_mail_op(
+        &message.account_id,
+        &message.id,
+        op_type,
+        &envelope.to_string(),
+    )? {
+        PendingMailOpEnqueue::Inserted(op_id) | PendingMailOpEnqueue::Merged(op_id) => {
+            state.store.mark_pending_mail_op_failed(&op_id, error)?;
+            Ok(if local_commit {
+                RemoteMutationOutcome::QueuedLocalCommit
+            } else {
+                RemoteMutationOutcome::Queued
+            })
+        }
+        // The new op undoes a queued op that never reached the server, so
+        // the remote already matches the state this change produces locally.
+        PendingMailOpEnqueue::Cancelled { cancelled_op_id } => {
+            tracing::debug!(
+                "Pending {op_type} for {} cancelled queued op {cancelled_op_id}",
+                message.id
+            );
+            Ok(RemoteMutationOutcome::LocalOnly)
+        }
+    }
 }
 
 pub(super) fn queued_remote_error(op_type: &str, error: &str) -> PebbleError {

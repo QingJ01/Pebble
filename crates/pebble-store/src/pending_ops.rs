@@ -70,6 +70,320 @@ pub struct PendingMailOpsSummary {
     pub updated_at: Option<i64>,
 }
 
+/// Result of queueing a pending mail op with supersession rules applied.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PendingMailOpEnqueue {
+    /// A new row was inserted.
+    Inserted(String),
+    /// The op was folded into the latest not-yet-running op for the message.
+    Merged(String),
+    /// The new op exactly undoes the latest not-yet-running op, so both were
+    /// cancelled. Nothing remains queued for the remote.
+    Cancelled { cancelled_op_id: String },
+}
+
+/// What happened to local optimistic state when an op was abandoned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PendingMailOpCompensation {
+    /// Local state was never changed (or was already compensated).
+    NotNeeded,
+    /// Local state was restored from the previous state recorded in the payload.
+    Reverted,
+    /// Local state may differ from the server and must be refreshed from it.
+    NeedsResync,
+}
+
+/// Ops that are still active and may run (or are running) before later ops
+/// on the same message. Exhausted/stopped ops no longer hold the queue.
+fn active_blocking_condition(alias: &str, max_param: &str) -> String {
+    format!(
+        "({alias}.status IN ('pending', 'in_progress') \
+         OR ({alias}.status = 'failed' AND {alias}.attempts < {max_param}))"
+    )
+}
+
+fn is_archive_inverse(previous: &str, next: &str) -> bool {
+    matches!(
+        (previous, next),
+        ("archive", "unarchive") | ("unarchive", "archive")
+    )
+}
+
+fn envelope_remote_succeeded(envelope: &serde_json::Value) -> bool {
+    envelope
+        .get("remote_succeeded")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn envelope_local_committed(envelope: &serde_json::Value) -> Option<bool> {
+    envelope
+        .get("local_committed")
+        .and_then(serde_json::Value::as_bool)
+}
+
+/// Fold a later `update_flags` op into an earlier one so only the final flag
+/// state is replayed. Returns `None` when the payloads can't be merged safely.
+fn merge_update_flags_envelopes(previous: &str, next: &str) -> Option<String> {
+    use serde_json::Value;
+    let previous: Value = serde_json::from_str(previous).ok()?;
+    let next: Value = serde_json::from_str(next).ok()?;
+    if previous.get("remote_id") != next.get("remote_id") {
+        return None;
+    }
+    let prev_inner = previous.get("payload")?.as_object()?;
+    let next_inner = next.get("payload")?.as_object()?;
+    let has_bool = |inner: &serde_json::Map<String, Value>| {
+        inner.get("is_read").is_some_and(Value::is_boolean)
+            || inner.get("is_starred").is_some_and(Value::is_boolean)
+    };
+    // Label-only payloads can't be re-derived from booleans; keep them separate.
+    if !has_bool(prev_inner) || !has_bool(next_inner) {
+        return None;
+    }
+    let mut merged_inner = prev_inner.clone();
+    for key in ["is_read", "is_starred"] {
+        if let Some(value) = next_inner.get(key).filter(|value| value.is_boolean()) {
+            merged_inner.insert(key.to_string(), value.clone());
+        }
+    }
+    if let Some(folder) = next_inner.get("folder_remote_id") {
+        merged_inner.insert("folder_remote_id".to_string(), folder.clone());
+    }
+    // Derived from the merged booleans at replay time.
+    merged_inner.remove("add_labels");
+    merged_inner.remove("remove_labels");
+
+    let mut merged = next.clone();
+    let merged_obj = merged.as_object_mut()?;
+    merged_obj.insert("payload".to_string(), Value::Object(merged_inner));
+    let prev_committed = envelope_local_committed(&previous);
+    let next_committed = envelope_local_committed(&next);
+    // The earliest local commit captured the true pre-change state.
+    if prev_committed == Some(true) {
+        if let Some(state) = previous.get("previous_state") {
+            merged_obj.insert("previous_state".to_string(), state.clone());
+        }
+    }
+    let committed = match (prev_committed, next_committed) {
+        (Some(a), Some(b)) => Some(a || b),
+        _ => None,
+    };
+    match committed {
+        Some(value) => {
+            merged_obj.insert("local_committed".to_string(), Value::Bool(value));
+        }
+        None => {
+            merged_obj.remove("local_committed");
+            merged_obj.remove("previous_state");
+        }
+    }
+    Some(merged.to_string())
+}
+
+/// One op that was abandoned and the local-state compensation applied for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AbandonedPendingMailOp {
+    pub id: String,
+    pub account_id: String,
+    pub message_id: String,
+    pub compensation: PendingMailOpCompensation,
+}
+
+fn compensation_marker(compensation: &PendingMailOpCompensation) -> &'static str {
+    match compensation {
+        PendingMailOpCompensation::NotNeeded => "not_needed",
+        PendingMailOpCompensation::Reverted => "reverted",
+        PendingMailOpCompensation::NeedsResync => "needs_resync",
+    }
+}
+
+/// Restore the local optimistic change made for an abandoned op, using the
+/// previous state recorded in its payload. Runs on the caller's transaction.
+fn compensate_pending_mail_op_on(
+    conn: &rusqlite::Connection,
+    id: &str,
+) -> Result<Option<AbandonedPendingMailOp>> {
+    use serde_json::Value;
+    let Some((account_id, message_id, op_type, payload_json, created_at, rowid)) = conn
+        .query_row(
+            "SELECT account_id, message_id, op_type, payload_json, created_at, rowid
+             FROM pending_mail_ops WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                ))
+            },
+        )
+        .optional()?
+    else {
+        return Ok(None);
+    };
+    let mut envelope: Value = serde_json::from_str(&payload_json).unwrap_or(Value::Null);
+    let abandoned = |compensation| AbandonedPendingMailOp {
+        id: id.to_string(),
+        account_id: account_id.clone(),
+        message_id: message_id.clone(),
+        compensation,
+    };
+    if envelope.get("compensated").is_some() {
+        return Ok(Some(abandoned(PendingMailOpCompensation::NotNeeded)));
+    }
+
+    let compensation = if op_type == "send" || envelope_remote_succeeded(&envelope) {
+        // Sends keep their own outbox/needs-attention UX; a remote receipt
+        // means the remote already matches the local commit.
+        PendingMailOpCompensation::NotNeeded
+    } else {
+        match envelope_local_committed(&envelope) {
+            Some(false) => PendingMailOpCompensation::NotNeeded,
+            Some(true) => {
+                let later_active: bool = conn.query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM pending_mail_ops
+                        WHERE message_id = ?1 AND id != ?2 AND status != 'done'
+                          AND (created_at > ?3 OR (created_at = ?3 AND rowid > ?4)))",
+                    params![message_id, id, created_at, rowid],
+                    |row| row.get(0),
+                )?;
+                match envelope.get("previous_state") {
+                    Some(previous) if !later_active => {
+                        if revert_local_state(
+                            conn,
+                            &message_id,
+                            &op_type,
+                            envelope.get("payload").unwrap_or(&Value::Null),
+                            previous,
+                        )? {
+                            PendingMailOpCompensation::Reverted
+                        } else {
+                            PendingMailOpCompensation::NeedsResync
+                        }
+                    }
+                    _ => PendingMailOpCompensation::NeedsResync,
+                }
+            }
+            // Legacy payloads don't say whether local state was changed.
+            None => PendingMailOpCompensation::NeedsResync,
+        }
+    };
+
+    if let Some(object) = envelope.as_object_mut() {
+        object.insert(
+            "compensated".to_string(),
+            Value::String(compensation_marker(&compensation).to_string()),
+        );
+        conn.execute(
+            "UPDATE pending_mail_ops SET payload_json = ?1 WHERE id = ?2",
+            params![envelope.to_string(), id],
+        )?;
+    }
+    Ok(Some(abandoned(compensation)))
+}
+
+/// Returns `false` when the previous state can't be applied (message gone,
+/// unknown op type, or recorded folders no longer exist).
+fn revert_local_state(
+    conn: &rusqlite::Connection,
+    message_id: &str,
+    op_type: &str,
+    payload: &serde_json::Value,
+    previous: &serde_json::Value,
+) -> Result<bool> {
+    use serde_json::Value;
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM messages WHERE id = ?1)",
+        params![message_id],
+        |row| row.get(0),
+    )?;
+    if !exists {
+        return Ok(false);
+    }
+    let now = pebble_core::now_timestamp();
+    match op_type {
+        "update_flags" => {
+            let restore = |key: &str| {
+                payload
+                    .get(key)
+                    .filter(|value| value.is_boolean())
+                    .and_then(|_| previous.get(key).and_then(Value::as_bool))
+            };
+            let is_read = restore("is_read");
+            let is_starred = restore("is_starred");
+            if is_read.is_none() && is_starred.is_none() {
+                return Ok(false);
+            }
+            conn.execute(
+                "UPDATE messages
+                 SET is_read = COALESCE(?1, is_read),
+                     is_starred = COALESCE(?2, is_starred),
+                     updated_at = ?3
+                 WHERE id = ?4",
+                params![is_read, is_starred, now, message_id],
+            )?;
+            Ok(true)
+        }
+        "archive" | "unarchive" | "restore" | "delete" | "move_to_folder" => {
+            let folder_ids: Vec<String> = previous
+                .get("folder_ids")
+                .and_then(Value::as_array)
+                .map(|ids| {
+                    ids.iter()
+                        .filter_map(Value::as_str)
+                        .map(ToOwned::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default();
+            if folder_ids.is_empty() {
+                return Ok(false);
+            }
+            for folder_id in &folder_ids {
+                let folder_exists: bool = conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM folders WHERE id = ?1)",
+                    params![folder_id],
+                    |row| row.get(0),
+                )?;
+                if !folder_exists {
+                    return Ok(false);
+                }
+            }
+            conn.execute(
+                "DELETE FROM message_folders WHERE message_id = ?1",
+                params![message_id],
+            )?;
+            for folder_id in &folder_ids {
+                conn.execute(
+                    "INSERT OR IGNORE INTO message_folders (message_id, folder_id) VALUES (?1, ?2)",
+                    params![message_id, folder_id],
+                )?;
+            }
+            let is_deleted = previous
+                .get("is_deleted")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let deleted_at = previous.get("deleted_at").and_then(Value::as_i64);
+            let remote_id = previous.get("remote_id").and_then(Value::as_str);
+            conn.execute(
+                "UPDATE messages
+                 SET is_deleted = ?1,
+                     deleted_at = ?2,
+                     remote_id = COALESCE(?3, remote_id),
+                     updated_at = ?4
+                 WHERE id = ?5",
+                params![is_deleted, deleted_at, remote_id, now, message_id],
+            )?;
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
 impl Store {
     pub fn insert_pending_mail_op(
         &self,
@@ -99,6 +413,103 @@ impl Store {
         })
     }
 
+    /// Queue a pending op, collapsing it with the latest not-yet-running op on
+    /// the same message when the newer op supersedes it:
+    /// - `update_flags` after `update_flags` keeps only the final flag state;
+    /// - `archive` after `unarchive` (or vice versa) cancels both.
+    pub fn enqueue_pending_mail_op(
+        &self,
+        account_id: &str,
+        message_id: &str,
+        op_type: &str,
+        payload_json: &str,
+    ) -> Result<PendingMailOpEnqueue> {
+        self.with_write(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            let now = pebble_core::now_timestamp();
+            let latest = tx
+                .query_row(
+                    "SELECT id, op_type, status, payload_json, attempts
+                     FROM pending_mail_ops
+                     WHERE account_id = ?1 AND message_id = ?2 AND status != 'done'
+                     ORDER BY created_at DESC, rowid DESC
+                     LIMIT 1",
+                    params![account_id, message_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, i64>(4)?,
+                        ))
+                    },
+                )
+                .optional()?;
+
+            if let Some((latest_id, latest_type, latest_status, latest_payload, attempts)) = latest
+            {
+                let latest_envelope: serde_json::Value =
+                    serde_json::from_str(&latest_payload).unwrap_or(serde_json::Value::Null);
+                // Running, remotely-applied, or abandoned (and possibly already
+                // compensated) ops are history; never rewrite them.
+                let not_started = latest_status != PendingMailOpStatus::InProgress.as_str()
+                    && attempts < MAX_PENDING_MAIL_OP_ATTEMPTS
+                    && !envelope_remote_succeeded(&latest_envelope)
+                    && latest_envelope.get("compensated").is_none();
+                if not_started && latest_type == "update_flags" && op_type == "update_flags" {
+                    if let Some(merged) = merge_update_flags_envelopes(&latest_payload, payload_json)
+                    {
+                        tx.execute(
+                            "UPDATE pending_mail_ops
+                             SET payload_json = ?1, status = ?2, attempts = 0,
+                                 last_error = NULL, next_retry_at = NULL, updated_at = ?3
+                             WHERE id = ?4",
+                            params![
+                                merged,
+                                PendingMailOpStatus::Pending.as_str(),
+                                now,
+                                latest_id
+                            ],
+                        )?;
+                        tx.commit()?;
+                        return Ok(PendingMailOpEnqueue::Merged(latest_id));
+                    }
+                }
+                if not_started && is_archive_inverse(&latest_type, op_type) {
+                    tx.execute(
+                        "UPDATE pending_mail_ops
+                         SET status = ?1, last_error = NULL, next_retry_at = NULL, updated_at = ?2
+                         WHERE id = ?3",
+                        params![PendingMailOpStatus::Done.as_str(), now, latest_id],
+                    )?;
+                    tx.commit()?;
+                    return Ok(PendingMailOpEnqueue::Cancelled {
+                        cancelled_op_id: latest_id,
+                    });
+                }
+            }
+
+            let id = pebble_core::new_id();
+            tx.execute(
+                "INSERT INTO pending_mail_ops
+                    (id, account_id, message_id, op_type, payload_json, status, attempts, last_error, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, ?7)",
+                params![
+                    id,
+                    account_id,
+                    message_id,
+                    op_type,
+                    payload_json,
+                    PendingMailOpStatus::Pending.as_str(),
+                    now,
+                ],
+            )?;
+            tx.commit()?;
+            Ok(PendingMailOpEnqueue::Inserted(id))
+        })
+    }
+
     pub fn list_pending_mail_ops(&self, account_id: &str) -> Result<Vec<PendingMailOp>> {
         self.with_read(|conn| {
             let mut stmt = conn.prepare(
@@ -106,7 +517,7 @@ impl Store {
                         attempts, last_error, created_at, updated_at, next_retry_at
                  FROM pending_mail_ops
                  WHERE account_id = ?1
-                 ORDER BY updated_at ASC",
+                 ORDER BY created_at ASC, rowid ASC",
             )?;
             let rows = stmt.query_map(params![account_id], |row| {
                 let status: String = row.get(5)?;
@@ -223,9 +634,13 @@ impl Store {
         })
     }
 
+    /// Ops ready to replay, in creation order. An op is never returned while an
+    /// earlier op on the same message is still active (pending, running, or
+    /// failed with retries left), so per-message replay order matches the
+    /// order the user made the changes in.
     pub fn list_retryable_pending_mail_ops(&self, limit: i64) -> Result<Vec<PendingMailOp>> {
         self.with_read(|conn| {
-            let mut stmt = conn.prepare(
+            let sql = format!(
                 "SELECT id, account_id, message_id, op_type, payload_json, status,
                         attempts, last_error, created_at, updated_at, next_retry_at
                  FROM pending_mail_ops
@@ -238,12 +653,22 @@ impl Store {
                    AND NOT EXISTS (
                        SELECT 1 FROM pending_mail_ops claimed
                        WHERE claimed.message_id = pending_mail_ops.message_id
-                         AND claimed.op_type = 'managed_move'
                          AND claimed.status = 'in_progress'
                    )
-                 ORDER BY updated_at ASC
+                   AND NOT EXISTS (
+                       SELECT 1 FROM pending_mail_ops earlier
+                       WHERE earlier.message_id = pending_mail_ops.message_id
+                         AND earlier.id != pending_mail_ops.id
+                         AND (earlier.created_at < pending_mail_ops.created_at
+                              OR (earlier.created_at = pending_mail_ops.created_at
+                                  AND earlier.rowid < pending_mail_ops.rowid))
+                         AND {blocking}
+                   )
+                 ORDER BY created_at ASC, rowid ASC
                  LIMIT ?1",
-            )?;
+                blocking = active_blocking_condition("earlier", "?2"),
+            );
+            let mut stmt = conn.prepare(&sql)?;
             let now = pebble_core::now_timestamp();
             let rows =
                 stmt.query_map(params![limit, MAX_PENDING_MAIL_OP_ATTEMPTS, now], |row| {
@@ -518,19 +943,63 @@ impl Store {
     }
 
     pub fn dismiss_failed_pending_mail_ops(&self, account_id: Option<&str>) -> Result<u64> {
+        Ok(self
+            .dismiss_failed_pending_mail_ops_with_compensation(account_id)?
+            .len() as u64)
+    }
+
+    /// Dismiss failed ops and compensate the local optimistic state each one
+    /// left behind. Ops are processed newest-first so that reverting several
+    /// ops on one message unwinds back to the oldest recorded state.
+    pub fn dismiss_failed_pending_mail_ops_with_compensation(
+        &self,
+        account_id: Option<&str>,
+    ) -> Result<Vec<AbandonedPendingMailOp>> {
         self.with_write(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            let ids = {
+                let mut stmt = tx.prepare(
+                    "SELECT id FROM pending_mail_ops
+                     WHERE status = 'failed'
+                       AND (?1 IS NULL OR account_id = ?1)
+                     ORDER BY created_at DESC, rowid DESC",
+                )?;
+                let rows = stmt.query_map(params![account_id], |row| row.get::<_, String>(0))?;
+                rows.collect::<std::result::Result<Vec<_>, _>>()?
+            };
             let now = pebble_core::now_timestamp();
-            let rows = conn.execute(
-                "UPDATE pending_mail_ops
-                 SET status = ?1,
-                     last_error = NULL,
-                     updated_at = ?2,
-                     next_retry_at = NULL
-                 WHERE status = 'failed'
-                   AND (?3 IS NULL OR account_id = ?3)",
-                params![PendingMailOpStatus::Done.as_str(), now, account_id],
-            )?;
-            Ok(rows as u64)
+            let mut abandoned = Vec::with_capacity(ids.len());
+            for id in ids {
+                if let Some(op) = compensate_pending_mail_op_on(&tx, &id)? {
+                    abandoned.push(op);
+                }
+                tx.execute(
+                    "UPDATE pending_mail_ops
+                     SET status = ?1,
+                         last_error = NULL,
+                         updated_at = ?2,
+                         next_retry_at = NULL
+                     WHERE id = ?3",
+                    params![PendingMailOpStatus::Done.as_str(), now, id],
+                )?;
+            }
+            tx.commit()?;
+            Ok(abandoned)
+        })
+    }
+
+    /// Compensate local optimistic state for an op the worker gave up on
+    /// (retries exhausted or a permanent error). Idempotent: an op that was
+    /// already compensated reports `NotNeeded`.
+    pub fn compensate_abandoned_pending_mail_op(
+        &self,
+        id: &str,
+    ) -> Result<Option<AbandonedPendingMailOp>> {
+        self.with_write(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            let result = compensate_pending_mail_op_on(&tx, id)?;
+            tx.commit()?;
+            Ok(result)
         })
     }
 
@@ -619,6 +1088,340 @@ mod tests {
                 ["remote_succeeded"],
             true
         );
+    }
+
+    fn envelope(op: &str, payload: serde_json::Value) -> String {
+        serde_json::json!({ "remote_id": "remote-123", "op": op, "payload": payload }).to_string()
+    }
+
+    fn committed_envelope(
+        op: &str,
+        payload: serde_json::Value,
+        previous: serde_json::Value,
+    ) -> String {
+        serde_json::json!({
+            "remote_id": "remote-123",
+            "op": op,
+            "payload": payload,
+            "local_committed": true,
+            "previous_state": previous,
+        })
+        .to_string()
+    }
+
+    fn seeded_store() -> (Store, Account, Folder, Message) {
+        let store = Store::open_in_memory().unwrap();
+        let account = test_account();
+        store.insert_account(&account).unwrap();
+        let folder = test_folder(&account.id);
+        store.insert_folder(&folder).unwrap();
+        let message = test_message(&account.id);
+        store
+            .insert_message(&message, std::slice::from_ref(&folder.id))
+            .unwrap();
+        (store, account, folder, message)
+    }
+
+    #[test]
+    fn earlier_failing_op_replays_before_later_op_on_same_message() {
+        let (store, account, _folder, message) = seeded_store();
+        let first = store
+            .insert_pending_mail_op(&account.id, &message.id, "archive", "{}")
+            .unwrap();
+        // A fails twice; each failure bumps updated_at.
+        store
+            .mark_pending_mail_op_failed(&first, "offline")
+            .unwrap();
+        store
+            .force_pending_mail_op_retry_now_for_test(&first)
+            .unwrap();
+        store
+            .mark_pending_mail_op_failed(&first, "offline")
+            .unwrap();
+        let second = store
+            .insert_pending_mail_op(&account.id, &message.id, "move_to_folder", "{}")
+            .unwrap();
+
+        // While A waits for its backoff, B must not overtake it.
+        assert!(store
+            .list_retryable_pending_mail_ops(10)
+            .unwrap()
+            .is_empty());
+
+        store
+            .force_pending_mail_op_retry_now_for_test(&first)
+            .unwrap();
+        let ids: Vec<_> = store
+            .list_retryable_pending_mail_ops(10)
+            .unwrap()
+            .into_iter()
+            .map(|op| op.id)
+            .collect();
+        assert_eq!(ids, vec![first.clone()]);
+
+        store.mark_pending_mail_op_done(&first).unwrap();
+        let ids: Vec<_> = store
+            .list_retryable_pending_mail_ops(10)
+            .unwrap()
+            .into_iter()
+            .map(|op| op.id)
+            .collect();
+        assert_eq!(ids, vec![second]);
+    }
+
+    #[test]
+    fn exhausted_op_does_not_block_later_ops_forever() {
+        let (store, account, _folder, message) = seeded_store();
+        let first = store
+            .insert_pending_mail_op(&account.id, &message.id, "archive", "{}")
+            .unwrap();
+        store
+            .mark_pending_mail_op_stopped(&first, "gave up")
+            .unwrap();
+        let second = store
+            .insert_pending_mail_op(&account.id, &message.id, "move_to_folder", "{}")
+            .unwrap();
+        let ids: Vec<_> = store
+            .list_retryable_pending_mail_ops(10)
+            .unwrap()
+            .into_iter()
+            .map(|op| op.id)
+            .collect();
+        assert_eq!(ids, vec![second]);
+    }
+
+    #[test]
+    fn enqueue_collapses_flag_toggles_to_final_state() {
+        let (store, account, _folder, message) = seeded_store();
+        let first = store
+            .enqueue_pending_mail_op(
+                &account.id,
+                &message.id,
+                "update_flags",
+                &committed_envelope(
+                    "update_flags",
+                    serde_json::json!({"is_read": true, "is_starred": null,
+                        "add_labels": [], "remove_labels": ["UNREAD"]}),
+                    serde_json::json!({"is_read": false, "is_starred": false}),
+                ),
+            )
+            .unwrap();
+        let PendingMailOpEnqueue::Inserted(first_id) = first else {
+            panic!("expected insert, got {first:?}");
+        };
+        store
+            .mark_pending_mail_op_failed(&first_id, "offline")
+            .unwrap();
+
+        let second = store
+            .enqueue_pending_mail_op(
+                &account.id,
+                &message.id,
+                "update_flags",
+                &committed_envelope(
+                    "update_flags",
+                    serde_json::json!({"is_read": false, "is_starred": true}),
+                    serde_json::json!({"is_read": true, "is_starred": false}),
+                ),
+            )
+            .unwrap();
+        assert_eq!(second, PendingMailOpEnqueue::Merged(first_id.clone()));
+
+        let ops = store.list_pending_mail_ops(&account.id).unwrap();
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].status, PendingMailOpStatus::Pending);
+        assert_eq!(ops[0].attempts, 0);
+        let payload: serde_json::Value = serde_json::from_str(&ops[0].payload_json).unwrap();
+        assert_eq!(payload["payload"]["is_read"], false);
+        assert_eq!(payload["payload"]["is_starred"], true);
+        assert!(payload["payload"].get("remove_labels").is_none());
+        // The oldest recorded pre-change state is what a revert must restore.
+        assert_eq!(payload["previous_state"]["is_read"], false);
+    }
+
+    #[test]
+    fn enqueue_cancels_archive_then_unarchive_when_neither_started() {
+        let (store, account, _folder, message) = seeded_store();
+        let PendingMailOpEnqueue::Inserted(archive) = store
+            .enqueue_pending_mail_op(
+                &account.id,
+                &message.id,
+                "archive",
+                &envelope("archive", serde_json::json!({})),
+            )
+            .unwrap()
+        else {
+            panic!("expected insert");
+        };
+        let result = store
+            .enqueue_pending_mail_op(
+                &account.id,
+                &message.id,
+                "unarchive",
+                &envelope("unarchive", serde_json::json!({})),
+            )
+            .unwrap();
+        assert_eq!(
+            result,
+            PendingMailOpEnqueue::Cancelled {
+                cancelled_op_id: archive.clone()
+            }
+        );
+        assert!(store
+            .list_active_pending_mail_ops(Some(&account.id), 10)
+            .unwrap()
+            .is_empty());
+
+        // A running archive is not cancelled; the unarchive queues behind it.
+        let PendingMailOpEnqueue::Inserted(running) = store
+            .enqueue_pending_mail_op(
+                &account.id,
+                &message.id,
+                "archive",
+                &envelope("archive", serde_json::json!({})),
+            )
+            .unwrap()
+        else {
+            panic!("expected insert");
+        };
+        store.mark_pending_mail_op_in_progress(&running).unwrap();
+        assert!(matches!(
+            store
+                .enqueue_pending_mail_op(
+                    &account.id,
+                    &message.id,
+                    "unarchive",
+                    &envelope("unarchive", serde_json::json!({}))
+                )
+                .unwrap(),
+            PendingMailOpEnqueue::Inserted(_)
+        ));
+    }
+
+    #[test]
+    fn dismiss_reverts_recorded_flag_and_folder_changes() {
+        let (store, account, inbox, message) = seeded_store();
+        let mut archive = test_folder(&account.id);
+        archive.id = new_id();
+        archive.remote_id = "Archive".into();
+        archive.role = Some(FolderRole::Archive);
+        store.insert_folder(&archive).unwrap();
+
+        // Optimistic local commits: archived and marked read.
+        let PendingMailOpEnqueue::Inserted(archive_op) = store
+            .enqueue_pending_mail_op(
+                &account.id,
+                &message.id,
+                "archive",
+                &committed_envelope(
+                    "archive",
+                    serde_json::json!({"target_folder_id": archive.id}),
+                    serde_json::json!({"folder_ids": [inbox.id], "is_deleted": false,
+                        "is_read": false, "is_starred": false}),
+                ),
+            )
+            .unwrap()
+        else {
+            panic!("expected insert");
+        };
+        store
+            .mark_pending_mail_op_failed(&archive_op, "offline")
+            .unwrap();
+        store
+            .move_message_to_folder(&message.id, &archive.id)
+            .unwrap();
+        let PendingMailOpEnqueue::Inserted(flag_op) = store
+            .enqueue_pending_mail_op(
+                &account.id,
+                &message.id,
+                "update_flags",
+                &committed_envelope(
+                    "update_flags",
+                    serde_json::json!({"is_read": true}),
+                    serde_json::json!({"folder_ids": [archive.id], "is_read": false,
+                        "is_starred": false, "is_deleted": false}),
+                ),
+            )
+            .unwrap()
+        else {
+            panic!("expected insert");
+        };
+        store
+            .mark_pending_mail_op_failed(&flag_op, "offline")
+            .unwrap();
+        store
+            .update_message_flags(&message.id, Some(true), None)
+            .unwrap();
+
+        let abandoned = store
+            .dismiss_failed_pending_mail_ops_with_compensation(Some(&account.id))
+            .unwrap();
+        assert_eq!(abandoned.len(), 2);
+        assert!(abandoned
+            .iter()
+            .all(|op| op.compensation == PendingMailOpCompensation::Reverted));
+        let restored = store.get_message(&message.id).unwrap().unwrap();
+        assert!(!restored.is_read);
+        assert_eq!(
+            store.get_message_folder_ids(&message.id).unwrap(),
+            vec![inbox.id]
+        );
+        // Compensation happens once.
+        assert_eq!(
+            store
+                .compensate_abandoned_pending_mail_op(&archive_op)
+                .unwrap()
+                .unwrap()
+                .compensation,
+            PendingMailOpCompensation::NotNeeded
+        );
+    }
+
+    #[test]
+    fn abandoned_op_without_previous_state_requests_resync() {
+        let (store, account, _folder, message) = seeded_store();
+        let legacy = store
+            .insert_pending_mail_op(&account.id, &message.id, "archive", "{}")
+            .unwrap();
+        let uncommitted = store
+            .insert_pending_mail_op(
+                &account.id,
+                &message.id,
+                "update_flags",
+                &serde_json::json!({"local_committed": false, "payload": {"is_read": true}})
+                    .to_string(),
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .compensate_abandoned_pending_mail_op(&legacy)
+                .unwrap()
+                .unwrap()
+                .compensation,
+            PendingMailOpCompensation::NeedsResync
+        );
+        assert_eq!(
+            store
+                .compensate_abandoned_pending_mail_op(&uncommitted)
+                .unwrap()
+                .unwrap()
+                .compensation,
+            PendingMailOpCompensation::NotNeeded
+        );
+    }
+
+    #[test]
+    fn deleting_account_clears_queued_ops_and_search_work() {
+        let (store, account, _folder, message) = seeded_store();
+        store
+            .insert_pending_mail_op(&account.id, &message.id, "archive", "{}")
+            .unwrap();
+        store
+            .add_search_pending(std::slice::from_ref(&message.id), "index")
+            .unwrap();
+        store.delete_account(&account.id).unwrap();
+        assert!(store.list_pending_mail_ops(&account.id).unwrap().is_empty());
+        assert!(store.list_search_pending().unwrap().is_empty());
     }
 
     #[test]
@@ -999,8 +1802,18 @@ mod tests {
             .into_iter()
             .map(|op| op.id)
             .collect();
-        assert!(retryable_ids.contains(&archive_id));
-        assert!(retryable_ids.contains(&confirmed_send_id));
+        // Ops on one message replay in creation order: the archive runs first,
+        // the stopped send no longer holds the queue, and the confirmed send
+        // finalizes once the archive is done.
+        assert_eq!(retryable_ids, vec![archive_id.clone()]);
+        store.mark_pending_mail_op_done(&archive_id).unwrap();
+        let retryable_ids: Vec<_> = store
+            .list_retryable_pending_mail_ops(10)
+            .unwrap()
+            .into_iter()
+            .map(|op| op.id)
+            .collect();
+        assert_eq!(retryable_ids, vec![confirmed_send_id]);
         assert!(!retryable_ids.contains(&unknown_send_id));
     }
 

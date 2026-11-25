@@ -83,6 +83,42 @@ impl Store {
         })
     }
 
+    /// Move jobs stuck in `dispatching` since `stale_before` to `review`
+    /// (needs attention), skipping ids the caller knows are still in flight.
+    /// They are never put back to `pending`: the send may have gone out, so
+    /// only the user may decide to send again.
+    pub fn recover_stuck_dispatching_sends(
+        &self,
+        stale_before: i64,
+        now: i64,
+        exclude: &[String],
+    ) -> Result<Vec<String>> {
+        self.with_write(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            let stuck = {
+                let mut stmt = tx.prepare(
+                    "SELECT id FROM scheduled_sends WHERE state='dispatching' AND updated_at<=?1",
+                )?;
+                let rows = stmt
+                    .query_map([stale_before], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                rows
+            };
+            let mut recovered = Vec::new();
+            for id in stuck.into_iter().filter(|id| !exclude.contains(id)) {
+                if tx.execute(
+                    "UPDATE scheduled_sends SET state='review',revision=revision+1,updated_at=?2 WHERE id=?1 AND state='dispatching'",
+                    params![id, now],
+                )? == 1
+                {
+                    recovered.push(id);
+                }
+            }
+            tx.commit()?;
+            Ok(recovered)
+        })
+    }
+
     pub fn claim_scheduled_send(&self, id: &str, revision: i64, now: i64) -> Result<bool> {
         self.with_write(|conn| Ok(conn.execute("UPDATE scheduled_sends SET state='dispatching',revision=revision+1,updated_at=?3 WHERE id=?1 AND revision=?2 AND state='pending' AND due_at<=?3", params![id,revision,now])? == 1))
     }
