@@ -1,4 +1,3 @@
-
 use super::*;
 use pebble_core::{Folder, FolderRole};
 use std::io::{self, Write};
