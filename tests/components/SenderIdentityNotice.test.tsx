@@ -33,6 +33,7 @@ describe("sender identity upgrade notice", () => {
     render(<SenderIdentityNotice />);
     expect(screen.getByRole("dialog", { name: "Review your sender names" })).toBeTruthy();
     expect(screen.queryByRole("complementary")).toBeNull();
+    expect(document.activeElement?.textContent).toBe("Preview sender identities");
   });
 
   it("dismisses with Escape", () => {

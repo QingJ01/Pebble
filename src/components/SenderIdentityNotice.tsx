@@ -27,7 +27,7 @@ export default function SenderIdentityNotice() {
   >
     <p>{t("accountSetup.senderNotice", "Sender names now appear in outgoing mail. Review these names, and use Account label for private account descriptions.")}</p>
     <details>
-      <summary>{t("accountSetup.senderPreview", "Preview sender identities")}</summary>
+      <summary tabIndex={0}>{t("accountSetup.senderPreview", "Preview sender identities")}</summary>
       <ul style={{ maxHeight: "120px", overflowY: "auto", overflowWrap: "anywhere", paddingLeft: "18px" }}>
         {senders.map((account) => <li key={account.id}>{senderIdentityLabel(account)}</li>)}
       </ul>
