@@ -1,12 +1,14 @@
-import { memo, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import MoveToButton from "./MoveToButton";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Star, Paperclip, Archive, LayoutGrid, ShieldAlert, RotateCcw } from "lucide-react";
+import { Star, Paperclip, Archive, LayoutGrid, ShieldAlert, RotateCcw, Mail, MailOpen } from "lucide-react";
 import type { EmailAddress, Folder, Label, MessageSummary } from "@/lib/api";
 import { updateMessageFlags, archiveMessage, moveToFolder } from "@/lib/api";
 import { useKanbanStore } from "@/stores/kanban.store";
 import { useToastStore } from "@/stores/toast.store";
+import { useClickOutside } from "@/hooks/useClickOutside";
 import { patchMessagesCache, restoreMessagesCache, snapshotMessagesCache } from "@/hooks/queries";
 
 interface Props {
@@ -51,6 +53,8 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [showActions, setShowActions] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
   const inKanban = useKanbanStore((s) => s.cardIdSet.has(message.id));
   const archiveActionLabel = folderRole === "archive"
     ? t("messageActions.unarchive", "Unarchive")
@@ -60,6 +64,17 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
     ? recipientLabel(message.to_list)
     : message.from_name || message.from_address;
 
+  useClickOutside(contextMenuRef, Boolean(contextMenu), () => setContextMenu(null));
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setContextMenu(null);
+    }
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [contextMenu]);
+
   function invalidateMessageViews(includeUnreadCounts = false) {
     queryClient.invalidateQueries({ queryKey: ["messages"] });
     queryClient.invalidateQueries({ queryKey: ["threads"] });
@@ -68,10 +83,38 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
     }
   }
 
+  function handleContextMenu(event: React.MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({ x: event.clientX, y: event.clientY });
+  }
+
+  async function handleToggleRead() {
+    const nextReadState = !message.is_read;
+    setContextMenu(null);
+    try {
+      await updateMessageFlags(message.id, nextReadState);
+      invalidateMessageViews(true);
+    } catch {
+      useToastStore.getState().addToast({
+        message: t("messageActions.updateReadFailed", "Failed to update read state"),
+        type: "error",
+      });
+    }
+  }
+
+  const contextMenuLeft = contextMenu ? Math.min(contextMenu.x, window.innerWidth - 190) : 0;
+  const contextMenuTop = contextMenu ? Math.min(contextMenu.y, window.innerHeight - 64) : 0;
+  const readToggleLabel = message.is_read
+    ? t("messageActions.markUnread", "Mark as unread")
+    : t("messageActions.markRead", "Mark as read");
+  const ReadToggleIcon = message.is_read ? Mail : MailOpen;
+
   return (
     <div
       className={`message-list-row${message.is_read ? "" : " message-list-row--unread"}`}
       onClick={onClick}
+      onContextMenu={handleContextMenu}
       tabIndex={0}
       role="option"
       aria-selected={isSelected}
@@ -387,6 +430,52 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
             />
           </button>
         </div>
+      )}
+      {contextMenu && createPortal(
+        <div
+          ref={contextMenuRef}
+          role="menu"
+          aria-label={t("messageActions.contextMenu", "Message actions")}
+          style={{
+            position: "fixed",
+            left: contextMenuLeft,
+            top: contextMenuTop,
+            minWidth: "170px",
+            padding: "4px",
+            borderRadius: "8px",
+            border: "1px solid var(--color-border)",
+            backgroundColor: "var(--color-bg)",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+            zIndex: 1000,
+          }}
+          onClick={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            autoFocus
+            onClick={() => void handleToggleRead()}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              width: "100%",
+              padding: "7px 9px",
+              border: "none",
+              borderRadius: "6px",
+              backgroundColor: "transparent",
+              color: "var(--color-text-primary)",
+              cursor: "pointer",
+              fontSize: "12.5px",
+              textAlign: "left",
+            }}
+          >
+            <ReadToggleIcon size={14} />
+            <span>{readToggleLabel}</span>
+          </button>
+        </div>,
+        document.body,
       )}
     </div>
   );
