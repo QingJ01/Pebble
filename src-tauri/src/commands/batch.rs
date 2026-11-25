@@ -601,6 +601,10 @@ pub async fn batch_mark_read(
                             if let Ok(uid) = parse_imap_uid(&msg.remote_id) {
                                 if let Ok(folder) = find_message_folder(&state, &msg.id, account_id)
                                 {
+                                    if folder.remote_id.starts_with("__local_") {
+                                        synced_ids.push(msg.id.clone());
+                                        continue;
+                                    }
                                     match imap
                                         .set_flags(&folder.remote_id, uid, Some(is_read), None)
                                         .await
