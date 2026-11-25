@@ -8,7 +8,7 @@ use pebble_core::traits::FolderProvider;
 use pebble_core::{now_timestamp, Folder, Message, PebbleError, Result};
 use pebble_store::Store;
 use tokio::sync::{mpsc, watch};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::backoff::SyncBackoff;
 use crate::gmail_sync::TokenRefresher;
@@ -18,23 +18,113 @@ use crate::provider::outlook::{
 };
 use crate::realtime_policy::{RealtimePollPolicy, RealtimeRuntimeState, SyncTrigger};
 use crate::sync::{
-    cleanup_staged_attachment_files, recv_sync_trigger, stage_message_attachments_async,
+    blocking_store, cleanup_staged_attachment_files, message_ids_with_pending_local_changes,
+    recv_sync_trigger, stage_message_attachments_async,
     store_new_message_with_attachments_atomically, StoredMessage, SyncConfig, SyncError,
     SyncWorkerBase,
 };
-use crate::thread::compute_thread_id;
+use crate::thread::{compute_thread_id, provider_thread_id, OUTLOOK_THREAD_NAMESPACE};
 
-#[derive(Debug)]
-struct OutlookDeltaBatch {
-    messages: Vec<Message>,
-    deleted_remote_ids: Vec<String>,
-    delta_link: Option<String>,
+/// Delta pages processed per folder in one sync pass. Progress is
+/// checkpointed per page, so a larger folder simply continues on the next
+/// pass instead of failing.
+const MAX_OUTLOOK_DELTA_PAGES_PER_RUN: usize = MAX_GRAPH_CONTINUATION_PAGES;
+
+/// Pagination state machine for Graph delta queries: validates every
+/// continuation URL before it is requested, detects loops, and bounds the
+/// number of pages per run.
+struct OutlookDeltaPager {
+    cursor: Option<String>,
+    visited: std::collections::HashSet<String>,
+    page_count: usize,
+    max_pages: usize,
 }
 
-#[derive(Debug)]
-struct OutlookDeltaRecoveryBatch {
-    batch: OutlookDeltaBatch,
-    recovered_from_expired_cursor: bool,
+enum OutlookPageStep {
+    Next(String),
+    Done(Option<String>),
+}
+
+impl OutlookDeltaPager {
+    fn new(start: Option<&str>, max_pages: usize) -> Self {
+        Self {
+            cursor: start.map(ToOwned::to_owned),
+            visited: std::collections::HashSet::new(),
+            page_count: 0,
+            max_pages,
+        }
+    }
+
+    /// The cursor for the next request; `Ok(None)` when the per-run page
+    /// budget is exhausted.
+    fn next_request(&mut self) -> Result<Option<Option<String>>> {
+        if self.page_count == self.max_pages {
+            return Ok(None);
+        }
+        if let Some(continuation) = self.cursor.as_deref() {
+            validate_graph_continuation_url(continuation)?;
+            if !self.visited.insert(continuation.to_string()) {
+                return Err(PebbleError::Network(
+                    "Outlook delta pagination returned a repeated continuation URL".to_string(),
+                ));
+            }
+        }
+        self.page_count += 1;
+        Ok(Some(self.cursor.take()))
+    }
+
+    fn advance(
+        &mut self,
+        next_link: Option<String>,
+        delta_link: Option<String>,
+    ) -> Result<OutlookPageStep> {
+        if let Some(delta_link) = delta_link {
+            validate_graph_continuation_url(&delta_link)?;
+            return Ok(OutlookPageStep::Done(Some(delta_link)));
+        }
+        match next_link {
+            Some(next_link) if !next_link.is_empty() => {
+                self.cursor = Some(next_link.clone());
+                Ok(OutlookPageStep::Next(next_link))
+            }
+            _ => Ok(OutlookPageStep::Done(None)),
+        }
+    }
+}
+
+const OUTLOOK_RESUME_KEY: &str = "outlook_resume";
+
+/// Continuation of an unfinished delta walk, stored next to the folder's
+/// delta cursor so an interrupted initial sync resumes from the last page
+/// that was fully persisted.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct OutlookResumeState {
+    next_link: String,
+    /// The walk restarted after an expired cursor; stale messages cannot be
+    /// reconciled after a resume because earlier pages are not remembered.
+    #[serde(default)]
+    recovering: bool,
+}
+
+fn parse_outlook_resume_state(state: Option<&str>) -> Option<OutlookResumeState> {
+    let value: serde_json::Value = serde_json::from_str(state?.trim()).ok()?;
+    serde_json::from_value(value.get(OUTLOOK_RESUME_KEY)?.clone()).ok()
+}
+
+fn serialize_outlook_folder_state(
+    folder_remote_id: &str,
+    delta_link: Option<&str>,
+    resume: Option<&OutlookResumeState>,
+    sync_since: Option<i64>,
+) -> String {
+    let mut value = serde_json::json!({ "sync_since": sync_since });
+    if let Some(delta_link) = delta_link {
+        value[outlook_delta_cursor_key(folder_remote_id)] = serde_json::json!(delta_link);
+    }
+    if let Some(resume) = resume {
+        value[OUTLOOK_RESUME_KEY] = serde_json::json!(resume);
+    }
+    value.to_string()
 }
 
 enum SyncWaitOutcome {
@@ -109,6 +199,22 @@ fn load_cached_outlook_ids(
     }
 }
 
+#[cfg(test)]
+#[derive(Debug)]
+struct OutlookDeltaBatch {
+    messages: Vec<Message>,
+    deleted_remote_ids: Vec<String>,
+    delta_link: Option<String>,
+}
+
+#[cfg(test)]
+#[derive(Debug)]
+struct OutlookDeltaRecoveryBatch {
+    batch: OutlookDeltaBatch,
+    recovered_from_expired_cursor: bool,
+}
+
+#[cfg(test)]
 async fn collect_outlook_delta_pages<F, Fut>(
     folder_id: &str,
     stored_cursor: Option<&str>,
@@ -120,51 +226,30 @@ where
 {
     let mut messages = Vec::new();
     let mut deleted_remote_ids = Vec::new();
-    let mut cursor = stored_cursor.map(ToOwned::to_owned);
-    let mut visited = std::collections::HashSet::new();
-    let mut page_count = 0usize;
-
+    let mut pager = OutlookDeltaPager::new(stored_cursor, MAX_GRAPH_CONTINUATION_PAGES);
     loop {
-        if page_count == MAX_GRAPH_CONTINUATION_PAGES {
+        let Some(cursor) = pager.next_request()? else {
             return Err(PebbleError::Network(
                 "Outlook delta pagination exceeded page limit".to_string(),
             ));
-        }
-        if let Some(continuation) = cursor.as_deref() {
-            validate_graph_continuation_url(continuation)?;
-            if !visited.insert(continuation.to_string()) {
-                return Err(PebbleError::Network(
-                    "Outlook delta pagination returned a repeated continuation URL".to_string(),
-                ));
-            }
-        }
-        page_count += 1;
-        let page = fetch_page(folder_id.to_string(), cursor.take()).await?;
+        };
+        let page = fetch_page(folder_id.to_string(), cursor).await?;
         messages.extend(page.messages);
         deleted_remote_ids.extend(page.deleted_remote_ids);
-
-        if let Some(delta_link) = page.delta_link {
-            validate_graph_continuation_url(&delta_link)?;
-            return Ok(OutlookDeltaBatch {
-                messages,
-                deleted_remote_ids,
-                delta_link: Some(delta_link),
-            });
-        }
-
-        match page.next_link {
-            Some(next_link) if !next_link.is_empty() => cursor = Some(next_link),
-            _ => {
+        match pager.advance(page.next_link, page.delta_link)? {
+            OutlookPageStep::Next(_) => {}
+            OutlookPageStep::Done(delta_link) => {
                 return Ok(OutlookDeltaBatch {
                     messages,
                     deleted_remote_ids,
-                    delta_link: None,
-                });
+                    delta_link,
+                })
             }
         }
     }
 }
 
+#[cfg(test)]
 async fn collect_outlook_delta_pages_with_expiry_recovery<F, Fut>(
     folder_id: &str,
     stored_cursor: Option<&str>,
@@ -283,7 +368,15 @@ fn apply_outlook_deleted_remote_ids(
         return Ok(OutlookDeletionOutcome::default());
     }
 
-    let existing = store.get_existing_message_map_by_remote_ids(account_id, deleted_remote_ids)?;
+    let mut existing =
+        store.get_existing_message_map_by_remote_ids(account_id, deleted_remote_ids)?;
+    // A queued local move/delete owns these messages until it reaches the
+    // server; a tombstone from the source folder must not undo it.
+    let pending = store.message_ids_with_active_pending_ops(
+        account_id,
+        &existing.values().cloned().collect::<Vec<_>>(),
+    )?;
+    existing.retain(|_, message_id| !pending.contains(message_id));
     Ok(apply_outlook_deleted_remote_ids_from_existing(
         &existing,
         deleted_remote_ids,
@@ -330,9 +423,19 @@ fn reconcile_outlook_fresh_snapshot_since(
     sync_since: Option<i64>,
 ) -> OutlookDeletionOutcome {
     let mut outcome = OutlookDeletionOutcome::default();
+    let snapshot_ids: Vec<String> = previous_snapshot.iter().map(|m| m.id.clone()).collect();
+    let pending = previous_snapshot
+        .first()
+        .map(|message| {
+            store.message_ids_with_active_pending_ops(&message.account_id, &snapshot_ids)
+        })
+        .transpose()
+        .unwrap_or_default()
+        .unwrap_or_default();
     for message in previous_snapshot {
         if fresh_remote_ids.contains(&message.remote_id)
             || sync_since.is_some_and(|cutoff| message.date < cutoff)
+            || pending.contains(&message.id)
         {
             continue;
         }
@@ -505,14 +608,30 @@ impl OutlookSyncWorker {
         Fut: Future<Output = Result<Vec<crate::parser::AttachmentData>>>,
     {
         let remote_ids: Vec<String> = messages.iter().map(|m| m.remote_id.clone()).collect();
-        let existing = match self
-            .base
-            .store
-            .get_existing_message_map_by_remote_ids(&self.base.account_id, &remote_ids)
+        let account_id = self.base.account_id.clone();
+        let existing = match blocking_store(&self.base.store, move |store| {
+            store.get_existing_message_map_by_remote_ids(&account_id, &remote_ids)
+        })
+        .await
         {
             Ok(existing) => existing,
             Err(e) => {
                 warn!("Failed to look up existing Outlook messages: {e}");
+                return u32::try_from(messages.len()).unwrap_or(u32::MAX);
+            }
+        };
+        // Existing messages with queued local operations keep their local
+        // flags and folder membership until the operation reaches Graph.
+        let pending = match message_ids_with_pending_local_changes(
+            &self.base.store,
+            &self.base.account_id,
+            existing.values().cloned().collect(),
+        )
+        .await
+        {
+            Ok(pending) => pending,
+            Err(e) => {
+                warn!("Failed to look up pending Outlook operations: {e}");
                 return u32::try_from(messages.len()).unwrap_or(u32::MAX);
             }
         };
@@ -534,11 +653,14 @@ impl OutlookSyncWorker {
             refs.into_iter().collect()
         };
 
-        let mut thread_mappings = self
-            .base
-            .store
-            .get_thread_mappings_for_refs(&self.base.account_id, &ref_ids)
-            .unwrap_or_default();
+        let account_id = self.base.account_id.clone();
+        let mut thread_mappings = blocking_store(&self.base.store, move |store| {
+            Ok(store
+                .get_thread_mappings_for_refs(&account_id, &ref_ids)
+                .unwrap_or_default())
+        })
+        .await
+        .unwrap_or_default();
         let mut failure_count = 0;
 
         for msg in &messages {
@@ -574,10 +696,26 @@ impl OutlookSyncWorker {
                 let mut updated = msg.clone();
                 updated.id = local_id.clone();
                 updated.created_at = current.created_at;
-                if updated.thread_id.is_none() {
-                    updated.thread_id = current.thread_id;
-                }
-                let folder_ids = vec![folder.id.clone()];
+                updated.thread_id =
+                    provider_thread_id(OUTLOOK_THREAD_NAMESPACE, msg.thread_id.as_deref())
+                        .or(current.thread_id.clone());
+                let folder_ids = if pending.contains(local_id) {
+                    updated.is_read = current.is_read;
+                    updated.is_starred = current.is_starred;
+                    match self.base.store.get_message_folder_ids(local_id) {
+                        Ok(folder_ids) => folder_ids,
+                        Err(e) => {
+                            failure_count += 1;
+                            warn!(
+                                "Failed to load folders of Outlook message {}: {e}",
+                                msg.remote_id
+                            );
+                            continue;
+                        }
+                    }
+                } else {
+                    vec![folder.id.clone()]
+                };
                 let remote_attachments = if updated.has_attachments {
                     match fetch_attachments(msg.remote_id.clone()).await {
                         Ok(attachments) => attachments,
@@ -655,8 +793,12 @@ impl OutlookSyncWorker {
             }
 
             let mut msg = msg.clone();
-            let thread_id = compute_thread_id(&msg, &thread_mappings);
-            msg.thread_id = Some(thread_id);
+            // Prefer Graph's conversationId so arrival order cannot split a
+            // conversation; fall back to header threading without one.
+            msg.thread_id = Some(
+                provider_thread_id(OUTLOOK_THREAD_NAMESPACE, msg.thread_id.as_deref())
+                    .unwrap_or_else(|| compute_thread_id(&msg, &thread_mappings)),
+            );
 
             let folder_ids = vec![folder.id.clone()];
             let attachments = if msg.has_attachments {
@@ -701,6 +843,264 @@ impl OutlookSyncWorker {
         }
 
         failure_count
+    }
+
+    async fn save_outlook_folder_state(&self, folder: &Folder, state: String) -> Result<()> {
+        let account_id = self.base.account_id.clone();
+        let folder_id = folder.id.clone();
+        blocking_store(&self.base.store, move |store| {
+            store.set_folder_sync_state(&account_id, &folder_id, &state)
+        })
+        .await
+    }
+
+    /// Sync one folder through Graph delta, persisting every page before the
+    /// next is requested and checkpointing the continuation link after each
+    /// failure-free page. Returns the number of failures.
+    async fn sync_outlook_folder(&self, folder: &Folder, sync_since: Option<i64>) -> u32 {
+        let account_id = self.base.account_id.clone();
+        let folder_id = folder.id.clone();
+        let state = match blocking_store(&self.base.store, move |store| {
+            store.get_folder_sync_state(&account_id, &folder_id)
+        })
+        .await
+        {
+            Ok(state) => state,
+            Err(error) => {
+                warn!(
+                    "Failed to read Outlook sync cursor for folder {}: {error}",
+                    folder.name
+                );
+                return 1;
+            }
+        };
+        let scope_matches = outlook_delta_scope_matches(state.as_deref(), sync_since);
+        let delta_cursor = if scope_matches {
+            parse_outlook_delta_cursor(&folder.remote_id, state.as_deref())
+        } else {
+            None
+        };
+        let resume = if scope_matches {
+            parse_outlook_resume_state(state.as_deref())
+        } else {
+            None
+        };
+
+        let account_id = self.base.account_id.clone();
+        let folder_id = folder.id.clone();
+        let cached_remote_ids = match blocking_store(&self.base.store, move |store| {
+            load_cached_outlook_ids(sync_since, || {
+                store
+                    .list_remote_ids_by_folder(&account_id, &folder_id)
+                    .map(|messages| {
+                        messages
+                            .into_iter()
+                            .map(|(_, remote_id, _, _, _)| remote_id)
+                            .collect::<std::collections::HashSet<_>>()
+                    })
+            })
+        })
+        .await
+        {
+            Ok(cached_remote_ids) => cached_remote_ids,
+            Err(error) => {
+                warn!(
+                    "Failed to read cached Outlook message IDs for folder {}: {error}",
+                    folder.name
+                );
+                return 1;
+            }
+        };
+
+        let start = resume
+            .as_ref()
+            .map(|resume| resume.next_link.clone())
+            .or_else(|| delta_cursor.clone());
+        let mut recovering = resume.as_ref().is_some_and(|resume| resume.recovering);
+        // Only a walk from a stored delta link reports genuinely new mail.
+        let mut notify_new = resume.is_none() && delta_cursor.is_some();
+        let mut previous_snapshot: Option<Vec<Message>> = None;
+        let mut fresh_remote_ids: Option<std::collections::HashSet<String>> = None;
+        let mut pager = OutlookDeltaPager::new(start.as_deref(), MAX_OUTLOOK_DELTA_PAGES_PER_RUN);
+        let mut failures = 0u32;
+        let mut checkpointing = true;
+
+        loop {
+            let request = match pager.next_request() {
+                Ok(Some(request)) => request,
+                Ok(None) => {
+                    info!(
+                        "Outlook folder {} has more delta pages; continuing on the next sync",
+                        folder.name
+                    );
+                    return failures;
+                }
+                Err(e) => {
+                    warn!("Outlook delta sync failed for folder {}: {e}", folder.name);
+                    return failures + 1;
+                }
+            };
+            let first_page_with_cursor = pager.page_count == 1 && request.is_some();
+            let page = match self
+                .provider
+                .fetch_delta_page_since_with_cached_ids(
+                    &folder.remote_id,
+                    request.as_deref(),
+                    sync_since,
+                    Arc::clone(&cached_remote_ids),
+                )
+                .await
+            {
+                Ok(page) => page,
+                Err(error)
+                    if first_page_with_cursor
+                        && (matches!(error, PebbleError::SyncCursorExpired(_))
+                            || resume.is_some()) =>
+                {
+                    warn!(
+                        "Outlook delta cursor for folder {} is no longer usable ({error}); restarting a full walk",
+                        folder.name
+                    );
+                    let folder_id = folder.id.clone();
+                    match blocking_store(&self.base.store, move |store| {
+                        load_outlook_folder_snapshot(store, &folder_id)
+                    })
+                    .await
+                    {
+                        Ok(snapshot) => previous_snapshot = Some(snapshot),
+                        Err(error) => {
+                            warn!(
+                                "Failed to snapshot Outlook folder {} before expired-cursor recovery: {error}",
+                                folder.name
+                            );
+                            return failures + 1;
+                        }
+                    }
+                    fresh_remote_ids = Some(std::collections::HashSet::new());
+                    recovering = true;
+                    notify_new = false;
+                    pager = OutlookDeltaPager::new(None, MAX_OUTLOOK_DELTA_PAGES_PER_RUN);
+                    continue;
+                }
+                Err(error) => {
+                    warn!(
+                        "Outlook delta sync failed for folder {}: {error}",
+                        folder.name
+                    );
+                    return failures + 1;
+                }
+            };
+
+            let OutlookDeltaPage {
+                messages,
+                deleted_remote_ids,
+                next_link,
+                delta_link,
+            } = page;
+            if let Some(fresh) = fresh_remote_ids.as_mut() {
+                fresh.extend(messages.iter().map(|message| message.remote_id.clone()));
+            }
+            let mut page_failures = self
+                .persist_folder_messages(folder, messages, notify_new)
+                .await;
+            let account_id = self.base.account_id.clone();
+            match blocking_store(&self.base.store, move |store| {
+                apply_outlook_deleted_remote_ids(store, &account_id, &deleted_remote_ids)
+            })
+            .await
+            {
+                Ok(outcome) => page_failures += outcome.failure_count,
+                Err(e) => {
+                    warn!(
+                        "Failed to load Outlook tombstones for folder {}: {e}",
+                        folder.name
+                    );
+                    page_failures += 1;
+                }
+            }
+            failures += page_failures;
+            if page_failures > 0 {
+                // Later pages are still applied, but the checkpoint stays on
+                // the last fully persisted page so failures are retried.
+                checkpointing = false;
+            }
+
+            match pager.advance(next_link, delta_link) {
+                Err(e) => {
+                    warn!("Outlook delta sync failed for folder {}: {e}", folder.name);
+                    return failures + 1;
+                }
+                Ok(OutlookPageStep::Next(next_link)) => {
+                    if checkpointing {
+                        let state = serialize_outlook_folder_state(
+                            &folder.remote_id,
+                            delta_cursor.as_deref(),
+                            Some(&OutlookResumeState {
+                                next_link,
+                                recovering,
+                            }),
+                            sync_since,
+                        );
+                        if let Err(e) = self.save_outlook_folder_state(folder, state).await {
+                            warn!(
+                                "Failed to checkpoint Outlook delta for folder {}: {e}",
+                                folder.name
+                            );
+                        }
+                    }
+                }
+                Ok(OutlookPageStep::Done(delta_link)) => {
+                    if failures == 0 {
+                        match (previous_snapshot.as_deref(), fresh_remote_ids.as_ref()) {
+                            (Some(previous_snapshot), Some(fresh_remote_ids)) => {
+                                let store = Arc::clone(&self.base.store);
+                                let folder_id = folder.id.clone();
+                                let previous_snapshot = previous_snapshot.to_vec();
+                                let fresh_remote_ids = fresh_remote_ids.clone();
+                                failures += blocking_store(&store, move |store| {
+                                    Ok(reconcile_outlook_fresh_snapshot_since(
+                                        store,
+                                        &folder_id,
+                                        &previous_snapshot,
+                                        &fresh_remote_ids,
+                                        sync_since,
+                                    )
+                                    .failure_count)
+                                })
+                                .await
+                                .unwrap_or(1);
+                            }
+                            _ if recovering => debug!(
+                                "Outlook folder {} finished a resumed recovery walk; stale messages are reconciled on the next cursor expiry",
+                                folder.name
+                            ),
+                            _ => {}
+                        }
+                    }
+                    if let Some(delta_link) = delta_link {
+                        if can_advance_outlook_delta_cursor(failures) {
+                            let state = serialize_outlook_delta_cursor_with_scope(
+                                &folder.remote_id,
+                                &delta_link,
+                                sync_since,
+                            );
+                            if let Err(e) = self.save_outlook_folder_state(folder, state).await {
+                                warn!(
+                                    "Failed to persist Outlook delta cursor for folder {}: {e}",
+                                    folder.name
+                                );
+                            }
+                        } else {
+                            warn!(
+                                "Outlook delta sync for folder {} had {} failures; keeping previous checkpoint",
+                                folder.name, failures
+                            );
+                        }
+                    }
+                    return failures;
+                }
+            }
+        }
     }
 
     /// Main sync loop.
@@ -857,164 +1257,7 @@ impl OutlookSyncWorker {
             };
 
             for folder in &db_folders {
-                let state = match self
-                    .base
-                    .store
-                    .get_folder_sync_state(&self.base.account_id, &folder.id)
-                {
-                    Ok(state) => state,
-                    Err(error) => {
-                        warn!(
-                            "Failed to read Outlook sync cursor for folder {}: {error}",
-                            folder.name
-                        );
-                        sync_failure_count += 1;
-                        continue;
-                    }
-                };
-                let cursor = if outlook_delta_scope_matches(state.as_deref(), sync_since) {
-                    parse_outlook_delta_cursor(&folder.remote_id, state.as_deref())
-                } else {
-                    None
-                };
-                let cached_remote_ids = match load_cached_outlook_ids(sync_since, || {
-                    self.base
-                        .store
-                        .list_remote_ids_by_folder(&self.base.account_id, &folder.id)
-                        .map(|messages| {
-                            messages
-                                .into_iter()
-                                .map(|(_, remote_id, _, _, _)| remote_id)
-                                .collect::<std::collections::HashSet<_>>()
-                        })
-                }) {
-                    Ok(cached_remote_ids) => cached_remote_ids,
-                    Err(error) => {
-                        warn!(
-                            "Failed to read cached Outlook message IDs for folder {}: {error}",
-                            folder.name
-                        );
-                        sync_failure_count += 1;
-                        continue;
-                    }
-                };
-
-                match collect_outlook_delta_pages_with_expiry_recovery(
-                    &folder.remote_id,
-                    cursor.as_deref(),
-                    |folder_id, cursor| {
-                        let provider = Arc::clone(&self.provider);
-                        let cached_remote_ids = Arc::clone(&cached_remote_ids);
-                        async move {
-                            provider
-                                .fetch_delta_page_since_with_cached_ids(
-                                    &folder_id,
-                                    cursor.as_deref(),
-                                    sync_since,
-                                    cached_remote_ids,
-                                )
-                                .await
-                        }
-                    },
-                )
-                .await
-                {
-                    Ok(recovered) => {
-                        let previous_snapshot = if recovered.recovered_from_expired_cursor {
-                            match load_outlook_folder_snapshot(&self.base.store, &folder.id) {
-                                Ok(snapshot) => Some(snapshot),
-                                Err(error) => {
-                                    warn!(
-                                        "Failed to snapshot Outlook folder {} before expired-cursor recovery: {error}",
-                                        folder.name
-                                    );
-                                    sync_failure_count += 1;
-                                    continue;
-                                }
-                            }
-                        } else {
-                            None
-                        };
-                        let OutlookDeltaBatch {
-                            messages,
-                            deleted_remote_ids,
-                            delta_link,
-                        } = recovered.batch;
-                        let fresh_remote_ids = recovered.recovered_from_expired_cursor.then(|| {
-                            messages
-                                .iter()
-                                .map(|message| message.remote_id.clone())
-                                .collect::<std::collections::HashSet<_>>()
-                        });
-                        let notify_new =
-                            cursor.is_some() && !recovered.recovered_from_expired_cursor;
-                        let mut failure_count = self
-                            .persist_folder_messages(folder, messages, notify_new)
-                            .await;
-
-                        match apply_outlook_deleted_remote_ids(
-                            &self.base.store,
-                            &self.base.account_id,
-                            &deleted_remote_ids,
-                        ) {
-                            Ok(outcome) => {
-                                failure_count += outcome.failure_count;
-                            }
-                            Err(e) => {
-                                warn!(
-                                    "Failed to load Outlook tombstones for folder {}: {e}",
-                                    folder.name
-                                );
-                                failure_count += 1;
-                            }
-                        }
-                        if failure_count == 0 {
-                            if let (Some(previous_snapshot), Some(fresh_remote_ids)) =
-                                (previous_snapshot.as_deref(), fresh_remote_ids.as_ref())
-                            {
-                                failure_count += reconcile_outlook_fresh_snapshot_since(
-                                    &self.base.store,
-                                    &folder.id,
-                                    previous_snapshot,
-                                    fresh_remote_ids,
-                                    sync_since,
-                                )
-                                .failure_count;
-                            }
-                        }
-                        sync_failure_count += failure_count;
-
-                        if let Some(delta_link) = delta_link {
-                            if can_advance_outlook_delta_cursor(failure_count) {
-                                let state = serialize_outlook_delta_cursor_with_scope(
-                                    &folder.remote_id,
-                                    &delta_link,
-                                    sync_since,
-                                );
-                                if let Err(e) = self.base.store.set_folder_sync_state(
-                                    &self.base.account_id,
-                                    &folder.id,
-                                    &state,
-                                ) {
-                                    warn!(
-                                        "Failed to persist Outlook delta cursor for folder {}: {e}",
-                                        folder.name
-                                    );
-                                }
-                            } else {
-                                warn!(
-                                    "Outlook delta sync for folder {} had {} failures; keeping previous cursor",
-                                    folder.name, failure_count
-                                );
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        warn!("Outlook delta sync failed for folder {}: {e}", folder.name);
-                        sync_failure_count += 1;
-                    }
-                }
-
+                sync_failure_count += self.sync_outlook_folder(folder, sync_since).await;
                 if *stop_rx.borrow() {
                     break;
                 }
@@ -1616,6 +1859,99 @@ mod tests {
         assert_eq!(backoff.failure_count(), 0);
     }
 
+    #[test]
+    fn outlook_pager_stops_at_the_page_budget_without_error() {
+        let mut pager = OutlookDeltaPager::new(None, 2);
+        assert_eq!(pager.next_request().unwrap(), Some(None));
+        let next = "https://graph.microsoft.com/v1.0/me/messages/delta?$skiptoken=2".to_string();
+        assert!(matches!(
+            pager.advance(Some(next.clone()), None).unwrap(),
+            OutlookPageStep::Next(link) if link == next
+        ));
+        assert_eq!(pager.next_request().unwrap(), Some(Some(next)));
+        pager
+            .advance(
+                Some("https://graph.microsoft.com/v1.0/me/messages/delta?$skiptoken=3".into()),
+                None,
+            )
+            .unwrap();
+        assert_eq!(pager.next_request().unwrap(), None);
+    }
+
+    #[test]
+    fn outlook_resume_state_round_trips_next_to_the_delta_cursor() {
+        let delta = "https://graph.microsoft.com/v1.0/me/messages/delta?$deltatoken=old";
+        let resume = OutlookResumeState {
+            next_link: "https://graph.microsoft.com/v1.0/me/messages/delta?$skiptoken=p7"
+                .to_string(),
+            recovering: true,
+        };
+        let state =
+            serialize_outlook_folder_state("inbox", Some(delta), Some(&resume), Some(86_400));
+        assert_eq!(parse_outlook_resume_state(Some(&state)), Some(resume));
+        assert_eq!(
+            parse_outlook_delta_cursor("inbox", Some(&state)).as_deref(),
+            Some(delta)
+        );
+        assert!(outlook_delta_scope_matches(Some(&state), Some(86_400)));
+        assert!(!outlook_delta_scope_matches(Some(&state), None));
+
+        // Finishing the walk writes a plain delta cursor without resume data.
+        let done = serialize_outlook_delta_cursor_with_scope("inbox", delta, None);
+        assert_eq!(parse_outlook_resume_state(Some(&done)), None);
+        let fresh = serialize_outlook_folder_state("inbox", None, None, None);
+        assert_eq!(parse_outlook_delta_cursor("inbox", Some(&fresh)), None);
+    }
+
+    #[tokio::test]
+    async fn outlook_delta_keeps_queued_local_flags_and_ignores_tombstones() {
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let account = make_account();
+        let folder = make_folder("inbox");
+        let archive = make_folder("archive");
+        store.insert_account(&account).unwrap();
+        store.insert_folder(&folder).unwrap();
+        store.insert_folder(&archive).unwrap();
+        let mut local = make_message("outlook-pending");
+        local.is_read = true;
+        store
+            .insert_message(&local, std::slice::from_ref(&archive.id))
+            .unwrap();
+        store
+            .insert_pending_mail_op(&local.account_id, &local.id, "move", "{}")
+            .unwrap();
+
+        let mut server_view = make_message("outlook-pending");
+        server_view.is_read = false;
+        server_view.subject = "Server subject".to_string();
+        let worker = OutlookSyncWorker::new(
+            "account-1",
+            Arc::new(OutlookProvider::new("token".into(), "account-1".into())),
+            Arc::clone(&store),
+            std::env::temp_dir(),
+        );
+        let failures = worker
+            .persist_folder_messages(&folder, vec![server_view], false)
+            .await;
+        assert_eq!(failures, 0);
+        let stored = store.get_message(&local.id).unwrap().unwrap();
+        assert!(stored.is_read);
+        assert_eq!(stored.subject, "Server subject");
+        assert_eq!(
+            store.get_message_folder_ids(&local.id).unwrap(),
+            vec![archive.id.clone()]
+        );
+
+        let outcome = apply_outlook_deleted_remote_ids(
+            &store,
+            &local.account_id,
+            &["outlook-pending".to_string()],
+        )
+        .unwrap();
+        assert_eq!(outcome.deleted_count, 0);
+        assert!(!store.get_message(&local.id).unwrap().unwrap().is_deleted);
+    }
+
     #[tokio::test]
     async fn outlook_delta_updates_flags_for_existing_messages() {
         let store = Arc::new(Store::open_in_memory().unwrap());
@@ -1778,8 +2114,11 @@ mod tests {
             );
             assert_eq!(stored.date, original.date);
             assert_eq!(stored.message_id_header, original.message_id_header);
-            // Existing-message updates use the server's conversation ID.
-            assert_eq!(stored.thread_id.as_deref(), Some("original-conversation"));
+            // Existing-message updates use the server's (namespaced) conversation ID.
+            assert_eq!(
+                stored.thread_id.as_deref(),
+                Some("outlook:original-conversation")
+            );
             assert_eq!(stored.created_at, original.created_at);
             assert_eq!(stored.is_read, body_type == "text");
             assert_eq!(stored.is_starred, body_type == "text");
