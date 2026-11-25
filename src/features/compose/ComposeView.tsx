@@ -499,9 +499,10 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
       bodyText = editor.getText();
     } else if (editorMode === "html") {
       bodyHtml = rawSource;
-      const tmp = document.createElement("div");
-      tmp.innerHTML = rawSource;
-      bodyText = tmp.textContent || tmp.innerText || "";
+      // Parse in an inert document: assigning innerHTML on a live-document
+      // element would load images and fire inline handlers in the source.
+      const parsed = new DOMParser().parseFromString(rawSource, "text/html");
+      bodyText = parsed.body.textContent || "";
     } else {
       if (editor) {
         editor.commands.setContent(rawSource);
@@ -1147,7 +1148,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
                     className="compose-source-input compose-source-input--split is-code"
                   />
                   <iframe
-                    sandbox="allow-same-origin"
+                    sandbox=""
                     srcDoc={rawSource}
                     title={t("compose.mode.preview", "Preview")}
                     className="compose-html-preview"

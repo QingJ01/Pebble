@@ -1,9 +1,10 @@
 import { useRef, useMemo, useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { Inbox, Archive, Trash2, MailOpen, MailCheck, Star, X } from "lucide-react";
 import type { MessageSummary } from "@/lib/api";
+import type { Label } from "@/lib/ipc-types";
 import { getMessageLabelsBatch, batchArchive, batchDelete, batchMarkRead, batchStar } from "@/lib/api";
 import { useAccountsQuery, useFoldersForAccountsQuery } from "@/hooks/queries";
 import { useMailStore } from "@/stores/mail.store";
@@ -14,6 +15,17 @@ import { assignAccountColors, getAccountColor, getAccountLabel } from "@/lib/acc
 import MessageItem from "./MessageItem";
 import MoveToButton from "./MoveToButton";
 import { MessageListSkeleton } from "./Skeleton";
+
+const LABEL_CHUNK_SIZE = 50;
+
+// Module-level so React Query only re-runs it when a chunk result changes.
+function mergeLabelChunks(results: { data?: Record<string, Label[]> }[]) {
+  const merged: Record<string, Label[]> = {};
+  for (const result of results) {
+    if (result.data) Object.assign(merged, result.data);
+  }
+  return merged;
+}
 
 interface Props {
   messages: MessageSummary[];
@@ -67,12 +79,22 @@ export default function MessageList({
   const spamFolder = activeAccountId ? folders.find((f) => f.account_id === activeAccountId && f.role === "spam") : undefined;
   const spamFolderId = activeFolderRole !== "spam" ? spamFolder?.id : undefined;
   const messageIds = useMemo(() => messages.map((m) => m.id), [messages]);
-  const messageIdsKey = useMemo(() => messageIds.join(","), [messageIds]);
-  const { data: labelsByMessage = {} } = useQuery({
-    queryKey: ["message-labels", messageIdsKey],
-    queryFn: () => getMessageLabelsBatch(messageIds),
-    staleTime: 60_000,
-    enabled: messageIds.length > 0,
+  // Fetch labels per page-sized chunk so loading another page only fetches the
+  // new chunk; earlier chunks keep their cache entries.
+  const labelChunks = useMemo(() => {
+    const chunks: string[][] = [];
+    for (let start = 0; start < messageIds.length; start += LABEL_CHUNK_SIZE) {
+      chunks.push(messageIds.slice(start, start + LABEL_CHUNK_SIZE));
+    }
+    return chunks;
+  }, [messageIds]);
+  const labelsByMessage = useQueries({
+    queries: labelChunks.map((ids) => ({
+      queryKey: ["message-labels", ids.join(",")],
+      queryFn: () => getMessageLabelsBatch(ids),
+      staleTime: 60_000,
+    })),
+    combine: mergeLabelChunks,
   });
 
   const virtualizer = useVirtualizer({

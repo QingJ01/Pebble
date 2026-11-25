@@ -32,6 +32,9 @@ const mocks = vi.hoisted(() => ({
   cancelCloseCompose: vi.fn(),
   showComposeLeaveConfirm: false,
   quotedReplyHtml: "",
+  editorMode: "rich" as "rich" | "markdown" | "html",
+  htmlPreview: false,
+  rawSource: "",
   composeDraft: null as DraftData | null,
   accountsQuery: {
     data: [{ id: "account-1", email: "me@example.com", display_name: "Me" }],
@@ -122,11 +125,11 @@ vi.mock("../../../src/hooks/useComposeEditor", () => ({
       getText: () => "Hello",
       commands: { setContent: vi.fn() },
     },
-    editorMode: "rich",
-    rawSource: "",
+    editorMode: mocks.editorMode,
+    rawSource: mocks.rawSource,
     setRawSource: vi.fn(),
     richTextHtml: "<p>Hello</p>",
-    htmlPreview: false,
+    htmlPreview: mocks.htmlPreview,
     setHtmlPreview: vi.fn(),
     switchMode: vi.fn(),
     textareaRef: { current: null },
@@ -271,6 +274,9 @@ describe("ComposeView", () => {
     mocks.cancelCloseCompose.mockReset();
     mocks.showComposeLeaveConfirm = false;
     mocks.quotedReplyHtml = "";
+    mocks.editorMode = "rich";
+    mocks.htmlPreview = false;
+    mocks.rawSource = "";
     mocks.accountsQuery.data = [{ id: "account-1", email: "me@example.com", display_name: "Me" }];
     mocks.accountsQuery.isLoading = false;
     mocks.accountsQuery.isSuccess = true;
@@ -513,6 +519,20 @@ describe("ComposeView", () => {
       expect.objectContaining({ to: ["typed@example.com"] }),
       expect.any(Object),
     ));
+  });
+
+  it("renders the HTML source preview in a fully sandboxed iframe", () => {
+    mocks.editorMode = "html";
+    mocks.htmlPreview = true;
+    mocks.rawSource = "<p>Preview</p>";
+
+    render(<ComposeView />);
+
+    const iframe = document.querySelector("iframe.compose-html-preview");
+    expect(iframe).not.toBeNull();
+    expect(iframe!.hasAttribute("sandbox")).toBe(true);
+    expect(iframe!.getAttribute("sandbox")).not.toContain("allow-same-origin");
+    expect(iframe!.getAttribute("sandbox")).not.toContain("allow-scripts");
   });
 
   it("keeps quoted replies collapsed until the user expands them", () => {

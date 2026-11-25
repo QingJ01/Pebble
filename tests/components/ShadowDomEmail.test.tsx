@@ -163,4 +163,61 @@ describe("ShadowDomEmail", () => {
     expect(mocks.openMailtoUrl).toHaveBeenCalledWith("mailto:qingj1314@163.com");
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
+
+  it("drops relative and protocol-relative hrefs from rendered links", async () => {
+    const { container } = render(
+      <ShadowDomEmail html={'<a href="//evil.example/x">a</a><a href="/settings">b</a><a href="javascript:alert(1)">c</a>'} />,
+    );
+    const host = container.firstChild as HTMLDivElement | null;
+
+    await waitFor(() => {
+      expect(host?.shadowRoot?.querySelectorAll("a").length).toBe(3);
+    });
+
+    host!.shadowRoot!.querySelectorAll("a").forEach((anchor) => {
+      expect(anchor.hasAttribute("href")).toBe(false);
+    });
+  });
+
+  it("prevents default navigation for every anchor click, including protocol-relative links", async () => {
+    const { container } = render(<ShadowDomEmail html="<p>Body</p>" />);
+    const host = container.firstChild as HTMLDivElement | null;
+
+    await waitFor(() => {
+      expect(host?.shadowRoot?.querySelector(".pebble-email-content")).not.toBeNull();
+    });
+
+    const content = host!.shadowRoot!.querySelector(".pebble-email-content")!;
+    for (const href of ["//evil.example/x", "/relative", "https:///evil.example", "tel:123", ""]) {
+      const anchor = document.createElement("a");
+      if (href) anchor.setAttribute("href", href);
+      anchor.innerHTML = "<span>link</span>";
+      content.appendChild(anchor);
+
+      const notPrevented = fireEvent.click(anchor.querySelector("span")!);
+      expect(notPrevented).toBe(false);
+    }
+
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(mocks.openMailtoUrl).not.toHaveBeenCalled();
+  });
+
+  it("confines email CSS so fixed-position overlays cannot cover the app", async () => {
+    const { container } = render(
+      <ShadowDomEmail html={'<style>.x { position: fixed; inset: 0; z-index: 2147483647; }</style><div class="x">overlay</div>'} />,
+    );
+    const host = container.firstChild as HTMLDivElement | null;
+
+    await waitFor(() => {
+      expect(host?.shadowRoot?.querySelector(".x")).not.toBeNull();
+    });
+
+    const baseStyle = host!.shadowRoot!.querySelector("style")!.textContent ?? "";
+    const hostRule = baseStyle.match(/:host\s*\{([^}]+)\}/)![1];
+    expect(hostRule).toContain("contain: layout paint");
+    expect(hostRule).toContain("transform: translateZ(0)");
+    expect(hostRule).toContain("overflow: hidden");
+    const contentRule = baseStyle.match(/\.pebble-email-content\s*\{([^}]+)\}/)![1];
+    expect(contentRule).toContain("contain: layout paint");
+  });
 });

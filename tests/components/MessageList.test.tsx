@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
     invalidateQueries: vi.fn(),
   },
   getMessageLabelsBatch: vi.fn(),
+  labelQueryKeys: [] as unknown[][][],
+  labelData: {} as Record<string, Record<string, { id: string; name: string; color: string }[]>>,
   batchArchive: vi.fn(),
   batchDelete: vi.fn(),
   batchMarkRead: vi.fn(),
@@ -29,6 +31,13 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({ data: {} }),
+  useQueries: ({ queries, combine }: {
+    queries: { queryKey: unknown[] }[];
+    combine: (results: { data?: unknown }[]) => unknown;
+  }) => {
+    mocks.labelQueryKeys.push(queries.map((query) => query.queryKey));
+    return combine(queries.map((query) => ({ data: mocks.labelData[String(query.queryKey[1])] })));
+  },
   useQueryClient: () => mocks.queryClient,
 }));
 
@@ -136,6 +145,25 @@ describe("MessageList", () => {
       message: "Local-only drafts in this selection will be permanently deleted and cannot be restored. Other messages will move to Trash.",
     })));
     expect(mocks.batchDelete).not.toHaveBeenCalled();
+  });
+
+  it("fetches labels per stable page-sized chunk so earlier pages stay cached", () => {
+    mocks.labelQueryKeys = [];
+    const firstPages = Array.from({ length: 100 }, (_, index) => makeMessage(`m-${index}`));
+    const { rerender } = render(
+      <MessageList messages={firstPages} selectedMessageId={null} onSelectMessage={vi.fn()} loading={false} />,
+    );
+    const initialKeys = mocks.labelQueryKeys.at(-1)!;
+    expect(initialKeys).toHaveLength(2);
+    expect(String(initialKeys[0][1]).split(",")).toHaveLength(50);
+
+    const morePages = [...firstPages, ...Array.from({ length: 30 }, (_, index) => makeMessage(`n-${index}`))];
+    rerender(<MessageList messages={morePages} selectedMessageId={null} onSelectMessage={vi.fn()} loading={false} />);
+    const nextKeys = mocks.labelQueryKeys.at(-1)!;
+
+    expect(nextKeys).toHaveLength(3);
+    expect(nextKeys.slice(0, 2)).toEqual(initialKeys);
+    expect(String(nextKeys[2][1]).split(",")).toHaveLength(30);
   });
 
   it("retains the Trash confirmation for provider messages", async () => {
