@@ -26,12 +26,25 @@ describe("sender identity upgrade notice", () => {
     expect(screen.queryByText(/Ignored Name/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Got it" }));
     expect(profileLocalStorage.setItem).toHaveBeenCalledWith("pebble-sender-identity-notice-v1", "seen");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("renders as a modal dialog rather than a layout banner", () => {
+    render(<SenderIdentityNotice />);
+    expect(screen.getByRole("dialog", { name: "Review your sender names" })).toBeTruthy();
     expect(screen.queryByRole("complementary")).toBeNull();
+  });
+
+  it("dismisses with Escape", () => {
+    render(<SenderIdentityNotice />);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(profileLocalStorage.setItem).toHaveBeenCalledWith("pebble-sender-identity-notice-v1", "seen");
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("remains dismissed when opened again in the same profile", () => {
     vi.mocked(profileLocalStorage.getItem).mockReturnValue("seen");
     render(<SenderIdentityNotice />);
-    expect(screen.queryByRole("complementary")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
