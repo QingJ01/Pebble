@@ -352,8 +352,19 @@ async fn backfill_page_then_reconcile_against_fake_imap_server() {
             .unwrap();
         store.list_messages_by_folder(&inbox.id, 100, 0).unwrap()
     };
-    // Backfill stores bodies only; flags arrive with the reconcile pass.
-    assert_eq!(inbox_messages(&store).len(), 3);
+    // Backfill also pulls the server's flags for new messages, so message 1
+    // (\Seen on the server) starts read without waiting for a reconcile.
+    let initial = inbox_messages(&store);
+    assert_eq!(initial.len(), 3);
+    for message in &initial {
+        assert_eq!(
+            message.is_read,
+            message.subject == "Message 1",
+            "initial read state of {}: {:#?}",
+            message.subject,
+            mailbox.lock().unwrap().commands
+        );
+    }
     {
         let commands = &mailbox.lock().unwrap().commands;
         assert!(commands.iter().any(|c| c.starts_with("LOGIN")));

@@ -284,7 +284,13 @@ impl SyncWorker {
                     return Err(error);
                 }
             };
+            let page_uids: Vec<u32> = raw_page.iter().map(|(uid, _)| *uid).collect();
+            let page_flags = self
+                .fetch_initial_flags(&folder.remote_id, &page_uids)
+                .await;
             for (uid, raw) in raw_page {
+                let (page_is_read, page_is_starred) =
+                    page_flags.get(&uid).copied().unwrap_or((false, false));
                 let parsed = match parse_raw_email(&raw) {
                     Ok(parsed) => parsed,
                     Err(error) => {
@@ -341,8 +347,8 @@ impl SyncWorker {
                     body_text: parsed.body_text.clone(),
                     body_html_raw: parsed.body_html.clone(),
                     has_attachments: parsed.has_attachments,
-                    is_read: false,
-                    is_starred: false,
+                    is_read: page_is_read,
+                    is_starred: page_is_starred,
                     is_draft: false,
                     date: parsed.date,
                     remote_version: None,
@@ -432,6 +438,30 @@ impl SyncWorker {
     /// Store a batch of raw fetched messages, resolving threads and
     /// attachments. Returns the number of newly stored messages and the UIDs
     /// that failed to parse or store (also recorded in `sync_failures`).
+    /// Best-effort `(is_read, is_starred)` for freshly downloaded UIDs, so new
+    /// messages start with the server's read/star state instead of waiting
+    /// for the next flag reconcile. On error every UID falls back to
+    /// unread/unstarred (the reconcile pass corrects it later).
+    async fn fetch_initial_flags(
+        &self,
+        mailbox: &str,
+        uids: &[u32],
+    ) -> std::collections::HashMap<u32, (bool, bool)> {
+        if uids.is_empty() {
+            return std::collections::HashMap::new();
+        }
+        match self.provider.inner().fetch_flags(mailbox, uids).await {
+            Ok(flags) => flags
+                .into_iter()
+                .map(|(uid, is_read, is_starred)| (uid, (is_read, is_starred)))
+                .collect(),
+            Err(error) => {
+                warn!("Failed to fetch initial IMAP flags for {mailbox}: {error}");
+                std::collections::HashMap::new()
+            }
+        }
+    }
+
     pub(super) async fn store_fetched_messages(
         &self,
         folder: &pebble_core::Folder,
@@ -490,6 +520,9 @@ impl SyncWorker {
                 (uid, parsed)
             })
             .collect();
+
+        let new_uids: Vec<u32> = parsed_messages.iter().map(|(uid, _)| *uid).collect();
+        let initial_flags = self.fetch_initial_flags(&folder.remote_id, &new_uids).await;
 
         // Collect all referenced message-ID headers from this batch.
         let ref_ids = collect_ref_ids_from_parsed(&parsed_messages);
@@ -553,8 +586,8 @@ impl SyncWorker {
                 body_text: parsed.body_text.clone(),
                 body_html_raw: parsed.body_html.clone(),
                 has_attachments: parsed.has_attachments,
-                is_read: false,
-                is_starred: false,
+                is_read: initial_flags.get(&uid).is_some_and(|(read, _)| *read),
+                is_starred: initial_flags.get(&uid).is_some_and(|(_, starred)| *starred),
                 is_draft: false,
                 date: parsed.date,
                 remote_version: None,
