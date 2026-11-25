@@ -54,8 +54,8 @@ describe("CloudSyncTab automatic backup configuration", () => {
     vi.mocked(loadAutoBackupConfig).mockResolvedValue({
       url: "https://dav.example.com/old",
       username: "old-user",
-      password: "old-password",
-      secret_passphrase: null,
+      has_password: true,
+      has_secret_passphrase: false,
       interval_minutes: 60,
       enabled: true,
     });
@@ -79,7 +79,7 @@ describe("CloudSyncTab automatic backup configuration", () => {
       }),
     );
     fireEvent.change(screen.getByLabelText("Backup encryption password"), {
-      target: { value: "new-passphrase" },
+      target: { value: "new-passphrase-long" },
     });
     fireEvent.change(screen.getByRole("combobox"), {
       target: { value: "30" },
@@ -101,7 +101,7 @@ describe("CloudSyncTab automatic backup configuration", () => {
         url: "https://dav.example.com/new",
         username: "new-user",
         password: "new-password",
-        secret_passphrase: "new-passphrase",
+        secret_passphrase: "new-passphrase-long",
         interval_minutes: 30,
         enabled: true,
       });
@@ -130,7 +130,18 @@ describe("CloudSyncTab automatic backup configuration", () => {
   it.each(["WebDAV URL", "Username", "Password"])(
     "rejects enabled automatic backup when %s is empty",
     async (fieldLabel) => {
+      vi.mocked(loadAutoBackupConfig).mockResolvedValueOnce({
+        url: "https://dav.example.com/old",
+        username: "old-user",
+        has_password: false,
+        has_secret_passphrase: false,
+        interval_minutes: 60,
+        enabled: true,
+      });
       render(<CloudSyncTab />);
+      fireEvent.change(await screen.findByLabelText("Password"), {
+        target: { value: "typed-password" },
+      });
 
       fireEvent.change(await screen.findByLabelText(fieldLabel), {
         target: { value: "" },
@@ -172,8 +183,8 @@ describe("CloudSyncTab automatic backup configuration", () => {
     vi.mocked(loadAutoBackupConfig).mockResolvedValueOnce({
       url: "",
       username: "",
-      password: "",
-      secret_passphrase: null,
+      has_password: false,
+      has_secret_passphrase: false,
       interval_minutes: 60,
       enabled: true,
     });
@@ -200,6 +211,58 @@ describe("CloudSyncTab automatic backup configuration", () => {
         enabled: false,
       });
     });
+  });
+
+  it("never shows saved secrets and keeps them when fields are left blank", async () => {
+    vi.mocked(loadAutoBackupConfig).mockResolvedValueOnce({
+      url: "https://dav.example.com/old",
+      username: "old-user",
+      has_password: true,
+      has_secret_passphrase: true,
+      interval_minutes: 60,
+      enabled: true,
+    });
+    render(<CloudSyncTab />);
+
+    const password = (await screen.findByLabelText("Password")) as HTMLInputElement;
+    const passphrase = screen.getByLabelText("Backup encryption password") as HTMLInputElement;
+    expect(password.value).toBe("");
+    expect(passphrase.value).toBe("");
+    expect(password.placeholder).toContain("Saved");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save Auto-Backup Configuration" }),
+    );
+
+    await waitFor(() => {
+      expect(saveAutoBackupConfig).toHaveBeenCalledWith({
+        url: "https://dav.example.com/old",
+        username: "old-user",
+        password: "",
+        secret_passphrase: "",
+        interval_minutes: 60,
+        enabled: true,
+      });
+    });
+  });
+
+  it("rejects a backup encryption password shorter than 12 characters", async () => {
+    render(<CloudSyncTab />);
+
+    fireEvent.click(
+      await screen.findByRole("checkbox", {
+        name: /Include account passwords, OAuth tokens, and API keys/,
+      }),
+    );
+    fireEvent.change(screen.getByLabelText("Backup encryption password"), {
+      target: { value: "short-pass" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save Auto-Backup Configuration" }),
+    );
+
+    expect(saveAutoBackupConfig).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("at least 12 characters");
   });
 
   it("prevents duplicate configuration saves while one is in progress", async () => {

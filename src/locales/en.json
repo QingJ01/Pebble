@@ -309,7 +309,9 @@
     "autoBackup": "Automatic Backup",
     "autoBackupEnable": "Enable automatic WebDAV backup",
     "autoBackupInterval": "Interval",
-    "autoBackupFillFields": "Fill in WebDAV credentials above to enable auto-backup."
+    "autoBackupFillFields": "Fill in WebDAV credentials above to enable auto-backup.",
+    "secretPassphraseTooShort": "The backup encryption password must be at least 12 characters.",
+    "savedSecretPlaceholder": "Saved — leave blank to keep"
   },
   "pendingOps": {
     "retrySend": "Retry send",
@@ -762,7 +764,8 @@
     "connectionOk": "Connection OK: {{result}}",
     "testFailed": "Test failed: {{error}}",
     "privacyNotice": "Translation will send the selected text to a third-party translation service. Your email content will leave this device.",
-    "acceptAndContinue": "I understand, continue"
+    "acceptAndContinue": "I understand, continue",
+    "savedApiKeyPlaceholder": "Saved — leave blank to keep"
   },
   "selection": {
     "actions": "Selected text actions",

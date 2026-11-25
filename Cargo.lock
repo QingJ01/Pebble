@@ -3740,6 +3740,7 @@ dependencies = [
  "pebble-search",
  "pebble-store",
  "pebble-translate",
+ "regex",
  "reqwest 0.12.28",
  "rfd 0.15.4",
  "rusqlite",
@@ -3759,6 +3760,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "url",
  "windows-registry",
 ]
 

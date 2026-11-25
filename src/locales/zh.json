@@ -309,7 +309,9 @@
     "autoBackup": "自动备份",
     "autoBackupEnable": "启用 WebDAV 自动备份",
     "autoBackupInterval": "间隔",
-    "autoBackupFillFields": "请先填写上方的 WebDAV 连接信息以启用自动备份。"
+    "autoBackupFillFields": "请先填写上方的 WebDAV 连接信息以启用自动备份。",
+    "secretPassphraseTooShort": "备份加密密码至少需要 12 个字符。",
+    "savedSecretPlaceholder": "已保存 — 留空则保持不变"
   },
   "pendingOps": {
     "retrySend": "重试发送",
@@ -762,7 +764,8 @@
     "connectionOk": "连接正常: {{result}}",
     "testFailed": "测试失败: {{error}}",
     "privacyNotice": "翻译功能将把选中的文本发送给第三方翻译服务，您的邮件内容将离开本设备。",
-    "acceptAndContinue": "我已了解，继续"
+    "acceptAndContinue": "我已了解，继续",
+    "savedApiKeyPlaceholder": "已保存 — 留空则保持不变"
   },
   "selection": {
     "actions": "选中文本操作",

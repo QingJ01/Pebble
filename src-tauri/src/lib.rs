@@ -298,6 +298,41 @@ fn should_prefer_wayland(
             || (is_appimage && gdk_backend == Some(std::ffi::OsStr::new("x11"))))
 }
 
+/// Whether a top-level webview navigation stays on the app's own origin.
+///
+/// Email content is rendered in a sandbox, but a link or script that manages
+/// to navigate the main webview away from the bundled frontend would give a
+/// remote page access to the IPC bridge, so every other origin is cancelled.
+fn is_allowed_app_navigation(url: &tauri::Url) -> bool {
+    let host = url.host_str().unwrap_or_default();
+    match url.scheme() {
+        "tauri" => host == "localhost",
+        "http" | "https" if host == "tauri.localhost" => true,
+        "http" if cfg!(debug_assertions) => {
+            // Vite dev server (`build.devUrl`).
+            matches!(host, "127.0.0.1" | "localhost") && url.port() == Some(1420)
+        }
+        _ => false,
+    }
+}
+
+fn navigation_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri::plugin::Builder::new("navigation-guard")
+        .on_navigation(|webview, url| {
+            let allowed = is_allowed_app_navigation(url);
+            if !allowed {
+                tracing::warn!(
+                    webview = webview.label(),
+                    scheme = url.scheme(),
+                    host = url.host_str().unwrap_or_default(),
+                    "blocked webview navigation away from the app origin"
+                );
+            }
+            allowed
+        })
+        .build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Prefer native Wayland when a Wayland compositor is available.
@@ -337,6 +372,7 @@ pub fn run() {
     }
 
     builder
+        .plugin(navigation_guard())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
@@ -392,8 +428,15 @@ pub fn run() {
                 .allow_directory(&backgrounds_dir, true)?;
             let log_dir = commands::diagnostics::app_log_dir(&app_data);
             std::fs::create_dir_all(&log_dir)?;
-            let file_appender =
-                tracing_appender::rolling::never(&log_dir, commands::diagnostics::LOG_FILE_NAME);
+            // Rotate daily and keep a bounded number of files so logs cannot
+            // grow without limit.
+            let file_appender = tracing_appender::rolling::Builder::new()
+                .rotation(tracing_appender::rolling::Rotation::DAILY)
+                .filename_prefix(commands::diagnostics::LOG_FILE_PREFIX)
+                .filename_suffix(commands::diagnostics::LOG_FILE_SUFFIX)
+                .max_log_files(commands::diagnostics::LOG_MAX_FILES)
+                .build(&log_dir)
+                .map_err(|e| format!("Failed to initialise log file: {e}"))?;
             let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
             let env_filter =
                 tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
@@ -797,5 +840,30 @@ mod startup_timing_tests {
         assert!(!should_prefer_wayland(display, x11, false));
         assert!(should_prefer_wayland(display, x11, true));
         assert!(!should_prefer_wayland(display, wayland, true));
+    }
+}
+
+#[cfg(test)]
+mod navigation_guard_tests {
+    use super::is_allowed_app_navigation;
+
+    fn allowed(url: &str) -> bool {
+        is_allowed_app_navigation(&tauri::Url::parse(url).unwrap())
+    }
+
+    #[test]
+    fn allows_only_the_app_origin() {
+        assert!(allowed("tauri://localhost/index.html"));
+        assert!(allowed("http://tauri.localhost/"));
+        assert!(allowed("https://tauri.localhost/settings"));
+        assert!(allowed("http://127.0.0.1:1420/"));
+
+        assert!(!allowed("https://evil.example/"));
+        assert!(!allowed("http://tauri.localhost.evil.example/"));
+        assert!(!allowed("tauri://evil/"));
+        assert!(!allowed("http://127.0.0.1:8080/"));
+        assert!(!allowed("file:///etc/passwd"));
+        assert!(!allowed("javascript:alert(1)"));
+        assert!(!allowed("data:text/html,hi"));
     }
 }
