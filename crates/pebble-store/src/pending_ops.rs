@@ -429,7 +429,7 @@ impl Store {
             let now = pebble_core::now_timestamp();
             let latest = tx
                 .query_row(
-                    "SELECT id, op_type, status, payload_json
+                    "SELECT id, op_type, status, payload_json, attempts
                      FROM pending_mail_ops
                      WHERE account_id = ?1 AND message_id = ?2 AND status != 'done'
                      ORDER BY created_at DESC, rowid DESC
@@ -441,16 +441,22 @@ impl Store {
                             row.get::<_, String>(1)?,
                             row.get::<_, String>(2)?,
                             row.get::<_, String>(3)?,
+                            row.get::<_, i64>(4)?,
                         ))
                     },
                 )
                 .optional()?;
 
-            if let Some((latest_id, latest_type, latest_status, latest_payload)) = latest {
+            if let Some((latest_id, latest_type, latest_status, latest_payload, attempts)) = latest
+            {
                 let latest_envelope: serde_json::Value =
                     serde_json::from_str(&latest_payload).unwrap_or(serde_json::Value::Null);
+                // Running, remotely-applied, or abandoned (and possibly already
+                // compensated) ops are history; never rewrite them.
                 let not_started = latest_status != PendingMailOpStatus::InProgress.as_str()
-                    && !envelope_remote_succeeded(&latest_envelope);
+                    && attempts < MAX_PENDING_MAIL_OP_ATTEMPTS
+                    && !envelope_remote_succeeded(&latest_envelope)
+                    && latest_envelope.get("compensated").is_none();
                 if not_started && latest_type == "update_flags" && op_type == "update_flags" {
                     if let Some(merged) = merge_update_flags_envelopes(&latest_payload, payload_json)
                     {
