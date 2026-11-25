@@ -454,6 +454,8 @@
     "star": "标星",
     "unstar": "取消标星",
     "markUnread": "标为未读",
+    "markThreadUnread": "将整条会话标为未读",
+    "markThreadRead": "将整条会话标为已读",
     "markRead": "标记为已读",
     "updateReadFailed": "更新已读状态失败",
     "contextMenu": "邮件操作",

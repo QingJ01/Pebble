@@ -79,6 +79,7 @@ export default function MessageList({
     count: messages.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 76,
+    getItemKey: (index) => messages[index]?.id ?? index,
     measureElement: (el) => el.getBoundingClientRect().height,
     overscan: 5,
   });

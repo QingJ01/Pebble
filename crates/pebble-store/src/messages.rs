@@ -598,9 +598,15 @@ impl Store {
         if message_ids.is_empty() {
             return Ok(HashMap::new());
         }
+        let mut seen = std::collections::HashSet::new();
+        let unique_ids: Vec<&String> = message_ids
+            .iter()
+            .filter(|message_id| seen.insert(*message_id))
+            .collect();
+
         self.with_read(|conn| {
             let mut out: HashMap<String, Vec<String>> = HashMap::new();
-            for chunk in message_ids.chunks(SQL_IN_CHUNK_SIZE) {
+            for chunk in unique_ids.chunks(SQL_IN_CHUNK_SIZE) {
                 let placeholders: Vec<String> =
                     (1..=chunk.len()).map(|i| format!("?{}", i)).collect();
                 let sql = format!(
@@ -611,7 +617,7 @@ impl Store {
                 let mut stmt = conn.prepare(&sql)?;
                 let param_values: Vec<&dyn rusqlite::types::ToSql> = chunk
                     .iter()
-                    .map(|s| s as &dyn rusqlite::types::ToSql)
+                    .map(|s| *s as &dyn rusqlite::types::ToSql)
                     .collect();
                 let rows = stmt.query_map(param_values.as_slice(), |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -3119,5 +3125,44 @@ mod sql_batching_tests {
             })
             .unwrap();
         assert_eq!(deleted_count, 0);
+    }
+
+    #[test]
+    fn duplicate_ids_across_chunks_do_not_duplicate_folder_memberships() {
+        let store = Store::open_in_memory().unwrap();
+        let target = "target-message".to_string();
+        let mut ids = vec![target.clone()];
+        for index in 1..500 {
+            ids.push(format!("filler-{index}"));
+        }
+        ids.push(target.clone());
+
+        store
+            .with_write(|conn| {
+                conn.execute(
+                    "INSERT INTO accounts (id, email, display_name, provider, created_at, updated_at)
+                     VALUES ('account', 'a@example.com', 'A', 'imap', 0, 0)",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT INTO folders (id, account_id, remote_id, name, folder_type, is_system, sort_order)
+                     VALUES ('folder-1', 'account', 'INBOX', 'Inbox', 'folder', 1, 0)",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT INTO messages (id, account_id, remote_id, date, created_at, updated_at)
+                     VALUES (?1, 'account', ?1, 0, 0, 0)",
+                    [&target],
+                )?;
+                conn.execute(
+                    "INSERT INTO message_folders (message_id, folder_id) VALUES (?1, 'folder-1')",
+                    [&target],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        let result = store.get_message_folder_ids_batch(&ids).unwrap();
+        assert_eq!(result.get(&target).map(Vec::len), Some(1));
     }
 }
