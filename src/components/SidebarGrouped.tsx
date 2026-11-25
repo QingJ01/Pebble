@@ -1,4 +1,3 @@
-import FolderManagementButton from "./FolderManagementButton";
 import { accountOptionLabel } from "@/lib/accountIdentity";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -32,6 +31,7 @@ import {
   unreadCountForFolder,
 } from "../lib/folderAggregation";
 import { profileLocalStorage } from "../lib/profileStorage";
+import { useSidebarFolderManagement } from "../hooks/useSidebarFolderManagement";
 import type { Account, Folder as FolderType } from "../lib/api";
 
 const EMPTY_ACCOUNTS: Account[] = [];
@@ -79,6 +79,7 @@ export default function SidebarGrouped() {
   const accountIds = useMemo(() => accounts.map((account) => account.id), [accounts]);
   const { data: folders = EMPTY_FOLDERS, isFetched: foldersFetched } = useFoldersForAccountsQuery(accountIds);
   const { data: unreadCounts = {} } = useFolderUnreadCountsForAccounts(accountIds);
+  const { handleContextMenu: handleSidebarContextMenu, overlay: folderManagementOverlay } = useSidebarFolderManagement({ accounts, folders, accountId: activeAccountId });
 
   const ROLE_LABELS: Record<AccountGroupRole, string> = {
     inbox: t("sidebar.inbox"),
@@ -174,6 +175,7 @@ export default function SidebarGrouped() {
   return (
     <aside
       aria-label={t("sidebar.navigation", "Sidebar")}
+      onContextMenu={handleSidebarContextMenu}
       style={{
         width: sidebarCollapsed ? "48px" : "200px",
         flexShrink: 0,
@@ -213,7 +215,6 @@ export default function SidebarGrouped() {
       )}
 
       {/* Overview + per-account folder groups */}
-      <FolderManagementButton accounts={accounts} folders={folders} accountId={activeAccountId} collapsed={sidebarCollapsed}/>
       <nav
         className="scroll-region sidebar-folder-scroll"
         aria-label={t("sidebar.mailFolders", "Mail folders")}
@@ -357,6 +358,7 @@ export default function SidebarGrouped() {
           onClick={() => safeSetActiveView("settings")}
         />
       </nav>
+      {folderManagementOverlay}
     </aside>
   );
 }

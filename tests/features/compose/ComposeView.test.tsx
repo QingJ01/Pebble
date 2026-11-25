@@ -346,6 +346,17 @@ describe("ComposeView", () => {
     expect(mocks.mutate).not.toHaveBeenCalled();
   });
 
+  it("places schedule next to send with matching header button styling", () => {
+    render(<ComposeView />);
+
+    const schedule = screen.getByRole("button", { name: "sendControls.schedule" }) as HTMLButtonElement;
+    const send = screen.getByRole("button", { name: "Send" }) as HTMLButtonElement;
+
+    expect(schedule.parentElement).toBe(send.parentElement);
+    expect(schedule.getAttribute("aria-expanded")).toBe("false");
+    expect(schedule.getAttribute("style")).toBe(send.getAttribute("style"));
+  });
+
   it("persists the chosen local schedule with durable source ownership before closing", async () => {
     const due = new Date(Date.now() + 86400000);
     const value = `${due.getFullYear()}-${String(due.getMonth()+1).padStart(2,"0")}-${String(due.getDate()).padStart(2,"0")}T12:30`;
