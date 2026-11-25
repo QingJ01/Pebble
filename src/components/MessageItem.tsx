@@ -78,6 +78,7 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
   function invalidateMessageViews(includeUnreadCounts = false) {
     queryClient.invalidateQueries({ queryKey: ["messages"] });
     queryClient.invalidateQueries({ queryKey: ["threads"] });
+    queryClient.invalidateQueries({ queryKey: ["starred-messages"] });
     if (includeUnreadCounts) {
       queryClient.invalidateQueries({ queryKey: ["folder-unread-counts"] });
     }

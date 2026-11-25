@@ -256,6 +256,7 @@ describe("MessageItem", () => {
 
     await waitFor(() => expect(mocks.updateMessageFlags).toHaveBeenCalledWith("message-1", false));
     expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
+    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["starred-messages"] });
     expect(screen.queryByRole("menu", { name: "Message actions" })).toBeNull();
   });
 
