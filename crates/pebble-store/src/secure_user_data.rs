@@ -46,6 +46,17 @@ impl Store {
         })
     }
 
+    /// All keys in `secure_user_data` (used by the startup re-encryption pass).
+    pub fn list_secure_user_data_keys(&self) -> Result<Vec<String>> {
+        self.with_read(|conn| {
+            let mut stmt = conn.prepare("SELECT key FROM secure_user_data ORDER BY key")?;
+            let keys = stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(keys)
+        })
+    }
+
     pub fn delete_secure_user_data(&self, key: &str) -> Result<()> {
         self.with_write(|conn| {
             conn.execute("DELETE FROM secure_user_data WHERE key = ?1", params![key])?;

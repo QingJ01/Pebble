@@ -538,6 +538,33 @@ pub fn run() {
                 snooze_stop_rx,
             ));
 
+            // Legacy (AAD-less) ciphertext: once a previous run re-encrypted
+            // everything, reject it immediately; otherwise migrate in the
+            // background (idempotent, compare-and-swap per record).
+            if commands::encrypted_store::legacy_ciphertext_migration_done(
+                &state.crypto,
+                &state.store,
+            ) {
+                state.crypto.reject_legacy_ciphertext();
+            } else {
+                let crypto_for_migration = state.crypto.clone();
+                let store_for_migration = state.store.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    match commands::encrypted_store::migrate_legacy_ciphertexts(
+                        &crypto_for_migration,
+                        &store_for_migration,
+                    ) {
+                        Ok(outcome) => tracing::info!(
+                            migrated = outcome.migrated,
+                            failed = outcome.failed,
+                            completed = outcome.completed,
+                            "Legacy ciphertext migration finished"
+                        ),
+                        Err(error) => tracing::warn!("Legacy ciphertext migration failed: {error}"),
+                    }
+                });
+            }
+
             // Decide whether to rebuild the search index, and do it in the
             // background so startup never waits on the DB count query. The
             // task itself performs the consistency check (comparing the
