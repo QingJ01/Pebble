@@ -1482,6 +1482,7 @@ impl Store {
             return Ok(());
         }
         self.with_write(|conn| {
+            let tx = conn.unchecked_transaction()?;
             let now = pebble_core::now_timestamp();
             for chunk in message_ids.chunks(SQL_IN_CHUNK_SIZE) {
                 let placeholders: Vec<String> = (0..chunk.len())
@@ -1497,8 +1498,9 @@ impl Store {
                     param_values.push(Box::new(id.clone()));
                 }
                 let params: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|v| v.as_ref()).collect();
-                conn.execute(&sql, params.as_slice())?;
+                tx.execute(&sql, params.as_slice())?;
             }
+            tx.commit()?;
             Ok(())
         })
     }
@@ -3077,5 +3079,45 @@ mod sql_batching_tests {
             .unwrap()
             .is_empty());
         store.bulk_soft_delete(&ids).unwrap();
+    }
+
+    #[test]
+    fn bulk_soft_delete_rolls_back_all_chunks_when_a_later_chunk_fails() {
+        let store = Store::open_in_memory().unwrap();
+        let ids: Vec<String> = (0..501).map(|i| format!("message-{i}")).collect();
+        store
+            .with_write(|conn| {
+                conn.execute(
+                    "INSERT INTO accounts (id, email, display_name, provider, created_at, updated_at)
+                     VALUES ('account', 'a@example.com', 'A', 'imap', 0, 0)",
+                    [],
+                )?;
+                for id in &ids {
+                    conn.execute(
+                        "INSERT INTO messages (id, account_id, remote_id, date, created_at, updated_at)
+                         VALUES (?1, 'account', ?1, 0, 0, 0)",
+                        [id],
+                    )?;
+                }
+                conn.execute_batch(
+                    "CREATE TRIGGER fail_later_delete_chunk BEFORE UPDATE ON messages
+                     WHEN NEW.id = 'message-500'
+                     BEGIN SELECT RAISE(ABORT, 'forced delete failure'); END;",
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        assert!(store.bulk_soft_delete(&ids).is_err());
+        let deleted_count = store
+            .with_read(|conn| {
+                Ok(conn.query_row(
+                    "SELECT COUNT(*) FROM messages WHERE is_deleted = 1",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(deleted_count, 0);
     }
 }
