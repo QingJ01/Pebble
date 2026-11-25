@@ -3,6 +3,12 @@ use rusqlite::{params, OptionalExtension};
 
 use crate::Store;
 
+mod typed;
+pub use typed::{
+    DeleteOp, FlagsOp, FolderChangeOp, MailOp, MailOpEnvelope, ManagedMoveOp, PreviousLocalState,
+    SendOp,
+};
+
 pub const MAX_PENDING_MAIL_OP_ATTEMPTS: i64 = 8;
 const BASE_RETRY_DELAY_SECS: i64 = 60;
 const MAX_RETRY_DELAY_SECS: i64 = 60 * 60;
@@ -60,6 +66,13 @@ pub struct PendingMailOp {
     pub next_retry_at: Option<i64>,
 }
 
+impl PendingMailOp {
+    /// Decode this row's typed op and envelope markers.
+    pub fn envelope(&self) -> Result<MailOpEnvelope> {
+        MailOpEnvelope::decode(&self.op_type, &self.payload_json)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingMailOpsSummary {
     pub pending_count: i64,
@@ -109,76 +122,57 @@ fn is_archive_inverse(previous: &str, next: &str) -> bool {
     )
 }
 
-fn envelope_remote_succeeded(envelope: &serde_json::Value) -> bool {
-    envelope
-        .get("remote_succeeded")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
-}
-
-fn envelope_local_committed(envelope: &serde_json::Value) -> Option<bool> {
-    envelope
-        .get("local_committed")
-        .and_then(serde_json::Value::as_bool)
+/// Decode a stored envelope for bookkeeping. Undecodable rows are treated
+/// as legacy rows: never rewritten, and abandoned with a resync.
+fn decode_envelope(op_type: &str, payload_json: &str) -> Option<MailOpEnvelope> {
+    MailOpEnvelope::decode(op_type, payload_json).ok()
 }
 
 /// Fold a later `update_flags` op into an earlier one so only the final flag
 /// state is replayed. Returns `None` when the payloads can't be merged safely.
 fn merge_update_flags_envelopes(previous: &str, next: &str) -> Option<String> {
-    use serde_json::Value;
-    let previous: Value = serde_json::from_str(previous).ok()?;
-    let next: Value = serde_json::from_str(next).ok()?;
-    if previous.get("remote_id") != next.get("remote_id") {
+    let previous = decode_envelope("update_flags", previous)?;
+    let next = decode_envelope("update_flags", next)?;
+    if previous.remote_id != next.remote_id {
         return None;
     }
-    let prev_inner = previous.get("payload")?.as_object()?;
-    let next_inner = next.get("payload")?.as_object()?;
-    let has_bool = |inner: &serde_json::Map<String, Value>| {
-        inner.get("is_read").is_some_and(Value::is_boolean)
-            || inner.get("is_starred").is_some_and(Value::is_boolean)
+    let (MailOp::UpdateFlags(prev_flags), MailOp::UpdateFlags(next_flags)) =
+        (&previous.op, &next.op)
+    else {
+        return None;
     };
     // Label-only payloads can't be re-derived from booleans; keep them separate.
-    if !has_bool(prev_inner) || !has_bool(next_inner) {
+    if !prev_flags.has_flag_change() || !next_flags.has_flag_change() {
         return None;
     }
-    let mut merged_inner = prev_inner.clone();
-    for key in ["is_read", "is_starred"] {
-        if let Some(value) = next_inner.get(key).filter(|value| value.is_boolean()) {
-            merged_inner.insert(key.to_string(), value.clone());
-        }
-    }
-    if let Some(folder) = next_inner.get("folder_remote_id") {
-        merged_inner.insert("folder_remote_id".to_string(), folder.clone());
-    }
-    // Derived from the merged booleans at replay time.
-    merged_inner.remove("add_labels");
-    merged_inner.remove("remove_labels");
+    let merged_flags = FlagsOp {
+        is_read: next_flags.is_read.or(prev_flags.is_read),
+        is_starred: next_flags.is_starred.or(prev_flags.is_starred),
+        // Derived from the merged booleans at replay time.
+        add_labels: None,
+        remove_labels: None,
+        folder_remote_id: next_flags
+            .folder_remote_id
+            .clone()
+            .or_else(|| prev_flags.folder_remote_id.clone()),
+    };
 
     let mut merged = next.clone();
-    let merged_obj = merged.as_object_mut()?;
-    merged_obj.insert("payload".to_string(), Value::Object(merged_inner));
-    let prev_committed = envelope_local_committed(&previous);
-    let next_committed = envelope_local_committed(&next);
+    merged.op = MailOp::UpdateFlags(merged_flags);
     // The earliest local commit captured the true pre-change state.
-    if prev_committed == Some(true) {
-        if let Some(state) = previous.get("previous_state") {
-            merged_obj.insert("previous_state".to_string(), state.clone());
+    if previous.local_committed == Some(true) {
+        if let Some(state) = previous.previous_state.clone() {
+            merged.previous_state = Some(state);
         }
     }
-    let committed = match (prev_committed, next_committed) {
+    merged.local_committed = match (previous.local_committed, next.local_committed) {
         (Some(a), Some(b)) => Some(a || b),
         _ => None,
     };
-    match committed {
-        Some(value) => {
-            merged_obj.insert("local_committed".to_string(), Value::Bool(value));
-        }
-        None => {
-            merged_obj.remove("local_committed");
-            merged_obj.remove("previous_state");
-        }
+    if merged.local_committed.is_none() {
+        merged.previous_state = None;
     }
-    Some(merged.to_string())
+    Some(merged.to_json())
 }
 
 /// One op that was abandoned and the local-state compensation applied for it.
@@ -226,6 +220,7 @@ fn compensate_pending_mail_op_on(
         return Ok(None);
     };
     let mut envelope: Value = serde_json::from_str(&payload_json).unwrap_or(Value::Null);
+    let typed = decode_envelope(&op_type, &payload_json);
     let abandoned = |compensation| AbandonedPendingMailOp {
         id: id.to_string(),
         account_id: account_id.clone(),
@@ -236,12 +231,18 @@ fn compensate_pending_mail_op_on(
         return Ok(Some(abandoned(PendingMailOpCompensation::NotNeeded)));
     }
 
-    let compensation = if op_type == "send" || envelope_remote_succeeded(&envelope) {
+    let compensation = match typed {
         // Sends keep their own outbox/needs-attention UX; a remote receipt
         // means the remote already matches the local commit.
-        PendingMailOpCompensation::NotNeeded
-    } else {
-        match envelope_local_committed(&envelope) {
+        Some(ref typed) if matches!(typed.op, MailOp::Send(_)) || typed.remote_succeeded => {
+            PendingMailOpCompensation::NotNeeded
+        }
+        _ if op_type == "send"
+            || envelope.get("remote_succeeded").and_then(Value::as_bool) == Some(true) =>
+        {
+            PendingMailOpCompensation::NotNeeded
+        }
+        Some(typed) => match typed.local_committed {
             Some(false) => PendingMailOpCompensation::NotNeeded,
             Some(true) => {
                 let later_active: bool = conn.query_row(
@@ -252,15 +253,9 @@ fn compensate_pending_mail_op_on(
                     params![message_id, id, created_at, rowid],
                     |row| row.get(0),
                 )?;
-                match envelope.get("previous_state") {
+                match typed.previous_state.as_ref() {
                     Some(previous) if !later_active => {
-                        if revert_local_state(
-                            conn,
-                            &message_id,
-                            &op_type,
-                            envelope.get("payload").unwrap_or(&Value::Null),
-                            previous,
-                        )? {
+                        if revert_local_state(conn, &message_id, &typed.op, previous)? {
                             PendingMailOpCompensation::Reverted
                         } else {
                             PendingMailOpCompensation::NeedsResync
@@ -271,7 +266,8 @@ fn compensate_pending_mail_op_on(
             }
             // Legacy payloads don't say whether local state was changed.
             None => PendingMailOpCompensation::NeedsResync,
-        }
+        },
+        None => PendingMailOpCompensation::NeedsResync,
     };
 
     if let Some(object) = envelope.as_object_mut() {
@@ -288,15 +284,13 @@ fn compensate_pending_mail_op_on(
 }
 
 /// Returns `false` when the previous state can't be applied (message gone,
-/// unknown op type, or recorded folders no longer exist).
+/// an op without a local revert, or recorded folders no longer exist).
 fn revert_local_state(
     conn: &rusqlite::Connection,
     message_id: &str,
-    op_type: &str,
-    payload: &serde_json::Value,
-    previous: &serde_json::Value,
+    op: &MailOp,
+    previous: &PreviousLocalState,
 ) -> Result<bool> {
-    use serde_json::Value;
     let exists: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM messages WHERE id = ?1)",
         params![message_id],
@@ -306,16 +300,10 @@ fn revert_local_state(
         return Ok(false);
     }
     let now = pebble_core::now_timestamp();
-    match op_type {
-        "update_flags" => {
-            let restore = |key: &str| {
-                payload
-                    .get(key)
-                    .filter(|value| value.is_boolean())
-                    .and_then(|_| previous.get(key).and_then(Value::as_bool))
-            };
-            let is_read = restore("is_read");
-            let is_starred = restore("is_starred");
+    match op {
+        MailOp::UpdateFlags(flags) => {
+            let is_read = flags.is_read.and(previous.is_read);
+            let is_starred = flags.is_starred.and(previous.is_starred);
             if is_read.is_none() && is_starred.is_none() {
                 return Ok(false);
             }
@@ -329,17 +317,12 @@ fn revert_local_state(
             )?;
             Ok(true)
         }
-        "archive" | "unarchive" | "restore" | "delete" | "move_to_folder" => {
-            let folder_ids: Vec<String> = previous
-                .get("folder_ids")
-                .and_then(Value::as_array)
-                .map(|ids| {
-                    ids.iter()
-                        .filter_map(Value::as_str)
-                        .map(ToOwned::to_owned)
-                        .collect()
-                })
-                .unwrap_or_default();
+        MailOp::Archive(_)
+        | MailOp::Unarchive(_)
+        | MailOp::Restore(_)
+        | MailOp::Delete(_)
+        | MailOp::MoveToFolder(_) => {
+            let folder_ids = previous.folder_ids.clone().unwrap_or_default();
             if folder_ids.is_empty() {
                 return Ok(false);
             }
@@ -363,12 +346,6 @@ fn revert_local_state(
                     params![message_id, folder_id],
                 )?;
             }
-            let is_deleted = previous
-                .get("is_deleted")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            let deleted_at = previous.get("deleted_at").and_then(Value::as_i64);
-            let remote_id = previous.get("remote_id").and_then(Value::as_str);
             conn.execute(
                 "UPDATE messages
                  SET is_deleted = ?1,
@@ -376,11 +353,17 @@ fn revert_local_state(
                      remote_id = COALESCE(?3, remote_id),
                      updated_at = ?4
                  WHERE id = ?5",
-                params![is_deleted, deleted_at, remote_id, now, message_id],
+                params![
+                    previous.is_deleted.unwrap_or(false),
+                    previous.deleted_at,
+                    previous.remote_id,
+                    now,
+                    message_id
+                ],
             )?;
             Ok(true)
         }
-        _ => Ok(false),
+        MailOp::DeletePermanent(_) | MailOp::ManagedMove(_) | MailOp::Send(_) => Ok(false),
     }
 }
 
@@ -411,6 +394,21 @@ impl Store {
             )?;
             Ok(id)
         })
+    }
+
+    /// Queue a typed op; see [`Store::enqueue_pending_mail_op`].
+    pub fn enqueue_mail_op(
+        &self,
+        account_id: &str,
+        message_id: &str,
+        envelope: &MailOpEnvelope,
+    ) -> Result<PendingMailOpEnqueue> {
+        self.enqueue_pending_mail_op(
+            account_id,
+            message_id,
+            envelope.op_type(),
+            &envelope.to_json(),
+        )
     }
 
     /// Queue a pending op, collapsing it with the latest not-yet-running op on
@@ -449,14 +447,14 @@ impl Store {
 
             if let Some((latest_id, latest_type, latest_status, latest_payload, attempts)) = latest
             {
-                let latest_envelope: serde_json::Value =
-                    serde_json::from_str(&latest_payload).unwrap_or(serde_json::Value::Null);
                 // Running, remotely-applied, or abandoned (and possibly already
-                // compensated) ops are history; never rewrite them.
+                // compensated) ops are history; never rewrite them. Rows that
+                // can't be decoded are never folded either.
                 let not_started = latest_status != PendingMailOpStatus::InProgress.as_str()
                     && attempts < MAX_PENDING_MAIL_OP_ATTEMPTS
-                    && !envelope_remote_succeeded(&latest_envelope)
-                    && latest_envelope.get("compensated").is_none();
+                    && decode_envelope(&latest_type, &latest_payload).is_some_and(|envelope| {
+                        !envelope.remote_succeeded && envelope.compensated.is_none()
+                    });
                 if not_started && latest_type == "update_flags" && op_type == "update_flags" {
                     if let Some(merged) = merge_update_flags_envelopes(&latest_payload, payload_json)
                     {
