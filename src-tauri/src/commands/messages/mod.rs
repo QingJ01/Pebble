@@ -98,6 +98,9 @@ pub(crate) fn refresh_search_document_with_store(
 ) -> std::result::Result<(), PebbleError> {
     let ids = vec![message_id.to_string()];
     store.add_search_pending(&ids, "index")?;
+    // Read-then-write must not interleave with a full rebuild, which could
+    // otherwise re-add a document this call removes.
+    let _guard = crate::commands::indexing::search_write_guard();
 
     match store.get_message(message_id)? {
         Some(message) if !message.is_deleted => {
@@ -126,6 +129,7 @@ pub(crate) fn remove_search_documents(
         return Ok(());
     }
     state.store.add_search_pending(message_ids, "remove")?;
+    let _guard = crate::commands::indexing::search_write_guard();
     for message_id in message_ids {
         state.search.remove_message(message_id)?;
     }
@@ -146,6 +150,7 @@ pub(crate) fn refresh_search_documents(
         return Ok(());
     }
     state.store.add_search_pending(message_ids, "index")?;
+    let _guard = crate::commands::indexing::search_write_guard();
     for message_id in message_ids {
         match state.store.get_message(message_id)? {
             Some(message) if !message.is_deleted => {
