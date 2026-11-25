@@ -1,6 +1,6 @@
 use pebble_core::{new_id, Result};
 use rusqlite::OptionalExtension;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{Store, SQL_IN_CHUNK_SIZE};
 
@@ -100,13 +100,19 @@ impl Store {
             return Ok(HashMap::new());
         }
 
+        let mut seen = HashSet::new();
+        let unique_ids: Vec<&String> = message_ids
+            .iter()
+            .filter(|message_id| seen.insert(*message_id))
+            .collect();
+
         self.with_read(|conn| {
             let mut result: HashMap<String, Vec<Label>> = HashMap::new();
-            for message_id in message_ids {
-                result.entry(message_id.clone()).or_default();
+            for message_id in &unique_ids {
+                result.entry((*message_id).clone()).or_default();
             }
 
-            for chunk in message_ids.chunks(SQL_IN_CHUNK_SIZE) {
+            for chunk in unique_ids.chunks(SQL_IN_CHUNK_SIZE) {
                 let placeholders: Vec<String> =
                     (1..=chunk.len()).map(|i| format!("?{i}")).collect();
                 let sql = format!(
@@ -122,7 +128,7 @@ impl Store {
                 let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
                     Vec::with_capacity(chunk.len());
                 for message_id in chunk {
-                    param_values.push(Box::new(message_id.clone()));
+                    param_values.push(Box::new((*message_id).clone()));
                 }
                 let params: Vec<&dyn rusqlite::types::ToSql> =
                     param_values.iter().map(|v| v.as_ref()).collect();
@@ -185,5 +191,43 @@ mod sql_batching_tests {
         let result = store.get_message_labels_batch(&ids).unwrap();
         assert_eq!(result.len(), ids.len());
         assert!(result.values().all(|labels| labels.is_empty()));
+    }
+
+    #[test]
+    fn duplicate_ids_across_chunks_do_not_duplicate_labels() {
+        let store = Store::open_in_memory().unwrap();
+        let target = "target-message".to_string();
+        let mut ids = vec![target.clone()];
+        for index in 1..500 {
+            ids.push(format!("filler-{index}"));
+        }
+        ids.push(target.clone());
+
+        store
+            .with_write(|conn| {
+                conn.execute(
+                    "INSERT INTO accounts (id, email, display_name, provider, created_at, updated_at)
+                     VALUES ('account', 'a@example.com', 'A', 'imap', 0, 0)",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT INTO messages (id, account_id, remote_id, date, created_at, updated_at)
+                     VALUES (?1, 'account', ?1, 0, 0, 0)",
+                    [&target],
+                )?;
+                conn.execute(
+                    "INSERT INTO labels (id, name, color, is_system) VALUES ('label-1', 'Label', '#808080', 0)",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT INTO message_labels (message_id, label_id) VALUES (?1, 'label-1')",
+                    [&target],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        let result = store.get_message_labels_batch(&ids).unwrap();
+        assert_eq!(result.get(&target).map(Vec::len), Some(1));
     }
 }

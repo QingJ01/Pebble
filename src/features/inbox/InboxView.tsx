@@ -230,6 +230,7 @@ function ThreadList({ threads, selectedThreadId, onSelectThread, loading }: {
     count: threads.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 76,
+    getItemKey: (index) => threads[index]?.thread_id ?? index,
     measureElement: (el) => el.getBoundingClientRect().height,
     overscan: 5,
   });

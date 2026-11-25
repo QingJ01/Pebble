@@ -454,6 +454,8 @@
     "star": "Star",
     "unstar": "Unstar",
     "markUnread": "Mark as unread",
+    "markThreadUnread": "Mark thread as unread",
+    "markThreadRead": "Mark thread as read",
     "markRead": "Mark as read",
     "updateReadFailed": "Failed to update read state",
     "contextMenu": "Message actions",
