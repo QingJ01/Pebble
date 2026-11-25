@@ -377,9 +377,25 @@ impl Store {
         })
     }
 
+    /// Delete an account and everything keyed to it in one transaction.
+    ///
+    /// Most rows cascade from `accounts`, but `pending_mail_ops` and
+    /// `search_pending` are cleared explicitly so databases created before
+    /// those tables gained foreign keys do not keep orphaned work queued.
     pub fn delete_account(&self, id: &str) -> Result<()> {
         self.with_write(|conn| {
-            conn.execute("DELETE FROM accounts WHERE id = ?1", rusqlite::params![id])?;
+            let tx = conn.unchecked_transaction()?;
+            tx.execute(
+                "DELETE FROM search_pending
+                 WHERE message_id IN (SELECT id FROM messages WHERE account_id = ?1)",
+                rusqlite::params![id],
+            )?;
+            tx.execute(
+                "DELETE FROM pending_mail_ops WHERE account_id = ?1",
+                rusqlite::params![id],
+            )?;
+            tx.execute("DELETE FROM accounts WHERE id = ?1", rusqlite::params![id])?;
+            tx.commit()?;
             Ok(())
         })
     }

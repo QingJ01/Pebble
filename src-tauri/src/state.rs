@@ -12,6 +12,10 @@ pub type KeyedLockRegistry = Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>;
 pub type OAuthAccountLockRegistry = KeyedLockRegistry;
 
 pub struct SyncHandle {
+    /// Unique per start attempt. Lets `start_sync_inner` verify that the slot
+    /// it reserved was not stopped/removed (e.g. by account deletion) while the
+    /// worker was being built.
+    pub generation: u64,
     pub stop_tx: watch::Sender<bool>,
     pub trigger_tx: mpsc::UnboundedSender<SyncTrigger>,
     pub task: tokio::task::JoinHandle<()>,

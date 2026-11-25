@@ -75,7 +75,13 @@ pub async fn list_folders(
                 is_system: true,
                 sort_order: 3,
             };
-            let _ = store.insert_folder(&archive);
+            if let Err(error) = store.insert_folder(&archive) {
+                // A concurrent caller may have seeded it first; re-listing below
+                // shows whichever row won. Anything else is still surfaced in logs.
+                tracing::warn!(
+                    "Failed to seed local archive folder for account {account_id}: {error}"
+                );
+            }
             let folders = store.list_folders(&account_id)?;
             return Ok(filter_display_folders(provider.as_ref(), folders));
         }

@@ -1,8 +1,13 @@
 use crate::commands::attachments::cleanup_staged_attachment_records;
+use crate::commands::sync_cmd::request_sync;
+use crate::realtime::SyncTrigger;
 use crate::{events, state::AppState};
 use pebble_core::traits::{FolderProvider, LabelProvider};
 use pebble_core::{FolderRole, Message, PebbleError, ProviderType};
-use pebble_store::pending_ops::{PendingMailOp, PendingMailOpsSummary};
+use pebble_store::pending_ops::{
+    AbandonedPendingMailOp, PendingMailOp, PendingMailOpCompensation, PendingMailOpsSummary,
+    MAX_PENDING_MAIL_OP_ATTEMPTS,
+};
 use pebble_store::Store;
 use serde::Serialize;
 use serde_json::Value;
@@ -13,7 +18,7 @@ use super::compose::{self, LocalOutgoingState};
 use super::messages::{
     classify_remote_delete_result, connect_gmail, connect_imap, connect_outlook,
     find_folder_by_role, find_message_folder, imap_move_tracked, refresh_search_document,
-    remove_search_documents,
+    refresh_search_documents, remove_search_documents,
 };
 
 const WORKER_INTERVAL_SECS: u64 = 30;
@@ -162,6 +167,7 @@ pub async fn process_pending_mail_ops(
         .list_retryable_pending_mail_ops(WORKER_BATCH_LIMIT)?;
     let mut changed = false;
     let mut completed = 0usize;
+    let mut abandoned = Vec::new();
 
     for op in ops {
         state.store.mark_pending_mail_op_in_progress(&op.id)?;
@@ -173,6 +179,9 @@ pub async fn process_pending_mail_ops(
                 completed += 1;
             }
             Err(ReplayPendingMailOpError::Retryable(ref e)) if is_permanent_error(e) => {
+                // Compensate before marking done so the revert sees this op
+                // as the latest one for the message.
+                abandoned.extend(compensate_abandoned(state, &op.id));
                 state.store.mark_pending_mail_op_done(&op.id)?;
                 warn!(
                     "Pending mail op {} permanently failed (non-retryable): {e}",
@@ -195,6 +204,13 @@ pub async fn process_pending_mail_ops(
                     .store
                     .mark_pending_mail_op_failed(&op.id, &e.to_string())?;
                 warn!("Pending mail op {} retry failed: {e}", op.id);
+                if retries_exhausted_after_failure(op.attempts) {
+                    warn!(
+                        "Pending mail op {} gave up after {MAX_PENDING_MAIL_OP_ATTEMPTS} attempts",
+                        op.id
+                    );
+                    abandoned.extend(compensate_abandoned(state, &op.id));
+                }
             }
             Err(ReplayPendingMailOpError::SenderIdentityBlocked(e)) => {
                 state.store.mark_pending_mail_op_stopped(
@@ -205,10 +221,70 @@ pub async fn process_pending_mail_ops(
         }
     }
 
+    finish_abandoned_ops(state, app, abandoned).await;
     if changed {
         emit_pending_ops_changed(app);
     }
     Ok(completed)
+}
+
+fn retries_exhausted_after_failure(attempts_before_failure: i64) -> bool {
+    attempts_before_failure + 1 >= MAX_PENDING_MAIL_OP_ATTEMPTS
+}
+
+fn compensate_abandoned(state: &AppState, op_id: &str) -> Option<AbandonedPendingMailOp> {
+    match state.store.compensate_abandoned_pending_mail_op(op_id) {
+        Ok(result) => result,
+        Err(e) => {
+            warn!("Failed to compensate abandoned pending mail op {op_id}: {e}");
+            None
+        }
+    }
+}
+
+/// Accounts whose local state must be refreshed from the server after the
+/// given ops were abandoned, and messages whose search docs need refreshing.
+fn abandoned_followups(abandoned: &[AbandonedPendingMailOp]) -> (Vec<String>, Vec<String>) {
+    let mut resync_accounts = Vec::new();
+    let mut reverted_messages = Vec::new();
+    for op in abandoned {
+        match op.compensation {
+            PendingMailOpCompensation::Reverted => {
+                if !reverted_messages.contains(&op.message_id) {
+                    reverted_messages.push(op.message_id.clone());
+                }
+            }
+            PendingMailOpCompensation::NeedsResync => {
+                if !resync_accounts.contains(&op.account_id) {
+                    resync_accounts.push(op.account_id.clone());
+                }
+            }
+            PendingMailOpCompensation::NotNeeded => {}
+        }
+    }
+    (resync_accounts, reverted_messages)
+}
+
+/// After ops are abandoned: refresh search docs for reverted messages and ask
+/// the sync worker for an authoritative refetch where no revert was possible.
+async fn finish_abandoned_ops(
+    state: &AppState,
+    app: Option<&tauri::AppHandle>,
+    abandoned: Vec<AbandonedPendingMailOp>,
+) {
+    if abandoned.is_empty() {
+        return;
+    }
+    let (resync_accounts, reverted_messages) = abandoned_followups(&abandoned);
+    if let Err(e) = refresh_search_documents(state, &reverted_messages) {
+        warn!("Failed to refresh search after reverting abandoned ops: {e}");
+    }
+    for account_id in resync_accounts {
+        if let Err(e) = request_sync(app, state, &account_id, SyncTrigger::Manual).await {
+            warn!("Failed to request resync for {account_id} after abandoned ops: {e}");
+        }
+    }
+    emit_pending_ops_changed(app);
 }
 
 #[derive(Debug)]
@@ -247,16 +323,17 @@ fn is_permanent_error(e: &PebbleError) -> bool {
 }
 
 #[tauri::command]
-pub fn dismiss_failed_pending_mail_ops(
+pub async fn dismiss_failed_pending_mail_ops(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
     account_id: Option<String>,
 ) -> std::result::Result<u64, PebbleError> {
-    let dismissed = state
+    let abandoned = state
         .store
-        .dismiss_failed_pending_mail_ops(account_id.as_deref())?;
+        .dismiss_failed_pending_mail_ops_with_compensation(account_id.as_deref())?;
+    let dismissed = abandoned.len() as u64;
     if dismissed > 0 {
-        emit_pending_ops_changed(Some(&app));
+        finish_abandoned_ops(&state, Some(&app), abandoned).await;
     }
     Ok(dismissed)
 }
@@ -1014,6 +1091,38 @@ mod tests {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    #[test]
+    fn give_up_is_detected_on_the_final_attempt_only() {
+        use pebble_store::pending_ops::MAX_PENDING_MAIL_OP_ATTEMPTS;
+        assert!(!super::retries_exhausted_after_failure(0));
+        assert!(!super::retries_exhausted_after_failure(
+            MAX_PENDING_MAIL_OP_ATTEMPTS - 2
+        ));
+        assert!(super::retries_exhausted_after_failure(
+            MAX_PENDING_MAIL_OP_ATTEMPTS - 1
+        ));
+    }
+
+    #[test]
+    fn abandoned_followups_split_reverts_from_resyncs() {
+        use pebble_store::pending_ops::{AbandonedPendingMailOp, PendingMailOpCompensation};
+        let op = |id: &str, account: &str, message: &str, compensation| AbandonedPendingMailOp {
+            id: id.into(),
+            account_id: account.into(),
+            message_id: message.into(),
+            compensation,
+        };
+        let (resync, reverted) = super::abandoned_followups(&[
+            op("1", "a", "m1", PendingMailOpCompensation::Reverted),
+            op("2", "a", "m1", PendingMailOpCompensation::Reverted),
+            op("3", "b", "m2", PendingMailOpCompensation::NeedsResync),
+            op("4", "b", "m3", PendingMailOpCompensation::NeedsResync),
+            op("5", "c", "m4", PendingMailOpCompensation::NotNeeded),
+        ]);
+        assert_eq!(resync, vec!["b".to_string()]);
+        assert_eq!(reverted, vec!["m1".to_string()]);
     }
 
     #[test]
