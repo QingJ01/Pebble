@@ -641,11 +641,13 @@ impl Store {
             return Ok(Vec::new());
         }
         let mut seen = HashSet::new();
-        let unique_folder_ids: Vec<&String> = folder_ids.iter().filter(|id| seen.insert(*id)).collect();
+        let unique_folder_ids: Vec<&String> =
+            folder_ids.iter().filter(|id| seen.insert(*id)).collect();
         self.with_read(|conn| {
             let mut out = Vec::new();
             for chunk in unique_folder_ids.chunks(SQL_IN_CHUNK_SIZE) {
-                let placeholders: Vec<String> = (3..=chunk.len() + 2).map(|i| format!("?{i}")).collect();
+                let placeholders: Vec<String> =
+                    (3..=chunk.len() + 2).map(|i| format!("?{i}")).collect();
                 let sql = format!(
                     "SELECT m.id FROM messages m
                      JOIN message_folders mf ON mf.message_id = m.id
@@ -662,11 +664,14 @@ impl Store {
                 for folder_id in chunk {
                     param_values.push(Box::new((*folder_id).clone()));
                 }
-                let params: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|v| v.as_ref()).collect();
+                let params: Vec<&dyn rusqlite::types::ToSql> =
+                    param_values.iter().map(|v| v.as_ref()).collect();
                 let rows = stmt.query_map(params.as_slice(), |row| row.get::<_, String>(0))?;
                 for row in rows {
                     let id = row?;
-                    if !out.contains(&id) { out.push(id); }
+                    if !out.contains(&id) {
+                        out.push(id);
+                    }
                 }
             }
             Ok(out)
@@ -3169,7 +3174,6 @@ mod sql_batching_tests {
         assert_eq!(deleted_count, 0);
     }
 
-
     #[test]
     fn thread_ids_in_folders_are_scoped_to_selected_folder() {
         let store = Store::open_in_memory().unwrap();
@@ -3185,8 +3189,18 @@ mod sql_batching_tests {
             )?;
             Ok(())
         }).unwrap();
-        assert_eq!(store.list_message_ids_by_thread_in_folders("t", &["f1".into()]).unwrap(), vec!["m1"]);
-        assert_eq!(store.list_message_ids_by_thread_in_folders("t", &["f2".into()]).unwrap(), vec!["m2"]);
+        assert_eq!(
+            store
+                .list_message_ids_by_thread_in_folders("t", &["f1".into()])
+                .unwrap(),
+            vec!["m1"]
+        );
+        assert_eq!(
+            store
+                .list_message_ids_by_thread_in_folders("t", &["f2".into()])
+                .unwrap(),
+            vec!["m2"]
+        );
     }
 
     #[test]

@@ -55,7 +55,25 @@ function ThreadItem({ thread, isSelected, onClick, folderIds }: Props) {
     const nextReadState = hasUnread;
     setContextMenu(null);
     try {
-      await updateThreadReadFlagsInFolders(thread.thread_id, folderIds, nextReadState);
+      const result = await updateThreadReadFlagsInFolders(thread.thread_id, folderIds, nextReadState);
+      if (result.failed > 0) {
+        useToastStore.getState().addToast({
+          message: t("messageActions.threadReadFailed", { count: result.failed }),
+          type: "error",
+        });
+      } else if (result.updated === 0 && result.queued === 0) {
+        useToastStore.getState().addToast({
+          message: t("messageActions.threadReadNoMessages"),
+          type: "error",
+        });
+      } else if (result.queued > 0) {
+        useToastStore.getState().addToast({
+          message: result.updated > 0
+            ? t("messageActions.threadReadPartiallyUpdated", { updated: result.updated, queued: result.queued })
+            : t("messageActions.threadReadQueued", { count: result.queued }),
+          type: "info",
+        });
+      }
       queryClient.invalidateQueries({ queryKey: ["messages"] });
       queryClient.invalidateQueries({ queryKey: ["threads"] });
       queryClient.invalidateQueries({ queryKey: ["threadMessages", thread.thread_id] });
