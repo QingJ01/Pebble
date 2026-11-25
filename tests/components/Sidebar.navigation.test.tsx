@@ -137,7 +137,9 @@ describe("Sidebar navigation", () => {
 
     fireEvent.contextMenu(screen.getByLabelText("Sidebar"), { clientX: 32, clientY: 500 });
 
-    expect(screen.getByRole("menuitem", { name: "Manage folders" })).toBeTruthy();
+    const menuItem = screen.getByRole("menuitem", { name: "Manage folders" });
+    expect(menuItem).toBeTruthy();
+    expect(document.activeElement).toBe(menuItem);
   });
 
   it("does not open folder management when right-clicking a sidebar button icon", () => {

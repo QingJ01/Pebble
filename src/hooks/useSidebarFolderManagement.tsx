@@ -72,6 +72,7 @@ export function useSidebarFolderManagement({ accounts, folders, accountId }: Arg
           type="button"
           role="menuitem"
           className="sidebar-context-menu-item"
+          autoFocus
           onClick={() => {
             keyboardButtonRef.current?.focus();
             setMenuPosition(null);
