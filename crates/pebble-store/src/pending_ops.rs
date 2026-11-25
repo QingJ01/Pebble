@@ -1188,7 +1188,9 @@ mod active_pending_ops_tests {
         let in_progress = store
             .insert_pending_mail_op(&account.id, &ids[1], "move", "{}")
             .unwrap();
-        store.mark_pending_mail_op_in_progress(&in_progress).unwrap();
+        store
+            .mark_pending_mail_op_in_progress(&in_progress)
+            .unwrap();
         let retryable = store
             .insert_pending_mail_op(&account.id, &ids[2], "update_flags", "{}")
             .unwrap();
