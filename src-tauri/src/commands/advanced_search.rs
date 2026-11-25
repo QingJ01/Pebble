@@ -6,7 +6,9 @@ use serde::Deserialize;
 use tauri::State;
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(test, ts(optional_fields = nullable))]
 pub struct AdvancedSearchQuery {
     pub text: Option<String>,
     pub from: Option<String>,

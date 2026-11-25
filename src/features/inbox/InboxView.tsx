@@ -219,7 +219,7 @@ export default function InboxView() {
 
 // Inline ThreadList component using virtualizer
 function ThreadList({ threads, selectedThreadId, onSelectThread, loading }: {
-  threads: { thread_id: string; subject: string; snippet: string; last_date: number; message_count: number; unread_count: number; is_starred: boolean; participants: string[]; has_attachments: boolean }[];
+  threads: ThreadSummary[];
   selectedThreadId: string | null;
   onSelectThread: (id: string) => void;
   loading: boolean;

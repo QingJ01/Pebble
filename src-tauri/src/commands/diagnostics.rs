@@ -17,6 +17,7 @@ const DEFAULT_LOG_MAX_BYTES: u64 = 64 * 1024;
 const MAX_LOG_MAX_BYTES: u64 = 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct AppLogSnapshot {
     pub path: String,
     pub content: String,

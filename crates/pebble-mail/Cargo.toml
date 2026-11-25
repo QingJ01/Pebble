@@ -9,6 +9,7 @@ pebble-store = { path = "../pebble-store" }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+ts-rs = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 async-imap = { workspace = true }

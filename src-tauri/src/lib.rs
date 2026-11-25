@@ -1,6 +1,8 @@
 mod account_colors;
 mod commands;
 mod events;
+#[cfg(test)]
+mod ipc_bindings;
 mod profile;
 mod realtime;
 mod send_controls;

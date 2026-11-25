@@ -76,7 +76,7 @@ fn provider_slug(provider: &pebble_core::ProviderType) -> &'static str {
 }
 
 /// Lightweight summary of a backup for user confirmation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 pub struct BackupPreview {
     pub version: u32,
     pub exported_at: i64,

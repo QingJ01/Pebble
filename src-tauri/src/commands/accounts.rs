@@ -276,6 +276,8 @@ fn validate_account_color(color: Option<&str>) -> std::result::Result<(), Pebble
 
 #[allow(dead_code)]
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(optional_fields = nullable))]
 pub struct AddAccountRequest {
     #[serde(default)]
     pub account_label: Option<String>,
@@ -293,8 +295,10 @@ pub struct AddAccountRequest {
     pub imap_security: ConnectionSecurity,
     pub smtp_security: ConnectionSecurity,
     #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<bool>", optional))]
     pub accept_invalid_certs: bool,
     #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<bool>", optional))]
     pub allow_plaintext: bool,
     #[serde(default)]
     pub proxy_host: Option<String>,

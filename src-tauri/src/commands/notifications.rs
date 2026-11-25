@@ -12,6 +12,7 @@ const TRAY_DEFAULT_TOOLTIP: &str = "Pebble";
 const TRAY_ATTENTION_TOOLTIP: &str = "Pebble - New mail";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct NotificationStatus {
     pub enabled: bool,
     pub attention_active: bool,

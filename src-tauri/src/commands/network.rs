@@ -10,6 +10,7 @@ use tauri::State;
 const GLOBAL_PROXY_KEY: &str = "global_network_proxy";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum AccountProxyMode {
     #[default]
@@ -19,6 +20,7 @@ pub enum AccountProxyMode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct AccountProxySetting {
     pub mode: AccountProxyMode,
     pub proxy: Option<HttpProxyConfig>,

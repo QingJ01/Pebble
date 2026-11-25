@@ -40,7 +40,7 @@ use rustls::{
 };
 
 /// Connection security mode for mail protocols.
-#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
 pub enum ConnectionSecurity {
     /// Implicit TLS — connect over TLS immediately (IMAP 993, SMTP 465).
