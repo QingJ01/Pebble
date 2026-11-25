@@ -1,3 +1,4 @@
+use crate::commands::batch::batch_mark_read;
 use crate::state::AppState;
 use pebble_core::traits::LabelProvider;
 use pebble_core::{Message, PebbleError, ProviderType};
@@ -332,9 +333,8 @@ pub async fn update_thread_read_flags_in_folders(
     .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))??;
 
     let mut updated = 0;
-    for message_id in ids {
-        update_message_flags(state.clone(), message_id, Some(is_read), None).await?;
-        updated += 1;
+    for chunk in ids.chunks(1000) {
+        updated += batch_mark_read(state.clone(), chunk.to_vec(), is_read).await?;
     }
     Ok(updated)
 }
