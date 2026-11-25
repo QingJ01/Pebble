@@ -449,6 +449,10 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
             zIndex: 1000,
           }}
           onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            event.stopPropagation();
+            if (event.key === "Escape") setContextMenu(null);
+          }}
           onContextMenu={(event) => event.preventDefault()}
         >
           <button
