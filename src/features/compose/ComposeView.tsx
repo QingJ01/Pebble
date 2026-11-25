@@ -2,7 +2,7 @@ import { senderIdentityLabel } from "@/lib/accountIdentity";
 import { useState, useEffect, useRef } from "react";
 import { EditorContent } from "@tiptap/react";
 import {
-  ArrowLeft, Send, X, AlertCircle,
+  ArrowLeft, Send, X, AlertCircle, Clock,
   Type, FileCode2, Hash, Eye, EyeOff,
   Paperclip, FileText, Trash2, BookTemplate,
   ChevronDown, ChevronRight,
@@ -641,6 +641,20 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
     || pendingAttachmentStagingCount > 0
     || !fromAccountId
     || !hasToRecipient;
+  const headerActionStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    padding: "7px 16px",
+    backgroundColor: sendInProgress || sendMutation.isPending ? "var(--color-text-secondary)" : "var(--color-accent, #2563eb)",
+    color: "#fff",
+    border: "none",
+    borderRadius: "6px",
+    cursor: sendDisabled ? "default" : "pointer",
+    opacity: hasToRecipient ? 1 : 0.5,
+    fontSize: "13px",
+    fontWeight: 500,
+  };
 
   return (
     <div
@@ -685,27 +699,31 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
             {title}
           </span>
         </div>
-        <button
-          onClick={() => void handleSend()}
-          disabled={sendDisabled}
-          style={{
-            display: "flex", alignItems: "center", gap: "6px",
-            padding: "7px 20px",
-            backgroundColor: sendInProgress || sendMutation.isPending ? "var(--color-text-secondary)" : "var(--color-accent, #2563eb)",
-            color: "#fff", border: "none", borderRadius: "6px",
-            cursor: sendDisabled ? "default" : "pointer",
-            opacity: hasToRecipient ? 1 : 0.5,
-            fontSize: "13px", fontWeight: 500,
-          }}
-        >
-          <Send size={14} />
-          {sendInProgress || sendMutation.isPending ? t("compose.sending", "Sending...") : t("compose.send", "Send")}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <button
+            type="button"
+            aria-expanded={showSchedule}
+            onClick={() => setShowSchedule((value) => !value)}
+            disabled={sendDisabled}
+            style={headerActionStyle}
+          >
+            <Clock size={14} />
+            {t("sendControls.schedule")}
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleSend()}
+            disabled={sendDisabled}
+            style={headerActionStyle}
+          >
+            <Send size={14} />
+            {sendInProgress || sendMutation.isPending ? t("compose.sending", "Sending...") : t("compose.send", "Send")}
+          </button>
+        </div>
       </div>
 
-      <div className="send-controls-options">
-        <button disabled={sendDisabled} onClick={() => setShowSchedule((value) => !value)}>{t("sendControls.schedule")}</button>
-        {showSchedule && <>
+      {showSchedule && (
+        <div className="send-controls-options">
           <ScheduleTimeInput value={scheduleValue} onChange={setScheduleValue} />
           <button disabled={sendDisabled || scheduledInstant(scheduleValue) === null} onClick={() => {
             const instant = scheduledInstant(scheduleValue);
@@ -713,8 +731,8 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
             void handleSend(instant);
           }}>{t("sendControls.schedule")}</button>
           <small>{t("sendControls.policy")}</small>
-        </>}
-      </div>
+        </div>
+      )}
 
       {/* Error banner */}
       {sendError && (

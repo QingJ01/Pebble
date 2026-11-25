@@ -125,6 +125,19 @@ describe("Sidebar navigation", () => {
     });
   });
 
+  it.each(["classic", "grouped"] as const)("opens folder management from blank-area context menu in %s mode", (sidebarStyle) => {
+    useUIStore.setState({ sidebarStyle, activeView: "inbox" });
+    useComposeStore.setState({ composeDirty: false, composeMode: null });
+    render(<Sidebar />);
+
+    expect(screen.queryByRole("menuitem", { name: "Manage folders" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Manage folders" })).toBeNull();
+
+    fireEvent.contextMenu(screen.getByLabelText("Sidebar"), { clientX: 32, clientY: 500 });
+
+    expect(screen.getByRole("menuitem", { name: "Manage folders" })).toBeTruthy();
+  });
+
   it("keeps the sidebar from shrinking under wide message content", () => {
     render(<Sidebar />);
 
