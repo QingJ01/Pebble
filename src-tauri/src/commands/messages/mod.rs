@@ -379,19 +379,11 @@ pub(super) fn find_message_folder(
         ));
     }
     let folders = state.store.list_folders(account_id)?;
-    // Prefer a server-backed folder for provider writeback. Local-only folders
-    // cannot be mutation targets, but are returned when they are the only choice.
-    let mut local_fallback = None;
+    // Return the first matching folder (prefer inbox-like folders)
     for fid in &folder_ids {
         if let Some(folder) = folders.iter().find(|f| &f.id == fid) {
-            if !folder.remote_id.starts_with("__local_") {
-                return Ok(folder.clone());
-            }
-            local_fallback.get_or_insert_with(|| folder.clone());
+            return Ok(folder.clone());
         }
-    }
-    if let Some(folder) = local_fallback {
-        return Ok(folder);
     }
     Err(PebbleError::Internal(
         "Message folder not found".to_string(),
