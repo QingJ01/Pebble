@@ -68,6 +68,8 @@ use crate::thread::{
 };
 
 mod attachments;
+#[cfg(test)]
+mod fake_imap_tests;
 mod fetch;
 mod folder_sync;
 mod imap_cursor;
