@@ -5,7 +5,13 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import { invoke } from "@tauri-apps/api/core";
-import { useKanbanStore } from "../../src/stores/kanban.store";
+import { QueryClient } from "@tanstack/react-query";
+import {
+  fetchKanbanContextNotes,
+  kanbanContextNotesQueryKey,
+  type KanbanContextNotes,
+} from "../../src/hooks/queries/useKanbanContextNotesQuery";
+import { setKanbanContextNoteInCache } from "../../src/hooks/mutations/useKanbanMutations";
 
 const mockedInvoke = vi.mocked(invoke);
 
@@ -19,14 +25,30 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-describe("KanbanStore", () => {
+let client: QueryClient;
+
+/** What react-query does with the query function's result. */
+async function fetchContextNotes(target: QueryClient = client) {
+  const notes = await fetchKanbanContextNotes(target);
+  target.setQueryData(kanbanContextNotesQueryKey, notes);
+}
+
+function contextNotes(target: QueryClient = client): KanbanContextNotes | undefined {
+  return target.getQueryData<KanbanContextNotes>(kanbanContextNotesQueryKey);
+}
+
+function setContextNote(messageId: string, note: string) {
+  return setKanbanContextNoteInCache(client, messageId, note);
+}
+
+describe("kanban context notes (react-query)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    useKanbanStore.setState({ contextNotes: {} });
+    client = new QueryClient();
   });
 
-  it("fetchContextNotes loads notes only; cards live in react-query", async () => {
+  it("fetch loads notes only; cards have their own query", async () => {
     mockedInvoke.mockImplementation((command) => {
       if (command === "list_kanban_context_notes") {
         return Promise.resolve({ m1: "note" });
@@ -34,12 +56,12 @@ describe("KanbanStore", () => {
       return Promise.resolve(undefined);
     });
 
-    await useKanbanStore.getState().fetchContextNotes();
+    await fetchContextNotes();
 
     expect(mockedInvoke).toHaveBeenCalledWith("list_kanban_context_notes");
     expect(mockedInvoke).not.toHaveBeenCalledWith("list_kanban_cards", expect.anything());
-    expect(useKanbanStore.getState().contextNotes).toEqual({ m1: "note" });
-    expect("cards" in useKanbanStore.getState()).toBe(false);
+    expect(contextNotes()).toEqual({ m1: "note" });
+    expect(kanbanContextNotesQueryKey[0]).toBe("kanban");
   });
 
   it("does not let an older fetch overwrite a newer fetch", async () => {
@@ -54,15 +76,15 @@ describe("KanbanStore", () => {
       return Promise.resolve(undefined);
     });
 
-    const olderFetch = useKanbanStore.getState().fetchContextNotes();
-    const newerFetch = useKanbanStore.getState().fetchContextNotes();
+    const olderFetch = fetchContextNotes();
+    const newerFetch = fetchContextNotes();
     secondNotes.resolve({ new: "new note" });
     await newerFetch;
 
     firstNotes.resolve({ old: "old note" });
     await olderFetch;
 
-    expect(useKanbanStore.getState().contextNotes).toEqual({ new: "new note" });
+    expect(contextNotes()).toEqual({ new: "new note" });
   });
 
   it("preserves a context note edited while a fetch is in flight", async () => {
@@ -74,25 +96,25 @@ describe("KanbanStore", () => {
       return Promise.resolve(undefined);
     });
 
-    const fetch = useKanbanStore.getState().fetchContextNotes();
-    const save = useKanbanStore.getState().setContextNote("m1", "new note");
-    expect(useKanbanStore.getState().contextNotes).toEqual({ m1: "new note" });
+    const fetch = fetchContextNotes();
+    const save = setContextNote("m1", "new note");
+    expect(contextNotes()).toEqual({ m1: "new note" });
 
     fetchedNotes.resolve({ m1: "stale note" });
     await fetch;
-    expect(useKanbanStore.getState().contextNotes).toEqual({ m1: "new note" });
+    expect(contextNotes()).toEqual({ m1: "new note" });
 
     savedNote.resolve({ m1: "new note" });
     await save;
-    expect(useKanbanStore.getState().contextNotes).toEqual({ m1: "new note" });
+    expect(contextNotes()).toEqual({ m1: "new note" });
   });
 
   it("stores context notes through backend storage only", async () => {
     mockedInvoke.mockResolvedValueOnce({ m1: "follow up on the selected paragraph" });
 
-    await useKanbanStore.getState().setContextNote("m1", "follow up on the selected paragraph");
+    await setContextNote("m1", "follow up on the selected paragraph");
 
-    expect(useKanbanStore.getState().contextNotes.m1).toBe("follow up on the selected paragraph");
+    expect(contextNotes()?.m1).toBe("follow up on the selected paragraph");
     expect(mockedInvoke).toHaveBeenCalledWith("set_kanban_context_note", {
       messageId: "m1",
       note: "follow up on the selected paragraph",
@@ -107,17 +129,17 @@ describe("KanbanStore", () => {
       .mockReturnValueOnce(first.promise)
       .mockReturnValueOnce(second.promise);
 
-    const firstUpdate = useKanbanStore.getState().setContextNote("m1", "one");
-    const secondUpdate = useKanbanStore.getState().setContextNote("m2", "two");
-    expect(useKanbanStore.getState().contextNotes).toEqual({ m1: "one", m2: "two" });
+    const firstUpdate = setContextNote("m1", "one");
+    const secondUpdate = setContextNote("m2", "two");
+    expect(contextNotes()).toEqual({ m1: "one", m2: "two" });
 
     second.resolve({ m2: "two" });
     await secondUpdate;
-    expect(useKanbanStore.getState().contextNotes).toEqual({ m1: "one", m2: "two" });
+    expect(contextNotes()).toEqual({ m1: "one", m2: "two" });
 
     first.resolve({ m1: "one" });
     await firstUpdate;
-    expect(useKanbanStore.getState().contextNotes).toEqual({ m1: "one", m2: "two" });
+    expect(contextNotes()).toEqual({ m1: "one", m2: "two" });
   });
 
   it("ignores a stale response for a newer edit of the same context note", async () => {
@@ -127,14 +149,14 @@ describe("KanbanStore", () => {
       .mockReturnValueOnce(first.promise)
       .mockReturnValueOnce(second.promise);
 
-    const firstUpdate = useKanbanStore.getState().setContextNote("m1", "old");
-    const secondUpdate = useKanbanStore.getState().setContextNote("m1", "new");
+    const firstUpdate = setContextNote("m1", "old");
+    const secondUpdate = setContextNote("m1", "new");
     second.resolve({ m1: "new" });
     await secondUpdate;
     first.resolve({ m1: "old" });
     await firstUpdate;
 
-    expect(useKanbanStore.getState().contextNotes).toEqual({ m1: "new" });
+    expect(contextNotes()).toEqual({ m1: "new" });
   });
 
   it("keeps legacy context notes until the backend acknowledges migration", async () => {
@@ -142,7 +164,13 @@ describe("KanbanStore", () => {
     localStorage.setItem("pebble-kanban-context-notes", JSON.stringify({ m1: "legacy note" }));
     const { invoke: isolatedInvoke } = await import("@tauri-apps/api/core");
     const isolatedInvokeMock = vi.mocked(isolatedInvoke);
-    const { useKanbanStore: isolatedStore } = await import("../../src/stores/kanban.store");
+    const isolated = await import("../../src/hooks/queries/useKanbanContextNotesQuery");
+    const { QueryClient: IsolatedQueryClient } = await import("@tanstack/react-query");
+    const isolatedClient = new IsolatedQueryClient();
+    const isolatedFetch = async () => isolatedClient.setQueryData(
+      isolated.kanbanContextNotesQueryKey,
+      await isolated.fetchKanbanContextNotes(isolatedClient),
+    );
 
     expect(localStorage.getItem("pebble-kanban-context-notes"))
       .toBe(JSON.stringify({ m1: "legacy note" }));
@@ -152,12 +180,12 @@ describe("KanbanStore", () => {
       return Promise.resolve(undefined);
     });
 
-    await isolatedStore.getState().fetchContextNotes();
+    await isolatedFetch();
 
     expect(isolatedInvokeMock).toHaveBeenCalledWith("merge_kanban_context_notes", {
       notes: { m1: "legacy note" },
     });
-    expect(isolatedStore.getState().contextNotes).toEqual({ m1: "legacy note" });
+    expect(isolatedClient.getQueryData(isolated.kanbanContextNotesQueryKey)).toEqual({ m1: "legacy note" });
     expect(localStorage.getItem("pebble-kanban-context-notes")).toBeNull();
   });
 
@@ -167,15 +195,30 @@ describe("KanbanStore", () => {
     localStorage.setItem("pebble-kanban-context-notes", storedNotes);
     const { invoke: isolatedInvoke } = await import("@tauri-apps/api/core");
     const isolatedInvokeMock = vi.mocked(isolatedInvoke);
-    const { useKanbanStore: isolatedStore } = await import("../../src/stores/kanban.store");
+    const isolated = await import("../../src/hooks/queries/useKanbanContextNotesQuery");
+    const { QueryClient: IsolatedQueryClient } = await import("@tanstack/react-query");
+    const isolatedClient = new IsolatedQueryClient();
+    const isolatedFetch = async () => isolatedClient.setQueryData(
+      isolated.kanbanContextNotesQueryKey,
+      await isolated.fetchKanbanContextNotes(isolatedClient),
+    );
     isolatedInvokeMock.mockImplementation((command) => {
       if (command === "list_kanban_context_notes") return Promise.resolve({});
       if (command === "merge_kanban_context_notes") return Promise.reject(new Error("write failed"));
       return Promise.resolve(undefined);
     });
 
-    await expect(isolatedStore.getState().fetchContextNotes()).rejects.toThrow("write failed");
+    await expect(isolatedFetch()).rejects.toThrow("write failed");
 
     expect(localStorage.getItem("pebble-kanban-context-notes")).toBe(storedNotes);
+  });
+
+  it("rolls back a failed save to the previous note", async () => {
+    client.setQueryData(kanbanContextNotesQueryKey, { m1: "before" });
+    mockedInvoke.mockRejectedValueOnce(new Error("save failed"));
+
+    await expect(setContextNote("m1", "after")).rejects.toThrow("save failed");
+
+    expect(contextNotes()).toEqual({ m1: "before" });
   });
 });

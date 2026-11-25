@@ -1,10 +1,11 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { moveToKanban, removeFromKanban } from "@/lib/api";
+import { moveToKanban, removeFromKanban, setKanbanContextNote } from "@/lib/api";
 import type { KanbanCard, KanbanColumnType } from "@/lib/api";
 import {
   invalidateKanbanQueries,
   kanbanCardsQueryKey,
 } from "@/hooks/queries/useKanbanCardsQuery";
+import { saveKanbanContextNote } from "@/hooks/queries/useKanbanContextNotesQuery";
 
 interface KanbanMutationContext {
   previous: KanbanCard[] | undefined;
@@ -113,4 +114,17 @@ export async function addKanbanCard(
 ): Promise<void> {
   await moveToKanban(messageId, column);
   await invalidateKanbanQueries(client);
+}
+
+/** Persist a kanban context note (optimistic; see `saveKanbanContextNote`). */
+export function setKanbanContextNoteInCache(client: QueryClient, messageId: string, note: string) {
+  return saveKanbanContextNote(client, messageId, note, setKanbanContextNote);
+}
+
+export function useSetKanbanContextNoteMutation() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ messageId, note }: { messageId: string; note: string }) =>
+      setKanbanContextNoteInCache(client, messageId, note),
+  });
 }
