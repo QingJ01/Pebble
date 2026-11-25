@@ -1,4 +1,3 @@
-
 use super::*;
 use pebble_core::{Account, Folder, FolderRole, FolderType, Message, ProviderType};
 use std::collections::VecDeque;
