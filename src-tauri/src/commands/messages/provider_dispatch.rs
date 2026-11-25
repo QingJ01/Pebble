@@ -567,3 +567,205 @@ pub(crate) async fn apply_remote_or_queue(
     }
     Ok(applied.outcome)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pebble_core::{Account, FolderType};
+    use pebble_store::pending_ops::{FlagsOp, PendingMailOpStatus};
+
+    fn state(provider: ProviderType) -> AppState {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .insert_account(&Account {
+                id: "a".into(),
+                email: "test@example.invalid".into(),
+                display_name: "Test".into(),
+                account_label: None,
+                provider_display_name: None,
+                color: None,
+                provider,
+                created_at: 1,
+                updated_at: 1,
+            })
+            .unwrap();
+        AppState::new(
+            store,
+            pebble_search::TantivySearch::open_in_memory().unwrap(),
+            pebble_crypto::CryptoService::from_key([0; 32]),
+            std::sync::mpsc::channel().0,
+            std::env::temp_dir(),
+        )
+    }
+
+    fn folder(id: &str, remote: &str, role: Option<FolderRole>) -> Folder {
+        Folder {
+            id: id.into(),
+            account_id: "a".into(),
+            remote_id: remote.into(),
+            name: remote.into(),
+            folder_type: FolderType::Folder,
+            is_system: role.is_some(),
+            role,
+            parent_id: None,
+            color: None,
+            sort_order: 0,
+        }
+    }
+
+    fn seed(state: &AppState) -> Message {
+        for f in [
+            folder("inbox", "INBOX", Some(FolderRole::Inbox)),
+            folder("archive", "Archive", Some(FolderRole::Archive)),
+            folder("trash", "Trash", Some(FolderRole::Trash)),
+        ] {
+            state.store.insert_folder(&f).unwrap();
+        }
+        let message: Message = serde_json::from_value(serde_json::json!({
+            "id":"m","account_id":"a","remote_id":"5","message_id_header":"<m@example.invalid>",
+            "in_reply_to":null,"references_header":null,"thread_id":null,"subject":"Test",
+            "snippet":"","from_address":"test@example.invalid","from_name":"Test","to_list":[],
+            "cc_list":[],"bcc_list":[],"body_text":"","body_html_raw":"","has_attachments":false,
+            "is_read":false,"is_starred":false,"is_draft":false,"date":1,"remote_version":null,
+            "is_deleted":false,"deleted_at":null,"created_at":1,"updated_at":1}))
+        .unwrap();
+        state
+            .store
+            .insert_message(&message, &["inbox".into()])
+            .unwrap();
+        message
+    }
+
+    fn flags(is_read: bool) -> MailOp {
+        MailOp::UpdateFlags(FlagsOp {
+            is_read: Some(is_read),
+            folder_remote_id: Some("INBOX".into()),
+            ..FlagsOp::default()
+        })
+    }
+
+    #[tokio::test]
+    async fn offline_session_queues_with_local_commit_and_merges_repeated_flag_changes() {
+        // No stored IMAP credentials: connecting fails like being offline.
+        let state = state(ProviderType::Imap);
+        let message = seed(&state);
+        let session = RemoteSession::open(&state, "a", &ProviderType::Imap).await;
+        assert!(!session.is_connected());
+
+        let first = session.apply(&state, &message, flags(true)).await.unwrap();
+        assert_eq!(first.outcome, RemoteMutationOutcome::QueuedLocalCommit);
+        assert!(first.error.is_some());
+        state
+            .store
+            .update_message_flags("m", Some(true), None)
+            .unwrap();
+        let committed = state.store.get_message("m").unwrap().unwrap();
+        let second = session
+            .apply(&state, &committed, flags(false))
+            .await
+            .unwrap();
+        assert_eq!(second.outcome, RemoteMutationOutcome::QueuedLocalCommit);
+
+        let ops = state.store.list_pending_mail_ops("a").unwrap();
+        assert_eq!(ops.len(), 1, "flag toggles collapse into one op");
+        let envelope = ops[0].envelope().unwrap();
+        assert_eq!(envelope.local_committed, Some(true));
+        // The first commit captured the true pre-change state.
+        assert_eq!(envelope.previous_state.unwrap().is_read, Some(false));
+        let MailOp::UpdateFlags(merged) = envelope.op else {
+            panic!("expected flags");
+        };
+        assert_eq!(merged.is_read, Some(false));
+    }
+
+    #[tokio::test]
+    async fn offline_permanent_delete_waits_for_the_server() {
+        let state = state(ProviderType::Imap);
+        let message = seed(&state);
+        let trash = folder("trash", "Trash", Some(FolderRole::Trash));
+        let result = apply_remote_or_queue(
+            &state,
+            &message,
+            &ProviderType::Imap,
+            delete_op(Some(&trash), None, true),
+            false,
+        )
+        .await;
+        assert!(result.is_err(), "the local copy must not be deleted yet");
+        let ops = state.store.list_pending_mail_ops("a").unwrap();
+        assert_eq!(ops[0].op_type, "delete_permanent");
+        assert_eq!(ops[0].status, PendingMailOpStatus::Failed);
+        assert_eq!(ops[0].envelope().unwrap().local_committed, Some(false));
+    }
+
+    #[tokio::test]
+    async fn archive_then_unarchive_while_offline_cancels_out() {
+        let state = state(ProviderType::Imap);
+        let message = seed(&state);
+        let inbox = folder("inbox", "INBOX", Some(FolderRole::Inbox));
+        let archive = folder("archive", "Archive", Some(FolderRole::Archive));
+        let session = RemoteSession::open(&state, "a", &ProviderType::Imap).await;
+        let archived = session
+            .apply(
+                &state,
+                &message,
+                MailOp::Archive(folder_change(Some(&inbox), Some(&archive))),
+            )
+            .await
+            .unwrap();
+        assert_eq!(archived.outcome, RemoteMutationOutcome::QueuedLocalCommit);
+        let restored = session
+            .apply(
+                &state,
+                &message,
+                MailOp::Unarchive(folder_change(Some(&archive), Some(&inbox))),
+            )
+            .await
+            .unwrap();
+        assert_eq!(restored.outcome, RemoteMutationOutcome::LocalOnly);
+        assert!(state
+            .store
+            .list_active_pending_mail_ops(Some("a"), 10)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn worker_replays_legacy_batch_archive_row_for_local_only_account() {
+        let state = state(ProviderType::Pop3);
+        seed(&state);
+        // Written by the old batch_archive with a plain insert.
+        state
+            .store
+            .insert_pending_mail_op(
+                "a",
+                "m",
+                "archive",
+                r#"{"provider_account_id":"a","remote_id":"5","op":"archive",
+                    "payload":{"archive_folder_id":"archive","archive_folder_remote_id":"Archive"}}"#,
+            )
+            .unwrap();
+        let completed = crate::commands::pending_mail_ops::process_pending_mail_ops(&state, None)
+            .await
+            .unwrap();
+        assert_eq!(completed, 1);
+        assert_eq!(
+            state.store.get_message_folder_ids("m").unwrap(),
+            vec!["archive".to_string()]
+        );
+    }
+
+    #[test]
+    fn local_only_policy_matches_provider_identity_rules() {
+        let inbox = folder("inbox", "INBOX", Some(FolderRole::Inbox));
+        let local = folder("local", "__local_archive__", None);
+        let mut spam = folder("spam", "__local_spam", Some(FolderRole::Spam));
+        assert!(move_is_local_only(&ProviderType::Imap, &inbox, &local));
+        assert!(!move_is_local_only(&ProviderType::Gmail, &inbox, &spam));
+        spam.role = None;
+        assert!(move_is_local_only(&ProviderType::Gmail, &inbox, &spam));
+        assert!(remote_ids_are_folder_scoped(&ProviderType::Imap));
+        assert!(!remote_ids_are_folder_scoped(&ProviderType::Outlook));
+        assert!(archives_without_folder(&ProviderType::Gmail));
+    }
+}
