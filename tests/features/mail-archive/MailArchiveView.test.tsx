@@ -102,6 +102,8 @@ describe("Local mail archive browser", () => {
     fireEvent.change(screen.getByLabelText("Move within this local archive"), { target: { value: "local-other" } });
     await waitFor(() => expect(mocks.updateArchiveMessage).toHaveBeenCalledWith("archive", "message", "local-other", false, false));
     await waitFor(() => expect(screen.queryByRole("article")).toBeNull());
+    const browsePanel = screen.getByRole("group", { name: "Browse local archive" }) as HTMLFieldSetElement;
+    await waitFor(() => expect(browsePanel.disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: /Subject A — sender@example.com/ }));
     await screen.findByRole("article", { name: "Archived message" });
     fireEvent.click(screen.getByRole("button", { name: "Delete archived message" }));
