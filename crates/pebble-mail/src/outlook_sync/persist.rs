@@ -188,12 +188,16 @@ impl OutlookSyncWorker {
                 if let (Some(mid), Some(tid)) = (&updated.message_id_header, &updated.thread_id) {
                     thread_mappings.insert(mid.clone(), tid.clone());
                 }
+                // Update of an already-stored message: re-index only; never
+                // surface as new mail or re-run user rules on it.
+                let updated_id = updated.id.clone();
                 self.base.emit_message(StoredMessage {
                     message: updated,
-                    folder_ids,
+                    folder_ids: folder_ids.clone(),
                     notify: false,
-                    reconciliation: false,
+                    reconciliation: true,
                 });
+                self.base.emit_list_refresh(folder_ids, vec![updated_id]);
                 continue;
             }
 

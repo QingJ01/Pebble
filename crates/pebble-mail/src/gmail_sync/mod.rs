@@ -20,7 +20,7 @@ use crate::realtime_policy::{RealtimePollPolicy, RealtimeRuntimeState, SyncTrigg
 use crate::sync::{
     blocking_store, message_ids_with_pending_local_changes, recv_sync_trigger,
     remote_message_requires_fetch, store_new_message_with_attachments_atomically, StoredMessage,
-    SyncConfig, SyncError, SyncWorkerBase,
+    SyncConfig, SyncError, SyncWorkerBase, ThreadRefresh,
 };
 use crate::thread::{
     assign_thread_ids, compute_thread_id, provider_thread_id, GMAIL_THREAD_NAMESPACE,
@@ -337,6 +337,11 @@ impl GmailSyncWorker {
         self
     }
 
+    pub fn with_thread_refresh_tx(mut self, tx: mpsc::UnboundedSender<ThreadRefresh>) -> Self {
+        self.base.thread_refresh_tx = Some(tx);
+        self
+    }
+
     pub fn with_progress_tx(
         mut self,
         tx: mpsc::UnboundedSender<crate::sync::SyncProgress>,
@@ -371,12 +376,17 @@ impl GmailSyncWorker {
             .store
             .get_message_folder_ids(message_id)
             .unwrap_or_default();
+        // A refresh of an already-stored message (flags/labels changed on the
+        // server): re-index it, but never surface it as new mail or run user
+        // rules again — that would fight the user's own moves.
         let _ = tx.send(StoredMessage {
             message,
-            folder_ids,
+            folder_ids: folder_ids.clone(),
             notify: false,
-            reconciliation: false,
+            reconciliation: true,
         });
+        self.base
+            .emit_list_refresh(folder_ids, vec![message_id.to_string()]);
     }
 
     async fn store_fetched_message(

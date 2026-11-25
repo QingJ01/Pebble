@@ -21,7 +21,7 @@ use crate::sync::{
     blocking_store, cleanup_staged_attachment_files, message_ids_with_pending_local_changes,
     recv_sync_trigger, stage_message_attachments_async,
     store_new_message_with_attachments_atomically, StoredMessage, SyncConfig, SyncError,
-    SyncWorkerBase,
+    SyncWorkerBase, ThreadRefresh,
 };
 use crate::thread::{compute_thread_id, provider_thread_id, OUTLOOK_THREAD_NAMESPACE};
 
@@ -73,6 +73,11 @@ impl OutlookSyncWorker {
 
     pub fn with_message_tx(mut self, tx: mpsc::UnboundedSender<StoredMessage>) -> Self {
         self.base.message_tx = Some(tx);
+        self
+    }
+
+    pub fn with_thread_refresh_tx(mut self, tx: mpsc::UnboundedSender<ThreadRefresh>) -> Self {
+        self.base.thread_refresh_tx = Some(tx);
         self
     }
 

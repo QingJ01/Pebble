@@ -252,6 +252,23 @@ impl SyncWorkerBase {
         }
     }
 
+    /// Ask the UI to refresh the lists of `folder_ids` (all folders when
+    /// empty) after already-stored messages changed. Unlike a non-reconciliation
+    /// [`StoredMessage`] this never notifies or re-runs user rules.
+    pub(crate) fn emit_list_refresh(&self, folder_ids: Vec<String>, message_ids: Vec<String>) {
+        let Some(tx) = &self.thread_refresh_tx else {
+            return;
+        };
+        if message_ids.is_empty() {
+            return;
+        }
+        let _ = tx.send(ThreadRefresh {
+            account_id: self.account_id.clone(),
+            folder_ids,
+            message_ids,
+        });
+    }
+
     /// Announce messages whose thread id changed so the UI's thread lists
     /// for the affected folders refresh.
     pub(crate) async fn emit_thread_refresh(&self, message_ids: Vec<String>) {

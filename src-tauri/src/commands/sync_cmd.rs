@@ -613,6 +613,7 @@ fn build_sync_task(
                 )
                 .with_error_tx(error_tx)
                 .with_message_tx(message_tx)
+                .with_thread_refresh_tx(spawn_thread_refresh_forwarder(&app_for_progress))
                 .with_progress_tx(progress_tx)
                 .with_token_refresher(refresher, expires_at);
                 worker.run(config, Some(trigger_rx)).await;
@@ -682,6 +683,7 @@ fn build_sync_task(
                 )
                 .with_error_tx(error_tx)
                 .with_message_tx(message_tx)
+                .with_thread_refresh_tx(spawn_thread_refresh_forwarder(&app_for_progress))
                 .with_progress_tx(progress_tx)
                 .with_token_refresher(refresher, expires_at);
                 worker.run(config, stop_rx, Some(trigger_rx)).await;
