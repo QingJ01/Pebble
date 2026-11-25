@@ -318,6 +318,7 @@ impl GmailSyncWorker {
                 message_tx: None,
                 runtime_status_tx: None,
                 progress_tx: None,
+                thread_refresh_tx: None,
             },
             provider,
             stop_rx,

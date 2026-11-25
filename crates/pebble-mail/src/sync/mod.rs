@@ -173,6 +173,9 @@ fn should_notify_imap_startup_fetch(since_uid: Option<u32>) -> bool {
     since_uid.is_some()
 }
 
+/// Bump to re-run [`SyncWorkerBase::rethread_legacy_threads_once`].
+const RETHREAD_VERSION: u32 = 1;
+
 /// A newly stored message along with the folder IDs it belongs to.
 /// Emitted via `message_tx` so callers (e.g. the search indexer) can react.
 #[derive(Debug, Clone)]
@@ -183,6 +186,17 @@ pub struct StoredMessage {
     /// Reconciliation updates refresh search only. They must not be surfaced
     /// as new mail or run user rules again.
     pub reconciliation: bool,
+}
+
+/// Stored messages of an account moved to another thread. Listeners refresh
+/// the affected folders' lists (src-tauri emits a `mail:new`-shaped event);
+/// unlike [`StoredMessage`] this never notifies or re-runs user rules.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadRefresh {
+    pub account_id: String,
+    /// Union of the folders containing the moved messages.
+    pub folder_ids: Vec<String>,
+    pub message_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -214,6 +228,7 @@ pub(crate) struct SyncWorkerBase {
     pub(crate) message_tx: Option<mpsc::UnboundedSender<StoredMessage>>,
     pub(crate) runtime_status_tx: Option<mpsc::UnboundedSender<SyncRuntimeStatus>>,
     pub(crate) progress_tx: Option<mpsc::UnboundedSender<SyncProgress>>,
+    pub(crate) thread_refresh_tx: Option<mpsc::UnboundedSender<ThreadRefresh>>,
 }
 
 impl SyncWorkerBase {
@@ -232,6 +247,87 @@ impl SyncWorkerBase {
     pub(crate) fn emit_message(&self, message: StoredMessage) {
         if let Some(tx) = &self.message_tx {
             let _ = tx.send(message);
+        }
+    }
+
+    /// Announce messages whose thread id changed so the UI's thread lists
+    /// for the affected folders refresh.
+    pub(crate) async fn emit_thread_refresh(&self, message_ids: Vec<String>) {
+        let Some(tx) = &self.thread_refresh_tx else {
+            return;
+        };
+        if message_ids.is_empty() {
+            return;
+        }
+        let ids = message_ids.clone();
+        let folders = blocking_store(&self.store, move |store| {
+            store.get_message_folder_ids_batch(&ids)
+        })
+        .await;
+        let mut folder_ids: Vec<String> = match folders {
+            Ok(map) => map.into_values().flatten().collect(),
+            Err(error) => {
+                // An empty folder list makes listeners refresh every folder.
+                warn!("Failed to load folders of re-threaded messages: {error}");
+                Vec::new()
+            }
+        };
+        folder_ids.sort();
+        folder_ids.dedup();
+        let _ = tx.send(ThreadRefresh {
+            account_id: self.account_id.clone(),
+            folder_ids,
+            message_ids,
+        });
+    }
+
+    /// One-time, account-scoped re-merge of conversations stored before the
+    /// live alias merge existed (IMAP/POP3). Tracked in the account's
+    /// sync_state so it runs once; a failure retries on the next start.
+    pub(crate) async fn rethread_legacy_threads_once(&self) {
+        let account_id = self.account_id.clone();
+        let done = blocking_store(&self.store, move |store| {
+            Ok(store
+                .get_sync_state(&account_id)?
+                .is_some_and(|state| state.rethread_version >= RETHREAD_VERSION))
+        })
+        .await;
+        match done {
+            Ok(true) => return,
+            Ok(false) => {}
+            Err(error) => {
+                warn!(
+                    "Failed to read re-thread state for {}: {error}",
+                    self.account_id
+                );
+                return;
+            }
+        }
+        match crate::thread::rethread_account(&self.store, &self.account_id).await {
+            Ok(moved) => {
+                if !moved.is_empty() {
+                    info!(
+                        "Re-threaded {} legacy messages for account {}",
+                        moved.len(),
+                        self.account_id
+                    );
+                }
+                self.emit_thread_refresh(moved).await;
+                let account_id = self.account_id.clone();
+                if let Err(error) = blocking_store(&self.store, move |store| {
+                    store.update_sync_state(&account_id, |state| {
+                        state.rethread_version = RETHREAD_VERSION;
+                    })
+                })
+                .await
+                {
+                    warn!(
+                        "Failed to record re-thread pass for {}: {error}",
+                        self.account_id
+                    );
+                }
+            }
+            Err(error) => warn!("Re-thread pass failed for {}: {error}", self.account_id),
         }
     }
 
@@ -287,6 +383,7 @@ impl SyncWorker {
                 message_tx: None,
                 runtime_status_tx: None,
                 progress_tx: None,
+                thread_refresh_tx: None,
             },
             provider,
             idle_provider,
@@ -313,6 +410,12 @@ impl SyncWorker {
 
     pub fn with_progress_tx(mut self, tx: mpsc::UnboundedSender<SyncProgress>) -> Self {
         self.base.progress_tx = Some(tx);
+        self
+    }
+
+    /// Receive a [`ThreadRefresh`] whenever stored messages change thread.
+    pub fn with_thread_refresh_tx(mut self, tx: mpsc::UnboundedSender<ThreadRefresh>) -> Self {
+        self.base.thread_refresh_tx = Some(tx);
         self
     }
 }

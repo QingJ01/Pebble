@@ -643,11 +643,15 @@ impl SyncWorker {
         }
 
         match merge_thread_aliases(&self.base.store, &self.base.account_id, thread_merges).await {
-            Ok(0) => {}
-            Ok(count) => debug!(
-                "Re-parented {} messages into their conversations in {}",
-                count, folder.name
-            ),
+            Ok(moved) if moved.is_empty() => {}
+            Ok(moved) => {
+                debug!(
+                    "Re-parented {} messages into their conversations in {}",
+                    moved.len(),
+                    folder.name
+                );
+                self.base.emit_thread_refresh(moved).await;
+            }
             Err(e) => warn!("Failed to merge IMAP threads in {}: {}", folder.name, e),
         }
 

@@ -512,6 +512,31 @@ impl RealtimePreferenceStartSummary {
 /// Extracted so that any `?` propagation (token decode, config parse, etc.)
 /// returns `Err` to the caller, which can then remove the placeholder entry
 /// from `sync_handles` before propagating the error.
+/// Forward re-threading notices as `mail:new`-shaped events so thread lists
+/// of the affected folders refresh (no notification, no rules).
+fn spawn_thread_refresh_forwarder(
+    app: &tauri::AppHandle,
+) -> mpsc::UnboundedSender<pebble_mail::ThreadRefresh> {
+    let (tx, mut rx) = mpsc::unbounded_channel::<pebble_mail::ThreadRefresh>();
+    let app = app.clone();
+    tokio::spawn(async move {
+        while let Some(refresh) = rx.recv().await {
+            let _ = app.emit(events::MAIL_NEW, thread_refresh_event_payload(&refresh));
+        }
+    });
+    tx
+}
+
+pub(crate) fn thread_refresh_event_payload(
+    refresh: &pebble_mail::ThreadRefresh,
+) -> serde_json::Value {
+    serde_json::json!({
+        "account_id": refresh.account_id,
+        "folder_ids": refresh.folder_ids,
+        "rethreaded_message_ids": refresh.message_ids,
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_sync_task(
     state: &AppState,
@@ -723,7 +748,8 @@ fn build_sync_task(
                 )
                 .with_error_tx(error_tx)
                 .with_message_tx(message_tx)
-                .with_progress_tx(progress_tx);
+                .with_progress_tx(progress_tx)
+                .with_thread_refresh_tx(spawn_thread_refresh_forwarder(&app_for_progress));
                 worker.run(config, Some(trigger_rx)).await;
                 let _ = app_for_progress.emit(
                     events::MAIL_SYNC_COMPLETE,
@@ -810,7 +836,8 @@ fn build_sync_task(
                 .with_error_tx(error_tx)
                 .with_message_tx(message_tx)
                 .with_progress_tx(progress_tx)
-                .with_runtime_status_tx(runtime_status_tx);
+                .with_runtime_status_tx(runtime_status_tx)
+                .with_thread_refresh_tx(spawn_thread_refresh_forwarder(&app_for_progress));
                 worker.run(config, Some(trigger_rx)).await;
                 let _ = app_for_progress.emit(
                     events::MAIL_SYNC_COMPLETE,
@@ -985,6 +1012,20 @@ impl TriggerCoalescer {
 #[cfg(test)]
 mod trigger_tests {
     use super::*;
+
+    #[test]
+    fn thread_refresh_payload_matches_the_mail_new_refresh_contract() {
+        let payload = thread_refresh_event_payload(&pebble_mail::ThreadRefresh {
+            account_id: "account-1".to_string(),
+            folder_ids: vec!["inbox".to_string()],
+            message_ids: vec!["m1".to_string()],
+        });
+        // StatusBar's mail:new coalescer keys refreshes on these two fields.
+        assert_eq!(payload["account_id"], "account-1");
+        assert_eq!(payload["folder_ids"], serde_json::json!(["inbox"]));
+        // No subject/from: it must never look like a new message.
+        assert!(payload.get("subject").is_none());
+    }
 
     #[test]
     fn coalesces_duplicate_realtime_triggers_for_same_account() {

@@ -142,6 +142,7 @@ impl SyncWorker {
                 false
             }
         };
+        self.base.rethread_legacy_threads_once().await;
 
         if config.manual_only() {
             info!("Manual sync completed for account {}", self.base.account_id);

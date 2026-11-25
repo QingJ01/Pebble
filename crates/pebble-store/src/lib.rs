@@ -18,6 +18,7 @@ pub mod search_pending;
 pub mod secure_user_data;
 pub mod snooze;
 pub mod sync_failures;
+pub mod threads;
 pub mod translate_config;
 pub mod trusted_senders;
 pub mod vcard;
