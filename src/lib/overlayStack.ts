@@ -13,8 +13,9 @@
  *   event is preventDefault()+stopPropagation()'d, so global shortcuts and
  *   lower overlays never see it. Exception: while focus is inside an expanded
  *   combobox (aria-expanded="true"), Escape is left to that widget first.
- * - Tab / Shift+Tab → if the top layer traps focus (default: modal layers) and
- *   provides `getContainer`, focus cycles within that container.
+ * - Tab / Shift+Tab → if the top layer traps focus (default: modal layers, and
+ *   any layer opened above a modal one) and provides `getContainer`, focus
+ *   cycles within that container.
  * Layers without `onEscape` still count for isTopOverlay()/hasOverlay(): use
  * that from your own key handlers (`if (!layer.isTop()) return;`).
  */
@@ -63,7 +64,10 @@ function handleKeyDown(event: KeyboardEvent) {
   }
 
   if (event.key === "Tab") {
-    const trap = top.trapFocus ?? top.modal ?? false;
+    // A non-modal layer (popover, menu) above a modal dialog traps too: it is
+    // portaled outside the dialog, so leaving it with Tab would escape the modal.
+    const aboveModal = layers.slice(0, -1).some((layer) => layer.modal);
+    const trap = (top.trapFocus ?? top.modal ?? false) || aboveModal;
     const container = trap ? top.getContainer?.() : null;
     if (!container) return;
     const focusable = focusableIn(container);

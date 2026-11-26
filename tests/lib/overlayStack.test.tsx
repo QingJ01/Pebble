@@ -55,6 +55,26 @@ describe("overlay stack", () => {
     expect(document.activeElement).toBe(getByText("m-b"));
   });
 
+  it("keeps Tab inside a popover opened above a modal dialog", () => {
+    const { getByText } = render(
+      <>
+        <Layer name="dialog" modal onEscape={() => {}} />
+        <Layer name="popover" onEscape={() => {}} />
+      </>,
+    );
+    getByText("popover-b").focus();
+    fireEvent.keyDown(document.activeElement!, { key: "Tab" });
+    expect(document.activeElement).toBe(getByText("popover-a"));
+  });
+
+  it("leaves Tab alone for a popover with no modal below it", () => {
+    const { getByText } = render(<Layer name="popover" onEscape={() => {}} />);
+    getByText("popover-b").focus();
+    const event = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    document.activeElement!.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+  });
+
   it("tracks modal vs non-modal layers", () => {
     const popover = pushOverlay({ modal: false });
     expect(hasOverlay()).toBe(true);

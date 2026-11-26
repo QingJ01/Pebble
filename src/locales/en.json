@@ -1014,7 +1014,11 @@
     "deleteTitle_one": "Delete {{count}} message?",
     "deleteTitle_other": "Delete {{count}} messages?",
     "deleteConfirm_one": "Move {{count}} message to Trash? You can restore it from Trash.",
-    "deleteConfirm_other": "Move {{count}} messages to Trash? You can restore them from Trash."
+    "deleteConfirm_other": "Move {{count}} messages to Trash? You can restore them from Trash.",
+    "archivePartialFailure_one": "{{count}} message could not be archived",
+    "archivePartialFailure_other": "{{count}} messages could not be archived",
+    "deleteMixedSuccess_one": "{{count}} message deleted: local drafts permanently, the rest moved to Trash",
+    "deleteMixedSuccess_other": "{{count}} messages deleted: local drafts permanently, the rest moved to Trash"
   },
   "messageDetail": {
     "body": "Message body",

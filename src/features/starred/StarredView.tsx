@@ -207,6 +207,7 @@ export default function StarredView() {
           <MessageDetail
             messageId={scopedSelectedId}
             onBack={() => setSelectedId(null)}
+            onReopen={(id) => setSelectedId((current) => current ?? id)}
           />
         </div>
       )}

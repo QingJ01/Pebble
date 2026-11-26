@@ -993,7 +993,9 @@
     "deletePermanentSuccess": "已永久删除 {{count}} 封邮件",
     "deletePermanentConfirm": "永久删除 {{count}} 封邮件？此操作无法撤销。",
     "partialFailure": "{{count}} 封邮件未能移动",
-    "toolbar": "批量操作"
+    "toolbar": "批量操作",
+    "archivePartialFailure": "{{count}} 封邮件未能归档",
+    "deleteMixedSuccess": "已删除 {{count}} 封邮件：本地草稿已永久删除，其余已移至废纸篓"
   },
   "messageDetail": {
     "body": "邮件正文",

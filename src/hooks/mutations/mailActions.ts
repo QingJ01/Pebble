@@ -68,6 +68,8 @@ export interface MailActionPlan {
   undoable: boolean;
   /** At least one message is deleted permanently (Trash / local-only draft). */
   permanent: boolean;
+  /** Some messages are deleted permanently and the rest go to Trash. */
+  mixedPermanent?: boolean;
   /** Ask before acting: not undoable trash. */
   needsConfirm: boolean;
 }
@@ -166,9 +168,12 @@ export async function planMailAction(
 
   let undoable = messages.length > 0 && messages.every((m) => origins.has(m.id));
   let permanent = false;
+  let mixedPermanent = false;
 
   if (kind === "trash") {
-    permanent = messages.some((m) => isLocalOnlyDraft(m) || sourceRole(m) === "trash");
+    const isPermanent = (m: MailActionTarget) => isLocalOnlyDraft(m) || sourceRole(m) === "trash";
+    permanent = messages.some(isPermanent);
+    mixedPermanent = permanent && !messages.every(isPermanent);
     const everyAccountHasTrash = accountIds.every((id) => Boolean(folderByRole(foldersByAccount.get(id), "trash")));
     // Batch trash goes through move_mail_messages, which refuses drafts.
     const draftInBatch = messages.length > 1 && messages.some((m) => m.is_draft);
@@ -191,6 +196,7 @@ export async function planMailAction(
     spamFolderId: options.spamFolderId,
     undoable,
     permanent,
+    mixedPermanent,
     needsConfirm: kind === "trash" && !undoable,
   };
 }
@@ -250,6 +256,9 @@ function successMessage(plan: MailActionPlan, count: number, unarchived: boolean
         ? t("messageActions.archiveSuccess", "Message archived")
         : t("batch.archiveSuccess", "{{count}} messages archived", { count });
     case "trash":
+      if (plan.mixedPermanent) {
+        return t("batch.deleteMixedSuccess", "{{count}} messages deleted: local drafts permanently, the rest moved to Trash", { count });
+      }
       if (plan.permanent) {
         return single
           ? t("messageActions.deletePermanentSuccess", "Message permanently deleted")
@@ -275,6 +284,27 @@ export interface ExecuteOptions {
   onRemoved?: (ids: string[]) => void;
   /** Called when the action failed and the lists were restored. */
   onFailed?: (ids: string[]) => void;
+}
+
+/** Ids of the plan's messages that are now in their account's `role` folder. */
+async function idsInRoleFolder(plan: MailActionPlan, role: Folder["role"]): Promise<string[]> {
+  const found: string[] = [];
+  try {
+    for (const [accountId, group] of groupBy(plan.messages, (m) => m.account_id)) {
+      const target = folderByRole(plan.foldersByAccount.get(accountId), role)?.id;
+      if (!target) continue;
+      for (const ids of chunk(group.map((m) => m.id), MAX_CONTEXT_IDS)) {
+        const context = await getMailMoveContext(accountId, ids);
+        for (const id of ids) {
+          if (context?.folder_ids_by_message?.[id]?.includes(target)) found.push(id);
+        }
+      }
+    }
+  } catch {
+    // Unknown state: offer no undo rather than moving the wrong messages.
+    return [];
+  }
+  return found;
 }
 
 export async function executeMailAction(
@@ -310,6 +340,17 @@ export async function executeMailAction(
         unarchived = result === "unarchived";
       } else {
         count = await batchArchive(ids);
+        if (count === 0) throw new Error("No messages were archived");
+        if (count < ids.length) {
+          // batch_archive only reports how many succeeded; look up which ones
+          // are now in Archive so Undo moves back only those.
+          undoIds = plan.undoable ? await idsInRoleFolder(plan, "archive") : [];
+          invalidateMailViews(client);
+          useToastStore.getState().addToast({
+            type: "warning",
+            message: t("batch.archivePartialFailure", "{{count}} messages could not be archived", { count: ids.length - count }),
+          });
+        }
       }
       currentFolder = (accountId) => {
         const folders = plan.foldersByAccount.get(accountId);

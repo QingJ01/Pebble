@@ -31,6 +31,7 @@ import { useFoldersForAccountsQuery } from "../hooks/queries";
 import { useFolderUnreadCountsForAccounts } from "../hooks/queries/useFolderUnreadCounts";
 import {
   ALL_ACCOUNTS_SELECT_VALUE,
+  allAccountsFolderId,
   buildAllAccountsFolders,
   sortFoldersForSidebar,
   unreadCountForFolder,
@@ -227,15 +228,26 @@ export default function SidebarClassic({ collapsed: sidebarCollapsed }: { collap
       onSelect: () => switchAccount(account.id),
     }));
     // "Overview" is the classic sidebar's all-accounts mailbox.
+    const overviewFolderId = allAccountsFolderId("inbox");
     const overviewButton = accounts.length > 1 && (
       <SidebarButton
         icon={<Layers size={16} />}
         label={t("sidebar.overview", "Overview")}
-        isActive={!activeAccountId && activeView === "inbox"}
+        isActive={!activeAccountId && activeView === "inbox" && activeFolderId === overviewFolderId}
         collapsed
         onClick={() => {
-          if (activeAccountId) switchAccount(null);
-          setActiveView("inbox");
+          // Overview is always the all-accounts inbox, even when another
+          // all-accounts folder (Sent, Archive…) is open.
+          const go = () => {
+            setActiveAccountId(null);
+            setActiveFolderId(overviewFolderId);
+            setActiveView("inbox");
+          };
+          if (isComposeDirty()) {
+            useComposeStore.setState({ showComposeLeaveConfirm: true, pendingView: "inbox", pendingNavigation: go });
+            return;
+          }
+          go();
         }}
       />
     );

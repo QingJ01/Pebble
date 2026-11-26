@@ -46,6 +46,8 @@ function useLatched<T>(value: T | null): { value: T | null; open: boolean } {
 interface Props {
   messageId: string;
   onBack: () => void;
+  /** Reopen a message after an archive/delete from the toolbar failed. */
+  onReopen?: (messageId: string) => void;
   folderRole?: string | null;
 }
 
@@ -59,7 +61,7 @@ function formatFullDate(timestamp: number, language?: string): string {
   }, language);
 }
 
-export default function MessageDetail({ messageId, onBack, folderRole }: Props) {
+export default function MessageDetail({ messageId, onBack, onReopen, folderRole }: Props) {
   const { t, i18n } = useTranslation();
   const [privacyOverride, setPrivacyOverride] = useState<{
     messageId: string;
@@ -243,6 +245,7 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
           message={message}
           folderRole={folderRole}
           onBack={onBack}
+          onReopen={onReopen}
           onMessageUpdate={setMessage}
         />
         <div className="reader-toolbar__end">

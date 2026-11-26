@@ -27,6 +27,8 @@ interface Props {
   message: Message;
   folderRole?: string | null;
   onBack: () => void;
+  /** Reopen this message after an archive/delete failed (the list was rolled back). */
+  onReopen?: (messageId: string) => void;
   onMessageUpdate: (msg: Message) => void;
 }
 
@@ -62,6 +64,7 @@ export default function MessageActionToolbar({
   message,
   folderRole,
   onBack,
+  onReopen,
   onMessageUpdate,
 }: Props) {
   const { t } = useTranslation();
@@ -106,6 +109,7 @@ export default function MessageActionToolbar({
       await runMailAction(queryClient, kind, [message], {
         confirm: (plan) => useConfirmStore.getState().confirm({ ...trashConfirmCopy(plan), destructive: true }),
         onRemoved: () => onBack(),
+        onFailed: () => onReopen?.(message.id),
       });
     } finally {
       setBusy(false);

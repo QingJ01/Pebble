@@ -226,6 +226,43 @@ describe("mail actions with undo", () => {
       expect(mocks.moveMailMessages).toHaveBeenCalledWith("acc", ["m1", "m2"], "archive", "inbox"));
   });
 
+  it("after a partly failed batch archive, undoes only the archived messages and warns", async () => {
+    let archived = false;
+    mocks.getMailMoveContext.mockImplementation(async (_account: string, ids: string[]) => ({
+      provider: "imap",
+      folder_ids_by_message: Object.fromEntries(ids.map((id) => [id, [archived && id === "m1" ? "archive" : "inbox"]])),
+    }));
+    mocks.batchArchive.mockImplementation(async () => { archived = true; return 1; });
+
+    await runMailAction(client, "archive", [message("m1"), message("m2")]);
+
+    const toasts = useToastStore.getState().toasts;
+    expect(toasts.some((t) => t.type === "warning" && t.message.includes("could not be archived"))).toBe(true);
+    toasts.find((t) => t.action)!.action!.onClick();
+    await vi.waitFor(() => expect(mocks.moveToFolder).toHaveBeenCalledWith("m1", "inbox"));
+    expect(mocks.moveToFolder).not.toHaveBeenCalledWith("m2", expect.anything());
+    expect(mocks.moveMailMessages).not.toHaveBeenCalled();
+  });
+
+  it("treats a batch archive where nothing succeeded as a failure", async () => {
+    seedList(client, [message("m1"), message("m2")]);
+    mocks.batchArchive.mockResolvedValueOnce(0);
+
+    const result = await runMailAction(client, "archive", [message("m1"), message("m2")]);
+
+    expect(result.ok).toBe(false);
+    expect(listIds(client)).toEqual(["m1", "m2"]);
+  });
+
+  it("says which part of a mixed draft + message delete was permanent", async () => {
+    mocks.batchDelete.mockResolvedValue(2);
+    const draft = message("d1", { is_draft: true, remote_id: "" });
+
+    await runMailAction(client, "trash", [draft, message("m1")], { confirm: vi.fn().mockResolvedValue(true) });
+
+    expect(lastToast().message).toContain("local drafts permanently, the rest moved to Trash");
+  });
+
   it("marks spam with undo back to the original folder", async () => {
     await runMailAction(client, "spam", [message("m1")], { spamFolderId: "spam" });
 

@@ -160,6 +160,29 @@ describe("MessageActionToolbar", () => {
     expect(onBack).toHaveBeenCalled();
   });
 
+  it("reopens the message when the archive fails and the list is rolled back", async () => {
+    mocks.runMailAction.mockImplementationOnce(async (_client, _kind, _messages, options) => {
+      options?.onRemoved?.(["message-1"]);
+      options?.onFailed?.(["message-1"]);
+      return { ok: false, count: 0 };
+    });
+    const onBack = vi.fn();
+    const onReopen = vi.fn();
+    render(
+      <MessageActionToolbar
+        message={makeMessage()}
+        onBack={onBack}
+        onReopen={onReopen}
+        onMessageUpdate={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+
+    await waitFor(() => expect(onReopen).toHaveBeenCalledWith("message-1"));
+    expect(onBack).toHaveBeenCalled();
+  });
+
   it("moves to trash without its own confirm dialog; confirmation is left to non-undoable plans", async () => {
     render(
       <MessageActionToolbar

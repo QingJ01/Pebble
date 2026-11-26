@@ -249,6 +249,10 @@ export default function InboxView() {
               <MessageDetail
                 messageId={selectedMessageId}
                 onBack={() => setSelectedMessage(null)}
+                onReopen={(id) => {
+                  // Only if the user hasn't opened something else meanwhile.
+                  if (useMailStore.getState().selectedMessageId === null) setSelectedMessage(id);
+                }}
                 folderRole={activeFolderRole}
               />
             ) : null}

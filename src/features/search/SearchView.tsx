@@ -272,6 +272,7 @@ export default function SearchView() {
             <MessageDetail
               messageId={selectedId}
               onBack={() => setSelectedId(null)}
+              onReopen={(id) => setSelectedId((current) => current ?? id)}
             />
           </div>
         )}

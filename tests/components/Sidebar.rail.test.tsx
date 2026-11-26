@@ -214,4 +214,16 @@ describe("Collapsed sidebar rail", () => {
       expect(next).toEqual(["Switch account (current: bob@example.com)", "Inbox", "Sent", "More folders"]);
     });
   });
+  it("classic Overview always opens the all-accounts inbox", () => {
+    useUIStore.setState({ sidebarStyle: "classic" });
+    useMailStore.setState({ activeAccountId: null, activeFolderId: "all:sent" });
+    render(<Sidebar />);
+
+    const overview = screen.getByRole("button", { name: "Overview" });
+    expect(overview.getAttribute("aria-current")).toBeNull();
+    fireEvent.click(overview);
+
+    expect(useMailStore.getState().activeAccountId).toBeNull();
+    expect(useMailStore.getState().activeFolderId).toBe("all:inbox");
+  });
 });
