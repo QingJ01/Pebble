@@ -367,7 +367,7 @@ html, body, #root {
 }
 
 .app-shell--with-background .settings-panel-scroll {
-  background-color: color-mix(in srgb, var(--color-main-bg) 92%, transparent);
+  background-color: color-mix(in srgb, var(--color-canvas) 92%, transparent);
   border-radius: 0;
 }
 
