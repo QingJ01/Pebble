@@ -52,8 +52,8 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
           overflow: hidden;
           font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
             "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif);
-          font-size: 14px;
-          line-height: 1.6;
+          font-size: var(--font-md, 14px);
+          line-height: var(--leading-relaxed, 1.65);
           color: var(--color-text-primary);
           background: transparent;
           word-break: break-word;
@@ -98,7 +98,7 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
         }
         pre::-webkit-scrollbar-thumb {
           border: 3px solid transparent;
-          border-radius: 999px;
+          border-radius: var(--radius-full, 999px);
           background-clip: content-box;
           background-color: var(--color-scrollbar-thumb);
         }
@@ -128,14 +128,14 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
         body, div { word-wrap: break-word; overflow-wrap: break-word; }
         .blocked-image {
           display: inline-block;
-          padding: 6px 12px;
-          font-size: 12px;
+          padding: var(--space-1) var(--space-3);
+          font-size: var(--font-sm, 12px);
           /* Derived from the surrounding text color so it reads on both the
              light HTML-mail card and themed plain-text content. */
           color: color-mix(in srgb, currentColor 62%, transparent);
           background: color-mix(in srgb, currentColor 6%, transparent);
           border: 1px dashed color-mix(in srgb, currentColor 32%, transparent);
-          border-radius: 4px;
+          border-radius: var(--radius-sm, 4px);
           text-align: center;
           max-width: 100%;
           box-sizing: border-box;

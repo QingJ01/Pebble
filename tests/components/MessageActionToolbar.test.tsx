@@ -241,14 +241,14 @@ describe("MessageActionToolbar", () => {
     let rectSpy: ReturnType<typeof vi.spyOn>;
 
     beforeEach(() => {
-      // A 320px-wide pane: too narrow for every action in one row.
+      // A 240px-wide toolbar: too narrow for every action in one row.
       rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
-        { width: 320, height: 40, top: 0, left: 0, right: 320, bottom: 40, x: 0, y: 0, toJSON: () => ({}) } as DOMRect,
+        { width: 240, height: 40, top: 0, left: 0, right: 240, bottom: 40, x: 0, y: 0, toJSON: () => ({}) } as DOMRect,
       );
       globalThis.ResizeObserver = class {
         constructor(private callback: ResizeObserverCallback) {}
         observe(target: Element) {
-          this.callback([{ target, contentRect: { width: 320 } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+          this.callback([{ target, contentRect: { width: 240 } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
         }
         unobserve() {}
         disconnect() {}

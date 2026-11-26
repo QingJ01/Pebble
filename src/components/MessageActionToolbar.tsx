@@ -32,10 +32,10 @@ interface Props {
 
 type KanbanColumn = "todo" | "waiting" | "done";
 
-/** Toolbar button (32px) + gap. */
-const BUTTON_STEP = 34;
-const SEPARATOR_WIDTH = 13;
-const PADDING_FULL = 48 + 16;
+/** Toolbar button (--control-md 32) + gap (--space-1 4). */
+const BUTTON_STEP = 36;
+/** .toolbar-separator: 1px + --space-1 margin each side. */
+const SEPARATOR_WIDTH = 9;
 
 /**
  * True when `ref` is narrower than `minWidth` (ResizeObserver). Without
@@ -144,7 +144,7 @@ export default function MessageActionToolbar({
   // Reply, archive (+ restore in Trash) and delete always stay visible; the
   // rest collapses into "More" when the reading pane is too narrow for one row.
   const fullButtonCount = 8 + (isTrash ? 1 : 0);
-  const narrow = useIsNarrower(toolbarRef, PADDING_FULL + fullButtonCount * BUTTON_STEP + SEPARATOR_WIDTH);
+  const narrow = useIsNarrower(toolbarRef, fullButtonCount * BUTTON_STEP + SEPARATOR_WIDTH);
 
   function toggleStar() {
     flagsMutation.mutate(
@@ -189,17 +189,6 @@ export default function MessageActionToolbar({
       role="toolbar"
       aria-label={t("messageActions.toolbar", "Message actions")}
       className={narrow ? "message-toolbar message-toolbar--narrow" : "message-toolbar"}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        flexWrap: "nowrap",
-        gap: "2px",
-        padding: narrow ? "4px 8px" : "4px 16px 4px 48px",
-        position: "relative",
-        minWidth: 0,
-        userSelect: "none",
-        WebkitUserSelect: "none",
-      }}
     >
       <IconButton size="md" label={t("messageActions.reply")} icon={<Reply size={16} />} onClick={() => openCompose("reply", message)} />
       {!narrow && (
@@ -246,7 +235,7 @@ export default function MessageActionToolbar({
             icon={<LayoutGrid size={16} />}
             aria-haspopup="menu"
             aria-expanded={kanbanMenu !== null}
-            style={inKanban ? { color: "var(--color-accent-text)" } : undefined}
+            pressed={inKanban}
             onClick={openKanbanMenu}
           />
         </>
