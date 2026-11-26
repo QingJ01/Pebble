@@ -26,6 +26,10 @@ import { useCloseToBackground } from "./useCloseToBackground";
 import { useTrayI18n } from "./useTrayI18n";
 import { useMailtoOpen } from "./useMailtoOpen";
 import AppBackground from "./AppBackground";
+import Button from "../components/ui/Button";
+import Spinner from "../components/Spinner";
+import { LOADING_INDICATOR_DELAY_MS } from "../hooks/useDelayedVisible";
+import "./shell.css";
 
 const loadSettingsView = () => import("../features/settings/SettingsView");
 const loadComposeView = () => import("../features/compose/ComposeView");
@@ -135,10 +139,10 @@ export default function Layout() {
       <TitleBar />
       <SenderIdentityNotice />
       <SendControlsStatus />
+      <OfflineBanner />
       <div className="flex flex-1 min-h-0 app-shell-content">
         <Sidebar />
         <main className="flex-1 min-w-0 overflow-auto scroll-region app-main-scroll" style={{ position: "relative" }}>
-          <OfflineBanner />
           <ViewErrorBoundary key={displayedView}>
             <Suspense fallback={<ViewLoadingFallback />}>
               {displayedView === "inbox" && <InboxView />}
@@ -164,16 +168,10 @@ export default function Layout() {
 }
 
 function ViewLoadingFallback() {
+  // Lazy views are usually preloaded; only show a spinner if loading is slow.
   return (
-    <div style={{
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      height: "100%",
-      color: "var(--color-text-secondary)",
-      fontSize: "13px",
-    }}>
-      {i18next.t("common.loading", "Loading...")}
+    <div className="view-loading">
+      <Spinner delayMs={LOADING_INDICATOR_DELAY_MS} label={i18next.t("common.loading", "Loading...")} />
     </div>
   );
 }
@@ -200,27 +198,20 @@ class ViewErrorBoundary extends Component<
           justifyContent: "center", height: "100%", gap: 12, padding: 24,
           color: "var(--color-text-secondary)",
         }}>
-          <p style={{ fontSize: 14, margin: 0 }}>{i18next.t("errorBoundary.title", "Something went wrong")}</p>
-          <p style={{ fontSize: 12, margin: 0, color: "var(--color-text-secondary)" }}>
+          <p style={{ fontSize: "var(--font-md)", fontWeight: 600, margin: 0, color: "var(--color-text-primary)" }}>{i18next.t("errorBoundary.title", "Something went wrong")}</p>
+          <p style={{ fontSize: "var(--font-sm)", margin: 0, color: "var(--color-text-secondary)" }}>
             {i18next.t("errorBoundary.description", "Please try again or refresh the application.")}
           </p>
           {this.state.error && import.meta.env.DEV && (
-            <pre style={{ fontSize: 11, color: "#ef4444", maxWidth: "90%", overflow: "auto", whiteSpace: "pre-wrap", textAlign: "left" }}>
+            <pre style={{ fontSize: "var(--font-xs)", color: "var(--color-danger)", maxWidth: "90%", overflow: "auto", whiteSpace: "pre-wrap", textAlign: "left" }}>
               {this.state.error.message}
               {"\n"}
               {this.state.error.stack}
             </pre>
           )}
-          <button
-            onClick={() => this.setState({ error: null })}
-            style={{
-              padding: "6px 16px", cursor: "pointer",
-              backgroundColor: "var(--color-accent)", color: "#fff",
-              border: "none", borderRadius: 6, fontSize: 13,
-            }}
-          >
+          <Button variant="primary" onClick={() => this.setState({ error: null })}>
             {i18next.t("errorBoundary.retry", "Retry")}
-          </button>
+          </Button>
         </div>
       );
     }
@@ -245,18 +236,17 @@ function GlobalConfirmDialog() {
 }
 
 function OfflineBanner() {
+  const { t } = useTranslation();
   const networkStatus = useUIStore((s) => s.networkStatus);
   if (networkStatus === "online") return null;
   return (
-    <div style={{
-      display: "flex", alignItems: "center", gap: "8px",
-      padding: "6px 16px",
-      backgroundColor: "rgba(239,68,68,0.1)",
-      borderBottom: "1px solid rgba(239,68,68,0.2)",
-      color: "#ef4444", fontSize: "12px",
-    }}>
-      <WifiOff size={14} />
-      {i18next.t("status.offline", "Offline")} — {i18next.t("status.offlineHint", "Mail sync is paused until you're back online")}
+    <div className="offline-banner" role="status" aria-live="polite">
+      <WifiOff size={14} aria-hidden="true" />
+      <span>
+        <strong style={{ fontWeight: 600 }}>{t("status.offline", "Offline")}</strong>
+        {" — "}
+        {t("status.offlineHint", "Mail sync is paused until you're back online")}
+      </span>
     </div>
   );
 }

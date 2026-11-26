@@ -2,13 +2,18 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTranslation } from "react-i18next";
-import { Search, SlidersHorizontal, Loader } from "lucide-react";
+import { Search, SlidersHorizontal } from "lucide-react";
 import type { AdvancedSearchQuery, SearchHit } from "@/lib/api";
 import { advancedSearch, searchMessages } from "@/lib/api";
 import { useUIStore } from "@/stores/ui.store";
 import SearchFilters from "./SearchFilters";
 import SearchResultItem from "./SearchResultItem";
 import MessageDetail from "@/components/MessageDetail";
+import Button from "@/components/ui/Button";
+import Spinner from "@/components/Spinner";
+import PaneSplitter, { usePaneWidth } from "@/components/PaneSplitter";
+import { LOADING_INDICATOR_DELAY_MS } from "@/hooks/useDelayedVisible";
+import { extractErrorMessage } from "@/lib/extractErrorMessage";
 
 const emptyFilters: AdvancedSearchQuery = {};
 
@@ -51,6 +56,7 @@ export default function SearchView() {
   });
 
   const resultsParentRef = useRef<HTMLDivElement>(null);
+  const listPane = usePaneWidth("pebble-search-list-width", 340, 260, 560);
   const virtualizer = useVirtualizer({
     count: results.length,
     getScrollElement: () => resultsParentRef.current,
@@ -157,32 +163,18 @@ export default function SearchView() {
         {/* Results list */}
         <div
           ref={resultsParentRef}
+          id="search-results-pane"
           className="scroll-region search-results-scroll"
           style={{
-            width: selectedId ? "clamp(260px, 32%, 360px)" : "100%",
+            width: selectedId ? `${listPane.width}px` : "100%",
+            maxWidth: "55%",
             flexShrink: 0,
             overflow: "auto",
             borderRight: selectedId ? "1px solid var(--color-border)" : "none",
-            transition: "width 0.15s ease",
           }}
         >
           {loading && (
-            <div
-              className="fade-in"
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: "40px",
-                color: "var(--color-text-secondary)",
-                fontSize: "13px",
-                gap: "10px",
-              }}
-            >
-              <Loader size={20} className="spinner" />
-              <span>{t("common.loading")}</span>
-            </div>
+            <Spinner delayMs={LOADING_INDICATOR_DELAY_MS} label={t("common.loading")} />
           )}
 
           {!loading && queryError && (
@@ -199,25 +191,13 @@ export default function SearchView() {
                 gap: "8px",
               }}
             >
-              <p style={{ color: "var(--color-error, #e53e3e)", margin: 0 }}>
+              <p role="alert" style={{ color: "var(--color-danger)", margin: 0 }}>
                 {t("search.error", "Search failed")}
               </p>
-              <p style={{ fontSize: "13px", margin: 0 }}>{queryError?.message}</p>
-              <button
-                onClick={() => refetch()}
-                style={{
-                  marginTop: "8px",
-                  padding: "6px 16px",
-                  borderRadius: "4px",
-                  border: "1px solid var(--color-border)",
-                  backgroundColor: "transparent",
-                  color: "var(--color-accent)",
-                  fontSize: "13px",
-                  cursor: "pointer",
-                }}
-              >
+              <p style={{ fontSize: "var(--font-base)", margin: 0 }}>{extractErrorMessage(queryError)}</p>
+              <Button onClick={() => refetch()} style={{ marginTop: "8px" }}>
                 {t("common.retry", "Retry")}
-              </button>
+              </Button>
             </div>
           )}
 
@@ -293,7 +273,17 @@ export default function SearchView() {
 
         {/* Detail panel */}
         {selectedId && (
-          <div style={{ flex: 1, overflow: "hidden" }}>
+          <PaneSplitter
+            width={listPane.width}
+            min={listPane.min}
+            max={listPane.max}
+            onChange={listPane.setWidth}
+            onReset={listPane.reset}
+            controls="search-results-pane"
+          />
+        )}
+        {selectedId && (
+          <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
             <MessageDetail
               messageId={selectedId}
               onBack={() => setSelectedId(null)}

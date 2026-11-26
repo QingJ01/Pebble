@@ -5,7 +5,9 @@ import { isThreadSelected, useMailStore } from "@/stores/mail.store";
 import { useAccountsQuery, useFoldersForAccountsQuery, useThreadMessagesQuery, useThreadsQuery } from "@/hooks/queries";
 import { folderIdsForSelection } from "@/lib/folderAggregation";
 import ThreadMessageBubble from "@/components/ThreadMessageBubble";
-import Spinner from "@/components/Spinner";
+import { MessageDetailSkeleton } from "@/components/Skeleton";
+import IconButton from "@/components/ui/IconButton";
+import { useDelayedVisible } from "@/hooks/useDelayedVisible";
 
 export default function ThreadView() {
   const { t } = useTranslation();
@@ -25,6 +27,7 @@ export default function ThreadView() {
   const queryFolderIds = selectedFolderIds.length > 1 ? selectedFolderIds : undefined;
   const { data: threads = [] } = useThreadsQuery(queryFolderId, 50, 0, queryFolderIds);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const showLoadingSkeleton = useDelayedVisible();
 
   // Selection is keyed by (account_id, thread_id): the selected row's account
   // scopes the fetch so another account's thread with the same id is never
@@ -40,7 +43,7 @@ export default function ThreadView() {
   }, [threadMessages]);
 
   if (isLoading) {
-    return <Spinner />;
+    return showLoadingSkeleton ? <MessageDetailSkeleton /> : <div role="status" aria-busy="true" style={{ height: "100%" }} />;
   }
 
   return (
@@ -48,24 +51,19 @@ export default function ThreadView() {
       {/* Header */}
       <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--color-border)", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <button
+          <IconButton
             onClick={() => setSelectedThreadId(null)}
-            aria-label={t("thread.back", "Back")}
-            style={{
-              background: "none", border: "none", cursor: "pointer", padding: "4px",
-              borderRadius: "4px", color: "var(--color-text-secondary)", display: "flex", alignItems: "center",
-            }}
-          >
-            <ArrowLeft size={18} />
-          </button>
+            label={t("thread.back", "Back")}
+            icon={<ArrowLeft size={16} />}
+          />
           <h2 style={{
-            fontSize: "15px", fontWeight: "600", color: "var(--color-text-primary)",
+            fontSize: "var(--font-md)", fontWeight: 600, color: "var(--color-text-primary)",
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", margin: 0, flex: 1,
           }}>
             {thread?.subject || t("thread.title")}
           </h2>
-          <div style={{ display: "flex", alignItems: "center", gap: "4px", color: "var(--color-text-secondary)", fontSize: "12px" }}>
-            <MessageSquare size={14} />
+          <div style={{ display: "flex", alignItems: "center", gap: "4px", color: "var(--color-text-secondary)", fontSize: "var(--font-sm)" }}>
+            <MessageSquare size={14} aria-hidden="true" />
             <span>{threadMessages.length}</span>
           </div>
         </div>

@@ -24,37 +24,18 @@ export default function ComposeFAB() {
 
   return (
     <button
+      type="button"
+      className="compose-fab"
       onClick={() => openCompose("new")}
       aria-label={t("sidebar.compose", "Compose")}
       title={t("sidebar.compose", "Compose")}
       style={{
-        position: "fixed",
         bottom: `${COMPOSE_FAB_BOTTOM}px`,
-        right: "24px",
-        zIndex: 100,
         width: `${COMPOSE_FAB_SIZE}px`,
         height: `${COMPOSE_FAB_SIZE}px`,
-        borderRadius: "50%",
-        border: "none",
-        backgroundColor: "var(--color-accent, #2563eb)",
-        color: "#fff",
-        cursor: "pointer",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-        transition: "transform 0.15s ease, box-shadow 0.15s ease",
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.transform = "scale(1.08)";
-        e.currentTarget.style.boxShadow = "0 6px 20px rgba(0,0,0,0.3)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.transform = "scale(1)";
-        e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.2)";
       }}
     >
-      <PenLine size={20} />
+      <PenLine size={20} aria-hidden="true" />
     </button>
   );
 }
