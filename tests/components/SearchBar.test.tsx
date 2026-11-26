@@ -33,7 +33,7 @@ describe("SearchBar", () => {
 
     const advancedButton = screen.getByRole("button", { name: "Advanced search" });
 
-    expect(advancedButton.className).toContain("inbox-toolbar-button");
+    expect(advancedButton.className).toContain("icon-btn--md");
 
     fireEvent.click(advancedButton);
 

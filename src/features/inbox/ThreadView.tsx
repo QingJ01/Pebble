@@ -8,6 +8,7 @@ import ThreadMessageBubble from "@/components/ThreadMessageBubble";
 import { MessageDetailSkeleton } from "@/components/Skeleton";
 import IconButton from "@/components/ui/IconButton";
 import { useDelayedVisible } from "@/hooks/useDelayedVisible";
+import "@/components/message-reader.css";
 
 export default function ThreadView() {
   const { t } = useTranslation();
@@ -43,34 +44,30 @@ export default function ThreadView() {
   }, [threadMessages]);
 
   if (isLoading) {
-    return showLoadingSkeleton ? <MessageDetailSkeleton /> : <div role="status" aria-busy="true" style={{ height: "100%" }} />;
+    return showLoadingSkeleton ? <MessageDetailSkeleton /> : <div role="status" aria-busy="true" className="thread-reader" />;
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", backgroundColor: "var(--color-bg)" }}>
-      {/* Header */}
-      <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--color-border)", flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <IconButton
-            onClick={() => setSelectedThreadId(null)}
-            label={t("thread.back", "Back")}
-            icon={<ArrowLeft size={16} />}
-          />
-          <h2 style={{
-            fontSize: "var(--font-md)", fontWeight: 600, color: "var(--color-text-primary)",
-            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", margin: 0, flex: 1,
-          }}>
-            {thread?.subject || t("thread.title")}
-          </h2>
-          <div style={{ display: "flex", alignItems: "center", gap: "4px", color: "var(--color-text-secondary)", fontSize: "var(--font-sm)" }}>
-            <MessageSquare size={14} aria-hidden="true" />
-            <span>{threadMessages.length}</span>
-          </div>
+    <div className="thread-reader">
+      {/* Header: same 52px toolbar row as the message reader */}
+      <div className="reader-toolbar">
+        <IconButton
+          size="md"
+          onClick={() => setSelectedThreadId(null)}
+          label={t("thread.back", "Back")}
+          icon={<ArrowLeft size={16} />}
+        />
+        <h2 className="thread-reader__title" title={thread?.subject || undefined}>
+          {thread?.subject || t("thread.title")}
+        </h2>
+        <div className="reader-toolbar__count">
+          <MessageSquare size={14} aria-hidden="true" />
+          <span>{threadMessages.length}</span>
         </div>
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="scroll-region thread-message-scroll" style={{ flex: 1, overflow: "auto", padding: "16px" }}>
+      <div ref={scrollRef} className="scroll-region thread-message-scroll thread-reader__messages">
         {threadMessages.map((msg, i) => (
           <ThreadMessageBubble
             key={msg.id}

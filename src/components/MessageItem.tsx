@@ -209,17 +209,6 @@ function MessageItem({
       onFocus={(event) => {
         if (event.target === event.currentTarget) onRowFocus?.(message.id);
       }}
-      style={{
-        position: "relative",
-        color: "var(--color-text-primary)",
-        cursor: "pointer",
-        padding: "9px 14px",
-        borderBottom: "1px solid var(--color-divider)",
-        height: "76px",
-        boxSizing: "border-box",
-        overflow: "hidden",
-        transition: "background-color var(--dur-fast) var(--ease-out)",
-      }}
       onKeyDown={(e) => {
         // Keys pressed on the row's own buttons/checkbox belong to them.
         if (e.target !== e.currentTarget) return;
@@ -278,17 +267,9 @@ function MessageItem({
         </span>
         <div className="mail-row__meta">
           {inlineLabels.map((l) => (
-            <span
-              key={l.id}
-              className="mail-row__label"
-              title={l.name}
-              style={{
-                backgroundColor: l.color + "22",
-                color: l.color,
-                border: `1px solid ${l.color}44`,
-              }}
-            >
-              {l.name}
+            <span key={l.id} className="chip mail-row__label" title={l.name}>
+              <span className="mail-row__label-dot" style={{ backgroundColor: l.color }} aria-hidden="true" />
+              <span className="mail-row__label-text">{l.name}</span>
             </span>
           ))}
           {hiddenLabelCount > 0 && (
@@ -297,13 +278,13 @@ function MessageItem({
             </span>
           )}
           {inKanban && (
-            <LayoutGrid size={13} color="var(--color-accent-text)" aria-hidden="true" />
+            <LayoutGrid size={13} aria-hidden="true" />
           )}
           {message.is_starred && (
             <Star size={13} fill="var(--color-warning)" color="var(--color-warning)" aria-hidden="true" />
           )}
           {message.has_attachments && (
-            <Paperclip size={13} color="var(--color-text-secondary)" aria-hidden="true" />
+            <Paperclip size={13} aria-hidden="true" />
           )}
           <span className="mail-row__date">
             {formatListDate(message.date, i18n?.language)}

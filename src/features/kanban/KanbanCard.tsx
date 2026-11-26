@@ -4,7 +4,8 @@ import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { Message } from "@/lib/api";
 import IconButton from "@/components/ui/IconButton";
-import { formatDate } from "@/lib/formatDate";
+import { formatListDate } from "@/lib/formatDate";
+import "./kanban.css";
 
 interface Props {
   id: string;
@@ -14,46 +15,25 @@ interface Props {
   onOpen: (messageId: string) => void;
 }
 
-const cardStyle: React.CSSProperties = {
-  padding: "10px 12px",
-  marginBottom: "6px",
-  backgroundColor: "var(--color-bg)",
-  border: "1px solid var(--color-border)",
-  borderRadius: "var(--radius-lg)",
-  fontSize: "var(--font-base)",
-  textAlign: "left",
-  width: "100%",
-  boxSizing: "border-box",
-  color: "inherit",
-  userSelect: "none",
-  WebkitUserSelect: "none",
-};
-
 /** Card content, shared by the sortable card and the drag overlay preview. */
 export function KanbanCardBody({ id, note, message, onRemove }: Omit<Props, "onOpen">) {
   const { t, i18n } = useTranslation();
   if (!message) {
-    return <span style={{ color: "var(--color-text-secondary)" }}>{t("common.loading")}</span>;
+    return <span className="kanban-card__loading">{t("common.loading")}</span>;
   }
   const subject = message.subject || t("common.noSubject");
   const sender = message.from_name || message.from_address;
   return (
     <>
-      <div
-        title={subject}
-        style={{ fontWeight: 600, color: "var(--color-text-primary)", marginBottom: "4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-      >
+      <div title={subject} className="kanban-card__subject">
         {subject}
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
-        <span
-          title={sender}
-          style={{ color: "var(--color-text-secondary)", fontSize: "var(--font-sm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}
-        >
+      <div className="kanban-card__meta">
+        <span title={sender} className="kanban-card__sender">
           {sender}
         </span>
-        <span style={{ color: "var(--color-text-secondary)", fontSize: "var(--font-xs)", marginRight: "auto", whiteSpace: "nowrap" }}>
-          {formatDate(message.date, undefined, i18n?.language)}
+        <span className="kanban-card__date">
+          {formatListDate(message.date, i18n?.language)}
         </span>
         <IconButton
           label={t("kanban.removeFromBoard")}
@@ -61,26 +41,9 @@ export function KanbanCardBody({ id, note, message, onRemove }: Omit<Props, "onO
           onClick={(e) => { e.stopPropagation(); onRemove(id); }}
           onPointerDown={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
-          style={{ marginRight: "-6px" }}
         />
       </div>
-      {note && (
-        <div
-          style={{
-            marginTop: "8px",
-            padding: "6px 8px",
-            borderRadius: "var(--radius-md)",
-            backgroundColor: "var(--color-bg-secondary)",
-            color: "var(--color-text-secondary)",
-            fontSize: "var(--font-sm)",
-            lineHeight: 1.4,
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-          }}
-        >
-          {note}
-        </div>
-      )}
+      {note && <div className="kanban-card__note">{note}</div>}
     </>
   );
 }
@@ -88,7 +51,7 @@ export function KanbanCardBody({ id, note, message, onRemove }: Omit<Props, "onO
 /** Static copy rendered inside dnd-kit's DragOverlay while a card is dragged. */
 export function KanbanCardPreview(props: Omit<Props, "onOpen" | "onRemove">) {
   return (
-    <div style={{ ...cardStyle, cursor: "grabbing", boxShadow: "var(--shadow-popover)" }}>
+    <div className="kanban-card kanban-card--overlay">
       <KanbanCardBody {...props} onRemove={() => {}} />
     </div>
   );
@@ -99,12 +62,10 @@ export default function KanbanCard({ id, note, message, onRemove, onOpen }: Prop
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
 
   const style: React.CSSProperties = {
-    ...cardStyle,
     transform: CSS.Transform.toString(transform),
     transition,
     // The overlay follows the pointer; the original stays as a placeholder.
     opacity: isDragging ? 0.4 : 1,
-    cursor: "pointer",
   };
 
   // Enter opens the message; Space (and arrows while dragging) go to dnd-kit.
@@ -123,6 +84,7 @@ export default function KanbanCard({ id, note, message, onRemove, onOpen }: Prop
   return (
     <div
       ref={setNodeRef}
+      className="kanban-card"
       style={style}
       {...attributes}
       {...listeners}

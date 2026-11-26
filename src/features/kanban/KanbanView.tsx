@@ -32,6 +32,7 @@ import { useMailStore } from "@/stores/mail.store";
 import KanbanColumn from "./KanbanColumn";
 import { KanbanCardPreview } from "./KanbanCard";
 import { KanbanSkeleton } from "@/components/Skeleton";
+import "./kanban.css";
 
 const COLUMN_IDS: { id: KanbanColumnType; titleKey: string }[] = [
   { id: "todo", titleKey: "kanban.todo" },
@@ -229,7 +230,7 @@ export default function KanbanView() {
   }
 
   return (
-    <div style={{ display: "flex", gap: "8px", padding: "16px", height: "100%", overflow: "hidden" }}>
+    <div className="kanban-board">
       <DndContext
         sensors={sensors}
         collisionDetection={closestCorners}

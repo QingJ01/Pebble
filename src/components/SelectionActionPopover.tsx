@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import Popover, { handleMenuKeyDown } from "./ui/Popover";
 import Button from "./ui/Button";
 import IconButton from "./ui/IconButton";
+import "./message-reader.css";
 
 interface Props {
   text: string;
@@ -62,7 +63,7 @@ export default function SelectionActionPopover({
       placement="bottom-start"
       role="toolbar"
       aria-label={t("selection.actions", "Selected text actions")}
-      style={{ display: "flex", alignItems: "center", gap: "4px", padding: "6px", overflow: "visible" }}
+      className="selection-actions"
     >
       <Button
         variant="primary"
@@ -78,13 +79,13 @@ export default function SelectionActionPopover({
       <IconButton
         ref={moreRef}
         label={t("selection.moreActions", "More selected-text actions")}
-        icon={<MoreHorizontal size={16} />}
+        icon={<MoreHorizontal size={14} />}
         aria-haspopup="menu"
         aria-expanded={showSecondaryActions}
         onClick={() => setShowSecondaryActions((value) => !value)}
       />
 
-      <IconButton label={t("common.close", "Close")} icon={<X size={15} />} onClick={onClose} />
+      <IconButton label={t("common.close", "Close")} icon={<X size={14} />} onClick={onClose} />
 
       <Popover
         open={open && showSecondaryActions}
@@ -94,7 +95,6 @@ export default function SelectionActionPopover({
         role="menu"
         aria-label={t("selection.moreActions", "More selected-text actions")}
         className="menu"
-        style={{ minWidth: "160px" }}
         onKeyDown={handleMenuKeyDown}
       >
         <button

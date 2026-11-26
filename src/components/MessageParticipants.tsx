@@ -1,4 +1,5 @@
 import { useState } from "react";
+import Button from "./ui/Button";
 import { useTranslation } from "react-i18next";
 import ContactAddressAction from "./ContactAddressAction";
 import { uniqueParticipants, type ContactParticipant } from "./contact-participants";
@@ -75,14 +76,15 @@ export default function MessageParticipants({ accountId, groups, collapsedLimit 
                 </span>
               ))}
               {hostsToggle && (
-                <button
-                  type="button"
+                <Button
+                  variant="link"
+                  size="sm"
                   className="participant-toggle"
                   aria-expanded={expanded}
                   onClick={() => setExpanded(true)}
                 >
                   {t("participants.more", { count: hiddenCount, defaultValue: "+{{count}} more" })}
-                </button>
+                </Button>
               )}
             </div>
           );
@@ -90,14 +92,15 @@ export default function MessageParticipants({ accountId, groups, collapsedLimit 
       </div>
       {scrollable && (
         <div className="participant-row">
-          <button
-            type="button"
+          <Button
+            variant="link"
+            size="sm"
             className="participant-toggle"
             aria-expanded={expanded}
             onClick={() => setExpanded(false)}
           >
             {t("participants.showLess", "Show less")}
-          </button>
+          </Button>
         </div>
       )}
     </div>

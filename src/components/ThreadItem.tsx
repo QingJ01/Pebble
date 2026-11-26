@@ -202,25 +202,13 @@ function ThreadItem({ thread, isSelected, onClick, folderIds, folderRole, tabInd
           onClick();
         }
       }}
-      style={{
-        color: "var(--color-text-primary)",
-        cursor: "pointer",
-        padding: "9px 14px",
-        borderBottom: "1px solid var(--color-divider)",
-        height: "76px",
-        boxSizing: "border-box",
-        overflow: "hidden",
-        transition: "background-color var(--dur-fast) var(--ease-out)",
-      }}
     >
       <div className="mail-row__line">
         <span className="mail-row__primary">
           <span className="mail-row__ellipsis" title={participantText}>
             {participantText}
             {thread.message_count > 1 && (
-              <span style={{ color: "var(--color-text-secondary)", fontWeight: 400, marginLeft: "4px" }}>
-                ({thread.message_count})
-              </span>
+              <span className="mail-row__count">({thread.message_count})</span>
             )}
           </span>
           {hasUnread && (
@@ -233,7 +221,7 @@ function ThreadItem({ thread, isSelected, onClick, folderIds, folderRole, tabInd
         </span>
         <div className="mail-row__meta">
           {thread.is_starred && <Star size={13} fill="var(--color-warning)" color="var(--color-warning)" aria-hidden="true" />}
-          {thread.has_attachments && <Paperclip size={13} color="var(--color-text-secondary)" aria-hidden="true" />}
+          {thread.has_attachments && <Paperclip size={13} aria-hidden="true" />}
           <span className="mail-row__date">
             {formatListDate(thread.last_date, i18n?.language)}
           </span>

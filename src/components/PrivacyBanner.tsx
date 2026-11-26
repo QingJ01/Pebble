@@ -2,6 +2,7 @@ import { Shield } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { RenderedHtml } from "@/lib/api";
 import Button from "./ui/Button";
+import "./message-reader.css";
 
 interface Props {
   rendered: RenderedHtml;
@@ -31,30 +32,13 @@ export default function PrivacyBanner({ rendered, onLoadImages, onTrustSender }:
   }
 
   return (
-    <div
-      role="region"
-      aria-label={t("privacy.bannerLabel", "Blocked content")}
-      style={{
-        display: "flex",
-        flexWrap: "wrap",
-        alignItems: "center",
-        columnGap: "12px",
-        rowGap: "6px",
-        padding: "6px 14px",
-        backgroundColor: "var(--color-warning-bg)",
-        borderBottom: "1px solid var(--color-border)",
-        fontSize: "var(--font-sm)",
-        color: "var(--color-text-secondary)",
-        flexShrink: 0,
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: "1 1 240px", minWidth: 0 }}>
-        <Shield size={14} aria-hidden="true" style={{ color: "var(--color-warning)", flexShrink: 0 }} />
-        <span style={{ minWidth: 0, lineHeight: 1.5 }}>
-          {t("privacy.blocked", { items: parts.join(` ${t("privacy.and")} `) })}
-        </span>
+    <div role="region" aria-label={t("privacy.bannerLabel", "Blocked content")} className="privacy-banner">
+      <div className="privacy-banner__text">
+        <Shield size={14} aria-hidden="true" className="privacy-banner__icon" />
+        <span>{t("privacy.blocked", { items: parts.join(` ${t("privacy.and")} `) })}</span>
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginLeft: "auto" }}>
+      {/* Hierarchy: one secondary (show images once) + ghost trust options, all 28px. */}
+      <div className="privacy-banner__actions">
         {rendered.images_blocked > 0 && (
           <>
             <Button size="sm" variant="secondary" onClick={onLoadImages}>

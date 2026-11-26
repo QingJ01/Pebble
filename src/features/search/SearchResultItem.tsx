@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { formatDate } from "@/lib/formatDate";
+import { formatListDate } from "@/lib/formatDate";
 import type { SearchHit, Message } from "@/lib/api";
 import "@/components/mail-list.css";
 
@@ -34,7 +34,7 @@ export default function SearchResultItem({ hit, message, isSelected, onClick, qu
   const { t, i18n } = useTranslation();
   const subject = hit.subject || message?.subject || hit.snippet || t("common.noSubject");
   const from = hit.from_address || message?.from_address || "";
-  const date = (hit.date || message?.date) ? formatDate(hit.date || message!.date, undefined, i18n?.language) : "";
+  const date = (hit.date || message?.date) ? formatListDate(hit.date || message!.date, i18n?.language) : "";
 
   return (
     <div
@@ -51,56 +51,22 @@ export default function SearchResultItem({ hit, message, isSelected, onClick, qu
         if (e.target !== e.currentTarget) return;
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); }
       }}
-      style={{
-        padding: "10px 14px",
-        cursor: "pointer",
-        borderBottom: "1px solid var(--color-border)",
-      }}
     >
-      <div
-        style={{
-          fontSize: "13px",
-          fontWeight: 600,
-          color: "var(--color-text-primary)",
-          marginBottom: "2px",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {highlightTerms(subject, query)}
-      </div>
-      <div
-        style={{
-          fontSize: "12px",
-          color: "var(--color-text-secondary)",
-          marginBottom: "2px",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {highlightTerms(from, query)}
-      </div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div
-          style={{
-            fontSize: "12px",
-            color: "var(--color-text-tertiary)",
-            flex: 1,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            marginRight: "8px",
-          }}
-        >
-          {highlightTerms(hit.snippet, query)}
-        </div>
+      <div className="mail-row__line">
+        <span className="mail-row__primary">
+          <span className="mail-row__ellipsis" title={from}>{highlightTerms(from, query)}</span>
+        </span>
         {date && (
-          <div style={{ fontSize: "11px", color: "var(--color-text-tertiary)", flexShrink: 0 }}>
-            {date}
+          <div className="mail-row__meta">
+            <span className="mail-row__date">{date}</span>
           </div>
         )}
+      </div>
+      <div className="mail-row__subject mail-row__ellipsis" title={subject}>
+        {highlightTerms(subject, query)}
+      </div>
+      <div className="mail-row__snippet mail-row__ellipsis">
+        {highlightTerms(hit.snippet, query)}
       </div>
     </div>
   );

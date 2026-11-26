@@ -26,6 +26,8 @@ import IconButton from "./ui/IconButton";
 import { useDelayedFlag } from "@/hooks/useDelayedFlag";
 import { formatDateTime } from "@/lib/formatDate";
 import "./ui/overlay.css";
+import "./mail-list.css";
+import "./message-reader.css";
 
 /** Skeleton appears only for loads slower than this… */
 const SKELETON_DELAY_MS = 200;
@@ -198,25 +200,12 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
 
   if (loading && !message) {
     // First load: stay blank for a moment instead of flashing a skeleton.
-    return <div aria-busy="true" style={{ height: "100%" }} />;
+    return <div aria-busy="true" className="reader-state" />;
   }
 
   if (error) {
     return (
-      <div
-        role="alert"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          height: "100%",
-          color: "var(--color-danger)",
-          fontSize: "var(--font-md)",
-          padding: "24px",
-          textAlign: "center",
-        }}
-        title={errorInfo?.detail || error}
-      >
+      <div role="alert" className="reader-state reader-state--error" title={errorInfo?.detail || error}>
         {errorInfo?.title ?? t("common.messageLoadFailed", "Failed to load message")}
       </div>
     );
@@ -224,16 +213,7 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
 
   if (!message) {
     return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          height: "100%",
-          color: "var(--color-text-secondary)",
-          fontSize: "14px",
-        }}
-      >
+      <div className="reader-state">
         {t("common.messageNotFound", "Message not found")}
       </div>
     );
@@ -249,122 +229,78 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
       className={isStale ? "message-detail-container message-detail--stale" : "message-detail-container"}
       aria-busy={isStale || undefined}
       inert={isStale || undefined}
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100%",
-      }}
     >
-      {/* Header */}
-      <div
-        style={{
-          padding: "12px 16px",
-          borderBottom: "1px solid var(--color-border)",
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
-          <IconButton
-            label={t("compose.back", "Back")}
-            icon={<ArrowLeft size={16} />}
-            onClick={onBack}
-          />
-          <h2
-            title={message.subject || undefined}
-            style={{
-              fontSize: "16px",
-              fontWeight: "600",
-              color: "var(--color-text-primary)",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              flex: 1,
-              minWidth: 0,
-              margin: 0,
-            }}
-          >
-            {message.subject || t("inbox.noSubject", "(no subject)")}
-          </h2>
-          <div style={{ display: "flex", alignItems: "center", gap: "2px", marginLeft: "auto", flexShrink: 0 }}>
-            <IconButton
-              ref={snoozeButtonRef}
-              label={t("messageActions.snooze", "Snooze message")}
-              icon={<Clock size={16} />}
-              aria-haspopup="menu"
-              aria-expanded={showSnooze}
-              onClick={() => setShowSnooze((value) => !value)}
-            />
-            <SnoozePopover
-              open={showSnooze}
-              anchorRef={snoozeButtonRef}
-              messageId={messageId}
-              onClose={() => setShowSnooze(false)}
-              onSnoozed={() => {
-                setShowSnooze(false);
-                onBack();
-              }}
-            />
-            <IconButton
-              label={t("messageActions.bilingualView", "Toggle bilingual view")}
-              icon={<Languages size={16} />}
-              pressed={bilingualMode}
-              onClick={handleBilingualToggle}
-            />
-          </div>
-        </div>
-        {/* Action Toolbar */}
-        {message.is_draft && <ResumeDraftButton messageId={messageId} />}
+      {/* Toolbar row: back · message actions · snooze / bilingual (all 32px) */}
+      <div className="reader-toolbar">
+        <IconButton
+          size="md"
+          label={t("compose.back", "Back")}
+          icon={<ArrowLeft size={16} />}
+          onClick={onBack}
+        />
+        <span className="toolbar-separator" aria-hidden="true" />
         <MessageActionToolbar
           message={message}
           folderRole={folderRole}
           onBack={onBack}
           onMessageUpdate={setMessage}
         />
-        <div style={{ paddingLeft: "32px" }}>
-          <div
-            style={{
-              backgroundColor: "var(--color-bg-hover)",
-              borderRadius: "8px",
-              padding: "8px 12px",
-              color: "var(--color-text-primary)",
+        <div className="reader-toolbar__end">
+          <IconButton
+            ref={snoozeButtonRef}
+            size="md"
+            label={t("messageActions.snooze", "Snooze message")}
+            icon={<Clock size={16} />}
+            aria-haspopup="menu"
+            aria-expanded={showSnooze}
+            onClick={() => setShowSnooze((value) => !value)}
+          />
+          <SnoozePopover
+            open={showSnooze}
+            anchorRef={snoozeButtonRef}
+            messageId={messageId}
+            onClose={() => setShowSnooze(false)}
+            onSnoozed={() => {
+              setShowSnooze(false);
+              onBack();
             }}
-          >
-            <div
-              style={{
-                fontSize: "13px",
-                marginBottom: "2px",
-                display: "flex",
-                alignItems: "center",
-                flexWrap: "wrap",
-                gap: "4px",
-              }}
-            >
-              <span style={{ fontWeight: "600" }}>
-                {message.from_name || message.from_address}
+          />
+          <IconButton
+            size="md"
+            label={t("messageActions.bilingualView", "Toggle bilingual view")}
+            icon={<Languages size={16} />}
+            pressed={bilingualMode}
+            onClick={handleBilingualToggle}
+          />
+        </div>
+      </div>
+
+      {/* Header: subject, draft resume, sender card — on the content edge */}
+      <div className="reader-header">
+        <h2 className="reader-title" title={message.subject || undefined}>
+          {message.subject || t("inbox.noSubject", "(no subject)")}
+        </h2>
+        {message.is_draft && <ResumeDraftButton messageId={messageId} />}
+        <div className="reader-sender-card">
+          <div className="reader-sender-card__line">
+            <span className="reader-sender-card__name">
+              {message.from_name || message.from_address}
+            </span>
+            {message.from_name && (
+              <span className="reader-sender-card__address">
+                &lt;{message.from_address}&gt;
               </span>
-              {message.from_name && (
-                <span style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginLeft: "2px" }}>
-                  &lt;{message.from_address}&gt;
-                </span>
-              )}
-              <ContactAddressAction
-                accountId={message.account_id}
-                name={message.from_name}
-                address={message.from_address}
-              />
-              <span
-                style={{
-                  fontSize: "12px",
-                  color: "var(--color-text-secondary)",
-                  marginLeft: "auto",
-                  flexShrink: 0,
-                }}
-              >
-                {formatFullDate(message.date, i18n?.language)}
-              </span>
-            </div>
-            <MessageParticipants accountId={message.account_id} groups={contactParticipantsGroups} />
+            )}
+            <ContactAddressAction
+              accountId={message.account_id}
+              name={message.from_name}
+              address={message.from_address}
+            />
+            <span className="reader-sender-card__date">
+              {formatFullDate(message.date, i18n?.language)}
+            </span>
           </div>
+          <MessageParticipants accountId={message.account_id} groups={contactParticipantsGroups} />
         </div>
       </div>
 
@@ -379,48 +315,28 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
 
       {/* Body */}
       <div
-        className="scroll-region message-body-scroll"
+        className="scroll-region message-body-scroll reader-body"
         tabIndex={0}
         role="region"
         aria-label={t("messageDetail.body", "Message body")}
-        style={{ flex: 1, overflow: "auto", padding: "16px" }}
         onContextMenu={handleContextMenu}
       >
         {bilingualMode && bilingualLoading ? (
-            <div style={{ fontSize: "13px", color: "var(--color-text-secondary)" }}>{t("common.translating", "Translating...")}</div>
+          <div className="reader-body__status">{t("common.translating", "Translating...")}</div>
         ) : bilingualMode && bilingualResult ? (
           (bilingualResult as TranslateResult & { _isHtml?: boolean })._isHtml ? (
             <ShadowDomEmail html={bilingualResult.translated} />
           ) : (
-            <pre
-              style={{
-                fontSize: "14px",
-                color: "var(--color-text-primary)",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-                margin: 0,
-                fontFamily: "inherit",
-                lineHeight: 1.7,
-              }}
-            >
+            <pre className="reader-plain-text reader-plain-text--translated">
               {bilingualResult.translated}
             </pre>
           )
         ) : bilingualMode && !bilingualLoading ? (
-            <div style={{ fontSize: "13px", color: "var(--color-text-secondary)" }}>{t("common.translationFailed", "Translation failed")}</div>
+          <div className="reader-body__status">{t("common.translationFailed", "Translation failed")}</div>
         ) : rendered && rendered.html ? (
           <ShadowDomEmail html={rendered.html} />
         ) : (
-          <pre
-            style={{
-              fontSize: "13px",
-              color: "var(--color-text-primary)",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-              margin: 0,
-              fontFamily: "inherit",
-            }}
-          >
+          <pre className="reader-plain-text">
             {message.body_text}
           </pre>
         )}
