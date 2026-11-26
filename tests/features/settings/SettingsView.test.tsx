@@ -98,14 +98,13 @@ describe("SettingsView", () => {
     expect(screen.getByText("Proxy panel")).toBeTruthy();
   });
 
-  it("does not animate all properties on settings tabs", () => {
+  it("styles settings tabs like the main sidebar items (neutral selected fill)", () => {
     render(<SettingsView />);
 
     const tab = screen.getByRole("tab", { name: "Accounts" });
 
-    expect(tab.style.transition).not.toContain("all");
-    expect(tab.style.transition).toContain("background-color");
-    expect(tab.style.transition).toContain("border-color");
+    expect(tab.className).toContain("sidebar-btn");
+    expect(tab.style.borderRight).toBe("");
   });
 
   it("keeps the settings panel vertically scrollable without horizontal overflow", () => {
