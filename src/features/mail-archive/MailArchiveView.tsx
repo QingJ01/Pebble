@@ -131,37 +131,41 @@ export default function MailArchiveView() {
   }
 
   return <section className="mail-archive" aria-label={t("mailArchive.title")}>
-    <h2>{t("mailArchive.title")}</h2>
-    <p className="mail-archive-note">{t("mailArchive.localOnly")}</p>
-    <p className="mail-archive-note">{t("mailArchive.searchScope")}</p>
+    <header className="page-header page-header--flush">
+      <div className="page-header__text">
+        <h2 className="page-header__title">{t("mailArchive.title")}</h2>
+        <p className="page-header__description">{t("mailArchive.localOnly")}</p>
+        <p className="page-header__description">{t("mailArchive.searchScope")}</p>
+      </div>
+    </header>
     <fieldset disabled={busy}>
       <legend>{t("mailArchive.destination")}</legend>
       <div className="mail-archive-row">
-        <label>{t("mailArchive.archive")}<select value={archiveId} onChange={(e) => { setArchiveChoice(e.target.value); setFolderChoice(""); setPreview(null); clearBrowser(); }}>
+        <label>{t("mailArchive.archive")}<select className="select" value={archiveId} onChange={(e) => { setArchiveChoice(e.target.value); setFolderChoice(""); setPreview(null); clearBrowser(); }}>
           <option value="" disabled>{t("mailArchive.chooseArchive")}</option>
           {archives.data?.map((archive) => <option key={archive.id} value={archive.id}>{archive.name} — {archive.account_label}</option>)}
         </select></label>
-        <label>{t("mailArchive.folder")}<select value={folderId} onChange={(e) => { setFolderChoice(e.target.value); setPreview(null); clearBrowser(); }}>
+        <label>{t("mailArchive.folder")}<select className="select" value={folderId} onChange={(e) => { setFolderChoice(e.target.value); setPreview(null); clearBrowser(); }}>
           <option value="" disabled>{t("mailArchive.chooseFolder")}</option>
           {folders.data?.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
         </select></label>
       </div>
       <form className="mail-archive-row" onSubmit={(e) => { e.preventDefault(); void perform(async () => { const archive = await api.createMailArchive(accountId, archiveName); setArchiveChoice(archive.id); setFolderChoice(""); setArchiveName(""); setPreview(null); clearBrowser(); await refresh(); }); }}>
-        <label>{t("mailArchive.account")}<select value={accountId} onChange={(e) => setAccountChoice(e.target.value)}><option value="" disabled>{t("mailArchive.chooseAccount")}</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.email}</option>)}</select></label>
-        <label>{t("mailArchive.newArchive")}<input value={archiveName} maxLength={200} onChange={(e) => setArchiveName(e.target.value)} /></label>
-        <button disabled={!accountId || !archiveName.trim()}>{t("mailArchive.createArchive")}</button>
+        <label>{t("mailArchive.account")}<select className="select" value={accountId} onChange={(e) => setAccountChoice(e.target.value)}><option value="" disabled>{t("mailArchive.chooseAccount")}</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.email}</option>)}</select></label>
+        <label>{t("mailArchive.newArchive")}<input className="input" value={archiveName} maxLength={200} onChange={(e) => setArchiveName(e.target.value)} /></label>
+        <Button type="submit" disabled={!accountId || !archiveName.trim()}>{t("mailArchive.createArchive")}</Button>
       </form>
       {archiveId && <form className="mail-archive-row" onSubmit={(e) => { e.preventDefault(); void perform(async () => { const folder = await api.createArchiveFolder(archiveId, folderName); setFolderChoice(folder.id); setFolderName(""); setPreview(null); clearBrowser(); await refresh(); }); }}>
-        <label>{t("mailArchive.newFolder")}<input value={folderName} maxLength={200} onChange={(e) => setFolderName(e.target.value)} /></label><button disabled={!folderName.trim()}>{t("mailArchive.createFolder")}</button>
+        <label>{t("mailArchive.newFolder")}<input className="input" value={folderName} maxLength={200} onChange={(e) => setFolderName(e.target.value)} /></label><Button type="submit" disabled={!folderName.trim()}>{t("mailArchive.createFolder")}</Button>
       </form>}
     </fieldset>
     <fieldset disabled={busy}>
       <legend>{t("mailArchive.importTitle")}</legend>
       <p className="mail-archive-note">{t("mailArchive.limits")}</p>
-      <button onClick={() => void perform(async () => { const result = await api.chooseArchiveFiles(); if (result) { setSelection(result); setPreview(null); setReport(null); } })}>{t("mailArchive.chooseFiles")}</button>
+      <Button onClick={() => void perform(async () => { const result = await api.chooseArchiveFiles(); if (result) { setSelection(result); setPreview(null); setReport(null); } })}>{t("mailArchive.chooseFiles")}</Button>
       {selection && <ul>{selection.files.map((file, index) => <li key={index}>{file.name} ({(file.bytes / 1024).toFixed(1)} KiB)</li>)}</ul>}
-      <div className="mail-archive-row"><button disabled={!selection || !folderId} onClick={() => void runImport(true)}>{t("mailArchive.validate")}</button>
-        <button disabled={!preview || !preview.imported || preview.cancelled} onClick={() => void runImport(false)}>{t("mailArchive.importAction")}</button></div>
+      <div className="mail-archive-row"><Button disabled={!selection || !folderId} onClick={() => void runImport(true)}>{t("mailArchive.validate")}</Button>
+        <Button variant="primary" disabled={!preview || !preview.imported || preview.cancelled} onClick={() => void runImport(false)}>{t("mailArchive.importAction")}</Button></div>
     </fieldset>
     {(error || archives.error || folders.error || messages.error || detail.error) && <p role="alert">{error || errorText(archives.error || folders.error || messages.error || detail.error)}</p>}
     {busy && <div role="status" className="mail-archive-progress">
@@ -179,34 +183,34 @@ export default function MailArchiveView() {
     </section>}
     <fieldset disabled={busy || !archiveId}>
       <legend>{t("mailArchive.browse")}</legend>
-      <label>{t("mailArchive.search")}<input type="search" maxLength={500} value={query} onChange={(e) => setQuery(e.target.value)} /></label>
+      <label>{t("mailArchive.search")}<input className="input" type="search" maxLength={500} value={query} onChange={(e) => setQuery(e.target.value)} /></label>
       <div className="mail-archive-row">
-        <label>{t("mailArchive.format")}<select value={format} onChange={(e) => setFormat(e.target.value as api.ArchiveExportFormat)}><option value="eml">EML</option><option value="mbox">MBOX (mboxrd)</option></select></label>
-        <button disabled={!selected.length} onClick={() => void runExport({ kind: "archive", archive_id: archiveId, message_ids: selected, folder_id: null })}>{t("mailArchive.exportSelected")}</button>
-        <button disabled={!folderId} onClick={() => void runExport({ kind: "archive", archive_id: archiveId, message_ids: [], folder_id: folderId })}>{t("mailArchive.exportFolder")}</button>
+        <label>{t("mailArchive.format")}<select className="select" value={format} onChange={(e) => setFormat(e.target.value as api.ArchiveExportFormat)}><option value="eml">EML</option><option value="mbox">MBOX (mboxrd)</option></select></label>
+        <Button disabled={!selected.length} onClick={() => void runExport({ kind: "archive", archive_id: archiveId, message_ids: selected, folder_id: null })}>{t("mailArchive.exportSelected")}</Button>
+        <Button disabled={!folderId} onClick={() => void runExport({ kind: "archive", archive_id: archiveId, message_ids: [], folder_id: folderId })}>{t("mailArchive.exportFolder")}</Button>
       </div>
       {messages.isLoading && <p role="status">{t("mailArchive.loading")}</p>}
       {!messages.isLoading && messages.data?.length === 0 && <p>{t("mailArchive.empty")}</p>}
       <ul className="mail-archive-messages">{messages.data?.map((message) => <li key={message.id}>
-        <input aria-label={t("mailArchive.selectMessage", { subject: message.subject })} type="checkbox" checked={selected.includes(message.id)} onChange={(e) => setSelected((ids) => e.target.checked ? [...ids, message.id] : ids.filter((id) => id !== message.id))} />
-        <button aria-pressed={messageId === message.id} className={message.is_read ? "" : "mail-archive-unread"} onClick={() => setMessageId(message.id)}>{message.is_starred ? "★ " : ""}{message.subject || t("mailArchive.noSubject")} — {message.sender}<time>{formatDateTime(message.date)}</time></button>
+        <input className="checkbox" aria-label={t("mailArchive.selectMessage", { subject: message.subject })} type="checkbox" checked={selected.includes(message.id)} onChange={(e) => setSelected((ids) => e.target.checked ? [...ids, message.id] : ids.filter((id) => id !== message.id))} />
+        <button type="button" aria-pressed={messageId === message.id} className={`mail-archive-message${message.is_read ? "" : " mail-archive-unread"}`} onClick={() => setMessageId(message.id)}>{message.is_starred && <span className="mail-archive-star" aria-hidden="true">★ </span>}{message.subject || t("mailArchive.noSubject")} — {message.sender}<time>{formatDateTime(message.date)}</time></button>
       </li>)}</ul>
-      <div className="mail-archive-row"><button disabled={!offset} onClick={() => { setOffset(Math.max(0, offset - 100)); setSelected([]); setMessageId(""); }}>{t("mailArchive.previous")}</button><span>{offset + 1}–{offset + (messages.data?.length || 0)}</span><button disabled={messages.data?.length !== 100} onClick={() => { setOffset(offset + 100); setSelected([]); setMessageId(""); }}>{t("mailArchive.next")}</button></div>
+      <div className="mail-archive-row"><Button disabled={!offset} onClick={() => { setOffset(Math.max(0, offset - 100)); setSelected([]); setMessageId(""); }}>{t("mailArchive.previous")}</Button><span>{offset + 1}–{offset + (messages.data?.length || 0)}</span><Button disabled={messages.data?.length !== 100} onClick={() => { setOffset(offset + 100); setSelected([]); setMessageId(""); }}>{t("mailArchive.next")}</Button></div>
       {detail.data && <article className="mail-archive-detail" aria-label={t("mailArchive.message")}>
         <h3>{detail.data.metadata.subject || t("mailArchive.noSubject")}</h3>
         <p>{detail.data.metadata.from_name} &lt;{detail.data.metadata.from_address}&gt;</p>
         <p>{t("mailArchive.toLine", { list: detail.data.metadata.to_list.map((a) => a.address).join(", ") })}</p>
         <p>{t("mailArchive.ccLine", { list: detail.data.metadata.cc_list.map((a) => a.address).join(", ") })}</p><p>{t("mailArchive.bccLine", { list: detail.data.metadata.bcc_list.map((a) => a.address).join(", ") })}</p>
         <p>{formatDateTime(detail.data.metadata.date)}</p>
-        <div className="mail-archive-row"><button onClick={() => void edit(detail.data!.folder_id, !detail.data!.is_read, detail.data!.is_starred)}>{t(detail.data.is_read ? "mailArchive.markUnread" : "mailArchive.markRead")}</button><button onClick={() => void edit(detail.data!.folder_id, detail.data!.is_read, !detail.data!.is_starred)}>{t(detail.data.is_starred ? "mailArchive.unstar" : "mailArchive.star")}</button>
-          <label>{t("mailArchive.move")}<select value={detail.data.folder_id} onChange={(e) => void edit(e.target.value, detail.data!.is_read, detail.data!.is_starred)}>{folders.data?.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label>
-          <button onClick={() => void perform(async () => { if (await useConfirmStore.getState().confirm({ title: t("mailArchive.delete"), message: t("mailArchive.deleteWarning"), confirmLabel: t("mailArchive.deletePermanently", "Delete permanently"), destructive: true })) { await api.deleteArchiveMessage(archiveId, detail.data!.id); clearBrowser(); await refresh(); } })}>{t("mailArchive.delete")}</button>
+        <div className="mail-archive-row"><Button onClick={() => void edit(detail.data!.folder_id, !detail.data!.is_read, detail.data!.is_starred)}>{t(detail.data.is_read ? "mailArchive.markUnread" : "mailArchive.markRead")}</Button><Button onClick={() => void edit(detail.data!.folder_id, detail.data!.is_read, !detail.data!.is_starred)}>{t(detail.data.is_starred ? "mailArchive.unstar" : "mailArchive.star")}</Button>
+          <label>{t("mailArchive.move")}<select className="select" value={detail.data.folder_id} onChange={(e) => void edit(e.target.value, detail.data!.is_read, detail.data!.is_starred)}>{folders.data?.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label>
+          <Button variant="danger-ghost" onClick={() => void perform(async () => { if (await useConfirmStore.getState().confirm({ title: t("mailArchive.delete"), message: t("mailArchive.deleteWarning"), confirmLabel: t("mailArchive.deletePermanently", "Delete permanently"), destructive: true })) { await api.deleteArchiveMessage(archiveId, detail.data!.id); clearBrowser(); await refresh(); } })}>{t("mailArchive.delete")}</Button>
         </div>
         <p className="mail-archive-note">{t("mailArchive.safePreview")}</p>
         <pre>{detail.data.metadata.body_text || t("mailArchive.noPlainBody")}</pre>
-        <h4>{t("mailArchive.attachments")}</h4><ul>{detail.data.metadata.attachments.map((attachment, index) => <li key={index}>
+        <h4>{t("mailArchive.attachments")}</h4><ul className="mail-archive-attachments">{detail.data.metadata.attachments.map((attachment, index) => <li key={index}>
           {attachment.filename} ({attachment.size} B){attachment.is_inline && ` — ${t("mailArchive.inline")}`}{attachment.content_id && ` CID: ${attachment.content_id}`}<code>SHA256: {attachment.sha256}</code>
-          <button onClick={() => void perform(async () => { await api.saveArchiveAttachment(archiveId, detail.data!.id, index); })}>{t("mailArchive.saveAttachment")}</button>
+          <Button size="sm" onClick={() => void perform(async () => { await api.saveArchiveAttachment(archiveId, detail.data!.id, index); })}>{t("mailArchive.saveAttachment")}</Button>
         </li>)}</ul><code>MIME SHA256: {detail.data.fingerprint}</code>
       </article>}
     </fieldset>
@@ -227,9 +231,9 @@ function MailboxExportPanel({ busy, format, runExport }: { busy: boolean; format
   const selected = selectedIds.size ? [...selectedIds] : single ? [single] : [];
   return <fieldset disabled={busy}><legend>{t("mailArchive.mailboxExport")}</legend>
     <p className="mail-archive-note">{t("mailArchive.mailboxNote")}</p>
-    <div className="mail-archive-row"><label>{t("mailArchive.exportAccount")}<select value={accountId} onChange={(e) => { setChoice(e.target.value); setFolderId(""); }}>{accounts.map((account) => <option key={account.id} value={account.id}>{account.email}</option>)}</select></label>
-      <label>{t("mailArchive.exportMailboxFolder")}<select value={folderId} onChange={(e) => setFolderId(e.target.value)}><option value="">{t("mailArchive.chooseFolder")}</option>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label></div>
-    <div className="mail-archive-row"><button disabled={!folderId || !accountId} onClick={() => void runExport({ kind: "mailbox", account_id: accountId, folder_id: folderId, message_ids: [] })}>{t("mailArchive.exportMailbox", { format })}</button>
-      <button disabled={!selected.length || accountId !== activeAccount} onClick={() => void runExport({ kind: "mailbox", account_id: accountId, folder_id: null, message_ids: selected })}>{t("mailArchive.exportMailboxSelected", { count: selected.length, format })}</button></div>
+    <div className="mail-archive-row"><label>{t("mailArchive.exportAccount")}<select className="select" value={accountId} onChange={(e) => { setChoice(e.target.value); setFolderId(""); }}>{accounts.map((account) => <option key={account.id} value={account.id}>{account.email}</option>)}</select></label>
+      <label>{t("mailArchive.exportMailboxFolder")}<select className="select" value={folderId} onChange={(e) => setFolderId(e.target.value)}><option value="">{t("mailArchive.chooseFolder")}</option>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label></div>
+    <div className="mail-archive-row"><Button disabled={!folderId || !accountId} onClick={() => void runExport({ kind: "mailbox", account_id: accountId, folder_id: folderId, message_ids: [] })}>{t("mailArchive.exportMailbox", { format })}</Button>
+      <Button disabled={!selected.length || accountId !== activeAccount} onClick={() => void runExport({ kind: "mailbox", account_id: accountId, folder_id: null, message_ids: selected })}>{t("mailArchive.exportMailboxSelected", { count: selected.length, format })}</Button></div>
   </fieldset>;
 }

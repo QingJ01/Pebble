@@ -45,7 +45,7 @@ export default function ErrorDiagnosticsButton({ error, componentStack }: { erro
         {i18next.t("errorBoundary.copyDiagnostics", "Copy error details")}
       </Button>
       {status !== "idle" && (
-        <p role="status" style={{ margin: 0, fontSize: "var(--font-sm)", color: "var(--color-text-secondary)" }}>
+        <p role="status" className="error-state__status">
           {status === "copied"
             ? i18next.t("errorBoundary.copied", "Copied. Paste it into your issue report.")
             : i18next.t("errorBoundary.copyFailed", "Couldn't copy the error details.")}

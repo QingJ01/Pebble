@@ -195,23 +195,19 @@ class ViewErrorBoundary extends Component<
   render() {
     if (this.state.error) {
       return (
-        <div style={{
-          display: "flex", flexDirection: "column", alignItems: "center",
-          justifyContent: "center", height: "100%", gap: 12, padding: 24,
-          color: "var(--color-text-secondary)",
-        }}>
-          <p style={{ fontSize: "var(--font-md)", fontWeight: 600, margin: 0, color: "var(--color-text-primary)" }}>{i18next.t("errorBoundary.title", "Something went wrong")}</p>
-          <p style={{ fontSize: "var(--font-sm)", margin: 0, color: "var(--color-text-secondary)" }}>
+        <div className="error-state">
+          <p className="error-state__title">{i18next.t("errorBoundary.title", "Something went wrong")}</p>
+          <p className="error-state__description">
             {i18next.t("errorBoundary.description", "This view ran into an unexpected error. Try again, or reload Pebble if it keeps happening.")}
           </p>
           {this.state.error && import.meta.env.DEV && (
-            <pre style={{ fontSize: "var(--font-xs)", color: "var(--color-danger)", maxWidth: "90%", overflow: "auto", whiteSpace: "pre-wrap", textAlign: "left" }}>
+            <pre className="error-state__detail">
               {this.state.error.message}
               {"\n"}
               {this.state.error.stack}
             </pre>
           )}
-          <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", alignItems: "center", gap: 8 }}>
+          <div className="error-state__actions">
             <Button variant="primary" onClick={() => this.setState({ error: null, componentStack: null })}>
               {i18next.t("errorBoundary.retry", "Retry")}
             </Button>
@@ -249,7 +245,7 @@ function OfflineBanner() {
     <div className="offline-banner" role="status" aria-live="polite">
       <WifiOff size={14} aria-hidden="true" />
       <span>
-        <strong style={{ fontWeight: 600 }}>{t("status.offline", "Offline")}</strong>
+        <strong className="offline-banner__title">{t("status.offline", "Offline")}</strong>
         {" — "}
         {t("status.offlineHint", "Mail sync is paused until you're back online")}
       </span>

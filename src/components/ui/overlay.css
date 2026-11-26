@@ -49,7 +49,7 @@
 
 .menu { min-width: 200px; padding: var(--space-1); }
 .menu-label {
-  padding: 6px var(--space-2) var(--space-1);
+  padding: var(--space-2) var(--space-2) var(--space-1);
   font-size: var(--font-sm);
   font-weight: var(--weight-semibold);
   color: var(--color-text-secondary);
@@ -85,19 +85,19 @@
 .menu-item--danger { color: var(--color-danger); }
 .menu-item__hint {
   margin-left: auto;
-  padding-left: 12px;
+  padding-left: var(--space-3);
   font-size: var(--font-sm);
-  color: var(--color-text-secondary);
+  color: var(--color-text-tertiary);
 }
 
 .popover-error {
-  margin: 4px;
-  padding: 6px 8px;
+  margin: var(--space-1);
+  padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-sm);
   background: var(--color-danger-bg);
   color: var(--color-danger);
   font-size: var(--font-sm);
-  line-height: 1.5;
+  line-height: var(--leading-normal);
 }
 
 /* Keep previous message visible but dimmed while the next one loads (D3). */
@@ -109,13 +109,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .message-detail--stale { transition: none; }
-}
-
-/* Contact editor title follows the dialog title scale (600). */
-.contact-dialog .contact-dialog-header h2 {
-  font-size: var(--font-lg);
-  font-weight: var(--weight-semibold);
-  letter-spacing: normal;
 }
 
 /* Required-field marker (pseudo-element so label text / accessible names stay clean;
