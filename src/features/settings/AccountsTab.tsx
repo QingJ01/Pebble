@@ -37,7 +37,8 @@ import SyncRangeFields, { syncRangeDays, syncRangeDraft } from "@/components/Syn
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import { getSignature, setSignature } from "@/lib/signatures";
 import { ACCOUNT_COLOR_PRESETS, assignAccountColors, getAccountColor } from "@/lib/accountColors";
-import { inputStyle, labelStyle } from "../../styles/form";
+import { SettingsList, SettingsListRow, SettingsNotice, SettingsSection, StatusChip } from "./SettingsLayout";
+import { providerLabel } from "./providerLabel";
 
 export default function AccountsTab() {
   const { t } = useTranslation();
@@ -83,195 +84,104 @@ export default function AccountsTab() {
 
   return (
     <div>
-      {/* Section header */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: "20px",
-        }}
+      <SettingsSection
+        title={t("settings.emailAccounts")}
+        actions={
+          <Button size="sm" variant="primary" icon={<Plus size={14} />} onClick={() => setShowSetup(true)}>
+            {t("settings.addAccount")}
+          </Button>
+        }
       >
-        <h2
-          style={{
-            margin: 0,
-            fontSize: "16px",
-            fontWeight: 600,
-            color: "var(--color-text-primary)",
-          }}
-        >
-          {t("settings.emailAccounts")}
-        </h2>
-        <button
-          onClick={() => setShowSetup(true)}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "6px",
-            padding: "7px 14px",
-            borderRadius: "6px",
-            border: "none",
-            backgroundColor: "var(--color-accent-strong)",
-            color: "var(--color-on-accent)",
-            fontSize: "13px",
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >
-          <Plus size={14} />
-          {t("settings.addAccount")}
-        </button>
-      </div>
-
-      {/* Empty state */}
-      {accounts.length === 0 ? (
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "12px",
-            padding: "48px 0",
-            color: "var(--color-text-secondary)",
-          }}
-        >
-          <Mail size={40} strokeWidth={1.5} />
-          <p style={{ margin: 0, fontSize: "14px" }}>{t("settings.noAccounts")}</p>
-          <button
-            onClick={() => setShowSetup(true)}
+        {accounts.length === 0 ? (
+          <div
             style={{
-              marginTop: "4px",
-              padding: "8px 18px",
-              borderRadius: "6px",
-              border: "1px solid var(--color-border)",
-              backgroundColor: "transparent",
-              color: "var(--color-text-primary)",
-              fontSize: "13px",
-              cursor: "pointer",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "var(--space-3)",
+              padding: "var(--space-8) 0",
+              color: "var(--color-text-tertiary)",
             }}
           >
-            {t("settings.addFirstAccount")}
-          </button>
-        </div>
-      ) : (
-        /* Account list */
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "1px",
-            borderRadius: "8px",
-            overflow: "hidden",
-            border: "1px solid var(--color-border)",
-          }}
-        >
-          {accounts.map((account, index) => {
-            const realtimeStatus = realtimeStatusByAccount[account.id];
-            const realtimeLabel = getAccountRealtimeStatusText(realtimeStatus, t);
-            const accountColor = accountColorsById.get(account.id) ?? getAccountColor(account);
+            <Mail size={40} strokeWidth={1.5} aria-hidden="true" />
+            <p className="settings-empty">{t("settings.noAccounts")}</p>
+            <Button onClick={() => setShowSetup(true)}>{t("settings.addFirstAccount")}</Button>
+          </div>
+        ) : (
+          <SettingsList>
+            {accounts.map((account) => {
+              const realtimeStatus = realtimeStatusByAccount[account.id];
+              const realtimeLabel = getAccountRealtimeStatusText(realtimeStatus, t);
+              const accountColor = accountColorsById.get(account.id) ?? getAccountColor(account);
 
-            return (
-              <div
-                key={account.id}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "14px 16px",
-                  backgroundColor: "var(--color-bg)",
-                  borderTop: index > 0 ? "1px solid var(--color-border)" : "none",
-                }}
-              >
-                <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+              return (
+                <SettingsListRow
+                  key={account.id}
+                  style={{ alignItems: "flex-start" }}
+                  leading={
                     <span
                       aria-hidden="true"
                       style={{
                         width: "8px",
                         height: "8px",
-                        borderRadius: "50%",
+                        marginTop: "var(--space-1)",
+                        borderRadius: "var(--radius-full)",
                         backgroundColor: accountColor,
                         flexShrink: 0,
                       }}
                     />
-                    <span style={{ fontSize: "13px", fontWeight: 500 }}>
-                      {accountLabel(account)}
-                    </span>
+                  }
+                  title={accountLabel(account)}
+                  meta={account.email}
+                  actions={
+                    <>
+                      <IconButton
+                        label={t("accountSetup.testConnection", "Test Connection")}
+                        icon={<Plug size={14} />}
+                        loading={testingId === account.id}
+                        onClick={() => doTestConnection(account.id)}
+                      />
+                      <IconButton
+                        label={t("settings.editAccount", "Edit account")}
+                        icon={<Pencil size={14} />}
+                        onClick={() => setEditingAccount(account)}
+                      />
+                      <IconButton
+                        variant="danger"
+                        label={t("settings.removeAccount")}
+                        icon={<Trash2 size={14} />}
+                        onClick={() => setDeleteTarget({ id: account.id, email: account.email })}
+                      />
+                    </>
+                  }
+                >
+                  <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "var(--space-2)", marginTop: "var(--space-1)" }}>
+                    <StatusChip>{providerLabel(account.provider)}</StatusChip>
+                    {realtimeLabel && (
+                      <span
+                        aria-label={realtimeLabel}
+                        title={realtimeStatus?.message ?? realtimeLabel}
+                        style={{ fontSize: "var(--font-xs)", color: "var(--color-text-tertiary)" }}
+                      >
+                        {realtimeLabel}
+                      </span>
+                    )}
                   </div>
-                  <span
-                    style={{
-                      fontSize: "12px",
-                      color: "var(--color-text-secondary)",
-                    }}
-                  >
-                    {account.email}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: "11px",
-                      color: "var(--color-text-secondary)",
-                      textTransform: "capitalize",
-                    }}
-                  >
-                    {account.provider}
-                  </span>
-                  {realtimeLabel && (
-                    <span
-                      aria-label={realtimeLabel}
-                      title={realtimeStatus?.message ?? realtimeLabel}
-                      style={{
-                        fontSize: "11px",
-                        color: "var(--color-text-secondary)",
-                      }}
-                    >
-                      {realtimeLabel}
-                    </span>
-                  )}
-                </div>
-                <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-                  <IconButton
-                    label={t("accountSetup.testConnection", "Test Connection")}
-                    icon={<Plug size={15} />}
-                    loading={testingId === account.id}
-                    onClick={() => doTestConnection(account.id)}
-                  />
-                  <IconButton
-                    label={t("settings.editAccount", "Edit account")}
-                    icon={<Pencil size={15} />}
-                    onClick={() => setEditingAccount(account)}
-                  />
-                  <IconButton
-                    label={t("settings.removeAccount")}
-                    icon={<Trash2 size={15} />}
-                    onClick={() => setDeleteTarget({ id: account.id, email: account.email })}
-                    style={{ marginLeft: "4px" }}
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+                </SettingsListRow>
+              );
+            })}
+          </SettingsList>
+        )}
 
-      {/* Test result */}
-      {testResult && (
-        <div
-          style={{
-            marginTop: "10px",
-            padding: "10px 12px",
-            borderRadius: "6px",
-            backgroundColor: testResult.ok ? "var(--color-success-bg)" : "var(--color-danger-bg)",
-            border: "1px solid var(--color-border)",
-            color: testResult.ok ? "var(--color-success)" : "var(--color-danger)",
-            fontSize: "12px",
-            whiteSpace: "pre-wrap",
-            fontFamily: "monospace",
-            lineHeight: 1.5,
-          }}
-        >
-          {testResult.message}
-        </div>
-      )}
+        {testResult && (
+          <SettingsNotice
+            tone={testResult.ok ? "success" : "danger"}
+            style={{ whiteSpace: "pre-wrap", fontFamily: "var(--font-mono)" }}
+          >
+            {testResult.message}
+          </SettingsNotice>
+        )}
+      </SettingsSection>
 
       {/* Delete confirmation */}
       {deleteTarget && (
@@ -544,20 +454,20 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
     }
   }
 
-  const fieldStyle: React.CSSProperties = {
-    display: "flex",
-    flexDirection: "column",
+  const optionalStyle: React.CSSProperties = {
+    color: "var(--color-text-tertiary)",
+    fontWeight: "var(--weight-regular)" as React.CSSProperties["fontWeight"],
   };
   const colorInputValue = /^#[0-9a-fA-F]{6}$/.test(accountColor) ? accountColor : initialColor;
   const proxyFields = (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "12px" }}>
-      <div style={fieldStyle}>
-        <label style={labelStyle}>{t("accountSetup.proxyHost", "SOCKS5 Proxy")} <span style={{ color: "var(--color-text-secondary)", fontWeight: 400 }}>({t("settings.optional", "optional")})</span></label>
-        <input aria-label={t("accountSetup.proxyHost", "SOCKS5 Proxy")} style={inputStyle} type="text" value={proxyHost} onChange={(e) => setProxyHost(e.target.value)} placeholder="127.0.0.1" />
+    <div className="settings-grid" style={{ gridTemplateColumns: "1fr auto" }}>
+      <div className="field">
+        <label className="field__label">{t("accountSetup.proxyHost", "SOCKS5 Proxy")} <span style={optionalStyle}>({t("settings.optional", "optional")})</span></label>
+        <input aria-label={t("accountSetup.proxyHost", "SOCKS5 Proxy")} className="input" type="text" value={proxyHost} onChange={(e) => setProxyHost(e.target.value)} placeholder="127.0.0.1" />
       </div>
-      <div style={fieldStyle}>
-        <label style={labelStyle}>{t("accountSetup.proxyPort", "Port")}</label>
-        <input aria-label={t("accountSetup.proxyPort", "Port")} style={{ ...inputStyle, width: "80px" }} type="number" inputMode="numeric" value={proxyPort} onChange={(e) => setProxyPort(e.target.value)} placeholder="7890" />
+      <div className="field">
+        <label className="field__label">{t("accountSetup.proxyPort", "Port")}</label>
+        <input aria-label={t("accountSetup.proxyPort", "Port")} className="input" style={{ width: "80px" }} type="number" inputMode="numeric" value={proxyPort} onChange={(e) => setProxyPort(e.target.value)} placeholder="7890" />
       </div>
     </div>
   );
@@ -573,46 +483,40 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
       panelClassName="dialog-panel dialog-panel--flush"
       style={{ width: "min(480px, 100%)", maxHeight: "90vh", overflow: "hidden" }}
     >
-        <div
-          className="dialog-header"
-          style={{
-            padding: "16px 20px",
-            borderBottom: "1px solid var(--color-border)",
-          }}
-        >
+        <div className="dialog-panel__header">
           <h2 id="edit-account-title" className="dialog-title">
             {t("settings.editAccount", "Edit Account")}
           </h2>
           <IconButton label={t("common.close", "Close")} icon={<X size={16} />} onClick={onClose} />
         </div>
 
-        <div className="scroll-region edit-account-scroll" style={{ overflowY: "auto", padding: "20px" }}>
-          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-            <div style={fieldStyle}>
-              <label style={labelStyle}>{t("accountSetup.accountLabel", "Account label")}</label>
-              <input aria-label={t("accountSetup.accountLabel", "Account label")} style={inputStyle} maxLength={120}
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}>
+          <div className="scroll-region edit-account-scroll dialog-panel__body settings-form">
+            <div className="field">
+              <label className="field__label">{t("accountSetup.accountLabel", "Account label")}</label>
+              <input aria-label={t("accountSetup.accountLabel", "Account label")} className="input" maxLength={120}
                 value={accountLabelValue} onChange={(e) => setAccountLabelValue(e.target.value)} />
-              <small>{t("accountSetup.accountLabelHelp", "Only used to identify this account in Pebble; never sent as your sender name.")}</small>
+              <p className="field__hint">{t("accountSetup.accountLabelHelp", "Only used to identify this account in Pebble; never sent as your sender name.")}</p>
             </div>
-            <div>
-              <label style={labelStyle}>{t("accountSetup.displayName")}</label>
-              <input aria-label={t("accountSetup.displayName")} style={inputStyle} type="text" readOnly={account.provider === "outlook"} value={account.provider === "outlook" ? providerName : displayName} onChange={(e) => setDisplayName(e.target.value)} />
-              <small>{account.provider === "outlook"
+            <div className="field">
+              <label className="field__label">{t("accountSetup.displayName")}</label>
+              <input aria-label={t("accountSetup.displayName")} className="input" type="text" readOnly={account.provider === "outlook"} value={account.provider === "outlook" ? providerName : displayName} onChange={(e) => setDisplayName(e.target.value)} />
+              <p className="field__hint">{account.provider === "outlook"
                 ? t("accountSetup.providerManagedName", "The sender name is managed by your email provider.")
-                : t("accountSetup.senderNameHelp", "Used in outgoing messages. Check this name before sending.")}</small>
+                : t("accountSetup.senderNameHelp", "Used in outgoing messages. Check this name before sending.")}</p>
             </div>
-            <div style={fieldStyle}>
-              <label style={labelStyle}>{t("accountSetup.emailAddress")}</label>
-              <input aria-label={t("accountSetup.emailAddress")} ref={emailInputRef} style={inputStyle} type="email" required readOnly={isOAuth} value={email} onChange={(e) => setEmail(e.target.value)} />
+            <div className="field">
+              <label className="field__label">{t("accountSetup.emailAddress")}</label>
+              <input aria-label={t("accountSetup.emailAddress")} ref={emailInputRef} className="input" type="email" required readOnly={isOAuth} value={email} onChange={(e) => setEmail(e.target.value)} />
             </div>
             {isOAuth && <OAuthIdentityPanel account={account} onApplied={(updated) => {
               setEmail(updated.email);
               setProviderName(updated.provider_display_name || "");
               void queryClient.invalidateQueries({ queryKey: accountsQueryKey });
             }} />}
-            <div style={fieldStyle}>
-              <label htmlFor="account-color" style={labelStyle}>{t("settings.accountColor", "Account color")}</label>
-              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <div className="field">
+              <label htmlFor="account-color" className="field__label">{t("settings.accountColor", "Account color")}</label>
+              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
                 <input
                   id="account-color"
                   aria-label={t("settings.accountColor", "Account color")}
@@ -620,18 +524,18 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
                   value={colorInputValue}
                   onChange={(e) => setAccountColor(e.target.value)}
                   style={{
-                    width: "38px",
-                    height: "32px",
+                    width: "40px",
+                    height: "var(--control-md)",
                     padding: "2px",
                     border: "1px solid var(--color-border)",
-                    borderRadius: "6px",
-                    backgroundColor: "var(--color-bg)",
+                    borderRadius: "var(--radius-md)",
+                    backgroundColor: "var(--color-control-bg)",
                     cursor: "pointer",
                   }}
                 />
                 <input
                   aria-label={t("settings.accountColorHex", "Account color hex")}
-                  style={{ ...inputStyle, width: "96px", fontFamily: "monospace" }}
+                  className="input" style={{ width: "96px", fontFamily: "var(--font-mono)" }}
                   value={accountColor}
                   onChange={(e) => {
                     const value = e.target.value;
@@ -647,8 +551,8 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
                 style={{
                   display: "flex",
                   flexWrap: "wrap",
-                  gap: "6px",
-                  marginTop: "8px",
+                  gap: "var(--space-2)",
+                  marginTop: "var(--space-1)",
                 }}
               >
                 {ACCOUNT_COLOR_PRESETS.map((preset) => {
@@ -666,14 +570,13 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
                       title={presetLabel}
                       onClick={() => setAccountColor(preset.color)}
                       style={{
-                        width: "22px",
-                        height: "22px",
-                        borderRadius: "50%",
+                        width: "24px",
+                        height: "24px",
+                        borderRadius: "var(--radius-full)",
                         border: selected ? "2px solid var(--color-text-primary)" : "1px solid var(--color-border)",
                         backgroundColor: preset.color,
                         cursor: "pointer",
                         padding: 0,
-                        boxShadow: selected ? `0 0 0 2px ${preset.color}33` : "none",
                       }}
                     />
                   );
@@ -681,41 +584,31 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
               </div>
             </div>
             {isOAuth ? (
-              <div
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: "6px",
-                  backgroundColor: "rgba(59,130,246,0.08)",
-                  border: "1px solid rgba(59,130,246,0.25)",
-                  color: "var(--color-text-secondary)",
-                  fontSize: "12px",
-                  lineHeight: 1.5,
-                }}
-              >
+              <SettingsNotice tone="info">
                 {t(
                   "settings.oauthAccountNote",
                   "This account uses OAuth. Provider sign-in, password, and IMAP/SMTP settings are managed by the provider. Leave the proxy blank to inherit the global SOCKS5 proxy."
                 )}
-              </div>
+              </SettingsNotice>
             ) : (
               <>
-                <div style={fieldStyle}>
-                  <label style={labelStyle}>{t("accountSetup.password")} <span style={{ color: "var(--color-text-secondary)", fontWeight: 400 }}>({t("settings.leaveEmptyKeep", "leave empty to keep current")})</span></label>
-                  <input aria-label={t("accountSetup.password")} style={inputStyle} type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+                <div className="field">
+                  <label className="field__label">{t("accountSetup.password")} <span style={optionalStyle}>({t("settings.leaveEmptyKeep", "leave empty to keep current")})</span></label>
+                  <input aria-label={t("accountSetup.password")} className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "12px" }}>
-                  <div style={fieldStyle}>
-                    <label style={labelStyle}>{incomingHostLabel} <span style={{ color: "var(--color-text-secondary)", fontWeight: 400 }}>({t("settings.optional", "optional")})</span></label>
-                    <input aria-label={incomingHostLabel} style={inputStyle} type="text" value={imapHost} onChange={(e) => setImapHost(e.target.value)} placeholder={t("settings.leaveEmptyKeep")} />
+                <div className="settings-grid" style={{ gridTemplateColumns: "1fr auto auto" }}>
+                  <div className="field">
+                    <label className="field__label">{incomingHostLabel} <span style={optionalStyle}>({t("settings.optional", "optional")})</span></label>
+                    <input aria-label={incomingHostLabel} className="input" type="text" value={imapHost} onChange={(e) => setImapHost(e.target.value)} placeholder={t("settings.leaveEmptyKeep")} />
                   </div>
-                  <div style={fieldStyle}>
-                    <label style={labelStyle}>{incomingPortLabel}</label>
-                    <input aria-label={incomingPortLabel} style={{ ...inputStyle, width: "70px" }} type="number" min={1} max={65535} step={1} inputMode="numeric" value={imapPort} onChange={(e) => setImapPort(e.target.value)} />
+                  <div className="field">
+                    <label className="field__label">{incomingPortLabel}</label>
+                    <input aria-label={incomingPortLabel} className="input" style={{ width: "80px" }} type="number" min={1} max={65535} step={1} inputMode="numeric" value={imapPort} onChange={(e) => setImapPort(e.target.value)} />
                   </div>
-                  <div style={fieldStyle}>
-                    <label htmlFor="accountsetup-imap-security" style={labelStyle}>{t("accountSetup.security", "Security")}</label>
-                    <select id="accountsetup-imap-security" value={imapSecurity} onChange={(e) => setImapSecurity(e.target.value as ConnectionSecurity | "")} style={{ ...inputStyle, width: "110px" }}>
+                  <div className="field">
+                    <label htmlFor="accountsetup-imap-security" className="field__label">{t("accountSetup.security", "Security")}</label>
+                    <select id="accountsetup-imap-security" value={imapSecurity} onChange={(e) => setImapSecurity(e.target.value as ConnectionSecurity | "")} className="select" style={{ width: "120px" }}>
                       <option value="">{t("settings.leaveEmptyKeep", "keep current")}</option>
                       <option value="tls">{t("accountSetup.securityTls", "SSL/TLS")}</option>
                       <option value="starttls">{t("accountSetup.securityStarttls", "STARTTLS")}</option>
@@ -724,18 +617,18 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
                   </div>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "12px" }}>
-                  <div style={fieldStyle}>
-                    <label style={labelStyle}>{t("accountSetup.smtpHost")} <span style={{ color: "var(--color-text-secondary)", fontWeight: 400 }}>({t("settings.optional", "optional")})</span></label>
-                    <input aria-label={t("accountSetup.smtpHost")} style={inputStyle} type="text" value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} placeholder={t("settings.leaveEmptyKeep")} />
+                <div className="settings-grid" style={{ gridTemplateColumns: "1fr auto auto" }}>
+                  <div className="field">
+                    <label className="field__label">{t("accountSetup.smtpHost")} <span style={optionalStyle}>({t("settings.optional", "optional")})</span></label>
+                    <input aria-label={t("accountSetup.smtpHost")} className="input" type="text" value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} placeholder={t("settings.leaveEmptyKeep")} />
                   </div>
-                  <div style={fieldStyle}>
-                    <label style={labelStyle}>{t("accountSetup.smtpPort")}</label>
-                    <input aria-label={t("accountSetup.smtpPort")} style={{ ...inputStyle, width: "70px" }} type="number" min={1} max={65535} step={1} inputMode="numeric" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} />
+                  <div className="field">
+                    <label className="field__label">{t("accountSetup.smtpPort")}</label>
+                    <input aria-label={t("accountSetup.smtpPort")} className="input" style={{ width: "80px" }} type="number" min={1} max={65535} step={1} inputMode="numeric" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} />
                   </div>
-                  <div style={fieldStyle}>
-                    <label htmlFor="accountsetup-smtp-security" style={labelStyle}>{t("accountSetup.security", "Security")}</label>
-                    <select id="accountsetup-smtp-security" value={smtpSecurity} onChange={(e) => setSmtpSecurity(e.target.value as ConnectionSecurity | "")} style={{ ...inputStyle, width: "110px" }}>
+                  <div className="field">
+                    <label htmlFor="accountsetup-smtp-security" className="field__label">{t("accountSetup.security", "Security")}</label>
+                    <select id="accountsetup-smtp-security" value={smtpSecurity} onChange={(e) => setSmtpSecurity(e.target.value as ConnectionSecurity | "")} className="select" style={{ width: "120px" }}>
                       <option value="">{t("settings.leaveEmptyKeep", "keep current")}</option>
                       <option value="tls">{t("accountSetup.securityTls", "SSL/TLS")}</option>
                       <option value="starttls">{t("accountSetup.securityStarttls", "STARTTLS")}</option>
@@ -744,15 +637,15 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
                   </div>
                 </div>
 
-                <div style={fieldStyle}>
-                  <label htmlFor="accountsetup-cert-policy" style={labelStyle}>
+                <div className="field">
+                  <label htmlFor="accountsetup-cert-policy" className="field__label">
                     {t("accountSetup.tlsCertificateVerification", "TLS certificate verification")}
                   </label>
                   <select
                     id="accountsetup-cert-policy"
                     value={acceptInvalidCerts}
                     onChange={(e) => setAcceptInvalidCerts(e.target.value as "" | "false" | "true")}
-                    style={inputStyle}
+                    className="select"
                   >
                     <option value="">{t("settings.leaveEmptyKeep", "keep current")}</option>
                     <option value="false">{t("accountSetup.verifyTlsCerts", "Verify certificates")}</option>
@@ -767,8 +660,8 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
 
             <SyncRangeFields value={syncRange} onChange={setSyncRange}
               disabled={loading || rangeLoading || !!rangeError} unsupported={isPop3} />
-            {rangeLoading && <div role="status">{t("common.loading", "Loading...")}</div>}
-            {rangeError && <div role="alert" style={{ color: "var(--color-danger)", fontSize: "12px" }}>
+            {rangeLoading && <div role="status" className="settings-hint">{t("common.loading", "Loading...")}</div>}
+            {rangeError && <div role="alert" className="settings-error">
               {t("syncRange.loadError", "Could not load the sync range. Close and reopen this dialog to retry.")} {rangeError}
             </div>}
 
@@ -777,54 +670,41 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
                 style={{
                   display: "flex",
                   flexDirection: "column",
-                  gap: "10px",
-                  padding: "12px",
+                  gap: "var(--space-3)",
+                  padding: "var(--space-3)",
                   border: "1px solid var(--color-border)",
-                  borderRadius: "8px",
+                  borderRadius: "var(--radius-lg)",
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
-                  <div>
-                    <div style={{ ...labelStyle, marginBottom: "3px" }}>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "var(--space-3)" }}>
+                  <div className="field">
+                    <div className="field__label">
                       {t("settings.syncFolders", "Folders to sync")}
                     </div>
-                    <div style={{ fontSize: "12px", color: "var(--color-text-secondary)", lineHeight: 1.45 }}>
+                    <div className="field__hint">
                       {t(
                         "settings.syncFoldersDesc",
                         "Inbox is always synced. Choose any additional IMAP folders to keep locally.",
                       )}
                     </div>
                   </div>
-                  <button
-                    type="button"
+                  <Button
+                    size="sm"
                     onClick={loadImapFolders}
                     disabled={folderLoading || loading}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      padding: "7px 10px",
-                      borderRadius: "6px",
-                      border: "1px solid var(--color-border)",
-                      backgroundColor: "var(--color-bg)",
-                      color: "var(--color-text-primary)",
-                      fontSize: "12px",
-                      cursor: folderLoading || loading ? "wait" : "pointer",
-                      opacity: folderLoading || loading ? 0.7 : 1,
-                      flexShrink: 0,
-                    }}
+                    icon={<RefreshCw size={14} />}
+                    style={{ flexShrink: 0 }}
                   >
-                    <RefreshCw size={13} aria-hidden="true" />
                     {folderLoading
                       ? t("settings.loadingFolders", "Loading...")
                       : imapFolderSettings
                         ? t("settings.refreshFolders", "Refresh folders")
                         : t("settings.chooseFolders", "Choose folders")}
-                  </button>
+                  </Button>
                 </div>
 
                 {folderError && (
-                  <div role="alert" style={{ color: "var(--color-danger)", fontSize: "12px" }}>
+                  <div role="alert" className="settings-error">
                     {t("settings.folderListFailed", "Failed to list IMAP folders: {{error}}", {
                       error: folderError,
                     })}
@@ -839,12 +719,12 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
                       style={{
                         display: "flex",
                         flexDirection: "column",
-                        gap: "7px",
+                        gap: "var(--space-2)",
                         maxHeight: "180px",
                         overflowY: "auto",
-                        padding: "9px",
-                        borderRadius: "6px",
-                        backgroundColor: "var(--color-bg-secondary, var(--color-bg-hover))",
+                        padding: "var(--space-2) var(--space-3)",
+                        borderRadius: "var(--radius-md)",
+                        backgroundColor: "var(--color-surface-sunken)",
                       }}
                     >
                       {imapFolderSettings.folders.map((folder) => {
@@ -853,17 +733,16 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
                         return (
                           <label
                             key={folder.remote_id}
+                            className="choice"
                             style={{
                               display: "flex",
-                              alignItems: "center",
-                              gap: "8px",
-                              color: "var(--color-text-primary)",
-                              fontSize: "12px",
+                              fontSize: "var(--font-sm)",
                               cursor: isInboxFolder ? "default" : "pointer",
                             }}
                           >
                             <input
                               type="checkbox"
+                              className="checkbox"
                               aria-label={folder.name}
                               checked={isInboxFolder || selectedImapFolderIds.has(folder.remote_id)}
                               disabled={isInboxFolder}
@@ -881,7 +760,7 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
                             />
                             <span>{folder.name}</span>
                             {isInboxFolder && (
-                              <span style={{ color: "var(--color-text-secondary)", marginLeft: "auto" }}>
+                              <span style={{ color: "var(--color-text-tertiary)", marginLeft: "auto" }}>
                                 {t("settings.alwaysSynced", "Always synced")}
                               </span>
                             )}
@@ -889,7 +768,7 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
                         );
                       })}
                     </div>
-                    <div style={{ color: "var(--color-text-secondary)", fontSize: "11px", lineHeight: 1.45 }}>
+                    <div className="settings-hint">
                       {t(
                         "settings.syncFoldersCleanupWarning",
                         "Saving removes locally stored data for folders you uncheck. It does not delete mail from the server.",
@@ -901,10 +780,11 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
             )}
 
             {/* Signature */}
-            <div style={fieldStyle}>
-              <label style={labelStyle}>{t("settings.signature", "Signature")} <span style={{ color: "var(--color-text-secondary)", fontWeight: 400 }}>({t("settings.optional", "optional")})</span></label>
+            <div className="field">
+              <label className="field__label">{t("settings.signature", "Signature")} <span style={optionalStyle}>({t("settings.optional", "optional")})</span></label>
               <textarea
-                style={{ ...inputStyle, minHeight: "80px", resize: "vertical", fontFamily: "inherit" }}
+                className="textarea"
+                rows={4}
                 value={signature}
                 onChange={(e) => setSignatureValue(e.target.value)}
                 placeholder={t("settings.signaturePlaceholder", "Your email signature...")}
@@ -912,26 +792,26 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
             </div>
 
             {error && (
-              <div role="alert" aria-live="assertive" className="dialog-error" style={{ margin: 0 }}>
+              <div role="alert" aria-live="assertive" className="dialog-error">
                 {error}
               </div>
             )}
 
-            <div className="dialog-actions" style={{ marginTop: "4px" }}>
-              <Button variant="secondary" disabled={loading} onClick={onClose}>
-                {t("common.cancel", "Cancel")}
-              </Button>
-              <Button
-                type="submit"
-                variant="primary"
-                loading={loading}
-                disabled={folderLoading || rangeLoading || !!rangeError || (!isPop3 && syncRangeDays(syncRange) === undefined)}
-              >
-                {loading ? t("common.saving") : t("common.save")}
-              </Button>
-            </div>
-          </form>
-        </div>
+          </div>
+          <div className="dialog-panel__footer">
+            <Button variant="secondary" disabled={loading} onClick={onClose}>
+              {t("common.cancel", "Cancel")}
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              loading={loading}
+              disabled={folderLoading || rangeLoading || !!rangeError || (!isPop3 && syncRangeDays(syncRange) === undefined)}
+            >
+              {loading ? t("common.saving") : t("common.save")}
+            </Button>
+          </div>
+        </form>
     </Dialog>
   );
 }

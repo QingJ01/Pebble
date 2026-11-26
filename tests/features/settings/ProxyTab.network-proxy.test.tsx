@@ -198,20 +198,17 @@ describe("ProxyTab global proxy", () => {
     });
     const imapGroup = screen.getByRole("group", { name: "Proxy for imap@example.com" });
     const customModeButton = within(imapGroup).getByRole("button", { name: "Use custom proxy" });
-    expect(customModeButton.getAttribute("style")).toContain("border: 2px solid var(--color-accent)");
-    expect(customModeButton.getAttribute("style")).toContain("background-color: var(--color-bg-hover)");
+    expect(customModeButton.getAttribute("aria-pressed")).toBe("true");
+    expect(customModeButton.className).toContain("option-card");
     expect(screen.queryAllByText("Inherit global proxy unless a custom proxy or disabled mode is selected.")).toHaveLength(0);
     const saveButton = within(imapGroup).getByRole("button", { name: "Save account proxy" });
-    expect(saveButton.getAttribute("style")).toContain("background-color: var(--color-accent-strong)");
-    expect(saveButton.getAttribute("style")).toContain("color: var(--color-on-accent)");
+    expect(saveButton.className).toContain("btn");
     const accountProxyHostInput = within(imapGroup).getByLabelText("SOCKS5 Proxy") as HTMLInputElement;
     const accountProxyPortInput = within(imapGroup).getByLabelText("Port") as HTMLInputElement;
     expect(accountProxyHostInput.value).toBe("192.168.0.2");
     expect(accountProxyPortInput.value).toBe("1080");
-    expect(accountProxyHostInput.getAttribute("style")).toContain("width: 100%");
-    expect(accountProxyHostInput.getAttribute("style")).toContain("box-sizing: border-box");
-    expect(accountProxyPortInput.getAttribute("style")).toContain("width: 100%");
-    expect(accountProxyPortInput.getAttribute("style")).toContain("box-sizing: border-box");
+    expect(accountProxyHostInput.className).toContain("input");
+    expect(accountProxyPortInput.className).toContain("input");
 
     const gmailGroup = screen.getByRole("group", { name: "Proxy for gmail@example.com" });
     expect(within(gmailGroup).queryByLabelText("SOCKS5 Proxy")).toBeNull();

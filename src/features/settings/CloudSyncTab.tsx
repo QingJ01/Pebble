@@ -1,10 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  inputStyle as baseInputStyle,
-  labelStyle as baseLabelStyle,
-  fieldGroupStyle,
-} from "../../styles/form";
 import { useQueryClient } from "@tanstack/react-query";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import {
@@ -22,6 +17,9 @@ import {
 import { extractErrorMessage as errorMessage, formatError } from "@/lib/extractErrorMessage";
 import { profileLocalStorage } from "@/lib/profileStorage";
 import { formatDateTime } from "@/lib/formatDate";
+import Button from "@/components/ui/Button";
+import Checkbox from "@/components/ui/Checkbox";
+import { SettingsNotice, SettingsSection } from "./SettingsLayout";
 
 const LAST_BACKUP_KEY = "pebble-cloud-sync-last-backup";
 
@@ -35,26 +33,6 @@ const MIN_SECRET_PASSPHRASE_CHARS = 12;
 type RestoreRequest =
   | { source: "webdav"; preview: BackupPreview }
   | { source: "file"; preview: BackupPreview; data: string };
-
-const labelStyle: React.CSSProperties = {
-  ...baseLabelStyle,
-  fontWeight: 500,
-};
-
-const inputStyle: React.CSSProperties = {
-  ...baseInputStyle,
-  padding: "8px 10px",
-  backgroundColor: "var(--color-bg-secondary)",
-};
-
-const buttonStyle: React.CSSProperties = {
-  padding: "8px 18px",
-  fontSize: "13px",
-  fontWeight: 500,
-  border: "none",
-  borderRadius: "6px",
-  cursor: "pointer",
-};
 
 export default function CloudSyncTab() {
   const { t } = useTranslation();
@@ -445,256 +423,172 @@ export default function CloudSyncTab() {
 
   return (
     <div>
-      <h2
-        style={{
-          fontSize: "18px",
-          fontWeight: 600,
-          color: "var(--color-text-primary)",
-          marginTop: 0,
-          marginBottom: "20px",
-        }}
-      >
-        {t("cloudSync.title", "Settings Backup")}
-      </h2>
-
-      <p
-        style={{
-          marginTop: "-8px",
-          marginBottom: "18px",
-          fontSize: "13px",
-          lineHeight: 1.5,
-          color: "var(--color-text-secondary)",
-          maxWidth: "640px",
-        }}
-      >
-        {t(
-          "cloudSync.description",
-          "Back up contacts, rules, Kanban cards and notes, and account metadata to WebDAV. Account passwords, OAuth tokens, and API keys can be included with a separate backup encryption password.",
-        )}
-        {" "}
-        <span style={{ color: "var(--color-warning)" }}>
+      <section className="settings-section" style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+        <SettingsNotice tone="warning">
           {t(
             "cloudSync.encryptionWarning",
             "Note: regular settings are uploaded as JSON. Secrets are encrypted only when you enable the option below. Ensure your WebDAV server is trusted.",
           )}
-        </span>
-      </p>
+        </SettingsNotice>
+        <SettingsNotice>
+          {t(
+            "cloudSync.scopeNotice",
+            "WebDAV backup includes contacts, settings, rules, Kanban cards, and Kanban notes. Optional encrypted secrets include account passwords, OAuth tokens, and translation API keys. Message bodies and attachments are not included unless you saved text into a Kanban note.",
+          )}
+        </SettingsNotice>
+      </section>
 
-      <p
-        style={{
-          marginTop: "-8px",
-          marginBottom: "18px",
-          fontSize: "13px",
-          lineHeight: 1.5,
-          color: "var(--color-text-secondary)",
-          maxWidth: "640px",
-          padding: "8px 12px",
-          background: "var(--color-bg-secondary)",
-          borderRadius: "6px",
-          borderLeft: "3px solid var(--color-accent)",
-        }}
+      <SettingsSection
+        title={t("cloudSync.connectionSection", "WebDAV server")}
+        actions={
+          <Button size="sm" onClick={handleTestConnection} disabled={anyLoading}>
+            {testing ? t("common.testing") : t("cloudSync.testConnection")}
+          </Button>
+        }
       >
-        {t(
-          "cloudSync.scopeNotice",
-          "WebDAV backup includes contacts, settings, rules, Kanban cards, and Kanban notes. Optional encrypted secrets include account passwords, OAuth tokens, and translation API keys. Message bodies and attachments are not included unless you saved text into a Kanban note.",
-        )}
-      </p>
+        <div className="field">
+          <label htmlFor="settings-backup-webdav-url" className="field__label">{t("cloudSync.webdavUrl")}</label>
+          <input
+            id="settings-backup-webdav-url"
+            name="webdav_url"
+            type="url"
+            className="input"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            disabled={savingAutoConfig}
+            placeholder="https://dav.example.com/remote.php/dav/files/user/"
+            autoComplete="url"
+          />
+        </div>
 
-      <div style={fieldGroupStyle}>
-        <label htmlFor="settings-backup-webdav-url" style={labelStyle}>{t("cloudSync.webdavUrl")}</label>
-        <input
-          id="settings-backup-webdav-url"
-          name="webdav_url"
-          type="url"
-          style={inputStyle}
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          disabled={savingAutoConfig}
-          placeholder="https://dav.example.com/remote.php/dav/files/user/"
-          autoComplete="url"
-        />
-      </div>
+        <div className="settings-row">
+          <div className="field">
+            <label htmlFor="settings-backup-username" className="field__label">{t("cloudSync.username")}</label>
+            <input
+              id="settings-backup-username"
+              name="webdav_username"
+              className="input"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              disabled={savingAutoConfig}
+              placeholder={t("cloudSync.username")}
+              autoComplete="username"
+            />
+          </div>
 
-      <div style={fieldGroupStyle}>
-        <label htmlFor="settings-backup-username" style={labelStyle}>{t("cloudSync.username")}</label>
-        <input
-          id="settings-backup-username"
-          name="webdav_username"
-          style={inputStyle}
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          disabled={savingAutoConfig}
-          placeholder={t("cloudSync.username")}
-          autoComplete="username"
-        />
-      </div>
+          <div className="field">
+            <label htmlFor="settings-backup-password" className="field__label">{t("cloudSync.password")}</label>
+            <input
+              id="settings-backup-password"
+              name="webdav_password"
+              className="input"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={savingAutoConfig}
+              placeholder={
+                storedPasswordApplies
+                  ? t("cloudSync.savedSecretPlaceholder", "Saved — leave blank to keep")
+                  : t("cloudSync.password")
+              }
+              autoComplete="current-password"
+            />
+          </div>
+        </div>
+      </SettingsSection>
 
-      <div style={fieldGroupStyle}>
-        <label htmlFor="settings-backup-password" style={labelStyle}>{t("cloudSync.password")}</label>
-        <input
-          id="settings-backup-password"
-          name="webdav_password"
-          style={inputStyle}
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          disabled={savingAutoConfig}
-          placeholder={
-            storedPasswordApplies
-              ? t("cloudSync.savedSecretPlaceholder", "Saved — leave blank to keep")
-              : t("cloudSync.password")
-          }
-          autoComplete="current-password"
-        />
-      </div>
-
-      <div style={{ ...fieldGroupStyle, display: "flex", alignItems: "flex-start", gap: "8px" }}>
-        <input
-          id="settings-backup-include-secrets"
-          name="include_secrets"
-          type="checkbox"
-          checked={includeSecrets}
-          onChange={(e) => setIncludeSecrets(e.target.checked)}
-          disabled={savingAutoConfig}
-          style={{ marginTop: "3px" }}
-        />
-        <label
-          htmlFor="settings-backup-include-secrets"
-          style={{ fontSize: "13px", lineHeight: 1.5, color: "var(--color-text-primary)" }}
-        >
-          {t("cloudSync.includeSecrets", "Include account passwords, OAuth tokens, and API keys")}
-          <span style={{ display: "block", color: "var(--color-text-secondary)", fontSize: "12px" }}>
-            {t(
-              "cloudSync.includeSecretsDesc",
-              "Secrets are encrypted with the password below before upload. You will need the same password to restore them on another device.",
-            )}
+      <SettingsSection title={t("cloudSync.secretsSection", "Secrets")}>
+        <label className="choice choice--top" htmlFor="settings-backup-include-secrets">
+          <input
+            id="settings-backup-include-secrets"
+            name="include_secrets"
+            type="checkbox"
+            className="checkbox"
+            checked={includeSecrets}
+            onChange={(e) => setIncludeSecrets(e.target.checked)}
+            disabled={savingAutoConfig}
+          />
+          <span>
+            {t("cloudSync.includeSecrets", "Include account passwords, OAuth tokens, and API keys")}
+            <span className="choice__description">
+              {t(
+                "cloudSync.includeSecretsDesc",
+                "Secrets are encrypted with the password below before upload. You will need the same password to restore them on another device.",
+              )}
+            </span>
           </span>
         </label>
-      </div>
 
-      <div style={fieldGroupStyle}>
-        <label htmlFor="settings-backup-secret-passphrase" style={labelStyle}>
-          {t("cloudSync.secretPassphrase", "Backup encryption password")}
-        </label>
-        <input
-          id="settings-backup-secret-passphrase"
-          name="secret_passphrase"
-          style={inputStyle}
-          type="password"
-          value={secretPassphrase}
-          onChange={(e) => setSecretPassphrase(e.target.value)}
-          disabled={savingAutoConfig}
-          placeholder={
-            hasStoredPassphrase
-              ? t("cloudSync.savedSecretPlaceholder", "Saved — leave blank to keep")
-              : t("cloudSync.secretPassphrasePlaceholder", "Required for backing up or restoring secrets")
-          }
-          autoComplete="new-password"
-        />
-        {includeSecrets && storedPassphraseIsWeak && !secretPassphrase && (
-          <p
-            role="note"
-            style={{ margin: "6px 0 0", fontSize: "12px", color: "var(--color-warning)" }}
-          >
-            {t(
-              "cloudSync.weakPassphraseHint",
-              "Your saved backup encryption password is shorter than 12 characters. Backups still work, but please set a stronger password.",
-            )}
-          </p>
-        )}
-      </div>
+        <div className="field">
+          <label htmlFor="settings-backup-secret-passphrase" className="field__label">
+            {t("cloudSync.secretPassphrase", "Backup encryption password")}
+          </label>
+          <input
+            id="settings-backup-secret-passphrase"
+            name="secret_passphrase"
+            className="input"
+            type="password"
+            value={secretPassphrase}
+            onChange={(e) => setSecretPassphrase(e.target.value)}
+            disabled={savingAutoConfig}
+            placeholder={
+              hasStoredPassphrase
+                ? t("cloudSync.savedSecretPlaceholder", "Saved — leave blank to keep")
+                : t("cloudSync.secretPassphrasePlaceholder", "Required for backing up or restoring secrets")
+            }
+            autoComplete="new-password"
+          />
+          {includeSecrets && storedPassphraseIsWeak && !secretPassphrase && (
+            <p role="note" className="field__hint" style={{ color: "var(--color-warning)" }}>
+              {t(
+                "cloudSync.weakPassphraseHint",
+                "Your saved backup encryption password is shorter than 12 characters. Backups still work, but please set a stronger password.",
+              )}
+            </p>
+          )}
+        </div>
+      </SettingsSection>
 
-      {/* Action buttons */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="application/json,.json"
-        style={{ display: "none" }}
-        onChange={(event) => {
-          const file = event.currentTarget.files?.[0];
-          if (file) {
-            void handleImportFile(file);
-          }
-        }}
-      />
-
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginTop: "20px" }}>
-        <button
-          style={{
-            ...buttonStyle,
-            background: "var(--color-accent-strong)",
-            color: "var(--color-on-accent)",
-            opacity: anyLoading ? 0.6 : 1,
-          }}
-          onClick={handleExportFile}
-          disabled={anyLoading}
-        >
-          {backing ? t("common.saving") : t("cloudSync.exportFile", "Export File")}
-        </button>
-        <button
-          style={{
-            ...buttonStyle,
-            background: "var(--color-bg-hover)",
-            color: "var(--color-text-primary)",
-            opacity: anyLoading ? 0.6 : 1,
-          }}
-          onClick={() => fileInputRef.current?.click()}
-          disabled={anyLoading}
-        >
-          {restoring ? t("common.loading") : t("cloudSync.importFile", "Import File")}
-        </button>
-        <button
-          style={{
-            ...buttonStyle,
-            background: "var(--color-bg-hover)",
-            color: "var(--color-text-primary)",
-            opacity: anyLoading ? 0.6 : 1,
-          }}
-          onClick={handleTestConnection}
-          disabled={anyLoading}
-        >
-          {testing ? t("common.testing") : t("cloudSync.testConnection")}
-        </button>
-        <button
-          style={{
-            ...buttonStyle,
-            background: "var(--color-accent-strong)",
-            color: "var(--color-on-accent)",
-            opacity: anyLoading ? 0.6 : 1,
-          }}
-          onClick={handleBackup}
-          disabled={anyLoading}
-        >
-          {backing ? t("common.saving") : t("cloudSync.backup", "Backup Settings")}
-        </button>
-        <button
-          style={{
-            ...buttonStyle,
-            background: "var(--color-bg-hover)",
-            color: "var(--color-text-primary)",
-            opacity: anyLoading ? 0.6 : 1,
-          }}
-          onClick={handleRestoreClick}
-          disabled={anyLoading}
-        >
-          {restoring ? t("common.loading") : t("cloudSync.restore", "Restore Settings Backup")}
-        </button>
-      </div>
-
-      <div
-        style={{
-          marginTop: "12px",
-          fontSize: "12px",
-          lineHeight: 1.5,
-          color: "var(--color-text-secondary)",
-          maxWidth: "640px",
-        }}
-      >
-        {t(
+      <SettingsSection
+        title={t("cloudSync.backupSection", "Backup and restore")}
+        description={t(
           "cloudSync.restoreNotice",
           "Restoring without the backup encryption password is partial. Enter it to restore account passwords, OAuth tokens, and translation API keys when the backup contains them.",
         )}
-      </div>
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/json,.json"
+          style={{ display: "none" }}
+          onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            if (file) {
+              void handleImportFile(file);
+            }
+          }}
+        />
+        <div className="settings-actions">
+          <Button variant="primary" onClick={handleBackup} disabled={anyLoading}>
+            {backing ? t("common.saving") : t("cloudSync.backup", "Backup Settings")}
+          </Button>
+          <Button onClick={handleRestoreClick} disabled={anyLoading}>
+            {restoring ? t("common.loading") : t("cloudSync.restore", "Restore Settings Backup")}
+          </Button>
+          <Button onClick={handleExportFile} disabled={anyLoading}>
+            {backing ? t("common.saving") : t("cloudSync.exportFile", "Export File")}
+          </Button>
+          <Button onClick={() => fileInputRef.current?.click()} disabled={anyLoading}>
+            {restoring ? t("common.loading") : t("cloudSync.importFile", "Import File")}
+          </Button>
+        </div>
+
+        {lastBackup && (
+          <p className="settings-hint">
+            {t("cloudSync.lastBackupAt", { time: displayLastBackup(lastBackup) })}
+          </p>
+        )}
+      </SettingsSection>
 
       {/* Restore confirmation with backup preview */}
       {restoreRequest && (
@@ -712,50 +606,29 @@ export default function CloudSyncTab() {
         />
       )}
 
-      {/* Last backup timestamp */}
-      {lastBackup && (
-        <div
-          style={{
-            marginTop: "14px",
-            fontSize: "12px",
-            color: "var(--color-text-secondary)",
-          }}
-        >
-          {t("cloudSync.lastBackupAt", { time: displayLastBackup(lastBackup) })}
-        </div>
-      )}
-
-      {/* Auto backup */}
       {autoLoaded && (
-        <div style={{ marginTop: "24px", padding: "16px", border: "1px solid var(--color-border)", borderRadius: "8px", background: "var(--color-bg-secondary)" }}>
-          <h3 style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-text-primary)", margin: "0 0 12px" }}>
-            {t("cloudSync.autoBackup", "Automatic Backup")}
-          </h3>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", color: "var(--color-text-primary)", cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                checked={autoEnabled}
-                onChange={(e) => setAutoEnabled(e.target.checked)}
-                disabled={
-                  savingAutoConfig ||
-                  (!autoEnabled &&
-                    (!url.trim() || !username.trim() || !hasPassword))
-                }
-              />
-              {t("cloudSync.autoBackupEnable", "Enable automatic WebDAV backup")}
-            </label>
-          </div>
+        <SettingsSection title={t("cloudSync.autoBackup", "Automatic Backup")}>
+          <Checkbox
+            checked={autoEnabled}
+            onChange={(e) => setAutoEnabled(e.target.checked)}
+            disabled={
+              savingAutoConfig ||
+              (!autoEnabled &&
+                (!url.trim() || !username.trim() || !hasPassword))
+            }
+            label={t("cloudSync.autoBackupEnable", "Enable automatic WebDAV backup")}
+          />
           {autoEnabled && (
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <label style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>
-                {t("cloudSync.autoBackupInterval", "Interval")}:
+            <div className="field" style={{ maxWidth: "200px" }}>
+              <label htmlFor="settings-backup-interval" className="field__label">
+                {t("cloudSync.autoBackupInterval", "Interval")}
               </label>
               <select
+                id="settings-backup-interval"
+                className="select"
                 value={autoInterval}
                 onChange={(e) => setAutoInterval(Number(e.target.value))}
                 disabled={savingAutoConfig}
-                style={{ ...inputStyle, width: "auto", padding: "4px 8px" }}
               >
                 <option value={30}>30 min</option>
                 <option value={60}>1 h</option>
@@ -766,52 +639,29 @@ export default function CloudSyncTab() {
               </select>
             </div>
           )}
-          {!url && <p style={{ fontSize: "12px", color: "var(--color-text-secondary)", margin: "8px 0 0" }}>{t("cloudSync.autoBackupFillFields", "Fill in WebDAV credentials above to enable auto-backup.")}</p>}
-          <button
-            type="button"
-            style={{
-              ...buttonStyle,
-              marginTop: "12px",
-              background: "var(--color-accent-strong)",
-              color: "var(--color-on-accent)",
-              opacity: anyLoading ? 0.6 : 1,
-            }}
-            onClick={handleSaveAutoBackupConfig}
-            disabled={anyLoading}
-          >
-            {savingAutoConfig
-              ? t("common.saving")
-              : t(
-                  "cloudSync.saveAutoBackupConfig",
-                  "Save automatic backup settings",
-                )}
-          </button>
-        </div>
+          {!url && <p className="settings-hint">{t("cloudSync.autoBackupFillFields", "Fill in WebDAV credentials above to enable auto-backup.")}</p>}
+          <div className="settings-actions">
+            <Button onClick={handleSaveAutoBackupConfig} disabled={anyLoading}>
+              {savingAutoConfig
+                ? t("common.saving")
+                : t(
+                    "cloudSync.saveAutoBackupConfig",
+                    "Save automatic backup settings",
+                  )}
+            </Button>
+          </div>
+        </SettingsSection>
       )}
 
-      {/* Status message */}
       {statusMsg && (
-        <div
+        <SettingsNotice
+          tone={statusType === "success" ? "success" : "danger"}
           role={statusType === "error" ? "alert" : "status"}
           aria-live="polite"
-          style={{
-            marginTop: "14px",
-            padding: "10px 14px",
-            borderRadius: "6px",
-            fontSize: "13px",
-            background:
-              statusType === "success"
-                ? "var(--color-bg-hover)"
-                : "rgba(220, 53, 69, 0.1)",
-            color:
-              statusType === "success"
-                ? "var(--color-text-primary)"
-                : "var(--color-danger)",
-            border: `1px solid ${statusType === "success" ? "var(--color-border)" : "rgba(220, 53, 69, 0.3)"}`,
-          }}
+          style={{ marginTop: "var(--space-6)" }}
         >
           {statusMsg}
-        </div>
+        </SettingsNotice>
       )}
     </div>
   );

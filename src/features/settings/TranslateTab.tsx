@@ -7,6 +7,9 @@ import {
 } from "../../lib/api";
 import { useToastStore } from "@/stores/toast.store";
 import { extractErrorMessage } from "../../lib/extractErrorMessage";
+import Button from "@/components/ui/Button";
+import Checkbox from "@/components/ui/Checkbox";
+import { SettingsNotice, SettingsSection } from "./SettingsLayout";
 
 type ProviderType = "deeplx" | "deepl" | "generic_api" | "llm";
 
@@ -16,38 +19,6 @@ const PROVIDER_OPTIONS: { value: ProviderType; label: string; labelKey?: string 
   { value: "generic_api", label: "Generic API", labelKey: "translate.providerGenericApi" },
   { value: "llm", label: "LLM", labelKey: "translate.providerLlm" },
 ];
-
-const labelStyle: React.CSSProperties = {
-  display: "block",
-  fontSize: "12px",
-  fontWeight: 500,
-  color: "var(--color-text-secondary)",
-  marginBottom: "4px",
-};
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "8px 10px",
-  fontSize: "13px",
-  border: "1px solid var(--color-border)",
-  borderRadius: "6px",
-  background: "var(--color-bg-secondary)",
-  color: "var(--color-text-primary)",
-  boxSizing: "border-box",
-};
-
-const fieldGroupStyle: React.CSSProperties = {
-  marginBottom: "14px",
-};
-
-const buttonStyle: React.CSSProperties = {
-  padding: "8px 18px",
-  fontSize: "13px",
-  fontWeight: 500,
-  border: "none",
-  borderRadius: "6px",
-  cursor: "pointer",
-};
 
 export default function TranslateTab() {
   const { t } = useTranslation();
@@ -206,13 +177,13 @@ export default function TranslateTab() {
     switch (providerType) {
       case "deeplx":
         return (
-          <div style={fieldGroupStyle}>
-            <label htmlFor="translate-deeplx-endpoint" style={labelStyle}>{t("translate.endpointUrl")}</label>
+          <div className="field">
+            <label htmlFor="translate-deeplx-endpoint" className="field__label">{t("translate.endpointUrl")}</label>
             <input
               id="translate-deeplx-endpoint"
               name="deeplx_endpoint"
               type="url"
-              style={inputStyle}
+              className="input"
               value={deeplxEndpoint}
               onChange={(e) => setDeeplxEndpoint(e.target.value)}
               placeholder="http://localhost:1188/translate"
@@ -224,12 +195,12 @@ export default function TranslateTab() {
       case "deepl":
         return (
           <>
-            <div style={fieldGroupStyle}>
-              <label htmlFor="translate-deepl-api-key" style={labelStyle}>{t("translate.apiKey")}</label>
+            <div className="field">
+              <label htmlFor="translate-deepl-api-key" className="field__label">{t("translate.apiKey")}</label>
               <input
                 id="translate-deepl-api-key"
                 name="deepl_api_key"
-                style={inputStyle}
+                className="input"
                 type="password"
                 value={deeplApiKey}
                 onChange={(e) => setDeeplApiKey(e.target.value)}
@@ -237,42 +208,37 @@ export default function TranslateTab() {
                 autoComplete="current-password"
               />
             </div>
-            <div style={{ ...fieldGroupStyle, display: "flex", alignItems: "center", gap: "8px" }}>
-              <input
-                type="checkbox"
-                checked={deeplUseFree}
-                onChange={(e) => setDeeplUseFree(e.target.checked)}
-                id="deepl-free"
-              />
-              <label htmlFor="deepl-free" style={{ fontSize: "13px", color: "var(--color-text-primary)", cursor: "pointer" }}>
-                {t("translate.useFreeApi")}
-              </label>
-            </div>
+            <Checkbox
+              checked={deeplUseFree}
+              onChange={(e) => setDeeplUseFree(e.target.checked)}
+              id="deepl-free"
+              label={t("translate.useFreeApi")}
+            />
           </>
         );
 
       case "generic_api":
         return (
           <>
-            <div style={fieldGroupStyle}>
-              <label htmlFor="translate-generic-endpoint" style={labelStyle}>{t("translate.endpoint")}</label>
+            <div className="field">
+              <label htmlFor="translate-generic-endpoint" className="field__label">{t("translate.endpoint")}</label>
               <input
                 id="translate-generic-endpoint"
                 name="generic_endpoint"
                 type="url"
-                style={inputStyle}
+                className="input"
                 value={genericEndpoint}
                 onChange={(e) => setGenericEndpoint(e.target.value)}
                 placeholder="https://api.example.com/translate"
                 autoComplete="off"
               />
             </div>
-            <div style={fieldGroupStyle}>
-              <label htmlFor="translate-generic-api-key" style={labelStyle}>{t("translate.apiKeyOptional")}</label>
+            <div className="field">
+              <label htmlFor="translate-generic-api-key" className="field__label">{t("translate.apiKeyOptional")}</label>
               <input
                 id="translate-generic-api-key"
                 name="generic_api_key"
-                style={inputStyle}
+                className="input"
                 type="password"
                 value={genericApiKey}
                 onChange={(e) => setGenericApiKey(e.target.value)}
@@ -280,45 +246,45 @@ export default function TranslateTab() {
                 autoComplete="current-password"
               />
             </div>
-            <div style={fieldGroupStyle}>
-              <label htmlFor="translate-generic-source-param" style={labelStyle}>{t("translate.sourceLangParam")}</label>
+            <div className="field">
+              <label htmlFor="translate-generic-source-param" className="field__label">{t("translate.sourceLangParam")}</label>
               <input
                 id="translate-generic-source-param"
                 name="generic_source_lang_param"
-                style={inputStyle}
+                className="input"
                 value={genericSourceLangParam}
                 onChange={(e) => setGenericSourceLangParam(e.target.value)}
                 autoComplete="off"
               />
             </div>
-            <div style={fieldGroupStyle}>
-              <label htmlFor="translate-generic-target-param" style={labelStyle}>{t("translate.targetLangParam")}</label>
+            <div className="field">
+              <label htmlFor="translate-generic-target-param" className="field__label">{t("translate.targetLangParam")}</label>
               <input
                 id="translate-generic-target-param"
                 name="generic_target_lang_param"
-                style={inputStyle}
+                className="input"
                 value={genericTargetLangParam}
                 onChange={(e) => setGenericTargetLangParam(e.target.value)}
                 autoComplete="off"
               />
             </div>
-            <div style={fieldGroupStyle}>
-              <label htmlFor="translate-generic-text-param" style={labelStyle}>{t("translate.textParam")}</label>
+            <div className="field">
+              <label htmlFor="translate-generic-text-param" className="field__label">{t("translate.textParam")}</label>
               <input
                 id="translate-generic-text-param"
                 name="generic_text_param"
-                style={inputStyle}
+                className="input"
                 value={genericTextParam}
                 onChange={(e) => setGenericTextParam(e.target.value)}
                 autoComplete="off"
               />
             </div>
-            <div style={fieldGroupStyle}>
-              <label htmlFor="translate-generic-result-path" style={labelStyle}>{t("translate.resultPath")}</label>
+            <div className="field">
+              <label htmlFor="translate-generic-result-path" className="field__label">{t("translate.resultPath")}</label>
               <input
                 id="translate-generic-result-path"
                 name="generic_result_path"
-                style={inputStyle}
+                className="input"
                 value={genericResultPath}
                 onChange={(e) => setGenericResultPath(e.target.value)}
                 autoComplete="off"
@@ -330,25 +296,25 @@ export default function TranslateTab() {
       case "llm":
         return (
           <>
-            <div style={fieldGroupStyle}>
-              <label htmlFor="translate-llm-endpoint" style={labelStyle}>{t("translate.endpoint")}</label>
+            <div className="field">
+              <label htmlFor="translate-llm-endpoint" className="field__label">{t("translate.endpoint")}</label>
               <input
                 id="translate-llm-endpoint"
                 name="llm_endpoint"
                 type="url"
-                style={inputStyle}
+                className="input"
                 value={llmEndpoint}
                 onChange={(e) => setLlmEndpoint(e.target.value)}
                 placeholder="https://api.openai.com/v1"
                 autoComplete="off"
               />
             </div>
-            <div style={fieldGroupStyle}>
-              <label htmlFor="translate-llm-api-key" style={labelStyle}>{t("translate.apiKey")}</label>
+            <div className="field">
+              <label htmlFor="translate-llm-api-key" className="field__label">{t("translate.apiKey")}</label>
               <input
                 id="translate-llm-api-key"
                 name="llm_api_key"
-                style={inputStyle}
+                className="input"
                 type="password"
                 value={llmApiKey}
                 onChange={(e) => setLlmApiKey(e.target.value)}
@@ -356,24 +322,24 @@ export default function TranslateTab() {
                 autoComplete="current-password"
               />
             </div>
-            <div style={fieldGroupStyle}>
-              <label htmlFor="translate-llm-model" style={labelStyle}>{t("translate.model")}</label>
+            <div className="field">
+              <label htmlFor="translate-llm-model" className="field__label">{t("translate.model")}</label>
               <input
                 id="translate-llm-model"
                 name="llm_model"
-                style={inputStyle}
+                className="input"
                 value={llmModel}
                 onChange={(e) => setLlmModel(e.target.value)}
                 placeholder="gpt-4o-mini"
                 autoComplete="off"
               />
             </div>
-            <div style={fieldGroupStyle}>
-              <label htmlFor="translate-llm-mode" style={labelStyle}>{t("translate.mode")}</label>
+            <div className="field">
+              <label htmlFor="translate-llm-mode" className="field__label">{t("translate.mode")}</label>
               <select
                 id="translate-llm-mode"
                 name="llm_mode"
-                style={inputStyle}
+                className="select"
                 value={llmMode}
                 onChange={(e) => setLlmMode(e.target.value as "completions" | "responses")}
               >
@@ -388,90 +354,52 @@ export default function TranslateTab() {
 
   return (
     <div>
-      <h2 style={{ fontSize: "18px", fontWeight: 600, color: "var(--color-text-primary)", marginTop: 0, marginBottom: "20px" }}>
-        {t("translate.engineTitle")}
-      </h2>
-
-      {/* Enable toggle */}
-      <div style={{ ...fieldGroupStyle, display: "flex", alignItems: "center", gap: "8px" }}>
-        <input
-          type="checkbox"
+      <SettingsSection title={t("translate.engineTitle")}>
+        <Checkbox
           checked={isEnabled}
           onChange={(e) => setIsEnabled(e.target.checked)}
           id="translate-enabled"
+          label={t("translate.enableTranslation")}
         />
-        <label htmlFor="translate-enabled" style={{ fontSize: "13px", color: "var(--color-text-primary)", cursor: "pointer" }}>
-          {t("translate.enableTranslation")}
-        </label>
-      </div>
 
-      {/* Provider selector */}
-      <div style={fieldGroupStyle}>
-        <label htmlFor="translate-provider" style={labelStyle}>{t("translate.provider")}</label>
-        <select
-          id="translate-provider"
-          name="translate_provider"
-          style={inputStyle}
-          value={providerType}
-          onChange={(e) => setProviderType(e.target.value as ProviderType)}
-        >
-          {PROVIDER_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.labelKey ? t(opt.labelKey, opt.label) : opt.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Dynamic provider fields */}
-      {renderProviderFields()}
-
-      {/* Actions */}
-      <div style={{ display: "flex", gap: "10px", marginTop: "20px" }}>
-        <button
-          style={{
-            ...buttonStyle,
-            background: "var(--color-accent-strong)",
-            color: "var(--color-on-accent)",
-            opacity: saving ? 0.6 : 1,
-          }}
-          onClick={handleSave}
-          disabled={saving}
-        >
-          {saving ? t("common.saving") : t("common.save")}
-        </button>
-        <button
-          style={{
-            ...buttonStyle,
-            background: "var(--color-bg-hover)",
-            color: "var(--color-text-primary)",
-            opacity: testing ? 0.6 : 1,
-          }}
-          onClick={handleTest}
-          disabled={testing}
-        >
-          {testing ? t("common.testing") : t("translate.testConnection")}
-        </button>
-      </div>
-
-      {/* Status message */}
-      {statusMsg && (
-        <div
-          role={statusType === "error" ? "alert" : "status"}
-          aria-live="polite"
-          style={{
-            marginTop: "14px",
-            padding: "10px 14px",
-            borderRadius: "6px",
-            fontSize: "13px",
-            background: statusType === "success" ? "var(--color-bg-hover)" : "rgba(220, 53, 69, 0.1)",
-            color: statusType === "success" ? "var(--color-text-primary)" : "var(--color-danger)",
-            border: `1px solid ${statusType === "success" ? "var(--color-border)" : "rgba(220, 53, 69, 0.3)"}`,
-          }}
-        >
-          {statusMsg}
+        <div className="field">
+          <label htmlFor="translate-provider" className="field__label">{t("translate.provider")}</label>
+          <select
+            id="translate-provider"
+            name="translate_provider"
+            className="select"
+            value={providerType}
+            onChange={(e) => setProviderType(e.target.value as ProviderType)}
+          >
+            {PROVIDER_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.labelKey ? t(opt.labelKey, opt.label) : opt.label}
+              </option>
+            ))}
+          </select>
         </div>
-      )}
+
+        {renderProviderFields()}
+
+        <div className="settings-actions" style={{ marginTop: "var(--space-2)" }}>
+          <Button variant="primary" onClick={handleSave} loading={saving}>
+            {saving ? t("common.saving") : t("common.save")}
+          </Button>
+          <Button onClick={handleTest} loading={testing}>
+            {testing ? t("common.testing") : t("translate.testConnection")}
+          </Button>
+        </div>
+
+        {statusMsg && (
+          <SettingsNotice
+            tone={statusType === "error" ? "danger" : "success"}
+            role={statusType === "error" ? "alert" : "status"}
+            aria-live="polite"
+          >
+            {statusMsg}
+          </SettingsNotice>
+        )}
+      </SettingsSection>
     </div>
   );
 }

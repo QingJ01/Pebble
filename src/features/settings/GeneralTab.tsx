@@ -9,6 +9,9 @@ import {
 } from "@/lib/api";
 import { useToastStore } from "@/stores/toast.store";
 import { useUIStore, type RealtimePreference } from "@/stores/ui.store";
+import Button from "@/components/ui/Button";
+import Checkbox from "@/components/ui/Checkbox";
+import { OptionCard, OptionCardGroup, SettingsSection } from "./SettingsLayout";
 
 const REALTIME_OPTIONS: Array<{
   mode: RealtimePreference;
@@ -132,195 +135,91 @@ export default function GeneralTab() {
 
   return (
     <div>
-      <h3 style={{ fontSize: "14px", fontWeight: 600, marginBottom: "8px" }}>
-        {t("settings.realtimeMode", "Realtime Mode")}
-      </h3>
-      <p style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginBottom: "12px", marginTop: 0 }}>
-        {t("settings.realtimeModeDesc", "Choose how aggressively Pebble checks for new mail.")}
-      </p>
-      <div
-        role="group"
-        aria-label={t("settings.realtimeMode", "Realtime Mode")}
-        style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}
+      <SettingsSection
+        title={t("settings.realtimeMode", "Realtime Mode")}
+        description={t("settings.realtimeModeDesc", "Choose how aggressively Pebble checks for new mail.")}
       >
-        {REALTIME_OPTIONS.map((option) => {
-          const selected = realtimeMode === option.mode;
-          const label = t(option.labelKey, option.fallback);
-          return (
-            <button
-              key={option.mode}
-              type="button"
-              aria-label={label}
-              aria-pressed={selected}
-              onClick={() => setRealtimeMode(option.mode)}
-              style={{
-                flex: "1 1 180px",
-                minWidth: 0,
-                padding: "8px 10px",
-                borderRadius: "6px",
-                border: selected ? "2px solid var(--color-accent)" : "1px solid var(--color-border)",
-                backgroundColor: selected ? "var(--color-bg-hover)" : "transparent",
-                cursor: "pointer",
-                textAlign: "left",
-                color: "var(--color-text-primary)",
-              }}
-            >
-              <span style={{ display: "block", fontSize: "13px", fontWeight: selected ? 600 : 500, lineHeight: 1.3 }}>
-                {label}
-              </span>
-              <span style={{ display: "block", marginTop: "4px", fontSize: "12px", lineHeight: 1.35, color: "var(--color-text-secondary)" }}>
-                {t(option.descriptionKey, option.descriptionFallback)}
-              </span>
-            </button>
-          );
-        })}
-      </div>
+        <OptionCardGroup label={t("settings.realtimeMode", "Realtime Mode")} columns={2}>
+          {REALTIME_OPTIONS.map((option) => {
+            const label = t(option.labelKey, option.fallback);
+            return (
+              <OptionCard
+                key={option.mode}
+                aria-label={label}
+                selected={realtimeMode === option.mode}
+                onClick={() => setRealtimeMode(option.mode)}
+                title={label}
+                description={t(option.descriptionKey, option.descriptionFallback)}
+              />
+            );
+          })}
+        </OptionCardGroup>
+      </SettingsSection>
 
-      <h3 style={{ fontSize: "14px", fontWeight: 600, marginBottom: "16px", marginTop: "32px" }}>
-        {t("settings.notifications")}
-      </h3>
-      <label
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          cursor: "pointer",
-          fontSize: "13px",
-          color: "var(--color-text-primary)",
-        }}
-      >
-        <input type="checkbox" checked={notificationsEnabled} onChange={toggleNotifications} />
-        <span>{t("settings.enableNotifications")}</span>
-      </label>
-      <button
-        type="button"
-        aria-label={t("settings.testNotification", "Send test notification")}
-        onClick={handleTestNotification}
-        disabled={!notificationsEnabled || testingNotification}
-        style={{
-          marginTop: "12px",
-          padding: "8px 12px",
-          borderRadius: "6px",
-          border: "1px solid var(--color-border)",
-          backgroundColor: notificationsEnabled ? "var(--color-bg)" : "var(--color-bg-hover)",
-          color: notificationsEnabled ? "var(--color-text-primary)" : "var(--color-text-secondary)",
-          cursor: notificationsEnabled && !testingNotification ? "pointer" : "not-allowed",
-          fontSize: "13px",
-        }}
-      >
-        {testingNotification
-          ? t("settings.testNotificationSending", "Sending test notification...")
-          : t("settings.testNotification", "Send test notification")}
-      </button>
-
-      <h3 style={{ fontSize: "14px", fontWeight: 600, marginBottom: "16px", marginTop: "32px" }}>
-        {t("settings.startupBehavior", "Startup Behavior")}
-      </h3>
-      <label
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          cursor: "pointer",
-          fontSize: "13px",
-          color: "var(--color-text-primary)",
-          marginBottom: "10px",
-        }}
-      >
-        <input
-          type="checkbox"
-          checked={launchAtStartup}
-          onChange={toggleLaunchAtStartup}
+      <SettingsSection title={t("settings.notifications")}>
+        <Checkbox
+          checked={notificationsEnabled}
+          onChange={toggleNotifications}
+          label={t("settings.enableNotifications")}
         />
-        <span>{t("settings.launchAtStartup", "Launch Pebble at system startup")}</span>
-      </label>
-      <label
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          cursor: "pointer",
-          fontSize: "13px",
-          color: "var(--color-text-primary)",
-        }}
-      >
-        <input
-          type="checkbox"
-          checked={startHiddenToTray}
-          onChange={toggleStartHiddenToTray}
-        />
-        <span>{t("settings.startHiddenToTray", "Start hidden to tray")}</span>
-      </label>
+        <div className="settings-actions">
+          <Button
+            aria-label={t("settings.testNotification", "Send test notification")}
+            onClick={handleTestNotification}
+            disabled={!notificationsEnabled}
+            loading={testingNotification}
+          >
+            {testingNotification
+              ? t("settings.testNotificationSending", "Sending test notification...")
+              : t("settings.testNotification", "Send test notification")}
+          </Button>
+        </div>
+      </SettingsSection>
 
-      <h3 style={{ fontSize: "14px", fontWeight: 600, marginBottom: "16px", marginTop: "32px" }}>
-        {t("settings.closeBehavior", "Close Behavior")}
-      </h3>
-      <label
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          cursor: "pointer",
-          fontSize: "13px",
-          color: "var(--color-text-primary)",
-        }}
-      >
-        <input
-          type="checkbox"
+      <SettingsSection title={t("settings.startupBehavior", "Startup Behavior")}>
+        <div className="settings-checks">
+          <Checkbox
+            checked={launchAtStartup}
+            onChange={toggleLaunchAtStartup}
+            label={t("settings.launchAtStartup", "Launch Pebble at system startup")}
+          />
+          <Checkbox
+            checked={startHiddenToTray}
+            onChange={toggleStartHiddenToTray}
+            label={t("settings.startHiddenToTray", "Start hidden to tray")}
+          />
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title={t("settings.closeBehavior", "Close Behavior")}>
+        <Checkbox
           checked={quitOnClose}
           onChange={toggleQuitOnClose}
+          label={t("settings.quitOnClose", "Quit app when window is closed")}
         />
-        <span>{t("settings.quitOnClose", "Quit app when window is closed")}</span>
-      </label>
+      </SettingsSection>
 
-      <h3 style={{ fontSize: "14px", fontWeight: 600, marginBottom: "16px", marginTop: "32px" }}>
-        {t("settings.folderCounts", "Folder Counts")}
-      </h3>
-      <label
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          cursor: "pointer",
-          fontSize: "13px",
-          color: "var(--color-text-primary)",
-        }}
-      >
-        <input
-          type="checkbox"
+      <SettingsSection title={t("settings.folderCounts", "Folder Counts")}>
+        <Checkbox
           checked={showUnreadCount}
           onChange={toggleUnreadCount}
+          label={t("settings.showUnreadCount", "Show unread count badges in sidebar")}
         />
-        <span>{t("settings.showUnreadCount", "Show unread count badges in sidebar")}</span>
-      </label>
+      </SettingsSection>
 
-      <ScheduledSendsView />
+      <ScheduledSendsView variant="section" />
 
       {navigator.userAgent.includes("Windows") && (
-        <>
-          <h3 style={{ fontSize: "14px", fontWeight: 600, marginBottom: "16px", marginTop: "32px" }}>
-            {t("settings.defaultMailClient", "Default Email Client")}
-          </h3>
-          <button
-            type="button"
-            onClick={() => openDefaultMailSettings()}
-            style={{
-              padding: "8px 18px",
-              fontSize: "13px",
-              fontWeight: 500,
-              border: "1px solid var(--color-border)",
-              borderRadius: "6px",
-              cursor: "pointer",
-              background: "var(--color-bg-secondary)",
-              color: "var(--color-text-primary)",
-            }}
-          >
-            {t("settings.setDefaultMailClient", "Set Pebble as default email app")}
-          </button>
-          <p style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginTop: "6px" }}>
-            {t("settings.setDefaultMailClientHint", "Opens Windows Default Apps settings where you can select Pebble for email.")}
-          </p>
-        </>
+        <SettingsSection
+          title={t("settings.defaultMailClient", "Default Email Client")}
+          description={t("settings.setDefaultMailClientHint", "Opens Windows Default Apps settings where you can select Pebble for email.")}
+        >
+          <div className="settings-actions">
+            <Button onClick={() => openDefaultMailSettings()}>
+              {t("settings.setDefaultMailClient", "Set Pebble as default email app")}
+            </Button>
+          </div>
+        </SettingsSection>
       )}
     </div>
   );
