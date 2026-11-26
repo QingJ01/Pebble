@@ -7,7 +7,7 @@ edition = "2021"
 pebble-core = { path = "../pebble-core", features = ["rusqlite"] }
 rusqlite = { workspace = true }
 r2d2 = "0.8"
-r2d2_sqlite = "0.33"
+r2d2_sqlite = "0.36"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
