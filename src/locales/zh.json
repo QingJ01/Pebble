@@ -105,6 +105,11 @@
     "allAccounts": "全部账户"
   },
   "inbox": {
+    "accountFilter": {
+      "label": "按账户筛选",
+      "all": "全部",
+      "unread": "{{count}} 封未读"
+    },
     "searchPlaceholder": "搜索邮件…",
     "noSubject": "（无主题）",
     "emailContent": "邮件内容",
@@ -318,16 +323,16 @@
     "accountColorName": {
       "sky": "天蓝",
       "emerald": "翠绿",
-      "amber": "琥珀黄",
       "violet": "紫罗兰",
-      "rose": "玫红",
-      "teal": "青绿",
-      "indigo": "靛蓝",
-      "orange": "橙色",
-      "cyan": "青色",
       "pink": "粉色",
       "lime": "黄绿",
-      "blue": "蓝色"
+      "indigo": "靛蓝",
+      "teal": "青绿",
+      "fuchsia": "品红",
+      "blue": "蓝色",
+      "slate": "石板灰",
+      "cyan": "青色",
+      "navy": "藏青"
     }
   },
   "cloudSync": {
