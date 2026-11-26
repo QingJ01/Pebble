@@ -625,7 +625,8 @@
     "threadReadQueued_one": "{{count}} message will retry in the background",
     "threadReadQueued_other": "{{count}} messages will retry in the background",
     "emptyTrashSuccess_one": "Trash emptied ({{count}} message deleted)",
-    "emptyTrashSuccess_other": "Trash emptied ({{count}} messages deleted)"
+    "emptyTrashSuccess_other": "Trash emptied ({{count}} messages deleted)",
+    "undoing": "Undoing…"
   },
   "snooze": {
     "failed": "Snooze failed",

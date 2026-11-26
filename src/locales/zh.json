@@ -616,7 +616,8 @@
     "threadContextMenu": "会话操作",
     "toolbar": "邮件操作",
     "emptyTrashConfirmAll": "永久删除所有账户废纸篓中的全部邮件？此操作无法撤销。",
-    "moveToTrash": "移至废纸篓"
+    "moveToTrash": "移至废纸篓",
+    "undoing": "正在撤销…"
   },
   "snooze": {
     "failed": "设置稍后提醒失败",

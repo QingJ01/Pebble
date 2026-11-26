@@ -338,6 +338,23 @@ describe("mail actions with undo", () => {
     expect(listIds(client)).toEqual(["m2", "m3"]);
   });
 
+  it("shows Undoing… until a Move To undo finishes", async () => {
+    let finishUndo!: () => void;
+    mocks.moveMailMessages
+      .mockResolvedValueOnce({ moved_ids: ["m1"], failures: [] })
+      .mockImplementationOnce(() => new Promise((resolve) => { finishUndo = () => resolve({ moved_ids: ["m1"], failures: [] }); }));
+
+    await moveMessagesWithUndo(client, { accountId: "acc", messageIds: ["m1"], sourceFolderId: "inbox", targetFolderId: "projects", targetFolderName: "Project" });
+    lastToast().action!.onClick();
+
+    await vi.waitFor(() => expect(mocks.moveMailMessages).toHaveBeenLastCalledWith("acc", ["m1"], "projects", "inbox"));
+    expect(useToastStore.getState().toasts.some((t) => t.message === "Undoing…" && !t.exiting)).toBe(true);
+
+    finishUndo();
+    await vi.waitFor(() => expect(lastToast().message).toBe("Undone"));
+    expect(useToastStore.getState().toasts.some((t) => t.message === "Undoing…" && !t.exiting)).toBe(false);
+  });
+
   it("marks spam with undo back to the original folder", async () => {
     await runMailAction(client, "spam", [message("m1")], { spamFolderId: "spam" });
 

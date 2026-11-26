@@ -32,15 +32,37 @@ async fn account_lock(id: &str) -> Arc<Mutex<()>> {
 
 // A live sync must not rediscover old names between server RENAME and local
 // reconciliation. Mirrors sync_cmd's existing stop-and-await implementation.
+/// How long a folder edit waits for the sync worker to wind down.
+const SYNC_PAUSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Stop the account's sync worker before a folder edit. The handle is taken
+/// out first so `sync_handles` is not held while waiting, and every wait is
+/// bounded: a worker stuck in blocking work must not hang the command (and
+/// with it Move To / Undo) forever. Returns whether a worker was running.
 async fn pause_sync(state: &AppState, account: &str) -> bool {
-    if let Some(handle) = state.sync_handles.lock().await.remove(account) {
-        let _ = handle.stop_tx.send(true);
+    let handle = state.sync_handles.lock().await.remove(account);
+    let Some(mut handle) = handle else {
+        return false;
+    };
+    let _ = handle.stop_tx.send(true);
+    if tokio::time::timeout(SYNC_PAUSE_TIMEOUT, &mut handle.task)
+        .await
+        .is_err()
+    {
+        tracing::warn!(
+            "Sync worker for {account} did not stop within {SYNC_PAUSE_TIMEOUT:?}; aborting"
+        );
         handle.task.abort();
-        let _ = handle.task.await;
-        true
-    } else {
-        false
+        if tokio::time::timeout(SYNC_PAUSE_TIMEOUT, handle.task)
+            .await
+            .is_err()
+        {
+            tracing::warn!(
+                "Sync worker for {account} is still winding down; continuing without it"
+            );
+        }
     }
+    true
 }
 
 fn validate_name(name: &str) -> Result<()> {
@@ -433,9 +455,25 @@ pub async fn move_mail_messages(
     source_folder_id: Option<String>,
     target_folder_id: String,
 ) -> Result<MoveResult> {
+    // Each phase is logged so a move (or an Undo, which is a move back) that
+    // never completes shows where it stopped.
+    let started = std::time::Instant::now();
+    tracing::info!(
+        "move_mail_messages: {} message(s), {:?} -> {target_folder_id}",
+        message_ids.len(),
+        source_folder_id
+    );
     let lock = account_lock(&account_id).await;
     let _guard = lock.lock().await;
+    tracing::info!(
+        "move_mail_messages: account lock after {:?}",
+        started.elapsed()
+    );
     let restart = pause_sync(&state, &account_id).await;
+    tracing::info!(
+        "move_mail_messages: sync paused (was running: {restart}) after {:?}",
+        started.elapsed()
+    );
     let result = move_messages_inner(
         &state,
         &account_id,
@@ -444,6 +482,27 @@ pub async fn move_mail_messages(
         target_folder_id,
     )
     .await;
+    match &result {
+        Ok(moved) => {
+            for failure in &moved.failures {
+                tracing::warn!(
+                    "move_mail_messages: {} failed: {}",
+                    failure.message_id,
+                    failure.error
+                );
+            }
+            tracing::info!(
+                "move_mail_messages: {} moved, {} failed in {:?}",
+                moved.moved_ids.len(),
+                moved.failures.len(),
+                started.elapsed()
+            );
+        }
+        Err(error) => tracing::warn!(
+            "move_mail_messages failed after {:?}: {error}",
+            started.elapsed()
+        ),
+    }
     let _ = app.emit(crate::events::MAIL_PENDING_OPS_CHANGED, ());
     if restart {
         let _ = super::sync_cmd::start_sync(app, state, account_id, None).await;

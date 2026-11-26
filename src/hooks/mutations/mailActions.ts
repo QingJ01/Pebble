@@ -510,7 +510,15 @@ export function showUndoableToast(client: QueryClient, message: string, moves: U
       ? {
           label: t("common.undo", "Undo"),
           onClick: () => {
+            // Visible until the move back finishes, so a slow or stuck Undo
+            // doesn't look like a click that did nothing.
+            const pending = useToastStore.getState().addToast({
+              type: "info",
+              message: t("messageActions.undoing", "Undoing…"),
+              duration: 30_000,
+            });
             void undoMoves(client, moves).then((failed) => {
+              useToastStore.getState().removeToast(pending);
               if (failed === 0) {
                 useToastStore.getState().addToast({ type: "success", message: t("messageActions.undoSuccess", "Undone") });
               } else {
