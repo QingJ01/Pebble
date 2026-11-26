@@ -9,6 +9,8 @@ import { attachmentVisual } from "./attachmentVisual";
 import { useToastStore } from "@/stores/toast.store";
 import { canPreviewAttachment, saveAllAttachments, type AttachmentSaveResult } from "@/lib/attachments-api";
 import AttachmentPreview from "./AttachmentPreview";
+import Button from "./ui/Button";
+import { describeError } from "@/lib/extractErrorMessage";
 
 interface Props {
   messageId: string;
@@ -20,13 +22,12 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** Raw backend reason (localised kind titles are too generic here), or null. */
 function getErrorMessage(err: unknown): string | null {
-  if (typeof err === "string") return err;
-  if (!err || typeof err !== "object") return null;
-  const record = err as Record<string, unknown>;
-  if (typeof record.message === "string") return record.message;
-  if (typeof record.error === "string") return record.error;
-  return null;
+  if (err && typeof err === "object" && !("message" in err) && typeof (err as { error?: unknown }).error === "string") {
+    return (err as { error: string }).error;
+  }
+  return describeError(err).detail || null;
 }
 
 export default function AttachmentList({ messageId }: Props) {
@@ -131,7 +132,7 @@ function MessageAttachments({ messageId }: Props) {
   }
 
   if (loading) return <p role="status">{t("attachmentViewer.loadingAttachments")}</p>;
-  if (loadError) return <div role="alert">{t("attachmentViewer.listFailed")} <button onClick={() => setLoadAttempt((value) => value + 1)}>{t("attachmentViewer.retry")}</button></div>;
+  if (loadError) return <div role="alert">{t("attachmentViewer.listFailed")} <Button size="sm" variant="secondary" onClick={() => setLoadAttempt((value) => value + 1)}>{t("attachmentViewer.retry")}</Button></div>;
   if (attachments.length === 0) return null;
 
   return (

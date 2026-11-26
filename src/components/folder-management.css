@@ -1,14 +1,11 @@
-.folder-modal-backdrop { position: fixed; inset: 0; z-index: var(--z-modal); background: var(--overlay-backdrop); display: flex; align-items: center; justify-content: center; }
-.folder-modal { width: 420px; max-width: calc(100vw - 48px); max-height: calc(100vh - 64px); overflow: auto; padding: 24px; display: flex; flex-direction: column; gap: 14px; background: var(--color-dialog-bg); color: var(--color-text-primary); border: 1px solid var(--color-border); border-radius: var(--radius-dialog); box-shadow: var(--shadow-dialog); }
-.folder-modal h2 { margin: 0; font-size: var(--font-lg); font-weight: var(--font-weight-title); }
-.folder-modal label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
-.folder-modal input, .folder-modal select { padding: 8px; background: var(--color-bg); color: inherit; border: 1px solid var(--color-border); border-radius: 6px; width: 100%; }
-.folder-modal p { margin: 0; font-size: 12px; color: var(--color-text-secondary); white-space: pre-wrap; }
+/* .folder-modal is combined with .dialog-panel (src/components/ui/Dialog.tsx). */
+.folder-modal { width: min(420px, 100%); gap: 14px; }
+.folder-modal label { display: flex; flex-direction: column; gap: 6px; font-size: var(--font-base); }
+.folder-modal input, .folder-modal select { padding: 7px 8px; min-height: 32px; background: var(--color-bg); color: inherit; border: 1px solid var(--color-border); border-radius: var(--radius-md); width: 100%; font-size: var(--font-base); }
+.folder-modal p { margin: 0; font-size: var(--font-sm); line-height: 1.5; color: var(--color-text-secondary); white-space: pre-wrap; }
+.folder-modal p.folder-modal-lead { font-size: var(--font-base); color: var(--color-text-primary); }
 .folder-modal [role="alert"] { color: var(--color-danger); }
-.folder-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.folder-modal button { padding: 7px 12px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg); color: inherit; cursor: pointer; }
-.folder-modal button[type="submit"] { background: var(--color-accent-strong); border-color: var(--color-accent-strong); color: var(--color-on-accent); }
-.folder-modal button:disabled { opacity: .5; cursor: default; }
+.folder-modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 2px; }
 .folder-modal form { display: flex; flex-direction: column; gap: 14px; }
 
 .folder-modal summary {
@@ -16,16 +13,19 @@
   align-items: center;
   gap: 5px;
   width: fit-content;
-  padding: 5px 8px;
-  border-radius: 7px;
+  padding: 4px 8px;
+  margin-left: -8px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-base);
+  color: var(--color-text-secondary);
   cursor: pointer;
-  transition: background-color 0.14s ease;
+  transition: background-color var(--dur-fast) var(--ease-out);
 }
 
 .folder-modal summary:hover,
 .folder-modal summary:focus-visible {
   background: var(--color-bg-hover);
 }
-.folder-action-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--color-text-secondary); font-size: 12px; cursor: pointer; }
+.folder-action-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 28px; min-width: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-md); background: transparent; color: var(--color-text-secondary); font-size: var(--font-sm); cursor: pointer; }
 .folder-action-button:hover { background: var(--color-bg-hover); }
 .folder-action-button:disabled { opacity: .45; cursor: default; }

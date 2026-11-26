@@ -76,7 +76,7 @@ describe("CloudSyncTab contact backups", () => {
     fireEvent.change(screen.getByPlaceholderText("Required for backing up or restoring secrets"), { target: { value: "test-passphrase" } });
     fireEvent.click(screen.getByRole("button", { name: "Restore Settings Backup" }));
     const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Restore and overwrite" }));
     expect(await screen.findByText(/Existing OAuth connections and mailboxes with local data were preserved/)).toBeTruthy();
   });
 });

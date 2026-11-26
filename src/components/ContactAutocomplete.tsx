@@ -10,6 +10,9 @@ import { queryClient } from "@/lib/query-client";
 import { contactSuggestionsQueryRoot } from "@/hooks/queries";
 import { useToastStore } from "@/stores/toast.store";
 import { isValidEmailAddress } from "@/features/compose/recipient-utils";
+import OverlayPortal from "./ui/OverlayPortal";
+import { useFloatingPosition } from "@/hooks/useFloatingPosition";
+import "./ui/overlay.css";
 
 interface ContactAutocompleteProps {
   value: string[];
@@ -46,6 +49,15 @@ export default function ContactAutocomplete({
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  useFloatingPosition({
+    open: showDropdown,
+    floatingRef: dropdownRef,
+    anchorRef: containerRef,
+    placement: "bottom-start",
+    gap: 2,
+    matchWidth: true,
+  });
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchGenerationRef = useRef(0);
   const activeAccountIdRef = useRef(accountId);
@@ -198,6 +210,10 @@ export default function ContactAutocomplete({
         addRawAddress(inputValue);
       }
     } else if (e.key === "Escape") {
+      if (showDropdown) {
+        // Close only the suggestions; don't let Escape also close the composer.
+        e.stopPropagation();
+      }
       setShowDropdown(false);
       setActiveIndex(-1);
     } else if (e.key === "Backspace" && !inputValue && value.length > 0) {
@@ -221,9 +237,11 @@ export default function ContactAutocomplete({
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
       if (
         containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
+        !containerRef.current.contains(target) &&
+        !dropdownRef.current?.contains(target)
       ) {
         setShowDropdown(false);
       }
@@ -360,24 +378,18 @@ export default function ContactAutocomplete({
       </div>
 
       {showDropdown && (
+        <OverlayPortal>
         <div
-          style={{
-            position: "absolute",
-            top: "100%",
-            left: 0,
-            right: 0,
-            zIndex: 1100,
-            backgroundColor: "var(--color-bg)",
-            border: "1px solid var(--color-border)",
-            borderRadius: "8px",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-            marginTop: "2px",
-          }}
+          ref={dropdownRef}
+          className="popover-panel anim-popover-in"
+          style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
         >
           <div
             id={`${instanceId}-listbox`}
             role="listbox"
-            style={{ maxHeight: "200px", overflowY: "auto" }}
+            style={{ flex: 1, minHeight: 0, maxHeight: "240px", overflowY: "auto", padding: "4px" }}
           >
           {loading ? (
             <div
@@ -414,13 +426,14 @@ export default function ContactAutocomplete({
                   display: "flex",
                   alignItems: "center",
                   gap: "10px",
-                  padding: "7px 9px 7px 12px",
+                  padding: "6px 8px",
+                  borderRadius: "var(--radius-md)",
                   cursor: "pointer",
                   backgroundColor:
                     idx === activeIndex
-                      ? "var(--color-bg-secondary, #f5f5f5)"
+                      ? "var(--color-bg-hover)"
                       : "transparent",
-                  fontSize: "13px",
+                  fontSize: "var(--font-base)",
                 }}
               >
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -447,9 +460,9 @@ export default function ContactAutocomplete({
                   style={{
                     flex: "0 0 auto",
                     color: contact.source === "saved"
-                      ? "var(--color-accent)"
+                      ? "var(--color-accent-text)"
                       : "var(--color-text-secondary)",
-                    fontSize: "10px",
+                    fontSize: "var(--font-xs)",
                     fontWeight: 600,
                   }}
                 >
@@ -476,12 +489,12 @@ export default function ContactAutocomplete({
                 padding: "5px 10px",
                 border: 0,
                 borderTop: "1px solid var(--color-border)",
-                borderRadius: "0 0 8px 8px",
-                background: "var(--color-bg)",
+                borderRadius: 0,
+                background: "transparent",
                 color: "var(--color-text-secondary)",
                 cursor: "pointer",
                 font: "inherit",
-                fontSize: "11px",
+                fontSize: "var(--font-xs)",
               }}
             >
               <X size={12} aria-hidden="true" />
@@ -489,6 +502,7 @@ export default function ContactAutocomplete({
             </button>
           )}
         </div>
+        </OverlayPortal>
       )}
     </div>
   );

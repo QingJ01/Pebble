@@ -240,7 +240,7 @@ export default function ProxyTab() {
           {t("settings.globalProxyPort", "Port")}
           <input
             aria-label={t("settings.globalProxyPort", "Port")}
-            type="number"
+            type="number" min={1} max={65535} step={1} inputMode="numeric"
             value={proxyPort}
             onChange={(e) => setProxyPort(e.target.value)}
             placeholder="7890"
@@ -387,7 +387,7 @@ export default function ProxyTab() {
                         {t("settings.globalProxyPort", "Port")}
                         <input
                           aria-label={t("settings.globalProxyPort", "Port")}
-                          type="number"
+                          type="number" min={1} max={65535} step={1} inputMode="numeric"
                           value={draft.port}
                           onChange={(e) => updateAccountDraft(account.id, { port: e.target.value })}
                           placeholder="7890"

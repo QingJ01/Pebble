@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState } from "react";
-import type { ReactNode, Ref } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { Copy, RefreshCw, X } from "lucide-react";
 import iconUrl from "@/assets/app-icon.png";
 import { readAppLog, type AppLogSnapshot } from "@/lib/api";
+import { describeError, extractErrorMessage } from "@/lib/extractErrorMessage";
+import Dialog from "@/components/ui/Dialog";
+import Button from "@/components/ui/Button";
+import IconButton from "@/components/ui/IconButton";
 
 const REPO = "QingJ01/Pebble";
 const RELEASES_URL = `https://github.com/${REPO}/releases`;
@@ -35,6 +38,9 @@ export default function AboutTab() {
   const [appVersion, setAppVersion] = useState<string>("");
   const [update, setUpdate] = useState<UpdateState>({ status: "idle" });
   const [diagnosticLog, setDiagnosticLog] = useState<DiagnosticLogState | null>(null);
+  // Keep the last state while the dialog plays its exit animation.
+  const diagnosticDialog = useRef<DiagnosticLogState | null>(null);
+  if (diagnosticLog) diagnosticDialog.current = diagnosticLog;
   const diagnosticClickCount = useRef(0);
   const diagnosticClickTimer = useRef<number | null>(null);
 
@@ -68,7 +74,7 @@ export default function AboutTab() {
     } catch (err) {
       setUpdate({
         status: "error",
-        error: err instanceof Error ? err.message : String(err),
+        error: extractErrorMessage(err),
       });
     }
   }
@@ -79,9 +85,12 @@ export default function AboutTab() {
       const snapshot = await readAppLog(DIAGNOSTIC_LOG_MAX_BYTES);
       setDiagnosticLog({ status: "ready", snapshot });
     } catch (err) {
+      const described = describeError(err);
       setDiagnosticLog({
         status: "error",
-        error: err instanceof Error ? err.message : String(err),
+        error: described.detail && described.detail !== described.title
+          ? `${described.title}\n${described.detail}`
+          : described.title,
       });
     }
   }
@@ -187,28 +196,18 @@ export default function AboutTab() {
         </h3>
 
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <button
+          <Button
+            variant="secondary"
             onClick={handleCheckUpdate}
-            disabled={update.status === "checking"}
-            style={{
-              padding: "8px 18px",
-              fontSize: "13px",
-              fontWeight: 500,
-              border: "1px solid var(--color-border)",
-              borderRadius: "6px",
-              backgroundColor: "var(--color-bg-hover)",
-              color: "var(--color-text-primary)",
-              cursor: update.status === "checking" ? "wait" : "pointer",
-              opacity: update.status === "checking" ? 0.6 : 1,
-            }}
+            loading={update.status === "checking"}
           >
             {update.status === "checking"
               ? t("about.checking", "Checking...")
               : t("about.checkUpdate", "Check for updates")}
-          </button>
+          </Button>
 
           {update.status === "latest" && (
-            <span style={{ fontSize: "13px", color: "#22c55e" }}>
+            <span role="status" style={{ fontSize: "var(--font-base)", color: "var(--color-success)" }}>
               {t("about.upToDate", "You're on the latest version")}
             </span>
           )}
@@ -220,9 +219,10 @@ export default function AboutTab() {
               marginTop: "12px",
               padding: "12px 14px",
               borderRadius: "6px",
-              backgroundColor: "rgba(59, 130, 246, 0.08)",
-              border: "1px solid rgba(59, 130, 246, 0.2)",
-              fontSize: "13px",
+              gap: "12px",
+              backgroundColor: "var(--color-info-bg)",
+              border: "1px solid var(--color-border)",
+              fontSize: "var(--font-base)",
               color: "var(--color-text-primary)",
               display: "flex",
               alignItems: "center",
@@ -234,37 +234,18 @@ export default function AboutTab() {
                 version: update.latestVersion,
               })}
             </span>
-            <button
-              onClick={() => openUrl(update.releaseUrl || RELEASES_URL)}
-              style={{
-                padding: "6px 14px",
-                fontSize: "12px",
-                fontWeight: 500,
-                border: "none",
-                borderRadius: "6px",
-                backgroundColor: "var(--color-accent, #3b82f6)",
-                color: "#fff",
-                cursor: "pointer",
-              }}
-            >
+            <Button variant="primary" size="sm" onClick={() => openUrl(update.releaseUrl || RELEASES_URL)}>
               {t("about.download", "Download")}
-            </button>
+            </Button>
           </div>
         )}
 
         {update.status === "error" && (
-          <div
-            style={{
-              marginTop: "12px",
-              padding: "10px 14px",
-              borderRadius: "6px",
-              backgroundColor: "rgba(220, 53, 69, 0.1)",
-              border: "1px solid rgba(220, 53, 69, 0.3)",
-              fontSize: "13px",
-              color: "#dc3545",
-            }}
-          >
-            {t("about.checkFailed", "Failed to check for updates")}: {update.error}
+          <div role="alert" className="dialog-error" style={{ marginTop: "12px" }} title={update.error || undefined}>
+            {t("about.checkFailed", "Failed to check for updates")}
+            {update.error && (
+              <div style={{ marginTop: "2px", opacity: 0.85, overflowWrap: "anywhere" }}>{update.error}</div>
+            )}
           </div>
         )}
       </div>
@@ -294,7 +275,7 @@ export default function AboutTab() {
               onClick={(e) => { e.preventDefault(); openUrl(link.url); }}
               style={{
                 fontSize: "13px",
-                color: "var(--color-accent, #3b82f6)",
+                color: "var(--color-accent-text)",
                 textDecoration: "none",
                 cursor: "pointer",
               }}
@@ -305,9 +286,10 @@ export default function AboutTab() {
         </div>
       </div>
 
-      {diagnosticLog && (
+      {diagnosticDialog.current && (
         <DiagnosticLogDialog
-          state={diagnosticLog}
+          open={diagnosticLog !== null}
+          state={diagnosticDialog.current}
           title={t("about.diagnosticLog", "Diagnostic log")}
           loadingLabel={t("common.loading", "Loading...")}
           emptyLabel={t("about.noDiagnosticLog", "No log entries yet.")}
@@ -324,6 +306,7 @@ export default function AboutTab() {
 }
 
 function DiagnosticLogDialog({
+  open,
   state,
   title,
   loadingLabel,
@@ -335,6 +318,7 @@ function DiagnosticLogDialog({
   onRefresh,
   onClose,
 }: {
+  open: boolean;
   state: DiagnosticLogState;
   title: string;
   loadingLabel: string;
@@ -346,20 +330,9 @@ function DiagnosticLogDialog({
   onRefresh: () => void;
   onClose: () => void;
 }) {
+  const titleId = useId();
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const snapshot = state.status === "ready" ? state.snapshot : null;
-
-  useEffect(() => {
-    closeButtonRef.current?.focus();
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-      }
-    }
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
 
   function handleCopyPath() {
     if (!snapshot) {
@@ -369,174 +342,121 @@ function DiagnosticLogDialog({
   }
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="diagnostic-log-title"
+    <Dialog
+      open={open}
+      onClose={onClose}
+      labelledBy={titleId}
+      closeOnBackdrop={false}
+      initialFocus={closeButtonRef}
+      panelClassName="dialog-panel dialog-panel--flush"
       style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 1200,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "24px",
-        backgroundColor: "rgba(0, 0, 0, 0.48)",
+        width: "min(820px, 100%)",
+        maxHeight: "min(720px, calc(100vh - 48px))",
+        overflow: "hidden",
       }}
     >
       <div
+        className="dialog-header"
         style={{
-          width: "min(820px, calc(100vw - 48px))",
-          maxHeight: "min(720px, calc(100vh - 48px))",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          border: "1px solid var(--color-border)",
-          borderRadius: "10px",
-          backgroundColor: "var(--color-bg)",
-          boxShadow: "0 24px 70px rgba(0, 0, 0, 0.32)",
+          gap: "12px",
+          padding: "16px 18px",
+          borderBottom: "1px solid var(--color-border)",
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "12px",
-            padding: "16px 18px",
-            borderBottom: "1px solid var(--color-border)",
-          }}
-        >
-          <div style={{ minWidth: 0 }}>
-            <h3
-              id="diagnostic-log-title"
-              style={{ margin: 0, fontSize: "15px", fontWeight: 600, color: "var(--color-text-primary)" }}
-            >
-              {title}
-            </h3>
-            {snapshot && (
-              <div
-                style={{
-                  marginTop: "6px",
-                  fontSize: "12px",
-                  color: "var(--color-text-secondary)",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {snapshot.path}
-              </div>
-            )}
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
-            <IconButton
-              label={refreshLabel}
-              onClick={onRefresh}
-              disabled={state.status === "loading"}
-              icon={<RefreshCw size={16} />}
-            />
-            <IconButton
-              label={copyPathLabel}
-              onClick={handleCopyPath}
-              disabled={!snapshot}
-              icon={<Copy size={16} />}
-            />
-            <IconButton
-              buttonRef={closeButtonRef}
-              label={closeLabel}
-              onClick={onClose}
-              icon={<X size={16} />}
-            />
-          </div>
-        </div>
-
-        {state.status === "loading" && (
-          <div style={{ padding: "22px", fontSize: "13px", color: "var(--color-text-secondary)" }}>
-            {loadingLabel}
-          </div>
-        )}
-
-        {state.status === "error" && (
-          <div style={{ padding: "22px", fontSize: "13px", color: "#dc3545", whiteSpace: "pre-wrap" }}>
-            {state.error}
-          </div>
-        )}
-
-        {snapshot && (
-          <>
-            {snapshot.truncated && (
-              <div
-                style={{
-                  padding: "8px 18px",
-                  borderBottom: "1px solid var(--color-border)",
-                  fontSize: "12px",
-                  color: "var(--color-text-secondary)",
-                  backgroundColor: "var(--color-bg-hover)",
-                }}
-              >
-                {truncatedLabel}
-              </div>
-            )}
-            <pre
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h2 id={titleId} className="dialog-title">
+            {title}
+          </h2>
+          {snapshot && (
+            <div
+              title={snapshot.path}
               style={{
-                margin: 0,
-                minHeight: "260px",
-                maxHeight: "560px",
-                overflow: "auto",
-                padding: "18px",
-                fontSize: "12px",
-                lineHeight: 1.6,
-                color: "var(--color-text-primary)",
-                backgroundColor: "var(--color-bg)",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-                fontFamily: "Consolas, 'SFMono-Regular', Menlo, monospace",
+                marginTop: "4px",
+                fontSize: "var(--font-sm)",
+                color: "var(--color-text-secondary)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
               }}
             >
-              {snapshot.content || emptyLabel}
-            </pre>
-          </>
-        )}
+              {snapshot.path}
+            </div>
+          )}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
+          <IconButton
+            size="md"
+            label={refreshLabel}
+            onClick={onRefresh}
+            loading={state.status === "loading"}
+            icon={<RefreshCw size={16} />}
+          />
+          <IconButton
+            size="md"
+            label={copyPathLabel}
+            onClick={handleCopyPath}
+            disabled={!snapshot}
+            icon={<Copy size={16} />}
+          />
+          <IconButton
+            ref={closeButtonRef}
+            size="md"
+            label={closeLabel}
+            onClick={onClose}
+            icon={<X size={16} />}
+          />
+        </div>
       </div>
-    </div>
+
+      {state.status === "loading" && (
+        <div role="status" style={{ padding: "22px", fontSize: "var(--font-base)", color: "var(--color-text-secondary)" }}>
+          {loadingLabel}
+        </div>
+      )}
+
+      {state.status === "error" && (
+        <div role="alert" className="dialog-error" style={{ margin: "18px" }}>
+          {state.error}
+        </div>
+      )}
+
+      {snapshot && (
+        <>
+          {snapshot.truncated && (
+            <div
+              style={{
+                padding: "8px 18px",
+                borderBottom: "1px solid var(--color-border)",
+                fontSize: "var(--font-sm)",
+                color: "var(--color-text-secondary)",
+                backgroundColor: "var(--color-bg-hover)",
+              }}
+            >
+              {truncatedLabel}
+            </div>
+          )}
+          <pre
+            tabIndex={0}
+            style={{
+              margin: 0,
+              minHeight: "260px",
+              flex: 1,
+              overflow: "auto",
+              padding: "18px",
+              fontSize: "var(--font-sm)",
+              lineHeight: 1.6,
+              color: "var(--color-text-primary)",
+              backgroundColor: "var(--color-bg)",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              fontFamily: "var(--font-mono)",
+              userSelect: "text",
+            }}
+          >
+            {snapshot.content || emptyLabel}
+          </pre>
+        </>
+      )}
+    </Dialog>
   );
 }
-
-const IconButton = ({
-  icon,
-  label,
-  onClick,
-  disabled,
-  buttonRef,
-}: {
-  icon: ReactNode;
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-  buttonRef?: Ref<HTMLButtonElement>;
-}) => (
-  <button
-    ref={buttonRef}
-    type="button"
-    onClick={onClick}
-    disabled={disabled}
-    aria-label={label}
-    title={label}
-    style={{
-      width: "32px",
-      height: "32px",
-      display: "inline-flex",
-      alignItems: "center",
-      justifyContent: "center",
-      border: "1px solid var(--color-border)",
-      borderRadius: "6px",
-      backgroundColor: "var(--color-bg-hover)",
-      color: "var(--color-text-primary)",
-      cursor: disabled ? "not-allowed" : "pointer",
-      opacity: disabled ? 0.55 : 1,
-    }}
-  >
-    {icon}
-  </button>
-);
