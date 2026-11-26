@@ -1,0 +1,164 @@
+/* Message / thread list rows (MessageItem, ThreadItem, MessageList). */
+
+.message-list-row,
+.thread-list-row {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.mail-row__line {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.mail-row__primary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  margin-right: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: var(--font-base);
+  line-height: 18px;
+  font-weight: 400;
+}
+
+.message-list-row--unread .mail-row__primary,
+.thread-list-row--unread .mail-row__primary {
+  font-weight: 600;
+}
+
+.mail-row__ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.mail-row__unread-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.mail-row__meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  max-width: 55%;
+  color: var(--color-text-secondary);
+}
+
+.mail-row__date {
+  font-size: var(--font-xs);
+  line-height: 18px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.mail-row__label {
+  display: inline-block;
+  max-width: 88px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-xs);
+  line-height: 16px;
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+}
+
+.mail-row__subject {
+  font-size: var(--font-base);
+  line-height: 18px;
+  font-weight: 400;
+  margin-top: 2px;
+}
+
+.message-list-row--unread .mail-row__subject,
+.thread-list-row--unread .mail-row__subject {
+  font-weight: 600;
+}
+
+.mail-row__snippet {
+  font-size: var(--font-sm);
+  line-height: 17px;
+  margin-top: 1px;
+  color: var(--color-text-secondary);
+}
+
+/* Selected rows sit on --color-sidebar-active: lift secondary text for contrast. */
+.message-list-row[aria-selected="true"] .mail-row__snippet,
+.message-list-row[aria-selected="true"] .mail-row__meta,
+.thread-list-row[aria-selected="true"] .mail-row__snippet,
+.thread-list-row[aria-selected="true"] .mail-row__meta {
+  color: color-mix(in srgb, var(--color-text-primary) 78%, transparent);
+}
+
+/* Hover / keyboard-focus quick actions replace the date + icons. */
+.message-row-actions {
+  position: absolute;
+  right: 8px;
+  top: 5px;
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding: 1px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-popover-bg);
+  box-shadow: var(--shadow-popover);
+}
+
+.message-list-row:hover .message-row-actions,
+.message-list-row:focus-within .message-row-actions {
+  display: flex;
+}
+
+.message-list-row:hover .mail-row__meta,
+.message-list-row:focus-within .mail-row__meta {
+  visibility: hidden;
+}
+
+.message-row-actions .folder-action-button {
+  min-width: 28px;
+  min-height: 28px;
+}
+
+.icon-btn.message-row-actions__star[aria-pressed="true"] {
+  color: var(--color-warning);
+  background: transparent;
+}
+
+/* Batch toolbar */
+.batch-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--color-border);
+  background-color: var(--color-bg);
+  flex-shrink: 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.toolbar-separator {
+  width: 1px;
+  height: 18px;
+  margin: 0 6px;
+  background-color: var(--color-border);
+  flex-shrink: 0;
+}
+
+.mail-list-load-more {
+  padding: 12px;
+  text-align: center;
+}

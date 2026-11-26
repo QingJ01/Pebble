@@ -1,23 +1,29 @@
-import { useRef, useMemo, useState, useEffect } from "react";
+import { useRef, useMemo, useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
-import { Inbox, Archive, Trash2, MailOpen, MailCheck, Star, X } from "lucide-react";
+import { Inbox, Archive, Trash2, MailOpen, Mail, Star, StarOff, X } from "lucide-react";
 import type { MessageSummary } from "@/lib/api";
 import type { Label } from "@/lib/ipc-types";
-import { getMessageLabelsBatch, batchArchive, batchDelete, batchMarkRead, batchStar } from "@/lib/api";
+import { getMessageLabelsBatch, batchMarkRead, batchStar } from "@/lib/api";
 import { useAccountsQuery, useFoldersForAccountsQuery } from "@/hooks/queries";
 import { invalidateKanbanQueries } from "@/hooks/queries/useKanbanCardsQuery";
+import { runMailAction, trashConfirmCopy } from "@/hooks/mutations/mailActions";
 import { useMailStore } from "@/stores/mail.store";
-import { useToastStore } from "@/stores/toast.store";
+import { eventToKeyString, useShortcutStore } from "@/stores/shortcut.store";
+import { toastError, useToastStore } from "@/stores/toast.store";
 import { useConfirmStore } from "@/stores/confirm.store";
 import { roleForSelection } from "@/lib/folderAggregation";
 import { assignAccountColors, getAccountColor, getAccountLabel } from "@/lib/accountColors";
 import MessageItem from "./MessageItem";
 import MoveToButton from "./MoveToButton";
+import IconButton from "./ui/IconButton";
+import Button from "./ui/Button";
 import { MessageListSkeleton } from "./Skeleton";
+import "./mail-list.css";
 
 const LABEL_CHUNK_SIZE = 50;
+const PAGE_STEP = 10;
 
 // Module-level so React Query only re-runs it when a chunk result changes.
 function mergeLabelChunks(results: { data?: Record<string, Label[]> }[]) {
@@ -37,6 +43,13 @@ interface Props {
   onLoadMore?: () => void;
   hasNextPage?: boolean;
   isFetchingNextPage?: boolean;
+}
+
+type FlagAction = "markRead" | "markUnread" | "star" | "unstar";
+
+function matchesBinding(event: React.KeyboardEvent, binding: string | undefined) {
+  if (!binding) return false;
+  return eventToKeyString(event.nativeEvent).toLowerCase() === binding.toLowerCase();
 }
 
 export default function MessageList({
@@ -80,6 +93,7 @@ export default function MessageList({
   const spamFolder = activeAccountId ? folders.find((f) => f.account_id === activeAccountId && f.role === "spam") : undefined;
   const spamFolderId = activeFolderRole !== "spam" ? spamFolder?.id : undefined;
   const messageIds = useMemo(() => messages.map((m) => m.id), [messages]);
+  const indexById = useMemo(() => new Map(messageIds.map((id, index) => [id, index])), [messageIds]);
   // Fetch labels per page-sized chunk so loading another page only fetches the
   // new chunk; earlier chunks keep their cache entries.
   const labelChunks = useMemo(() => {
@@ -107,14 +121,121 @@ export default function MessageList({
     overscan: 5,
   });
 
-  // Scroll selected message into view on keyboard navigation
+  // ── Roving tab stop ────────────────────────────────────────────────────
+  // One row is tabbable (the "active" row); ↑/↓/J/K/Home/End move it.
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const anchorIndexRef = useRef<number | null>(null);
+  const effectiveActiveId =
+    (activeId && indexById.has(activeId) ? activeId : null)
+    ?? (selectedMessageId && indexById.has(selectedMessageId) ? selectedMessageId : null)
+    ?? messageIds[0]
+    ?? null;
+
+  const focusRow = useCallback((id: string) => {
+    const index = indexById.get(id);
+    if (index === undefined) return;
+    virtualizer.scrollToIndex(index, { align: "auto" });
+    const tryFocus = (attempt: number) => {
+      const row = Array.from(parentRef.current?.querySelectorAll<HTMLElement>("[data-row-id]") ?? [])
+        .find((el) => el.dataset.rowId === id);
+      if (row) row.focus({ preventScroll: true });
+      else if (attempt < 3) requestAnimationFrame(() => tryFocus(attempt + 1));
+    };
+    tryFocus(0);
+  }, [indexById, virtualizer]);
+
+  // Scroll to the selected message only when the selection itself changes —
+  // not on every background refresh of the list (that would yank the view
+  // back while the user scrolls).
+  const scrolledForRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!selectedMessageId) return;
-    const idx = messages.findIndex((m) => m.id === selectedMessageId);
-    if (idx >= 0) {
-      virtualizer.scrollToIndex(idx, { align: "auto" });
+    if (!selectedMessageId) {
+      scrolledForRef.current = null;
+      return;
     }
-  }, [selectedMessageId, messages, virtualizer]);
+    if (scrolledForRef.current === selectedMessageId) return;
+    const idx = indexById.get(selectedMessageId);
+    if (idx === undefined) return; // not loaded yet; retry when it is
+    scrolledForRef.current = selectedMessageId;
+    setActiveId(selectedMessageId);
+    virtualizer.scrollToIndex(idx, { align: "auto" });
+    // Keyboard selection (J/K) moves focus along when the list has it.
+    if (parentRef.current?.contains(document.activeElement) && document.activeElement !== parentRef.current) {
+      focusRow(selectedMessageId);
+    }
+  }, [selectedMessageId, indexById, virtualizer, focusRow]);
+
+  const moveActive = useCallback((index: number) => {
+    if (messages.length === 0) return;
+    const clamped = Math.max(0, Math.min(messages.length - 1, index));
+    const id = messages[clamped].id;
+    setActiveId(id);
+    anchorIndexRef.current = clamped;
+    if (!useMailStore.getState().batchMode) {
+      scrolledForRef.current = id;
+      onSelectMessage(id);
+    }
+    focusRow(id);
+    if (index >= messages.length && hasNextPage && !isFetchingNextPage) onLoadMore?.();
+  }, [messages, onSelectMessage, focusRow, hasNextPage, isFetchingNextPage, onLoadMore]);
+
+  function handleListKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.defaultPrevented) return;
+    const target = event.target as HTMLElement;
+    const onRow = target === event.currentTarget || target.getAttribute("role") === "option";
+    if (!onRow || event.altKey) return;
+    const current = effectiveActiveId ? indexById.get(effectiveActiveId) ?? 0 : 0;
+    const bindings = useShortcutStore.getState().bindings;
+    let next: number | null = null;
+    if (event.key === "ArrowDown" || matchesBinding(event, bindings["next-message"])) next = current + 1;
+    else if (event.key === "ArrowUp" || matchesBinding(event, bindings["prev-message"])) next = current - 1;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = messages.length - 1;
+    else if (event.key === "PageDown") next = current + PAGE_STEP;
+    else if (event.key === "PageUp") next = current - PAGE_STEP;
+    if (next === null) return;
+    event.preventDefault();
+    moveActive(next);
+  }
+
+  function handleRowClick(index: number, event?: React.MouseEvent) {
+    const id = messages[index]?.id;
+    if (!id) return;
+    const state = useMailStore.getState();
+    if (event && (event.metaKey || event.ctrlKey)) {
+      // ⌘/Ctrl-click toggles one message into a multi-selection.
+      event.preventDefault();
+      const ids = new Set(state.batchMode
+        ? state.selectedMessageIds
+        : selectedMessageId && indexById.has(selectedMessageId) ? [selectedMessageId] : []);
+      if (ids.has(id)) ids.delete(id);
+      else ids.add(id);
+      useMailStore.setState({ batchMode: true, selectedMessageIds: ids });
+      anchorIndexRef.current = index;
+      setActiveId(id);
+      return;
+    }
+    if (event?.shiftKey) {
+      // Shift-click selects the range from the last clicked row.
+      event.preventDefault();
+      const anchor = anchorIndexRef.current
+        ?? (selectedMessageId ? indexById.get(selectedMessageId) : undefined)
+        ?? index;
+      const [from, to] = anchor <= index ? [anchor, index] : [index, anchor];
+      const ids = new Set(state.batchMode ? state.selectedMessageIds : []);
+      for (const message of messages.slice(from, to + 1)) ids.add(message.id);
+      useMailStore.setState({ batchMode: true, selectedMessageIds: ids });
+      setActiveId(id);
+      return;
+    }
+    anchorIndexRef.current = index;
+    setActiveId(id);
+    if (state.batchMode) toggleMessageSelection(id);
+    else {
+      scrolledForRef.current = id;
+      onSelectMessage(id);
+    }
+  }
 
   if (loading) {
     return <MessageListSkeleton />;
@@ -131,7 +252,7 @@ export default function MessageList({
           justifyContent: "center",
           height: "100%",
           color: "var(--color-text-secondary)",
-          fontSize: "14px",
+          fontSize: "var(--font-md)",
           gap: "8px",
         }}
       >
@@ -145,68 +266,64 @@ export default function MessageList({
     queryClient.invalidateQueries({ queryKey: ["messages"] });
     queryClient.invalidateQueries({ queryKey: ["threads"] });
     queryClient.invalidateQueries({ queryKey: ["starred-messages"] });
-    // Batch deletes must drop the cards from the board too.
     void invalidateKanbanQueries(queryClient);
   }
 
-  function batchActionChangesUnreadCounts(action: "archive" | "delete" | "markRead" | "markUnread" | "star" | "unstar") {
-    return action !== "star" && action !== "unstar";
+  function selectedMessages() {
+    return messages.filter((m) => selectedMessageIds.has(m.id));
   }
 
-  async function handleBatchAction(action: "archive" | "delete" | "markRead" | "markUnread" | "star" | "unstar") {
-    const ids = [...selectedMessageIds];
-    if (ids.length === 0) return;
-    if (action === "delete") {
-      const count = ids.length;
-      const includesLocalDraft = ids.some((id) => {
-        const message = messages.find((message) => message.id === id);
-        return !message || (message.is_draft && message.remote_id === "");
+  async function handleMoveAction(kind: "archive" | "trash") {
+    const targets = selectedMessages();
+    if (targets.length === 0) return;
+    setBatchLoading(true);
+    try {
+      const result = await runMailAction(queryClient, kind, targets, {
+        confirm: (plan) => confirm({ ...trashConfirmCopy(plan), destructive: true }),
+        onRemoved: (ids) => {
+          const current = useMailStore.getState().selectedMessageId;
+          if (current && ids.includes(current)) useMailStore.getState().setSelectedMessage(null);
+        },
       });
-      const ok = await confirm({
-        title: t("batch.deleteTitle", { count, defaultValue: `Delete ${count} messages?` }),
-        message: includesLocalDraft ? t("batch.deleteWithLocalDraftsConfirm",
-          "Local-only drafts in this selection will be permanently deleted and cannot be restored. Other messages will move to Trash.") : t("batch.deleteConfirm", {
-          count,
-          defaultValue: `This will move ${count} message(s) to Trash. This action can be undone by restoring from Trash.`,
-        }),
-        confirmLabel: t("batch.deleteButton", { defaultValue: "Delete" }),
-        destructive: true,
-      });
-      if (!ok) return;
+      if (result.ok) clearSelection();
+    } finally {
+      setBatchLoading(false);
     }
+  }
+
+  async function handleFlagAction(action: FlagAction) {
+    const ids = selectedMessages().map((m) => m.id);
+    if (ids.length === 0) return;
     setBatchLoading(true);
     try {
       let count = 0;
-      if (action === "archive") count = await batchArchive(ids);
-      else if (action === "delete") count = await batchDelete(ids);
-      else if (action === "markRead") count = await batchMarkRead(ids, true);
+      if (action === "markRead") count = await batchMarkRead(ids, true);
       else if (action === "markUnread") count = await batchMarkRead(ids, false);
       else if (action === "star") count = await batchStar(ids, true);
       else count = await batchStar(ids, false);
       invalidateMessageViews();
-      if (batchActionChangesUnreadCounts(action)) {
+      if (action === "markRead" || action === "markUnread") {
         queryClient.invalidateQueries({ queryKey: ["folder-unread-counts"] });
       }
       addToast({ message: t("batch.success", { count }), type: "success" });
       clearSelection();
-    } catch {
-      addToast({ message: t("batch.failed"), type: "error" });
+    } catch (error) {
+      toastError(error, "batch.failed");
     } finally {
       setBatchLoading(false);
     }
   }
 
   const allSelected = messages.length > 0 && selectedMessageIds.size === messages.length;
+  const virtualItems = virtualizer.getVirtualItems();
+  const activeRowRendered = virtualItems.some((item) => messages[item.index]?.id === effectiveActiveId);
+  const selectionMessages = selectedMessageIds.size > 0 ? selectedMessages() : [];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* Batch toolbar */}
       {batchMode && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: "6px",
-          padding: "6px 10px", borderBottom: "1px solid var(--color-border)",
-          backgroundColor: "var(--color-bg)", flexShrink: 0,
-        }}>
+        <div className="batch-toolbar" role="toolbar" aria-label={t("batch.toolbar", "Selection actions")}>
           <label className="batch-select-control">
             <input
               type="checkbox"
@@ -221,16 +338,19 @@ export default function MessageList({
           </label>
           {selectedMessageIds.size > 0 && (
             <>
-              <MoveToButton messages={messages.filter((m) => selectedMessageIds.has(m.id))} disabled={batchLoading || [...selectedMessageIds].some((id) => !messageIds.includes(id))}/>
-              <BatchBtn icon={Archive} label={t("messageActions.archive")} onClick={() => handleBatchAction("archive")} disabled={batchLoading} />
-              <BatchBtn icon={Trash2} label={t("common.delete")} onClick={() => handleBatchAction("delete")} disabled={batchLoading} />
-              <BatchBtn icon={MailOpen} label={t("batch.markRead")} onClick={() => handleBatchAction("markRead")} disabled={batchLoading} />
-              <BatchBtn icon={MailCheck} label={t("batch.markUnread")} onClick={() => handleBatchAction("markUnread")} disabled={batchLoading} />
-              <BatchBtn icon={Star} label={t("batch.star", "Star")} onClick={() => handleBatchAction("star")} disabled={batchLoading} />
-              <BatchBtn icon={Star} label={t("batch.unstar", "Unstar")} onClick={() => handleBatchAction("unstar")} disabled={batchLoading} />
+              <span className="toolbar-separator" aria-hidden="true" />
+              <MoveToButton messages={selectionMessages} disabled={batchLoading || [...selectedMessageIds].some((id) => !indexById.has(id))}/>
+              <IconButton icon={<Archive size={14} />} label={t("messageActions.archive")} onClick={() => void handleMoveAction("archive")} disabled={batchLoading} />
+              <IconButton icon={<MailOpen size={14} />} label={t("batch.markRead")} onClick={() => void handleFlagAction("markRead")} disabled={batchLoading} />
+              <IconButton icon={<Mail size={14} />} label={t("batch.markUnread")} onClick={() => void handleFlagAction("markUnread")} disabled={batchLoading} />
+              <IconButton icon={<Star size={14} />} label={t("batch.star", "Star")} onClick={() => void handleFlagAction("star")} disabled={batchLoading} />
+              <IconButton icon={<StarOff size={14} />} label={t("batch.unstar", "Unstar")} onClick={() => void handleFlagAction("unstar")} disabled={batchLoading} />
+              <span className="toolbar-separator" aria-hidden="true" />
+              <IconButton icon={<Trash2 size={14} />} variant="danger" label={t("common.delete")} onClick={() => void handleMoveAction("trash")} disabled={batchLoading} />
             </>
           )}
-          <BatchBtn icon={X} label={t("common.close")} onClick={toggleBatchMode} disabled={false} />
+          <span style={{ flex: 1 }} />
+          <IconButton icon={<X size={14} />} label={t("common.close")} onClick={toggleBatchMode} />
         </div>
       )}
       <div
@@ -238,7 +358,14 @@ export default function MessageList({
         className="scroll-region message-list-scroll"
         role="listbox"
         aria-label={t("inbox.messageList", "Messages")}
-        style={{ flex: 1, overflow: "auto" }}
+        aria-multiselectable={batchMode || undefined}
+        data-shortcut-scope="list"
+        tabIndex={activeRowRendered ? -1 : 0}
+        onKeyDown={handleListKeyDown}
+        onFocus={(event) => {
+          if (event.target === event.currentTarget && effectiveActiveId) focusRow(effectiveActiveId);
+        }}
+        style={{ flex: 1, overflow: "auto", outline: "none" }}
       >
         <div
           style={{
@@ -246,7 +373,7 @@ export default function MessageList({
             position: "relative",
           }}
         >
-          {virtualizer.getVirtualItems().map((virtualItem) => {
+          {virtualItems.map((virtualItem) => {
             const message = messages[virtualItem.index];
             const account = accountsById.get(message.account_id);
             return (
@@ -254,6 +381,7 @@ export default function MessageList({
                 key={virtualItem.key}
                 ref={virtualizer.measureElement}
                 data-index={virtualItem.index}
+                role="presentation"
                 style={{
                   position: "absolute",
                   top: 0,
@@ -265,14 +393,21 @@ export default function MessageList({
                 <MessageItem
                   message={message}
                   labels={labelsByMessage[message.id] ?? []}
-                  isSelected={message.id === selectedMessageId}
-                  onClick={() => batchMode ? toggleMessageSelection(message.id) : onSelectMessage(message.id)}
+                  isSelected={batchMode ? selectedMessageIds.has(message.id) : message.id === selectedMessageId}
+                  onClick={(event) => handleRowClick(virtualItem.index, event)}
+                  onOpen={() => {
+                    scrolledForRef.current = message.id;
+                    setActiveId(message.id);
+                    onSelectMessage(message.id);
+                  }}
                   onToggleStar={onToggleStar}
                   batchMode={batchMode}
                   batchSelected={selectedMessageIds.has(message.id)}
                   onToggleBatchSelect={toggleMessageSelection}
                   spamFolderId={spamFolderId}
                   folderRole={activeFolderRole}
+                  tabIndex={message.id === effectiveActiveId ? 0 : -1}
+                  onRowFocus={setActiveId}
                   accountColor={
                     showAccountColorMarkers
                       ? accountColorsById.get(message.account_id) ?? getAccountColor(account, message.account_id)
@@ -285,49 +420,20 @@ export default function MessageList({
           })}
         </div>
         {onLoadMore && hasNextPage && (
-          <div style={{ padding: "12px", textAlign: "center" }}>
-            <button
+          <div className="mail-list-load-more">
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={isFetchingNextPage}
               onClick={() => {
                 if (!isFetchingNextPage) onLoadMore();
               }}
-              disabled={isFetchingNextPage}
-              style={{
-                padding: "6px 20px",
-                fontSize: "13px",
-                border: "1px solid var(--color-border)",
-                borderRadius: "6px",
-                background: "transparent",
-                color: "var(--color-text-secondary)",
-                cursor: isFetchingNextPage ? "default" : "pointer",
-                opacity: isFetchingNextPage ? 0.7 : 1,
-              }}
             >
               {isFetchingNextPage ? t("common.loading", "Loading...") : t("common.loadMore", "Load more")}
-            </button>
+            </Button>
           </div>
         )}
       </div>
     </div>
-  );
-}
-
-function BatchBtn({ icon: Icon, label, onClick, disabled }: {
-  icon: React.ElementType; label: string; onClick: () => void; disabled: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={label}
-      aria-label={label}
-      style={{
-        display: "flex", alignItems: "center", padding: "4px",
-        border: "none", background: "transparent", borderRadius: "4px",
-        cursor: disabled ? "default" : "pointer",
-        color: "var(--color-text-secondary)", opacity: disabled ? 0.5 : 1,
-      }}
-    >
-      <Icon size={14} />
-    </button>
   );
 }

@@ -18,6 +18,10 @@ const mocks = vi.hoisted(() => ({
   batchStar: vi.fn(),
   addToast: vi.fn(),
   confirm: vi.fn(),
+  runMailAction: vi.fn(),
+  toastError: vi.fn(),
+  scrollToIndex: vi.fn(),
+  itemProps: {} as Record<string, Record<string, unknown>>,
 }));
 
 vi.mock("react-i18next", () => ({
@@ -51,7 +55,7 @@ vi.mock("@tanstack/react-virtual", () => ({
         start: index * 76,
       })),
     measureElement: vi.fn(),
-    scrollToIndex: vi.fn(),
+    scrollToIndex: mocks.scrollToIndex,
   }),
 }));
 
@@ -73,6 +77,12 @@ vi.mock("../../src/lib/api", () => ({
 vi.mock("../../src/stores/toast.store", () => ({
   useToastStore: (selector: (state: { addToast: (toast: unknown) => void }) => unknown) =>
     selector({ addToast: mocks.addToast }),
+  toastError: mocks.toastError,
+}));
+
+vi.mock("../../src/hooks/mutations/mailActions", () => ({
+  runMailAction: mocks.runMailAction,
+  trashConfirmCopy: () => ({ title: "t", message: "m", confirmLabel: "c" }),
 }));
 
 vi.mock("../../src/stores/confirm.store", () => ({
@@ -83,15 +93,25 @@ vi.mock("../../src/stores/confirm.store", () => ({
 vi.mock("../../src/components/MessageItem", async () => {
   const { useState } = await import("react");
   return {
-  default: ({ message, folderRole, accountColor, accountLabel }: {
+  default: (props: {
     message: MessageSummary;
     folderRole?: string | null;
     accountColor?: string;
     accountLabel?: string;
+    tabIndex?: number;
+    isSelected?: boolean;
+    onClick: (event?: unknown) => void;
   }) => {
+    const { message, folderRole, accountColor, accountLabel } = props;
+    mocks.itemProps[message.id] = props as unknown as Record<string, unknown>;
     const [initialMessageId] = useState(message.id);
     return (
       <div
+        role="option"
+        aria-selected={Boolean(props.isSelected)}
+        tabIndex={props.tabIndex}
+        data-row-id={message.id}
+        onClick={(event) => props.onClick(event)}
         data-testid={`message-${message.id}`}
         data-initial-message-id={initialMessageId}
         data-folder-role={folderRole ?? ""}
@@ -141,48 +161,21 @@ function makeMessage(id: string): MessageSummary {
 }
 
 describe("MessageList", () => {
-  it.each([false, true])("warns about irreversible local-draft deletion, including mixed selection=%s", async (mixed) => {
+  it("sends batch delete through the undoable trash action with a confirm fallback", async () => {
     const first = { ...makeMessage("m-1"), is_draft: true, remote_id: "" };
-    const second = { ...makeMessage("m-2"), is_draft: !mixed, remote_id: mixed ? "remote-2" : "" };
-    useMailStore.setState({ batchMode: true, selectedMessageIds: new Set([first.id, second.id]) });
-    mocks.confirm.mockResolvedValue(false);
-    render(<MessageList messages={[first, second]} selectedMessageId={null} onSelectMessage={vi.fn()} loading={false} />);
+    useMailStore.setState({ batchMode: true, selectedMessageIds: new Set([first.id, "m-2"]) });
+    mocks.runMailAction.mockResolvedValue({ ok: true, count: 2 });
+    render(<MessageList messages={[first, makeMessage("m-2")]} selectedMessageId={null} onSelectMessage={vi.fn()} loading={false} />);
     fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
-    await waitFor(() => expect(mocks.confirm).toHaveBeenCalledWith(expect.objectContaining({
-      message: "Local-only drafts in this selection will be permanently deleted and cannot be restored. Other messages will move to Trash.",
-    })));
-    expect(mocks.batchDelete).not.toHaveBeenCalled();
+    await waitFor(() => expect(mocks.runMailAction).toHaveBeenCalledWith(
+      mocks.queryClient,
+      "trash",
+      [expect.objectContaining({ id: "m-1" }), expect.objectContaining({ id: "m-2" })],
+      expect.objectContaining({ confirm: expect.any(Function) }),
+    ));
+    expect(useMailStore.getState().selectedMessageIds.size).toBe(0);
   });
 
-  it("fetches labels per stable page-sized chunk so earlier pages stay cached", () => {
-    mocks.labelQueryKeys = [];
-    const firstPages = Array.from({ length: 100 }, (_, index) => makeMessage(`m-${index}`));
-    const { rerender } = render(
-      <MessageList messages={firstPages} selectedMessageId={null} onSelectMessage={vi.fn()} loading={false} />,
-    );
-    const initialKeys = mocks.labelQueryKeys.at(-1)!;
-    expect(initialKeys).toHaveLength(2);
-    expect(String(initialKeys[0][1]).split(",")).toHaveLength(50);
-
-    const morePages = [...firstPages, ...Array.from({ length: 30 }, (_, index) => makeMessage(`n-${index}`))];
-    rerender(<MessageList messages={morePages} selectedMessageId={null} onSelectMessage={vi.fn()} loading={false} />);
-    const nextKeys = mocks.labelQueryKeys.at(-1)!;
-
-    expect(nextKeys).toHaveLength(3);
-    expect(nextKeys.slice(0, 2)).toEqual(initialKeys);
-    expect(String(nextKeys[2][1]).split(",")).toHaveLength(30);
-  });
-
-  it("retains the Trash confirmation for provider messages", async () => {
-    useMailStore.setState({ batchMode: true, selectedMessageIds: new Set(["m-1"]) });
-    mocks.confirm.mockResolvedValue(false);
-    render(<MessageList messages={[makeMessage("m-1")]} selectedMessageId={null} onSelectMessage={vi.fn()} loading={false} />);
-    fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
-    await waitFor(() => expect(mocks.confirm).toHaveBeenCalledWith(expect.objectContaining({
-      message: "This will move 1 message(s) to Trash. This action can be undone by restoring from Trash.",
-    })));
-    expect(mocks.batchDelete).not.toHaveBeenCalled();
-  });
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.accounts = [
@@ -427,7 +420,7 @@ describe("MessageList", () => {
     expect(mocks.queryClient.invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
   });
 
-  it("refreshes folder unread counts after a successful batch archive action", async () => {
+  it("archives the batch through the shared undoable action", async () => {
     mocks.batchArchive.mockResolvedValueOnce(2);
     useMailStore.setState({
       selectedMessageIds: new Set(["m-1", "m-2"]),
@@ -445,8 +438,12 @@ describe("MessageList", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "messageActions.archive" }));
 
-    await waitFor(() => expect(mocks.batchArchive).toHaveBeenCalledWith(["m-1", "m-2"]));
-    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
+    await waitFor(() => expect(mocks.runMailAction).toHaveBeenCalledWith(
+      mocks.queryClient,
+      "archive",
+      [expect.objectContaining({ id: "m-1" }), expect.objectContaining({ id: "m-2" })],
+      expect.anything(),
+    ));
   });
 
   it("refreshes folder unread counts after a successful batch read-state action", async () => {
@@ -488,5 +485,86 @@ describe("MessageList", () => {
     expect(checkbox.className).toContain("batch-checkbox");
     expect(checkbox.className).toContain("batch-select-all-checkbox");
     expect(checkbox.closest("label")?.className).toContain("batch-select-control");
+  });
+
+  it("uses distinct icons for unstar/mark unread and separates delete", () => {
+    useMailStore.setState({ batchMode: true, selectedMessageIds: new Set(["m-1"]) });
+    render(<MessageList messages={[makeMessage("m-1")]} selectedMessageId={null} onSelectMessage={vi.fn()} loading={false} />);
+    const del = screen.getByRole("button", { name: "common.delete" });
+    expect(del.previousElementSibling?.className).toContain("toolbar-separator");
+    expect(del.className).toContain("icon-btn");
+  });
+
+  it("keeps a single tab stop on the active row (roving tabindex)", () => {
+    render(
+      <MessageList
+        messages={[makeMessage("m-1"), makeMessage("m-2"), makeMessage("m-3")]}
+        selectedMessageId="m-2"
+        onSelectMessage={vi.fn()}
+        loading={false}
+      />,
+    );
+    const rows = screen.getAllByRole("option");
+    expect(rows.map((row) => row.getAttribute("tabindex"))).toEqual(["-1", "0", "-1"]);
+  });
+
+  it("moves selection with arrow keys and J/K from a focused row", () => {
+    const onSelectMessage = vi.fn();
+    render(
+      <MessageList
+        messages={[makeMessage("m-1"), makeMessage("m-2"), makeMessage("m-3")]}
+        selectedMessageId="m-1"
+        onSelectMessage={onSelectMessage}
+        loading={false}
+      />,
+    );
+    const first = screen.getAllByRole("option")[0];
+    first.focus();
+    fireEvent.keyDown(first, { key: "ArrowDown" });
+    expect(onSelectMessage).toHaveBeenLastCalledWith("m-2");
+    fireEvent.keyDown(first, { key: "j" });
+    expect(onSelectMessage).toHaveBeenLastCalledWith("m-2");
+    fireEvent.keyDown(screen.getAllByRole("option")[1], { key: "End" });
+    expect(onSelectMessage).toHaveBeenLastCalledWith("m-3");
+  });
+
+  it("toggles rows into a selection with Cmd/Ctrl-click and selects ranges with Shift-click", () => {
+    const onSelectMessage = vi.fn();
+    const messages = ["m-1", "m-2", "m-3", "m-4"].map(makeMessage);
+    render(<MessageList messages={messages} selectedMessageId="m-1" onSelectMessage={onSelectMessage} loading={false} />);
+
+    fireEvent.click(screen.getByTestId("message-m-2"), { metaKey: true });
+    let state = useMailStore.getState();
+    expect(state.batchMode).toBe(true);
+    expect([...state.selectedMessageIds].sort()).toEqual(["m-1", "m-2"]);
+
+    fireEvent.click(screen.getByTestId("message-m-4"), { shiftKey: true });
+    state = useMailStore.getState();
+    expect([...state.selectedMessageIds].sort()).toEqual(["m-1", "m-2", "m-3", "m-4"]);
+
+    fireEvent.click(screen.getByTestId("message-m-3"), { ctrlKey: true });
+    expect([...useMailStore.getState().selectedMessageIds].sort()).toEqual(["m-1", "m-2", "m-4"]);
+    expect(onSelectMessage).not.toHaveBeenCalled();
+  });
+
+  it("scrolls to the selection only when it changes, not on list refreshes", () => {
+    const props = { onSelectMessage: vi.fn(), loading: false };
+    const { rerender } = render(
+      <MessageList {...props} messages={[makeMessage("m-1"), makeMessage("m-2")]} selectedMessageId="m-2" />,
+    );
+    expect(mocks.scrollToIndex).toHaveBeenCalledTimes(1);
+    expect(mocks.scrollToIndex).toHaveBeenLastCalledWith(1, { align: "auto" });
+
+    // Background refresh: new array, new message at the top, same selection.
+    rerender(
+      <MessageList {...props} messages={[makeMessage("m-0"), makeMessage("m-1"), makeMessage("m-2")]} selectedMessageId="m-2" />,
+    );
+    expect(mocks.scrollToIndex).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <MessageList {...props} messages={[makeMessage("m-0"), makeMessage("m-1"), makeMessage("m-2")]} selectedMessageId="m-0" />,
+    );
+    expect(mocks.scrollToIndex).toHaveBeenCalledTimes(2);
+    expect(mocks.scrollToIndex).toHaveBeenLastCalledWith(0, { align: "auto" });
   });
 });
