@@ -27,11 +27,10 @@ import {
   type ContactInput,
   type VcardImportResult,
 } from "@/lib/api";
-import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import { queryClient } from "@/lib/query-client";
 import { useComposeStore } from "@/stores/compose.store";
 import { useConfirmStore } from "@/stores/confirm.store";
-import { useToastStore } from "@/stores/toast.store";
+import { toastError, useToastStore } from "@/stores/toast.store";
 import { useUIStore } from "@/stores/ui.store";
 import ContactEditorDialog from "./ContactEditorDialog";
 import ContactListItem from "./ContactListItem";
@@ -117,7 +116,7 @@ export default function ContactsView() {
         isFavorite: !contact.is_favorite,
       });
     } catch (favoriteError) {
-      addToast({ message: extractErrorMessage(favoriteError), type: "error" });
+      toastError(favoriteError, "contacts.favoriteFailed");
     }
   };
 
@@ -141,7 +140,7 @@ export default function ContactsView() {
         type: "success",
       });
     } catch (deleteError) {
-      addToast({ message: extractErrorMessage(deleteError), type: "error" });
+      toastError(deleteError, "contacts.deleteFailed");
     }
   };
 
@@ -159,7 +158,7 @@ export default function ContactsView() {
         type: "success",
       });
     } catch (copyError) {
-      addToast({ message: extractErrorMessage(copyError), type: "error" });
+      toastError(copyError, "contacts.copyFailed");
     }
   };
 
@@ -189,7 +188,7 @@ export default function ContactsView() {
         type: "success",
       });
     } catch (importError) {
-      addToast({ message: extractErrorMessage(importError), type: "error" });
+      toastError(importError, "contacts.importFailed");
     } finally {
       setIsImporting(false);
     }
@@ -212,7 +211,7 @@ export default function ContactsView() {
         type: "success",
       });
     } catch (exportError) {
-      addToast({ message: extractErrorMessage(exportError), type: "error" });
+      toastError(exportError, "contacts.exportFailed");
     } finally {
       if (downloadUrl) URL.revokeObjectURL(downloadUrl);
       setIsExporting(false);

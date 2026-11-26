@@ -672,7 +672,12 @@
     "importSkipped": "个已跳过",
     "importInvalid": "个无效",
     "closeImportSummary": "关闭导入摘要",
-    "saveFailed": "无法保存联系人，请重试。"
+    "saveFailed": "无法保存联系人，请重试。",
+    "favoriteFailed": "无法更新收藏状态，请重试。",
+    "deleteFailed": "无法删除联系人，请重试。",
+    "copyFailed": "无法复制邮箱地址。",
+    "importFailed": "无法导入 vCard 文件，请检查文件后重试。",
+    "exportFailed": "无法导出联系人，请重试。"
   },
   "commands": {
     "navigation": "导航",

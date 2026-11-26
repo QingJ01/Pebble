@@ -672,7 +672,12 @@
     "importSkipped": "skipped",
     "importInvalid": "invalid",
     "closeImportSummary": "Close import summary",
-    "saveFailed": "Couldn't save the contact. Try again."
+    "saveFailed": "Couldn't save the contact. Try again.",
+    "favoriteFailed": "Couldn't update the favorite. Try again.",
+    "deleteFailed": "Couldn't delete the contact. Try again.",
+    "copyFailed": "Couldn't copy the email address.",
+    "importFailed": "Couldn't import the vCard file. Check the file and try again.",
+    "exportFailed": "Couldn't export contacts. Try again."
   },
   "commands": {
     "navigation": "Navigation",
