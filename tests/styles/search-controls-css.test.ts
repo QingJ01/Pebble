@@ -6,8 +6,8 @@ describe("search controls CSS", () => {
   it("gives the inbox search field a distinct input surface", () => {
     const css = readFileSync(join(process.cwd(), "src", "styles", "index.css"), "utf8");
 
-    expect(css).toMatch(/\.search-input-shell\s*\{[^}]*height\s*:\s*42px/i);
-    expect(css).toMatch(/\.search-input-shell\s*\{[^}]*border-radius\s*:\s*8px/i);
+    expect(css).toMatch(/\.search-input-shell\s*\{[^}]*height\s*:\s*var\(--control-lg\)/i);
+    expect(css).toMatch(/\.search-input-shell\s*\{[^}]*border-radius\s*:\s*var\(--radius-md\)/i);
     expect(css).toMatch(/\.search-input-shell\s*\{[^}]*transition\s*:[^;]*box-shadow/i);
     expect(css).toMatch(/\.search-input-shell:focus-within\s*\{[^}]*border-color\s*:\s*var\(--color-focus-ring\)/i);
     expect(css).toMatch(

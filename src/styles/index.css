@@ -4,28 +4,86 @@
 /* ─── Design tokens ─────────────────────────────────────────
    Theme-independent scales live in the first :root block; colors are
    defined per theme below (light = :root, dark = [data-theme="dark"]).
+   Use tokens, never raw px/hex, in new code.
 
-   Colors
-     --color-accent            brand hue; decorative fills, indicators, borders
-     --color-accent-strong     solid fill for buttons/badges carrying text
+   Surfaces (elevation model — same logic in both themes)
+     --color-surface-sunken    wells, kanban columns, code, quoted text
+                               (darker than canvas in both themes)
+     --color-chrome-bg         title bar / sidebar / status bar
+                               (a step below canvas in both themes)
+     --color-canvas            list + reader + settings content area
+     --color-surface-raised    cards on canvas (light: same fill as canvas,
+                               separated by --color-border + --shadow-raised;
+                               dark: one lightness step up)
+     --color-surface-overlay   popovers, menus, dialogs, toasts
+                               (light: white + shadow; dark: lightest surface)
+     --color-control-bg        input/select/textarea fill
+   Interaction fills (translucent, work on any surface; strictly ordered)
+     --color-fill-hover < --color-fill-selected < --color-fill-pressed
+     Selected rows/nav items use --color-fill-selected (neutral, never accent).
+     Pressed toggles (aria-pressed) use --color-fill-selected too.
+   Borders
+     --color-border            component outlines, pane separators
+     --color-border-strong     input hover, emphasis outlines
+     --color-divider           hairlines between rows/sections inside a surface;
+                               lighter than --color-fill-selected so a selected
+                               row never swallows its divider (rows also use
+                               background-clip: padding-box)
+     Overlays draw ONE outline: 1px --color-border; --shadow-* carry no ring.
+   Text
+     --color-text-primary      body text, titles
+     --color-text-secondary    supporting text (>= 4.5:1 on every surface)
+     --color-text-tertiary     meta (dates, counts) + placeholders; >= 4.5:1 on
+                               canvas/raised, >= 3:1 on chrome/overlay/selected.
+                               Don't use it for the only copy of key info on chrome.
+     --color-text-disabled     disabled labels (no contrast requirement)
+   Accent (brand orange) — ONLY primary action, unread state, compose FAB
+     --color-accent            unread dot, decorative brand fill
+     --color-accent-strong(-hover/-active)  primary button / FAB fill
                                (pair with --color-on-accent, >= 4.5:1)
-     --color-accent-text       accent used as text/icon on --color-bg (>= 4.5:1)
-     --color-accent-subtle     tinted background (selected/pressed states)
-     --color-on-accent         text/icon color on --color-accent-strong
-     --color-{danger,warning,success,info}       text/icon/border (>= 4.5:1 on bg)
+     --color-accent-text       accent as text/icon on canvas (>= 4.5:1): links
+     --color-accent-tint / --color-accent-tint-strong
+                               the only two accent tints (replace ad-hoc %)
+     --color-on-accent         text/icon on --color-accent-strong
+   Other
+     --color-focus-ring        keyboard focus (blue, NOT brand; >= 3:1 on all
+                               surfaces incl. selected fills, both themes)
+     --color-highlight / --color-on-highlight   search-match <mark>
+     --color-control-checked / --color-on-control-checked
+                               checkbox/radio/switch "on" fill (neutral by
+                               decision: orange stays reserved)
+     --color-{danger,warning,success,info}       text/icon/border (>= 4.5:1)
      --color-{danger,warning,success,info}-bg    subtle tinted surface
-     --color-danger-solid / --color-on-danger    destructive button fill + text
-     --color-focus-ring        keyboard focus outline (>= 3:1 on bg)
-     --color-popover-bg / --color-dialog-bg      floating surfaces
-   Overlays: --overlay-backdrop, --shadow-popover, --shadow-dialog, --shadow-toast
+     --color-danger-solid(-hover) / --color-on-danger  destructive button
+   Deprecated aliases (still work, map onto the model; don't use in new code):
+     --color-bg, --color-main-bg → canvas; --color-titlebar-bg,
+     --color-sidebar-bg, --color-statusbar-bg → chrome; --color-popover-bg,
+     --color-dialog-bg → surface-overlay; --color-bg-hover, --color-sidebar-hover
+     → fill-hover; --color-sidebar-active, --color-bg-secondary → fill-selected;
+     --color-bg-active → fill-pressed; --color-accent-subtle → accent-tint;
+     --font-weight-title → --weight-semibold; --radius-dialog → --radius-xl.
+
+   Overlays: --overlay-backdrop, --shadow-raised, --shadow-popover,
+             --shadow-dialog, --shadow-toast, --shadow-focus (input focus ring)
+   Spacing:  --space-1 4 / -2 8 / -3 12 / -4 16 / -5 20 / -6 24 / -7 32 / -8 40
+   Controls: --control-sm 28 / --control-md 32 / --control-lg 36 (buttons AND
+             inputs share these heights); --opacity-disabled .5
    Type:     --font-xs 11 / --font-sm 12 / --font-base 13 / --font-md 14 /
-             --font-lg 16 / --font-xl 20; --font-sans (with CJK fallbacks)
-   Radius:   --radius-sm 4 / --radius-md 6 / --radius-lg 8 / --radius-xl 12 /
-             --radius-full; --radius-dialog 10
+             --font-lg 16 / --font-xl 20; --font-sans (with CJK fallbacks);
+             --leading-tight 1.25 / -normal 1.45 / -relaxed 1.65;
+             --weight-regular 400 / -medium 500 / -semibold 600
+   Radius:   --radius-sm 4 (chips/tags) / --radius-md 6 (controls, menu items) /
+             --radius-lg 8 (cards, menus, popovers) / --radius-xl 12 (dialogs) /
+             --radius-full (pills, avatars)
    Motion:   --dur-fast 120ms / --dur-base 180ms / --dur-exit 120ms,
              --ease-out (enter), --ease-in (exit). Keyframes + .anim-* classes
              are in the Animations section.
    Layers:   --z-menu 1000 / --z-modal 1100 / --z-nested 1200 / --z-toast 1300
+
+   Shared component classes (see "Primitives" section below and
+   src/components/ui/*): .btn / .icon-btn, .input / .select / .textarea /
+   .checkbox / .radio, .field, .page-header, .settings-section, .list-row,
+   .menu-item, .dialog-panel(+__header/__body/__footer), .chip.
    ────────────────────────────────────────────────────────── */
 :root {
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC",
@@ -37,14 +95,34 @@
   --font-md: 14px;
   --font-lg: 16px;
   --font-xl: 20px;
-  --font-weight-title: 600;
+  --leading-tight: 1.25;
+  --leading-normal: 1.45;
+  --leading-relaxed: 1.65;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --font-weight-title: var(--weight-semibold); /* deprecated alias */
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+
+  --control-sm: 28px;
+  --control-md: 32px;
+  --control-lg: 36px;
+  --opacity-disabled: 0.5;
 
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
   --radius-xl: 12px;
   --radius-full: 999px;
-  --radius-dialog: 10px;
+  --radius-dialog: var(--radius-xl); /* deprecated alias */
 
   --dur-fast: 120ms;
   --dur-base: 180ms;
@@ -61,23 +139,42 @@
 :root {
   color-scheme: light;
   --app-color-scheme: light;
-  --color-sidebar-bg: #f8f7f5;
-  --color-sidebar-hover: #eeedeb;
-  --color-sidebar-active: #e5e4e2;
-  --color-titlebar-bg: #f8f7f5;
-  --color-main-bg: #ffffff;
-  --color-statusbar-bg: #f8f7f5;
-  --color-border: #e5e4e2;
+  /* Surfaces */
+  --color-surface-sunken: #f1f0ee;
+  --color-chrome-bg: #f5f4f2;
+  --color-canvas: #ffffff;
+  --color-surface-raised: #ffffff;
+  --color-surface-overlay: #ffffff;
+  --color-control-bg: #ffffff;
+  /* Interaction fills */
+  --color-fill-hover: rgba(0, 0, 0, 0.04);
+  --color-fill-selected: rgba(0, 0, 0, 0.08);
+  --color-fill-pressed: rgba(0, 0, 0, 0.12);
+  /* Borders */
+  --color-border: #e4e3e0;
+  --color-border-strong: #cdcbc7;
+  --color-divider: #efeeec;
+  /* Text */
   --color-text-primary: #1a1a1a;
-  --color-text-secondary: #6b6b6b;
+  --color-text-secondary: #616161;
+  --color-text-tertiary: #737373;
+  --color-text-disabled: #a6a6a6;
+  /* Accent */
   --color-accent: #d4714e;
   --color-accent-strong: #b5532f;
   --color-accent-strong-hover: #a44a29;
   --color-accent-strong-active: #934224;
   --color-accent-text: #b5532f;
-  --color-accent-subtle: color-mix(in srgb, #d4714e 12%, transparent);
+  --color-accent-tint: color-mix(in srgb, #d4714e 10%, transparent);
+  --color-accent-tint-strong: color-mix(in srgb, #d4714e 20%, transparent);
   --color-on-accent: #ffffff;
-  --color-focus-ring: #b5532f;
+  /* Focus, highlight, checked controls */
+  --color-focus-ring: #2563eb;
+  --color-highlight: #fde68a;
+  --color-on-highlight: #1a1a1a;
+  --color-control-checked: #2b2b2b;
+  --color-on-control-checked: #ffffff;
+  /* Status */
   --color-danger: #b42318;
   --color-danger-bg: color-mix(in srgb, #b42318 8%, transparent);
   --color-danger-solid: #b42318;
@@ -89,16 +186,27 @@
   --color-success-bg: color-mix(in srgb, #15803d 9%, transparent);
   --color-info: #1d4ed8;
   --color-info-bg: color-mix(in srgb, #1d4ed8 8%, transparent);
-  --color-bg: #ffffff;
-  --color-bg-hover: rgba(0,0,0,0.05);
-  --color-bg-active: rgba(0,0,0,0.09);
-  --color-bg-secondary: rgba(0,0,0,0.06);
-  --color-popover-bg: #ffffff;
-  --color-dialog-bg: #ffffff;
+  /* Deprecated aliases (map onto the model above) */
+  --color-bg: var(--color-canvas);
+  --color-main-bg: var(--color-canvas);
+  --color-titlebar-bg: var(--color-chrome-bg);
+  --color-sidebar-bg: var(--color-chrome-bg);
+  --color-statusbar-bg: var(--color-chrome-bg);
+  --color-popover-bg: var(--color-surface-overlay);
+  --color-dialog-bg: var(--color-surface-overlay);
+  --color-bg-hover: var(--color-fill-hover);
+  --color-sidebar-hover: var(--color-fill-hover);
+  --color-sidebar-active: var(--color-fill-selected);
+  --color-bg-secondary: var(--color-fill-selected);
+  --color-bg-active: var(--color-fill-pressed);
+  --color-accent-subtle: var(--color-accent-tint);
+  /* Overlays */
   --overlay-backdrop: rgba(18, 18, 18, 0.4);
+  --shadow-raised: 0 1px 2px rgba(0, 0, 0, 0.05);
   --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
   --shadow-dialog: 0 20px 60px rgba(0, 0, 0, 0.22), 0 2px 8px rgba(0, 0, 0, 0.08);
   --shadow-toast: 0 6px 20px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-focus: 0 0 0 1px var(--color-focus-ring);
   --color-scrollbar-track: transparent;
   --color-scrollbar-thumb: rgba(26, 26, 26, 0.22);
   --color-scrollbar-thumb-hover: rgba(26, 26, 26, 0.38);
@@ -114,23 +222,42 @@
 [data-theme="dark"] {
   color-scheme: dark;
   --app-color-scheme: dark;
-  --color-sidebar-bg: #1e1e1e;
-  --color-sidebar-hover: #2a2a2a;
-  --color-sidebar-active: #333333;
-  --color-titlebar-bg: #1e1e1e;
-  --color-main-bg: #141414;
-  --color-statusbar-bg: #1e1e1e;
-  --color-border: #2e2e2e;
-  --color-text-primary: #e0e0e0;
-  --color-text-secondary: #aaaaaa;
+  /* Surfaces: sunken < chrome < canvas < raised < overlay (lighter = higher) */
+  --color-surface-sunken: #161616;
+  --color-chrome-bg: #191919;
+  --color-canvas: #1f1f1f;
+  --color-surface-raised: #262626;
+  --color-surface-overlay: #2c2c2c;
+  --color-control-bg: #181818;
+  /* Interaction fills */
+  --color-fill-hover: rgba(255, 255, 255, 0.05);
+  --color-fill-selected: rgba(255, 255, 255, 0.09);
+  --color-fill-pressed: rgba(255, 255, 255, 0.14);
+  /* Borders */
+  --color-border: #363636;
+  --color-border-strong: #4a4a4a;
+  --color-divider: #2a2a2a;
+  /* Text */
+  --color-text-primary: #e6e6e6;
+  --color-text-secondary: #a8a8a8;
+  --color-text-tertiary: #8c8c8c;
+  --color-text-disabled: #5e5e5e;
+  /* Accent */
   --color-accent: #d4714e;
   --color-accent-strong: #b5532f;
   --color-accent-strong-hover: #c25d37;
   --color-accent-strong-active: #a44a29;
   --color-accent-text: #e08a68;
-  --color-accent-subtle: color-mix(in srgb, #d4714e 18%, transparent);
+  --color-accent-tint: color-mix(in srgb, #d4714e 16%, transparent);
+  --color-accent-tint-strong: color-mix(in srgb, #d4714e 28%, transparent);
   --color-on-accent: #ffffff;
-  --color-focus-ring: #e08a68;
+  /* Focus, highlight, checked controls */
+  --color-focus-ring: #60a5fa;
+  --color-highlight: color-mix(in srgb, #facc15 34%, transparent);
+  --color-on-highlight: #f5f5f5;
+  --color-control-checked: #d9d9d9;
+  --color-on-control-checked: #1a1a1a;
+  /* Status */
   --color-danger: #f87171;
   --color-danger-bg: color-mix(in srgb, #f87171 12%, transparent);
   --color-danger-solid: #dc2626;
@@ -142,16 +269,27 @@
   --color-success-bg: color-mix(in srgb, #4ade80 10%, transparent);
   --color-info: #60a5fa;
   --color-info-bg: color-mix(in srgb, #60a5fa 12%, transparent);
-  --color-bg: #1a1a1a;
-  --color-bg-hover: rgba(255,255,255,0.06);
-  --color-bg-active: rgba(255,255,255,0.1);
-  --color-bg-secondary: rgba(255,255,255,0.08);
-  --color-popover-bg: #232323;
-  --color-dialog-bg: #232323;
+  /* Deprecated aliases (map onto the model above) */
+  --color-bg: var(--color-canvas);
+  --color-main-bg: var(--color-canvas);
+  --color-titlebar-bg: var(--color-chrome-bg);
+  --color-sidebar-bg: var(--color-chrome-bg);
+  --color-statusbar-bg: var(--color-chrome-bg);
+  --color-popover-bg: var(--color-surface-overlay);
+  --color-dialog-bg: var(--color-surface-overlay);
+  --color-bg-hover: var(--color-fill-hover);
+  --color-sidebar-hover: var(--color-fill-hover);
+  --color-sidebar-active: var(--color-fill-selected);
+  --color-bg-secondary: var(--color-fill-selected);
+  --color-bg-active: var(--color-fill-pressed);
+  --color-accent-subtle: var(--color-accent-tint);
+  /* Overlays (no 1px ring in shadows: overlays draw their own border) */
   --overlay-backdrop: rgba(0, 0, 0, 0.6);
-  --shadow-popover: 0 10px 28px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04);
-  --shadow-dialog: 0 24px 64px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.04);
-  --shadow-toast: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --shadow-raised: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-popover: 0 10px 28px rgba(0, 0, 0, 0.5);
+  --shadow-dialog: 0 24px 64px rgba(0, 0, 0, 0.6);
+  --shadow-toast: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-focus: 0 0 0 1px var(--color-focus-ring);
   --color-scrollbar-track: transparent;
   --color-scrollbar-thumb: rgba(255, 255, 255, 0.22);
   --color-scrollbar-thumb-hover: rgba(255, 255, 255, 0.38);
@@ -250,12 +388,14 @@ select {
 
 input::placeholder,
 textarea::placeholder {
-  color: color-mix(in srgb, var(--color-text-secondary) 72%, transparent);
+  color: var(--color-text-tertiary);
 }
 
+/* Checked controls are neutral (orange is reserved for primary action, unread
+   and the compose FAB). Custom-drawn: .checkbox / .radio (Primitives). */
 input[type="checkbox"],
 input[type="radio"] {
-  accent-color: var(--color-accent);
+  accent-color: var(--color-control-checked);
 }
 
 option {
@@ -274,7 +414,7 @@ option {
 }
 
 [data-theme="dark"] option:checked {
-  background-color: color-mix(in srgb, var(--color-accent) 34%, var(--color-bg));
+  background-color: color-mix(in srgb, var(--color-text-primary) 18%, var(--color-bg));
   color: var(--color-text-primary);
 }
 
@@ -335,7 +475,7 @@ option {
 
 .settings-panel-scroll:hover::-webkit-scrollbar-thumb,
 .settings-panel-scroll:focus-within::-webkit-scrollbar-thumb {
-  background-color: color-mix(in srgb, var(--color-accent) 62%, transparent);
+  background-color: var(--color-scrollbar-thumb-hover);
 }
 
 /* ─── Animations ──────────────────────────────────────────── */
@@ -425,11 +565,14 @@ option {
 .message-list-row,
 .thread-list-row {
   background: transparent;
+  /* Fills stop at the divider so a selected row never hides its hairline. */
+  background-clip: padding-box;
 }
 
 .message-list-row[aria-selected="true"],
 .thread-list-row[aria-selected="true"] {
-  background: var(--color-sidebar-active);
+  background: var(--color-fill-selected);
+  background-clip: padding-box;
 }
 
 .message-list-row[aria-selected="false"]:hover,
@@ -448,7 +591,7 @@ option {
 
 .app-shell--with-background .message-list-row[aria-selected="true"],
 .app-shell--with-background .thread-list-row[aria-selected="true"] {
-  background: color-mix(in srgb, var(--color-sidebar-active) 60%, transparent);
+  background: color-mix(in srgb, var(--color-fill-selected) 60%, transparent);
 }
 
 /* Respect reduced-motion preferences (WCAG 2.1 AA — SC 2.3.3) */
@@ -469,7 +612,8 @@ option {
   outline-offset: 2px;
 }
 
-/* Inputs/selects get an inset ring instead */
+/* Inputs/selects get an inset ring instead (classed controls — .input,
+   .select, .textarea — use border-color + --shadow-focus, see Primitives). */
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
@@ -553,25 +697,25 @@ textarea:focus-visible {
 
 .compose-format-button,
 .compose-toolbar-icon-button {
-  width: 28px;
-  height: 28px;
+  width: var(--control-sm);
+  height: var(--control-sm);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 28px;
+  flex: 0 0 var(--control-sm);
   padding: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
 }
 
 .compose-toolbar-text-button {
-  height: 28px;
+  height: var(--control-sm);
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 0 9px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 500;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-md);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-medium);
   white-space: nowrap;
 }
 
@@ -579,17 +723,32 @@ textarea:focus-visible {
 .compose-toolbar-icon-button:hover,
 .compose-toolbar-text-button:hover,
 .compose-mode-button:hover {
-  background: var(--color-bg-hover);
+  background: var(--color-fill-hover);
   color: var(--color-text-primary);
 }
 
+.compose-format-button:active,
+.compose-toolbar-icon-button:active,
+.compose-toolbar-text-button:active,
+.compose-mode-button:active {
+  background: var(--color-fill-pressed);
+}
+
+/* Active/pressed toggles are neutral (selected fill), never accent. */
 .compose-format-button.is-active,
 .compose-toolbar-icon-button.is-active,
 .compose-toolbar-text-button.is-active,
 .compose-mode-button.is-active {
-  border-color: color-mix(in srgb, var(--color-accent) 24%, transparent);
-  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
-  color: var(--color-accent-text);
+  background: var(--color-fill-selected);
+  color: var(--color-text-primary);
+}
+
+.compose-format-button:disabled,
+.compose-toolbar-icon-button:disabled,
+.compose-toolbar-text-button:disabled,
+.compose-mode-button:disabled {
+  cursor: not-allowed;
+  opacity: var(--opacity-disabled);
 }
 
 .compose-mode-tabs {
@@ -598,19 +757,20 @@ textarea:focus-visible {
   margin-left: auto;
   padding: 2px;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: var(--color-bg);
+  border-radius: var(--radius-lg);
+  background: var(--color-control-bg);
 }
 
+/* Segmented control item: 26px so the 2px-padded group is --control-sm + 2. */
 .compose-mode-button {
   height: 26px;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 0 9px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 500;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-md);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-medium);
   white-space: nowrap;
 }
 
@@ -648,7 +808,7 @@ textarea:focus-visible {
 
 .compose-editor-surface:focus-within {
   border-color: var(--color-focus-ring);
-  box-shadow: 0 0 0 1px var(--color-focus-ring);
+  box-shadow: var(--shadow-focus);
 }
 
 .compose-editor-content,
@@ -757,10 +917,10 @@ textarea:focus-visible {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 2px dashed var(--color-accent);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--color-accent) 9%, transparent);
-  color: var(--color-accent);
+  border: 2px dashed var(--color-focus-ring);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-focus-ring) 8%, transparent);
+  color: var(--color-text-primary);
   font-size: 14px;
   font-weight: 500;
   pointer-events: none;
@@ -856,8 +1016,8 @@ textarea:focus-visible {
 .search-toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px 18px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--color-border);
   background: color-mix(in srgb, var(--color-bg) 94%, var(--color-bg-secondary));
 }
@@ -865,25 +1025,30 @@ textarea:focus-visible {
 .search-input-shell {
   flex: 1;
   min-width: 0;
-  height: 42px;
+  height: var(--control-lg);
+  box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 14px;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: var(--color-bg);
+  border-radius: var(--radius-md);
+  background: var(--color-control-bg);
   transition: border-color 0.14s ease, box-shadow 0.14s ease, background-color 0.14s ease;
+}
+
+.search-input-shell:hover {
+  border-color: var(--color-border-strong);
 }
 
 .search-input-shell:focus-within {
   border-color: var(--color-focus-ring);
-  box-shadow: 0 0 0 1px var(--color-focus-ring);
+  box-shadow: var(--shadow-focus);
 }
 
 .search-input-shell svg {
   flex-shrink: 0;
-  color: color-mix(in srgb, var(--color-text-secondary) 86%, var(--color-text-primary));
+  color: var(--color-text-secondary);
 }
 
 .app-shell--with-background .search-toolbar {
@@ -904,7 +1069,7 @@ textarea:focus-visible {
   background: transparent;
   color: var(--color-text-primary);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--font-base);
   line-height: 20px;
 }
 
@@ -913,7 +1078,7 @@ textarea:focus-visible {
 }
 
 .search-input::placeholder {
-  color: color-mix(in srgb, var(--color-text-secondary) 82%, transparent);
+  color: var(--color-text-tertiary);
 }
 
 .inbox-toolbar-row {
@@ -945,77 +1110,86 @@ textarea:focus-visible {
   backdrop-filter: none;
 }
 
+/* Legacy private buttons below are aligned to the shared scale (= .icon-btn--md
+   ghost / .btn--md ghost). Prefer <IconButton>/<Button> in markup. */
 .inbox-toolbar-button {
   position: relative;
   z-index: 1;
-  width: 40px;
-  height: 40px;
-  flex: 0 0 40px;
+  width: var(--control-md);
+  height: var(--control-md);
+  flex: 0 0 var(--control-md);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   margin: 0;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--color-text-secondary);
   cursor: pointer;
   font: inherit;
   line-height: 1;
-  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 
 .inbox-toolbar-button:hover {
-  background: var(--color-bg-hover);
+  background: var(--color-fill-hover);
   color: var(--color-text-primary);
 }
 
 .inbox-toolbar-button:active {
-  background: var(--color-bg-secondary);
+  background: var(--color-fill-pressed);
+}
+
+.inbox-toolbar-button[aria-pressed="true"] {
+  background: var(--color-fill-selected);
+  color: var(--color-text-primary);
 }
 
 .inbox-toolbar-button--end {
-  margin-right: 8px;
+  margin-right: var(--space-2);
 }
 
 .search-toolbar-button {
-  height: 34px;
+  height: var(--control-md);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 0 10px;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--color-text-secondary);
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--font-base);
+  font-weight: var(--weight-medium);
   line-height: 1;
-  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 
 .search-toolbar-button:hover {
-  background: var(--color-bg-hover);
+  background: var(--color-fill-hover);
   color: var(--color-text-primary);
 }
 
+.search-toolbar-button:active {
+  background: var(--color-fill-pressed);
+}
+
 .search-toolbar-button.is-active {
-  border-color: color-mix(in srgb, var(--color-accent) 24%, transparent);
-  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
-  color: var(--color-accent);
+  background: var(--color-fill-selected);
+  color: var(--color-text-primary);
 }
 
 .search-toolbar-button--primary {
-  padding: 0 12px;
-  color: var(--color-accent);
+  color: var(--color-accent-text);
 }
 
 .search-toolbar-icon-button {
-  width: 34px;
+  width: var(--control-md);
   padding: 0;
 }
 
@@ -1035,53 +1209,10 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
+/* .batch-checkbox is the legacy name of the shared .checkbox (Primitives). */
 .batch-checkbox {
   -webkit-appearance: none;
   appearance: none;
-  width: 15px;
-  height: 15px;
-  flex: 0 0 15px;
-  display: inline-grid;
-  place-content: center;
-  margin: 0;
-  border: 1px solid color-mix(in srgb, var(--color-text-secondary) 52%, transparent);
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--color-bg) 82%, var(--color-bg-secondary));
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
-  cursor: pointer;
-  transition: background-color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
-}
-
-.batch-checkbox::before {
-  content: "";
-  width: 7px;
-  height: 4px;
-  margin-top: -1px;
-  border-left: 2px solid var(--color-on-accent);
-  border-bottom: 2px solid var(--color-on-accent);
-  transform: rotate(-45deg) scale(0);
-  transform-origin: center;
-  transition: transform 0.12s ease;
-}
-
-.batch-checkbox:hover {
-  border-color: color-mix(in srgb, var(--color-text-secondary) 78%, transparent);
-  background: var(--color-bg-hover);
-}
-
-.batch-checkbox:checked {
-  border-color: var(--color-accent);
-  background: var(--color-accent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 22%, transparent);
-}
-
-.batch-checkbox:checked::before {
-  transform: rotate(-45deg) scale(1);
-}
-
-.batch-checkbox:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
 }
 
 .message-row-checkbox {
@@ -1089,9 +1220,9 @@ textarea:focus-visible {
 }
 
 .search-filters-panel {
-  padding: 14px 18px 16px;
+  padding: var(--space-3) var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border);
-  background: color-mix(in srgb, var(--color-bg) 92%, var(--color-bg-secondary));
+  background: var(--color-surface-sunken);
 }
 
 .search-filters-grid {
@@ -1107,91 +1238,97 @@ textarea:focus-visible {
 
 .search-filter-label {
   display: block;
-  margin-bottom: 6px;
+  margin-bottom: var(--space-1);
   color: var(--color-text-secondary);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1.2;
+  font-size: var(--font-sm);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-tight);
 }
 
+/* Same spec as .input/.select (Primitives); kept for existing markup. */
 .search-filter-control {
   width: 100%;
-  height: 34px;
+  height: var(--control-md);
   box-sizing: border-box;
-  padding: 0 10px;
+  padding: 0 var(--space-2);
   border: 1px solid var(--color-border);
-  border-radius: 7px;
-  background: var(--color-bg);
+  border-radius: var(--radius-md);
+  background-color: var(--color-control-bg);
   color: var(--color-text-primary);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-base);
   line-height: 20px;
-  transition: border-color 0.14s ease, box-shadow 0.14s ease, background-color 0.14s ease;
+  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.search-filter-control:hover {
+  border-color: var(--color-border-strong);
 }
 
 .search-filter-control:focus-visible {
   outline: 0;
   border-color: var(--color-focus-ring);
-  box-shadow: 0 0 0 1px var(--color-focus-ring);
+  box-shadow: var(--shadow-focus);
 }
 
 .search-filter-toggle {
-  height: 34px;
+  height: var(--control-md);
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   min-width: 0;
   box-sizing: border-box;
-  padding: 0 10px;
+  padding: 0 var(--space-2);
   border: 1px solid var(--color-border);
-  border-radius: 7px;
-  background: var(--color-bg);
+  border-radius: var(--radius-md);
+  background: var(--color-control-bg);
   color: var(--color-text-primary);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--font-base);
   line-height: 1;
-  transition: border-color 0.14s ease, background-color 0.14s ease, color 0.14s ease;
+  transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
 }
 
 .search-filter-toggle:hover {
-  background: var(--color-bg-hover);
+  border-color: var(--color-border-strong);
 }
 
 .search-filter-toggle:focus-within {
   border-color: var(--color-focus-ring);
-  box-shadow: 0 0 0 1px var(--color-focus-ring);
+  box-shadow: var(--shadow-focus);
 }
 
 .search-filter-checkbox {
   width: 14px;
   height: 14px;
   margin: 0;
-  accent-color: var(--color-accent);
+  accent-color: var(--color-control-checked);
 }
 
 .search-filters-actions {
   display: flex;
   justify-content: flex-end;
-  margin-top: 12px;
+  margin-top: var(--space-3);
 }
 
+/* = .btn--sm.btn--secondary */
 .search-filters-clear {
-  height: 30px;
-  padding: 0 10px;
+  height: var(--control-sm);
+  padding: 0 var(--space-3);
   border: 1px solid var(--color-border);
-  border-radius: 7px;
-  background: transparent;
-  color: var(--color-text-secondary);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+  color: var(--color-text-primary);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+  font-size: var(--font-sm);
+  font-weight: var(--weight-medium);
+  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
 
 .search-filters-clear:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text-primary);
+  border-color: var(--color-border-strong);
+  background: linear-gradient(var(--color-fill-hover), var(--color-fill-hover)), var(--color-surface-raised);
 }
 
 @media (max-width: 1100px) {
@@ -1382,7 +1519,7 @@ textarea:focus-visible {
 .contact-favorite-control input,
 .contact-primary-control input {
   margin: 0;
-  accent-color: var(--color-accent);
+  accent-color: var(--color-control-checked);
 }
 
 .contacts-shell {
@@ -1640,6 +1777,9 @@ textarea:focus-visible {
   border-top: 1px solid var(--color-border);
 }
 
+/* Legacy contact buttons, aligned to the shared button spec:
+   primary/secondary/danger = .btn--md, text = .btn--link, inline-danger =
+   .btn--danger-ghost (sm text), icon = .icon-btn--sm. Prefer <Button>. */
 .contact-primary-button,
 .contact-secondary-button,
 .contact-danger-button,
@@ -1649,13 +1789,14 @@ textarea:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  border-radius: 6px;
+  gap: var(--space-2);
+  border-radius: var(--radius-md);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease, opacity 0.14s ease;
+  font-size: var(--font-base);
+  font-weight: var(--weight-medium);
+  line-height: 1;
+  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 
 .contact-address-action {
@@ -1674,14 +1815,14 @@ textarea:focus-visible {
 }
 
 .contact-address-action:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--color-accent) 28%, var(--color-border));
-  background: color-mix(in srgb, var(--color-accent) 7%, var(--color-bg));
-  color: var(--color-accent);
+  border-color: var(--color-border-strong);
+  background: var(--color-fill-hover);
+  color: var(--color-text-primary);
 }
 
 .contact-address-action:disabled {
-  cursor: default;
-  opacity: 0.42;
+  cursor: not-allowed;
+  opacity: var(--opacity-disabled);
 }
 
 .message-participants {
@@ -1766,8 +1907,8 @@ textarea:focus-visible {
 
 .participant-chip .contact-address-action:hover:not(:disabled) {
   border-color: transparent;
-  background: var(--color-bg-hover);
-  color: var(--color-accent);
+  background: var(--color-fill-hover);
+  color: var(--color-text-primary);
 }
 
 .participant-toggle {
@@ -1776,7 +1917,7 @@ textarea:focus-visible {
   background: none;
   font: inherit;
   font-size: 12px;
-  color: var(--color-accent);
+  color: var(--color-accent-text);
   cursor: pointer;
 }
 
@@ -1852,60 +1993,75 @@ textarea:focus-visible {
 .contact-primary-button,
 .contact-secondary-button,
 .contact-danger-button {
-  min-height: 34px;
-  padding: 0 12px;
+  min-height: var(--control-md);
+  padding: 0 var(--space-3);
 }
 
 .contact-primary-button {
   border: 1px solid var(--color-accent-strong);
   background: var(--color-accent-strong);
   color: var(--color-on-accent);
+  font-weight: var(--weight-semibold);
 }
 
-.contact-primary-button:hover {
-  filter: brightness(0.96);
+.contact-primary-button:hover:not(:disabled) {
+  border-color: var(--color-accent-strong-hover);
+  background: var(--color-accent-strong-hover);
 }
 
 .contact-secondary-button {
   border: 1px solid var(--color-border);
-  background: var(--color-bg);
+  background: var(--color-surface-raised);
   color: var(--color-text-primary);
 }
 
-.contact-secondary-button:hover,
-.contact-icon-button:hover {
-  background: var(--color-bg-hover);
+.contact-secondary-button:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+  background: linear-gradient(var(--color-fill-hover), var(--color-fill-hover)), var(--color-surface-raised);
 }
 
+.contact-icon-button:hover:not(:disabled) {
+  background: var(--color-fill-hover);
+  color: var(--color-text-primary);
+}
+
+/* Inline destructive action (opens a confirm dialog) = danger-ghost. */
 .contact-danger-button {
-  border: 1px solid color-mix(in srgb, var(--color-danger) 30%, var(--color-border));
+  border: 1px solid transparent;
   background: transparent;
   color: var(--color-danger);
 }
 
-.contact-danger-button:hover {
-  background: color-mix(in srgb, var(--color-danger) 8%, transparent);
+.contact-danger-button:hover:not(:disabled) {
+  background: var(--color-danger-bg);
 }
 
 .contact-text-button {
-  padding: 4px 0;
+  padding: var(--space-1) 0;
   border: 0;
   background: transparent;
-  color: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+.contact-text-button:hover:not(:disabled) {
+  text-decoration: underline;
 }
 
 .contact-inline-danger {
-  padding: 4px 0;
+  padding: var(--space-1) 0;
   border: 0;
   background: transparent;
   color: var(--color-danger);
-  font-size: 11px;
-  font-weight: 500;
+  font-size: var(--font-sm);
+}
+
+.contact-inline-danger:hover:not(:disabled) {
+  text-decoration: underline;
 }
 
 .contact-icon-button {
-  width: 30px;
-  height: 30px;
+  width: var(--control-sm);
+  height: var(--control-sm);
   padding: 0;
   border: 1px solid transparent;
   background: transparent;
@@ -1914,9 +2070,12 @@ textarea:focus-visible {
 
 .contact-primary-button:disabled,
 .contact-secondary-button:disabled,
+.contact-danger-button:disabled,
+.contact-text-button:disabled,
+.contact-inline-danger:disabled,
 .contact-icon-button:disabled {
-  cursor: default;
-  opacity: 0.55;
+  cursor: not-allowed;
+  opacity: var(--opacity-disabled);
 }
 
 .contacts-mobile-back {
@@ -2108,7 +2267,20 @@ textarea:focus-visible {
   }
 }
 
-/* ─── Buttons (src/components/ui/Button.tsx, IconButton.tsx) ──────────── */
+/* ═══ Primitives ═══════════════════════════════════════════════════════
+   Shared component classes. Views should compose these instead of writing
+   private button/input/header styles. React wrappers: src/components/ui/
+   (Button, IconButton, Input, Select, Checkbox). All use the tokens above. */
+
+/* ─── Buttons (src/components/ui/Button.tsx, IconButton.tsx) ────────────
+   .btn + .btn--{primary|secondary|ghost|danger|danger-ghost|link}
+        + .btn--{sm|md|lg}                         (28 / 32 / 36px)
+   .icon-btn + .icon-btn--{ghost|secondary|danger} + .icon-btn--{sm|md|lg}
+   Rules: at most ONE primary per view; danger = solid red for the confirming
+   button of a destructive dialog; danger-ghost = red text for inline
+   destructive actions (which then open a confirm); link = accent-text.
+   Toggle state: aria-pressed="true" → neutral selected fill.
+   Disabled (native or aria-disabled): one style, --opacity-disabled. */
 
 .btn,
 .icon-btn {
@@ -2117,11 +2289,12 @@ textarea:focus-visible {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  box-sizing: border-box;
   margin: 0;
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   font: inherit;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
@@ -2134,15 +2307,16 @@ textarea:focus-visible {
     opacity var(--dur-fast) var(--ease-out);
 }
 
-.btn { gap: 6px; }
-.btn--sm { min-height: 28px; padding: 0 10px; font-size: var(--font-sm); }
-.btn--md { min-height: 32px; padding: 0 14px; font-size: var(--font-base); }
+.btn { gap: var(--space-2); }
+.btn--sm { min-height: var(--control-sm); padding: 0 var(--space-3); font-size: var(--font-sm); gap: 6px; }
+.btn--md { min-height: var(--control-md); padding: 0 var(--space-3); font-size: var(--font-base); }
+.btn--lg { min-height: var(--control-lg); padding: 0 var(--space-4); font-size: var(--font-base); }
 
 .btn--primary {
   background: var(--color-accent-strong);
   border-color: var(--color-accent-strong);
   color: var(--color-on-accent);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 .btn--primary:where(:not(:disabled, [aria-disabled="true"])):hover {
   background: var(--color-accent-strong-hover);
@@ -2153,10 +2327,22 @@ textarea:focus-visible {
   border-color: var(--color-accent-strong-active);
 }
 
-.btn--secondary {
-  background: var(--color-bg);
+/* Secondary: raised surface + border; hover/active layer a fill over it so
+   the button stays opaque on any surface. */
+.btn--secondary,
+.icon-btn--secondary {
+  background: var(--color-surface-raised);
   border-color: var(--color-border);
   color: var(--color-text-primary);
+}
+.btn--secondary:where(:not(:disabled, [aria-disabled="true"])):hover,
+.icon-btn--secondary:where(:not(:disabled, [aria-disabled="true"])):hover {
+  background: linear-gradient(var(--color-fill-hover), var(--color-fill-hover)), var(--color-surface-raised);
+  border-color: var(--color-border-strong);
+}
+.btn--secondary:where(:not(:disabled, [aria-disabled="true"])):active,
+.icon-btn--secondary:where(:not(:disabled, [aria-disabled="true"])):active {
+  background: linear-gradient(var(--color-fill-pressed), var(--color-fill-pressed)), var(--color-surface-raised);
 }
 
 .btn--ghost,
@@ -2165,32 +2351,21 @@ textarea:focus-visible {
   color: var(--color-text-primary);
 }
 .icon-btn--ghost { color: var(--color-text-secondary); }
-
-.icon-btn--secondary {
-  background: var(--color-bg);
-  border-color: var(--color-border);
-  color: var(--color-text-primary);
-}
-
-.btn--secondary:where(:not(:disabled, [aria-disabled="true"])):hover,
 .btn--ghost:where(:not(:disabled, [aria-disabled="true"])):hover,
-.icon-btn--ghost:where(:not(:disabled, [aria-disabled="true"])):hover,
-.icon-btn--secondary:where(:not(:disabled, [aria-disabled="true"])):hover {
-  background: var(--color-bg-hover);
+.icon-btn--ghost:where(:not(:disabled, [aria-disabled="true"])):hover {
+  background: var(--color-fill-hover);
   color: var(--color-text-primary);
 }
-.btn--secondary:where(:not(:disabled, [aria-disabled="true"])):active,
 .btn--ghost:where(:not(:disabled, [aria-disabled="true"])):active,
-.icon-btn--ghost:where(:not(:disabled, [aria-disabled="true"])):active,
-.icon-btn--secondary:where(:not(:disabled, [aria-disabled="true"])):active {
-  background: var(--color-bg-active);
+.icon-btn--ghost:where(:not(:disabled, [aria-disabled="true"])):active {
+  background: var(--color-fill-pressed);
 }
 
 .btn--danger {
   background: var(--color-danger-solid);
   border-color: var(--color-danger-solid);
   color: var(--color-on-danger);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 .btn--danger:where(:not(:disabled, [aria-disabled="true"])):hover,
 .btn--danger:where(:not(:disabled, [aria-disabled="true"])):active {
@@ -2198,22 +2373,45 @@ textarea:focus-visible {
   border-color: var(--color-danger-solid-hover);
 }
 
+.btn--danger-ghost,
 .icon-btn--danger {
   background: transparent;
   color: var(--color-danger);
 }
+.btn--danger-ghost:where(:not(:disabled, [aria-disabled="true"])):hover,
 .icon-btn--danger:where(:not(:disabled, [aria-disabled="true"])):hover {
   background: var(--color-danger-bg);
 }
+.btn--danger-ghost:where(:not(:disabled, [aria-disabled="true"])):active,
+.icon-btn--danger:where(:not(:disabled, [aria-disabled="true"])):active {
+  background: color-mix(in srgb, var(--color-danger) 18%, transparent);
+}
 
-/* IconButton: hit area >= 28x28 regardless of icon size. */
-.icon-btn { padding: 0; }
-.icon-btn--sm { width: 28px; height: 28px; min-width: 28px; min-height: 28px; }
-.icon-btn--md { width: 32px; height: 32px; min-width: 32px; min-height: 32px; }
-
-.icon-btn[aria-pressed="true"] {
-  background: var(--color-accent-subtle);
+/* Link: text-only, accent-text, underline on hover. Size only sets the font;
+   no min-height padding box so it sits inline with text. */
+.btn--link {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--color-accent-text);
+}
+.btn--link:where(:not(:disabled, [aria-disabled="true"])):hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* IconButton: square, hit area >= 28x28 regardless of icon size. */
+.icon-btn { padding: 0; }
+.icon-btn--sm { width: var(--control-sm); height: var(--control-sm); min-width: var(--control-sm); min-height: var(--control-sm); }
+.icon-btn--md { width: var(--control-md); height: var(--control-md); min-width: var(--control-md); min-height: var(--control-md); }
+.icon-btn--lg { width: var(--control-lg); height: var(--control-lg); min-width: var(--control-lg); min-height: var(--control-lg); }
+
+/* Pressed toggles are neutral (selected fill), never accent. */
+.btn[aria-pressed="true"],
+.icon-btn[aria-pressed="true"] {
+  background: var(--color-fill-selected);
+  color: var(--color-text-primary);
 }
 
 .btn:disabled,
@@ -2221,7 +2419,7 @@ textarea:focus-visible {
 .icon-btn:disabled,
 .icon-btn[aria-disabled="true"] {
   cursor: not-allowed;
-  opacity: 0.5;
+  opacity: var(--opacity-disabled);
 }
 .btn[aria-busy="true"],
 .icon-btn[aria-busy="true"] {
@@ -2234,7 +2432,314 @@ textarea:focus-visible {
   animation: spin 0.8s linear infinite;
 }
 
-/* ─── Dialog surface (ConfirmDialog; reuse for other modals) ─────────── */
+/* ─── Form controls (src/components/ui/Input.tsx, Select.tsx, Checkbox.tsx;
+   inline-style fallback: src/styles/form.ts) ─────────────────────────────
+   .input / .select / .textarea  + optional .input--sm / --lg (default md 32)
+   .checkbox / .radio            custom-drawn, neutral checked fill
+   .field > .field__label + control + .field__hint / .field__error
+   One focus style for all text controls: border-color + --shadow-focus. */
+
+.input,
+.select,
+.textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  margin: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-control-bg);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-base);
+  line-height: 20px;
+  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+.input,
+.select {
+  height: var(--control-md);
+  padding: 0 var(--space-2);
+}
+.textarea {
+  min-height: calc(var(--control-md) * 2);
+  padding: 6px var(--space-2);
+  resize: vertical;
+  line-height: var(--leading-normal);
+}
+.input--sm,
+.select.input--sm { height: var(--control-sm); font-size: var(--font-sm); }
+.input--lg,
+.select.input--lg { height: var(--control-lg); padding: 0 var(--space-3); }
+
+.input:hover:not(:disabled, :focus),
+.select:hover:not(:disabled, :focus),
+.textarea:hover:not(:disabled, :focus) {
+  border-color: var(--color-border-strong);
+}
+.input:focus,
+.select:focus,
+.textarea:focus,
+.input:focus-visible,
+.select:focus-visible,
+.textarea:focus-visible {
+  outline: none;
+  border-color: var(--color-focus-ring);
+  box-shadow: var(--shadow-focus);
+}
+.input[aria-invalid="true"],
+.select[aria-invalid="true"],
+.textarea[aria-invalid="true"] {
+  border-color: var(--color-danger);
+}
+.input:disabled,
+.select:disabled,
+.textarea:disabled {
+  cursor: not-allowed;
+  opacity: var(--opacity-disabled);
+}
+.input::placeholder,
+.textarea::placeholder { color: var(--color-text-tertiary); }
+
+.select {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: calc(var(--space-2) + 18px);
+  cursor: pointer;
+  /* Chevron drawn with two gradients so it follows currentColor-like tokens. */
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--color-text-secondary) 50%),
+    linear-gradient(135deg, var(--color-text-secondary) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+}
+
+.checkbox,
+.batch-checkbox,
+.radio {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  display: inline-grid;
+  place-content: center;
+  margin: 0;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-control-bg);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.radio { border-radius: var(--radius-full); }
+
+.checkbox::before,
+.batch-checkbox::before {
+  content: "";
+  width: 8px;
+  height: 4px;
+  margin-top: -2px;
+  border-left: 2px solid var(--color-on-control-checked);
+  border-bottom: 2px solid var(--color-on-control-checked);
+  transform: rotate(-45deg) scale(0);
+  transform-origin: center;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.radio::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-on-control-checked);
+  transform: scale(0);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.checkbox:hover:not(:disabled),
+.batch-checkbox:hover:not(:disabled),
+.radio:hover:not(:disabled) {
+  border-color: var(--color-text-tertiary);
+}
+.checkbox:checked,
+.checkbox:indeterminate,
+.batch-checkbox:checked,
+.radio:checked {
+  border-color: var(--color-control-checked);
+  background: var(--color-control-checked);
+}
+.checkbox:checked::before,
+.batch-checkbox:checked::before,
+.radio:checked::before {
+  transform: rotate(-45deg) scale(1);
+}
+.radio:checked::before { transform: scale(1); }
+.checkbox:indeterminate::before {
+  width: 8px;
+  height: 0;
+  margin: 0;
+  border-left: 0;
+  transform: none;
+}
+.checkbox:disabled,
+.batch-checkbox:disabled,
+.radio:disabled {
+  cursor: not-allowed;
+  opacity: var(--opacity-disabled);
+}
+/* Global *:focus-visible ring (2px, offset 2) applies to checkbox/radio. */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.field + .field { margin-top: var(--space-3); }
+.field__label {
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-tight);
+}
+.field__hint {
+  margin: 0;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-sm);
+  line-height: var(--leading-normal);
+}
+.field__error {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: var(--font-sm);
+  line-height: var(--leading-normal);
+}
+/* Checkbox/radio with its label: <label class="choice"><input class="checkbox">…</label> */
+.choice {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-primary);
+  font-size: var(--font-base);
+  line-height: var(--leading-tight);
+  cursor: pointer;
+}
+
+/* ─── Layout primitives ────────────────────────────────────────────────
+   .page-header       top of a full view (contacts, mail library, scheduled
+                      sends, settings tabs): title 16/600 + optional
+                      description, actions on the right.
+     <header class="page-header">
+       <div class="page-header__text">
+         <h1 class="page-header__title">…</h1>
+         <p class="page-header__description">…</p>
+       </div>
+       <div class="page-header__actions">…buttons…</div>
+     </header>
+     .page-header--flush removes the outer padding (settings panel already pads).
+   .settings-section  one titled group inside a settings tab:
+     <section class="settings-section">
+       <h3 class="settings-section__title">…</h3>
+       <p class="settings-section__description">…</p>
+       <div class="settings-section__body">…fields/rows…</div>
+     </section>
+   .list-row          padding/fills for any clickable list row
+                      (aria-selected="true" or .is-selected → selected fill)
+   .chip              single chip/tag style (labels, recipients, participants) */
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-6) var(--space-4);
+}
+.page-header--flush { padding: 0 0 var(--space-4); }
+.page-header__text { min-width: 0; }
+.page-header__title {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-lg);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+}
+.page-header__description {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+  line-height: var(--leading-normal);
+}
+.page-header__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.settings-section + .settings-section { margin-top: var(--space-7); }
+.settings-section__title {
+  margin: 0 0 var(--space-1);
+  color: var(--color-text-primary);
+  font-size: var(--font-base);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+}
+.settings-section__description {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+  line-height: var(--leading-normal);
+}
+.settings-section__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.list-row {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-divider);
+  background: transparent;
+  background-clip: padding-box;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.list-row:hover { background-color: var(--color-fill-hover); }
+.list-row:active { background-color: var(--color-fill-pressed); }
+.list-row[aria-selected="true"],
+.list-row.is-selected { background-color: var(--color-fill-selected); }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  height: 20px;
+  box-sizing: border-box;
+  padding: 0 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+  color: var(--color-text-secondary);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+}
+.chip--md { height: 24px; padding: 0 var(--space-2); font-size: var(--font-sm); }
+
+/* ─── Dialog surface (Dialog.tsx / ConfirmDialog) ───────────────────────
+   Simple dialog: .dialog-panel (padding 20, gap 16) > .dialog-title,
+   .dialog-message, .dialog-actions.
+   Sectioned dialog: .dialog-panel.dialog-panel--flush >
+     .dialog-panel__header (16 20, divider below; holds .dialog-title + close)
+     .dialog-panel__body   (20, scrolls)
+     .dialog-panel__footer (12 20, divider above; right-aligned buttons)
+   Titles are 16/600. One outline: 1px --color-border + --shadow-dialog. */
 
 .overlay-backdrop {
   position: fixed;
@@ -2243,7 +2748,7 @@ textarea:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: var(--space-6);
   background: var(--overlay-backdrop);
 }
 
@@ -2253,20 +2758,45 @@ textarea:focus-visible {
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 24px;
+  gap: var(--space-4);
+  padding: var(--space-5);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-dialog);
-  background: var(--color-dialog-bg);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface-overlay);
   color: var(--color-text-primary);
   box-shadow: var(--shadow-dialog);
 }
 
+.dialog-panel__header,
+.dialog-panel--flush > .dialog-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-divider);
+}
+.dialog-panel__header .dialog-title { flex: 1; min-width: 0; }
+.dialog-panel__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-5);
+}
+.dialog-panel__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--color-divider);
+}
+
 .dialog-title {
   margin: 0;
-  font-size: var(--font-md);
-  font-weight: var(--font-weight-title);
-  line-height: 1.4;
+  font-size: var(--font-lg);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
   color: var(--color-text-primary);
 }
 
@@ -2280,7 +2810,7 @@ textarea:focus-visible {
 
 .dialog-error {
   margin: -6px 0 0;
-  padding: 8px 10px;
+  padding: var(--space-2) var(--space-3);
   border-left: 3px solid var(--color-danger);
   border-radius: var(--radius-sm);
   background: var(--color-danger-bg);
@@ -2294,7 +2824,7 @@ textarea:focus-visible {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .dialog-actions__extra { margin-right: auto; }

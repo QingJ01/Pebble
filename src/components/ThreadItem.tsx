@@ -206,7 +206,7 @@ function ThreadItem({ thread, isSelected, onClick, folderIds, folderRole, tabInd
         color: "var(--color-text-primary)",
         cursor: "pointer",
         padding: "9px 14px",
-        borderBottom: "1px solid var(--color-border)",
+        borderBottom: "1px solid var(--color-divider)",
         height: "76px",
         boxSizing: "border-box",
         overflow: "hidden",

@@ -1,6 +1,12 @@
 /* App-shell chrome: title bar, sidebar, status bar, FAB, banners, splitter.
    Uses the design tokens from src/styles/index.css; hover/active are CSS only. */
 
+/* ─── Title bar ─── */
+/* Hairline between the title bar and the content row (chrome vs canvas). */
+.titlebar {
+  border-bottom: 1px solid var(--color-border);
+}
+
 /* ─── Title bar window controls ─── */
 .titlebar-btn {
   height: 36px;
@@ -14,8 +20,8 @@
   cursor: pointer;
   transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
-.titlebar-btn:hover { background: var(--color-bg-hover); }
-.titlebar-btn:active { background: var(--color-bg-active); }
+.titlebar-btn:hover { background: var(--color-fill-hover); }
+.titlebar-btn:active { background: var(--color-fill-pressed); }
 .titlebar-btn--close:hover,
 .titlebar-btn--close:active { background: var(--color-danger-solid); color: var(--color-on-danger); }
 
@@ -44,11 +50,11 @@
 }
 .sidebar-btn--indent { padding-left: 26px; }
 .sidebar-btn--rail { justify-content: center; padding: 7px; }
-.sidebar-btn:hover:not(:disabled) { background: var(--color-sidebar-hover); }
-.sidebar-btn:active:not(:disabled) { background: var(--color-bg-active); }
+.sidebar-btn:hover:not(:disabled) { background: var(--color-fill-hover); }
+.sidebar-btn:active:not(:disabled) { background: var(--color-fill-pressed); }
 .sidebar-btn.is-active,
-.sidebar-btn.is-active:hover { background: var(--color-sidebar-active); }
-.sidebar-btn:disabled { opacity: .45; cursor: default; }
+.sidebar-btn.is-active:hover { background: var(--color-fill-selected); }
+.sidebar-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .sidebar-btn__icon { display: inline-flex; flex-shrink: 0; }
 .sidebar-btn__label {
   flex: 1;
@@ -93,8 +99,8 @@
   text-align: left;
   cursor: pointer;
 }
-.sidebar-group-header:hover { background: var(--color-sidebar-hover); }
-.sidebar-group-header:active { background: var(--color-bg-active); }
+.sidebar-group-header:hover { background: var(--color-fill-hover); }
+.sidebar-group-header:active { background: var(--color-fill-pressed); }
 
 /* ─── Status bar ─── */
 .status-bar {
@@ -190,10 +196,11 @@
   transition: background-color var(--dur-fast) var(--ease-out);
 }
 .pane-splitter:hover::after,
-.pane-splitter:focus-visible::after,
-.pane-splitter[data-dragging="true"]::after { width: 2px; background: var(--color-accent); }
+.pane-splitter[data-dragging="true"]::after { width: 2px; background: var(--color-border-strong); }
+.pane-splitter:focus-visible { outline: none; }
+.pane-splitter:focus-visible::after { width: 2px; background: var(--color-focus-ring); }
 
 /* Clickable list rows outside the main message list */
 .list-row-hover { transition: background-color var(--dur-fast) var(--ease-out); }
-.list-row-hover:hover { background-color: var(--color-bg-hover); }
-.list-row-hover:active { background-color: var(--color-bg-active); }
+.list-row-hover:hover { background-color: var(--color-fill-hover); }
+.list-row-hover:active { background-color: var(--color-fill-pressed); }

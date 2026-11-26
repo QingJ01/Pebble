@@ -230,7 +230,7 @@ export default function ProxyTab() {
               padding: "8px 10px",
               borderRadius: "6px",
               border: "1px solid var(--color-border)",
-              backgroundColor: "var(--color-bg-primary)",
+              backgroundColor: "var(--color-control-bg)",
               color: "var(--color-text-primary)",
               fontSize: "13px",
             }}
@@ -252,7 +252,7 @@ export default function ProxyTab() {
               padding: "8px 10px",
               borderRadius: "6px",
               border: "1px solid var(--color-border)",
-              backgroundColor: "var(--color-bg-primary)",
+              backgroundColor: "var(--color-control-bg)",
               color: "var(--color-text-primary)",
               fontSize: "13px",
             }}
@@ -277,7 +277,7 @@ export default function ProxyTab() {
         </button>
       </div>
       {proxyError && (
-        <p style={{ fontSize: "12px", color: "var(--color-error)", marginTop: "8px", marginBottom: 0 }}>
+        <p style={{ fontSize: "12px", color: "var(--color-danger)", marginTop: "8px", marginBottom: 0 }}>
           {proxyError}
         </p>
       )}
@@ -376,7 +376,7 @@ export default function ProxyTab() {
                             padding: "8px 10px",
                             borderRadius: "6px",
                             border: "1px solid var(--color-border)",
-                            backgroundColor: "var(--color-bg-primary)",
+                            backgroundColor: "var(--color-control-bg)",
                             color: "var(--color-text-primary)",
                             fontSize: "13px",
                             opacity: fieldsDisabled ? 0.7 : 1,
@@ -399,7 +399,7 @@ export default function ProxyTab() {
                             padding: "8px 10px",
                             borderRadius: "6px",
                             border: "1px solid var(--color-border)",
-                            backgroundColor: "var(--color-bg-primary)",
+                            backgroundColor: "var(--color-control-bg)",
                             color: "var(--color-text-primary)",
                             fontSize: "13px",
                             opacity: fieldsDisabled ? 0.7 : 1,
@@ -432,7 +432,7 @@ export default function ProxyTab() {
                     </button>
                   </div>
                   {draft.error && (
-                    <p style={{ fontSize: "12px", color: "var(--color-error)", margin: 0 }}>
+                    <p style={{ fontSize: "12px", color: "var(--color-danger)", margin: 0 }}>
                       {draft.error}
                     </p>
                   )}

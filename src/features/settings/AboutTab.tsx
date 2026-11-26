@@ -176,7 +176,7 @@ export default function AboutTab() {
             "Supports Gmail, Outlook (experimental), IMAP, and POP3 accounts. Includes Kanban board, full-text search, snooze, rules engine, built-in translation, and WebDAV settings backup.",
           )}
         </p>
-        <p style={{ fontSize: "12px", color: "var(--color-text-tertiary, var(--color-text-secondary))", lineHeight: 1.5, margin: 0 }}>
+        <p style={{ fontSize: "12px", color: "var(--color-text-tertiary)", lineHeight: 1.5, margin: 0 }}>
           {t("about.license", "Open source under AGPL-3.0 license.")}
         </p>
       </div>

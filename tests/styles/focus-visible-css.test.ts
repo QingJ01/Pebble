@@ -10,11 +10,12 @@ describe("focus-visible CSS", () => {
     expect(css).not.toMatch(/\.tiptap:focus\s*\{[^}]*outline\s*:\s*none/i);
   });
 
-  it("uses a custom themed checkbox for batch selection", () => {
+  it("uses the shared custom checkbox (neutral checked fill) for batch selection", () => {
     const css = readFileSync(join(process.cwd(), "src", "styles", "index.css"), "utf8");
 
     expect(css).toMatch(/\.batch-checkbox\s*\{[^}]*appearance\s*:\s*none/i);
-    expect(css).toMatch(/\.batch-checkbox:checked\s*\{[^}]*background\s*:\s*var\(--color-accent\)/i);
+    // .batch-checkbox shares the .checkbox rules; checked state is neutral, not brand orange.
+    expect(css).toMatch(/\.batch-checkbox:checked,[^{]*\{[^}]*background\s*:\s*var\(--color-control-checked\)/i);
     expect(css).toMatch(/\.batch-checkbox::before\s*\{[^}]*border-left\s*:/i);
   });
 
@@ -25,7 +26,7 @@ describe("focus-visible CSS", () => {
     expect(css).toMatch(/input,\s*textarea,\s*select,\s*option\s*\{[^}]*color-scheme\s*:\s*inherit/i);
     expect(css).toMatch(/:root\s*\{[^}]*color-scheme\s*:\s*light/i);
     expect(css).toMatch(/\[data-theme="dark"\]\s*\{[^}]*color-scheme\s*:\s*dark/i);
-    expect(css).toMatch(/input\[type="checkbox"\],\s*input\[type="radio"\]\s*\{[^}]*accent-color\s*:\s*var\(--color-accent\)/i);
+    expect(css).toMatch(/input\[type="checkbox"\],\s*input\[type="radio"\]\s*\{[^}]*accent-color\s*:\s*var\(--color-control-checked\)/i);
     expect(css).toMatch(/\[data-theme="dark"\]\s*select,\s*\[data-theme="dark"\]\s*option\s*\{[^}]*background-color\s*:\s*var\(--color-bg\)/i);
     expect(css).toMatch(/\[data-theme="dark"\]\s*select,\s*\[data-theme="dark"\]\s*option\s*\{[^}]*color\s*:\s*var\(--color-text-primary\)/i);
     expect(css).toMatch(/\[data-theme="dark"\]\s*input\[type="date"\]::-webkit-calendar-picker-indicator\s*\{[^}]*filter\s*:\s*invert\(1\)/i);

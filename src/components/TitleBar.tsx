@@ -21,7 +21,7 @@ export default function TitleBar() {
   return (
     <div
       data-tauri-drag-region
-      className="flex items-center justify-between h-9 select-none"
+      className="titlebar flex items-center justify-between h-9 select-none"
       style={{ backgroundColor: "var(--color-titlebar-bg)" }}
     >
       {/* Brand block under the native titlebar; the macOS traffic lights sit at

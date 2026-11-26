@@ -94,7 +94,7 @@
   color: var(--color-text-secondary);
 }
 
-/* Selected rows sit on --color-sidebar-active: lift secondary text for contrast. */
+/* Selected rows sit on --color-fill-selected: lift secondary text for contrast. */
 .message-list-row[aria-selected="true"] .mail-row__snippet,
 .message-list-row[aria-selected="true"] .mail-row__meta,
 .thread-list-row[aria-selected="true"] .mail-row__snippet,
@@ -113,8 +113,8 @@
   padding: 1px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  background-color: var(--color-popover-bg);
-  box-shadow: var(--shadow-popover);
+  background-color: var(--color-surface-raised);
+  box-shadow: var(--shadow-raised);
 }
 
 .message-list-row:hover .message-row-actions,
@@ -165,7 +165,7 @@
 }
 
 .search-result-row[aria-selected="true"] {
-  background: var(--color-sidebar-active);
+  background: var(--color-fill-selected);
 }
 
 .search-result-row[aria-selected="false"]:hover,
@@ -174,8 +174,8 @@
 }
 
 .search-result-row__mark {
-  background: var(--color-accent-strong);
-  color: var(--color-on-accent);
+  background: var(--color-highlight);
+  color: var(--color-on-highlight);
   border-radius: 2px;
   padding: 0 1px;
 }
