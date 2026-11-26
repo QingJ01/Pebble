@@ -1346,10 +1346,13 @@ textarea:focus-visible {
 
 /* ─── Search Controls / inbox top bar ──────────────────────
    Top bars are pane headers: 52px (36px search shell or 32px controls
-   + 2 × --space-2), padding 0 --space-3, one divider below. */
+   + 2 × --space-2), padding 0 --space-3, one divider below. They stay ONE
+   row at any width: the search shell shrinks (down to 160px) and the
+   buttons beside it never shrink or wrap below it. */
 
 .search-toolbar {
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
   gap: var(--space-2);
   min-height: calc(var(--control-lg) + 2 * var(--space-2));
@@ -1360,8 +1363,8 @@ textarea:focus-visible {
 }
 
 .search-input-shell {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 160px;
+  min-width: 160px;
   height: var(--control-lg);
   box-sizing: border-box;
   display: flex;
@@ -1429,6 +1432,7 @@ textarea:focus-visible {
 
 .inbox-toolbar-row {
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
   gap: var(--space-2);
   flex: 0 0 auto;
@@ -1444,9 +1448,16 @@ textarea:focus-visible {
   background: color-mix(in srgb, var(--color-canvas) 12%, transparent);
 }
 
+/* Takes the free width but never less than its content (shell min + its
+   own buttons), so the row's buttons are never pushed under it. */
 .inbox-toolbar-search {
   flex: 1 1 auto;
-  min-width: 0;
+  min-width: min-content;
+}
+
+.search-toolbar > :not(.search-input-shell),
+.inbox-toolbar-row > :not(.inbox-toolbar-search) {
+  flex-shrink: 0;
 }
 
 /* The inbox row already is the bar: the embedded search form adds nothing. */
@@ -1506,16 +1517,6 @@ textarea:focus-visible {
 }
 
 @media (max-width: 720px) {
-  .search-toolbar,
-  .inbox-toolbar-row {
-    flex-wrap: wrap;
-    padding-block: var(--space-2);
-  }
-
-  .search-input-shell {
-    flex-basis: 100%;
-  }
-
   .search-filters-grid {
     grid-template-columns: 1fr;
   }

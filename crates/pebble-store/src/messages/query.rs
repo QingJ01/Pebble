@@ -187,6 +187,35 @@ impl Store {
         })
     }
 
+    /// Owning account of each message id, in one query per chunk. Unknown ids
+    /// are absent from the map.
+    pub fn get_message_account_ids_batch(
+        &self,
+        message_ids: &[String],
+    ) -> Result<HashMap<String, String>> {
+        if message_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        self.with_read(|conn| {
+            let mut out = HashMap::with_capacity(message_ids.len());
+            for chunk in message_ids.chunks(SQL_IN_CHUNK_SIZE) {
+                let sql = format!(
+                    "SELECT id, account_id FROM messages WHERE id IN ({})",
+                    placeholders(1, chunk.len()),
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?;
+                for row in rows {
+                    let (id, account_id) = row?;
+                    out.insert(id, account_id);
+                }
+            }
+            Ok(out)
+        })
+    }
+
     /// List message IDs in a thread restricted to the given folders.
     pub fn list_message_ids_by_thread_in_folders(
         &self,

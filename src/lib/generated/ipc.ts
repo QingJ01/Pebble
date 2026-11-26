@@ -124,7 +124,11 @@ export type RenderedHtml = { html: string, trackers_blocked: Array<TrackerInfo>,
 
 export type Rule = { id: string, name: string, priority: number, conditions: string, actions: string, is_enabled: boolean, created_at: number, updated_at: number, };
 
-export type SearchHit = { message_id: string, score: number, snippet: string, subject?: string, from_address?: string, date?: number, };
+export type SearchHit = { message_id: string, score: number, snippet: string, subject?: string, from_address?: string, date?: number, 
+/**
+ * Owning account, filled in from the store after the index search.
+ */
+account_id?: string, };
 
 export type SnoozedMessage = { message_id: string, snoozed_at: number, unsnoozed_at: number, return_to: string, };
 

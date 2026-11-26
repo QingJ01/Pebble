@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { isAllAccountsFolderId } from "@/lib/folderAggregation";
 
 /**
  * A thread row is identified by (account_id, thread_id): thread ids are only
@@ -25,6 +26,11 @@ export interface MailState {
   // ─── UI State ──────────────────────────────────────────────────────────────
   activeAccountId: string | null;
   activeFolderId: string | null;
+  /**
+   * Unified view only: restrict the merged list to one account (null = all).
+   * Cleared whenever the view leaves the unified ("all:*") folders.
+   */
+  unifiedAccountFilter: string | null;
   selectedMessageId: string | null;
   selectedThreadId: string | null;
   /** Account owning the selected thread (null when unknown). */
@@ -36,6 +42,7 @@ export interface MailState {
 
   setActiveAccountId: (accountId: string | null) => void;
   setActiveFolderId: (folderId: string | null) => void;
+  setUnifiedAccountFilter: (accountId: string | null) => void;
   setSelectedMessage: (messageId: string | null) => void;
   setSelectedThreadId: (threadId: string | null, accountId?: string | null) => void;
   /** Select a thread row by its (account_id, thread_id) key. */
@@ -50,6 +57,7 @@ export interface MailState {
 export const useMailStore = create<MailState>((set, get) => ({
   activeAccountId: null,
   activeFolderId: null,
+  unifiedAccountFilter: null,
   selectedMessageId: null,
   selectedThreadId: null,
   selectedThreadAccountId: null,
@@ -61,6 +69,7 @@ export const useMailStore = create<MailState>((set, get) => ({
     set({
       activeAccountId: accountId,
       activeFolderId: null,
+      unifiedAccountFilter: null,
       selectedMessageId: null,
       selectedThreadId: null,
       selectedThreadAccountId: null,
@@ -72,6 +81,19 @@ export const useMailStore = create<MailState>((set, get) => ({
   setActiveFolderId: (folderId) => {
     set({
       activeFolderId: folderId,
+      ...(isAllAccountsFolderId(folderId) ? {} : { unifiedAccountFilter: null }),
+      selectedMessageId: null,
+      selectedThreadId: null,
+      selectedThreadAccountId: null,
+      selectedMessageIds: new Set(),
+      batchMode: false,
+    });
+  },
+
+  setUnifiedAccountFilter: (accountId) => {
+    if (get().unifiedAccountFilter === accountId) return;
+    set({
+      unifiedAccountFilter: accountId,
       selectedMessageId: null,
       selectedThreadId: null,
       selectedThreadAccountId: null,

@@ -103,4 +103,27 @@ describe("MailStore", () => {
     useMailStore.getState().toggleThreadView();
     expect(useMailStore.getState().selectedThreadAccountId).toBeNull();
   });
+
+  it("keeps the unified account filter across unified folders and clears it when leaving", () => {
+    const store = useMailStore.getState();
+    store.setActiveAccountId(null);
+    store.setActiveFolderId("all:inbox");
+    useMailStore.setState({ selectedMessageId: "m-1", batchMode: true });
+
+    useMailStore.getState().setUnifiedAccountFilter("acct-2");
+    expect(useMailStore.getState().unifiedAccountFilter).toBe("acct-2");
+    // Changing the filter drops the selection from the old list.
+    expect(useMailStore.getState().selectedMessageId).toBeNull();
+    expect(useMailStore.getState().batchMode).toBe(false);
+
+    useMailStore.getState().setActiveFolderId("all:sent");
+    expect(useMailStore.getState().unifiedAccountFilter).toBe("acct-2");
+
+    useMailStore.getState().setActiveFolderId("acct-1-inbox");
+    expect(useMailStore.getState().unifiedAccountFilter).toBeNull();
+
+    useMailStore.getState().setUnifiedAccountFilter("acct-1");
+    useMailStore.getState().setActiveAccountId("acct-1");
+    expect(useMailStore.getState().unifiedAccountFilter).toBeNull();
+  });
 });

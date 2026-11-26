@@ -411,23 +411,39 @@ describe("MessageItem", () => {
     expect(onToggleBatchSelect).toHaveBeenCalledWith("message-1");
   });
 
-  it("shows the source account color marker when an account color is provided", () => {
-    render(
+  it("shows the account badge right before the date, named once for screen readers", () => {
+    const { container } = render(
       <MessageItem
         message={makeMessage()}
         isSelected={false}
         onClick={vi.fn()}
-        {...({
-          accountColor: "#22c55e",
-          accountLabel: "Work <work@example.com>",
-        } as Record<string, unknown>)}
+        account={{
+          id: "work",
+          email: "work@example.com",
+          display_name: "Work",
+          color: "#10b981",
+          account_label: "Work",
+        }}
       />,
     );
 
-    const marker = screen.getByTitle("Work <work@example.com>");
+    const badge = screen.getByRole("img", { name: "Work" });
+    expect(badge.className).toContain("account-badge--xs");
+    expect(badge.getAttribute("title")).toBe("Work");
+    expect(badge.textContent).toBe("W");
+    // Badge sits right before the date in the meta area.
+    expect(badge.nextElementSibling?.className).toContain("mail-row__date");
+    // No leftover colour strip, and the account is not named twice.
+    expect(container.querySelectorAll('[aria-label="Work"]')).toHaveLength(1);
+    expect(container.querySelector('[style*="width: 3px"]')).toBeNull();
+  });
 
-    expect(marker.getAttribute("aria-label")).toBe("Work <work@example.com>");
-    expect(marker.style.backgroundColor).toBe("rgb(34, 197, 94)");
+  it("renders no account badge without an account", () => {
+    const { container } = render(
+      <MessageItem message={makeMessage()} isSelected={false} onClick={vi.fn()} />,
+    );
+
+    expect(container.querySelector(".account-badge")).toBeNull();
   });
 
   it("marks unread rows with a row class", () => {

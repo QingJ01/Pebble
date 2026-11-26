@@ -111,6 +111,11 @@
     "moreFolders": "More folders"
   },
   "inbox": {
+    "accountFilter": {
+      "label": "Filter by account",
+      "all": "All",
+      "unread": "{{count}} unread"
+    },
     "searchPlaceholder": "Search mail…",
     "noSubject": "(no subject)",
     "emailContent": "Email content",
@@ -325,16 +330,16 @@
     "accountColorName": {
       "sky": "Sky blue",
       "emerald": "Emerald",
-      "amber": "Amber",
       "violet": "Violet",
-      "rose": "Rose",
-      "teal": "Teal",
-      "indigo": "Indigo",
-      "orange": "Orange",
-      "cyan": "Cyan",
       "pink": "Pink",
       "lime": "Lime",
-      "blue": "Blue"
+      "indigo": "Indigo",
+      "teal": "Teal",
+      "fuchsia": "Fuchsia",
+      "blue": "Blue",
+      "slate": "Slate",
+      "cyan": "Cyan",
+      "navy": "Navy"
     }
   },
   "cloudSync": {

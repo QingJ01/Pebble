@@ -1,16 +1,20 @@
+// Account colours stay clear of the brand orange, the star/warning amber and the
+// danger red so an account badge never reads as a status. Ordered so the first
+// accounts get the most distinct hues; keep in sync with
+// src-tauri/src/account_colors.rs.
 export const ACCOUNT_COLOR_PRESETS = [
   { name: "Sky", color: "#0ea5e9" },
-  { name: "Emerald", color: "#22c55e" },
-  { name: "Amber", color: "#f59e0b" },
+  { name: "Emerald", color: "#10b981" },
   { name: "Violet", color: "#8b5cf6" },
-  { name: "Rose", color: "#f43f5e" },
-  { name: "Teal", color: "#14b8a6" },
-  { name: "Indigo", color: "#6366f1" },
-  { name: "Orange", color: "#f97316" },
-  { name: "Cyan", color: "#06b6d4" },
   { name: "Pink", color: "#ec4899" },
-  { name: "Lime", color: "#84cc16" },
+  { name: "Lime", color: "#65a30d" },
+  { name: "Indigo", color: "#6366f1" },
+  { name: "Teal", color: "#14b8a6" },
+  { name: "Fuchsia", color: "#c026d3" },
   { name: "Blue", color: "#3b82f6" },
+  { name: "Slate", color: "#64748b" },
+  { name: "Cyan", color: "#06b6d4" },
+  { name: "Navy", color: "#1e40af" },
 ] as const;
 
 const ACCOUNT_COLOR_PALETTE = ACCOUNT_COLOR_PRESETS.map((preset) => preset.color);

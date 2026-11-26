@@ -14,8 +14,14 @@ export function useFolderUnreadCounts(accountId: string | null) {
   });
 }
 
-export function useFolderUnreadCountsForAccounts(accountIds: string[]) {
-  const enabled = useUIStore((s) => s.showFolderUnreadCount);
+/**
+ * Unread counts by folder id for several accounts. Follows the "show folder
+ * unread counts" setting unless `always` (the unified inbox account filter,
+ * whose chips always carry their count).
+ */
+export function useFolderUnreadCountsForAccounts(accountIds: string[], options: { always?: boolean } = {}) {
+  const showCounts = useUIStore((s) => s.showFolderUnreadCount);
+  const enabled = showCounts || options.always === true;
   const queries = useQueries({
     queries: accountIds.map((accountId) => ({
       queryKey: ["folder-unread-counts", accountId],

@@ -1,6 +1,8 @@
 import { useTranslation } from "react-i18next";
 import { formatListDate } from "@/lib/formatDate";
 import type { SearchHit, Message } from "@/lib/api";
+import type { BadgeAccount } from "@/hooks/useAccountBadges";
+import MailRowAccountBadge from "@/components/MailRowAccountBadge";
 import "@/components/mail-list.css";
 
 /** Highlight all occurrences of `terms` in `text` by wrapping in <mark>. */
@@ -28,9 +30,11 @@ interface Props {
   /** Roving tabindex: 0 for the list's active row, -1 for the others. */
   tabIndex?: number;
   onRowFocus?: (messageId: string) => void;
+  /** Account to badge the row with (results spanning several accounts only). */
+  account?: BadgeAccount;
 }
 
-export default function SearchResultItem({ hit, message, isSelected, onClick, query = "", tabIndex = 0, onRowFocus }: Props) {
+export default function SearchResultItem({ hit, message, isSelected, onClick, query = "", tabIndex = 0, onRowFocus, account }: Props) {
   const { t, i18n } = useTranslation();
   const subject = hit.subject || message?.subject || hit.snippet || t("common.noSubject");
   const from = hit.from_address || message?.from_address || "";
@@ -56,9 +60,10 @@ export default function SearchResultItem({ hit, message, isSelected, onClick, qu
         <span className="mail-row__primary">
           <span className="mail-row__ellipsis" title={from}>{highlightTerms(from, query)}</span>
         </span>
-        {date && (
+        {(date || account) && (
           <div className="mail-row__meta">
-            <span className="mail-row__date">{date}</span>
+            {account && <MailRowAccountBadge account={account} />}
+            {date && <span className="mail-row__date">{date}</span>}
           </div>
         )}
       </div>

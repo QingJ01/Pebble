@@ -13,6 +13,7 @@ import { MessageListSkeleton } from "@/components/Skeleton";
 import PaneSplitter, { usePaneWidth } from "@/components/PaneSplitter";
 import { LOADING_INDICATOR_DELAY_MS } from "@/hooks/useDelayedVisible";
 import { useRovingList } from "@/hooks/useRovingList";
+import { useAccountBadges } from "@/hooks/useAccountBadges";
 import "@/components/mail-list.css";
 
 const EMPTY_REMOVED_IDS = new Set<string>();
@@ -60,6 +61,8 @@ export default function StarredView() {
   }
 
   const visibleIds = useMemo(() => visibleMessages.map((m) => m.id), [visibleMessages]);
+  const visibleAccountIds = useMemo(() => visibleMessages.map((m) => m.account_id), [visibleMessages]);
+  const badgeAccounts = useAccountBadges(visibleAccountIds);
   const virtualItems = virtualizer.getVirtualItems();
   const roving = useRovingList({
     ids: visibleIds,
@@ -172,6 +175,7 @@ export default function StarredView() {
                     onToggleStar={handleToggleStar}
                     tabIndex={roving.tabIndexFor(msg.id)}
                     onRowFocus={roving.setActiveId}
+                    account={badgeAccounts?.get(msg.account_id)}
                   />
                 </div>
               );
