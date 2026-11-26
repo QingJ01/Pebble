@@ -23,7 +23,7 @@ export default function ContactListItem({ contact, selected, onSelect }: Contact
   return (
     <button
       type="button"
-      className={`contact-list-item${selected ? " contact-list-item--selected" : ""}`}
+      className={`list-row contact-list-item${selected ? " is-selected" : ""}`}
       aria-label={`${title} ${address}`.trim()}
       aria-pressed={selected}
       onClick={onSelect}
