@@ -7,7 +7,27 @@ fn main() {
     ] {
         emit_env_from_dotenv("../.env", key);
     }
-    tauri_build::build()
+    tauri_build::try_build(attributes()).expect("failed to run tauri-build");
+}
+
+/// On Windows MSVC, embed the Common-Controls v6 manifest through the linker
+/// so it applies to every binary of this crate, including the unit-test
+/// executable. tauri-build's default only covers the app binary, and a test
+/// binary that links the dialog code without it fails to start with
+/// STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139).
+fn attributes() -> tauri_build::Attributes {
+    let msvc = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
+        && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc");
+    if !msvc {
+        return tauri_build::Attributes::new();
+    }
+    let manifest = std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap())
+        .join("windows-app-manifest.xml");
+    println!("cargo:rerun-if-changed={}", manifest.display());
+    println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
+    println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", manifest.display());
+    tauri_build::Attributes::new()
+        .windows_attributes(tauri_build::WindowsAttributes::new_without_app_manifest())
 }
 
 fn emit_env_from_dotenv(path: &str, key: &str) {

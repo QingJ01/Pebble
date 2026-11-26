@@ -49,12 +49,18 @@ const RULE_LIST_AT_RULES: &[&str] = &[
 /// At-rules whose block contains a list of declarations.
 const DECLARATION_AT_RULES: &[&str] = &["font-face", "page", "counter-style", "property"];
 
+/// Deepest block nesting (at-rules and nested selectors combined) kept from
+/// untrusted CSS. Deeper blocks are dropped, which bounds the recursion below
+/// so a hostile stylesheet cannot overflow the rendering thread's stack.
+/// Real-world mail CSS rarely nests more than three or four levels.
+const MAX_NESTING_DEPTH: usize = 32;
+
 /// Properties that are never allowed in embedded CSS.
 const FORBIDDEN_PROPERTIES: &[&str] = &["behavior", "-moz-binding"];
 
 pub(crate) fn sanitize_embedded_css(css: &str, policy: CssPolicy) -> String {
     let stripped = strip_comments(css);
-    filter_rule_list(&stripped, policy)
+    filter_rule_list(&stripped, policy, 0)
 }
 
 /// Remove `/* ... */` comments outside of strings. Each comment is replaced
@@ -237,7 +243,10 @@ impl Cursor {
     }
 }
 
-fn filter_rule_list(text: &str, policy: CssPolicy) -> String {
+fn filter_rule_list(text: &str, policy: CssPolicy, depth: usize) -> String {
+    if depth >= MAX_NESTING_DEPTH {
+        return String::new();
+    }
     let mut cursor = Cursor::new(text);
     let mut out = String::new();
     loop {
@@ -250,7 +259,7 @@ fn filter_rule_list(text: &str, policy: CssPolicy) -> String {
             let name = cursor.consume_at_keyword();
             let (prelude, stop) = cursor.consume_until(&['{', ';']);
             let block = (stop == Some('{')).then(|| cursor.consume_block());
-            emit_at_rule(&name, &prelude, block.as_deref(), policy, &mut out);
+            emit_at_rule(&name, &prelude, block.as_deref(), policy, depth, &mut out);
         } else {
             let (prelude, stop) = cursor.consume_until(&['{', ';']);
             if stop != Some('{') {
@@ -264,7 +273,7 @@ fn filter_rule_list(text: &str, policy: CssPolicy) -> String {
             }
             out.push_str(prelude);
             out.push('{');
-            out.push_str(&filter_declaration_list(&block, policy));
+            out.push_str(&filter_declaration_list(&block, policy, depth + 1));
             out.push('}');
         }
     }
@@ -276,6 +285,7 @@ fn emit_at_rule(
     prelude: &str,
     block: Option<&str>,
     policy: CssPolicy,
+    depth: usize,
     out: &mut String,
 ) {
     if raw_name.is_empty() || raw_name.contains('\\') {
@@ -310,9 +320,9 @@ fn emit_at_rule(
                 return;
             }
             let inner = if RULE_LIST_AT_RULES.contains(&name.as_str()) {
-                filter_rule_list(block, policy)
+                filter_rule_list(block, policy, depth + 1)
             } else if DECLARATION_AT_RULES.contains(&name.as_str()) {
-                filter_declaration_list(block, policy)
+                filter_declaration_list(block, policy, depth + 1)
             } else {
                 return;
             };
@@ -329,7 +339,10 @@ fn emit_at_rule(
     }
 }
 
-fn filter_declaration_list(text: &str, policy: CssPolicy) -> String {
+fn filter_declaration_list(text: &str, policy: CssPolicy, depth: usize) -> String {
+    if depth >= MAX_NESTING_DEPTH {
+        return String::new();
+    }
     let mut cursor = Cursor::new(text);
     let mut kept: Vec<String> = Vec::new();
     loop {
@@ -353,7 +366,7 @@ fn filter_declaration_list(text: &str, policy: CssPolicy) -> String {
             if !selector.is_empty() && is_safe_piece(selector, policy) {
                 kept.push(format!(
                     "{selector}{{{}}}",
-                    filter_declaration_list(&block, policy)
+                    filter_declaration_list(&block, policy, depth + 1)
                 ));
             }
             continue;
@@ -527,5 +540,36 @@ mod tests {
     fn unterminated_comment_and_block_are_safe() {
         assert!(!strict(".a{color:red} /* .b{background:url(https://t/x)}").contains("url("));
         assert!(!strict(".a{background:url(https://t/x)").contains("url("));
+    }
+
+    #[test]
+    fn deeply_nested_css_is_truncated_without_overflowing_the_stack() {
+        // Run on a small stack so unbounded recursion would abort the test.
+        let handle = std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(|| {
+                let depth = 20_000;
+                let mut css = "@media screen{".repeat(depth);
+                css.push_str("a{color:red}");
+                css.push_str(&"}".repeat(depth));
+                let mut nested = "a{".repeat(depth);
+                nested.push_str("color:red");
+                nested.push_str(&"}".repeat(depth));
+                (strict(&css), strict(&nested))
+            })
+            .unwrap();
+        let (media, selectors) = handle.join().expect("sanitizer must not overflow");
+        assert!(media.matches("@media").count() <= MAX_NESTING_DEPTH);
+        assert!(
+            !media.contains("color:red"),
+            "content past the limit is dropped"
+        );
+        assert!(selectors.matches('{').count() <= MAX_NESTING_DEPTH);
+
+        // Ordinary nesting is untouched.
+        assert_eq!(
+            strict("@media screen{@supports (display:grid){a{color:red}}}"),
+            "@media screen{@supports (display:grid){a{color:red}}}"
+        );
     }
 }

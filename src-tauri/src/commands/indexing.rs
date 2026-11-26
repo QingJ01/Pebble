@@ -506,7 +506,7 @@ pub async fn index_new_messages(
     app: Option<tauri::AppHandle>,
 ) {
     let mut engine: Option<Arc<RuleEngine>> = None;
-    let mut rules_fingerprint: Option<(i64, i64)> = None;
+    let mut rules_fingerprint: Option<String> = None;
     let mut reconciliation_pending_ids: Vec<String> = Vec::new();
     let mut closed = false;
 
@@ -527,19 +527,13 @@ pub async fn index_new_messages(
             }
         }
 
-        // Reload rules only when the rules table changed.
+        // Reload rules only when the rules' content changed (see
+        // `pebble_store::rules::rules_fingerprint`).
         match store
-            .with_read_async(|conn| {
-                conn.query_row(
-                    "SELECT COUNT(*), COALESCE(MAX(updated_at), 0) FROM rules",
-                    [],
-                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
-                )
-                .map_err(Into::into)
-            })
+            .with_read_async(pebble_store::rules::rules_fingerprint)
             .await
         {
-            Ok(fingerprint) if Some(fingerprint) != rules_fingerprint => {
+            Ok(fingerprint) if rules_fingerprint.as_deref() != Some(fingerprint.as_str()) => {
                 let store = Arc::clone(store);
                 match tokio::task::spawn_blocking(move || store.list_rules()).await {
                     Ok(Ok(rules)) => {

@@ -1,5 +1,6 @@
 use pebble_core::{PebbleError, Result};
 use rusqlite::{params, OptionalExtension};
+use std::collections::HashSet;
 
 use crate::Store;
 
@@ -115,11 +116,52 @@ fn active_blocking_condition(alias: &str, max_param: &str) -> String {
     )
 }
 
-fn is_archive_inverse(previous: &str, next: &str) -> bool {
-    matches!(
-        (previous, next),
+/// Whether `next` exactly undoes `previous`, so both can be dropped. The op
+/// types alone are not enough: unarchive always targets the Inbox, so an
+/// archive from Sent or a custom folder followed by an unarchive is a move,
+/// not a no-op. Cancel only when the recorded endpoints mirror each other
+/// (folder ids for folder-based providers, label edits for Gmail).
+fn is_archive_inverse(
+    previous_type: &str,
+    previous: &MailOpEnvelope,
+    next_type: &str,
+    next_payload: &str,
+) -> bool {
+    if !matches!(
+        (previous_type, next_type),
         ("archive", "unarchive") | ("unarchive", "archive")
-    )
+    ) {
+        return false;
+    }
+    let Some(next) = decode_envelope(next_type, next_payload) else {
+        return false;
+    };
+    let (MailOp::Archive(a) | MailOp::Unarchive(a)) = &previous.op else {
+        return false;
+    };
+    let (MailOp::Archive(b) | MailOp::Unarchive(b)) = &next.op else {
+        return false;
+    };
+
+    let folders_mirror = match (
+        a.source_folder_id.as_deref(),
+        a.target_id(),
+        b.source_folder_id.as_deref(),
+        b.target_id(),
+    ) {
+        (Some(a_src), Some(a_dst), Some(b_src), Some(b_dst)) => a_src == b_dst && a_dst == b_src,
+        _ => false,
+    };
+    let labels_mirror = match (a.labels(), b.labels()) {
+        (Some((a_add, a_remove)), Some((b_add, b_remove))) => {
+            let set = |labels: &[String]| labels.iter().cloned().collect::<HashSet<_>>();
+            !(a_add.is_empty() && a_remove.is_empty())
+                && set(a_add) == set(b_remove)
+                && set(a_remove) == set(b_add)
+        }
+        _ => false,
+    };
+    folders_mirror || labels_mirror
 }
 
 /// Decode a stored envelope for bookkeeping. Undecodable rows are treated
@@ -414,7 +456,8 @@ impl Store {
     /// Queue a pending op, collapsing it with the latest not-yet-running op on
     /// the same message when the newer op supersedes it:
     /// - `update_flags` after `update_flags` keeps only the final flag state;
-    /// - `archive` after `unarchive` (or vice versa) cancels both.
+    /// - `archive` after `unarchive` (or vice versa) cancels both when the
+    ///   recorded folders (or Gmail label edits) exactly reverse each other.
     pub fn enqueue_pending_mail_op(
         &self,
         account_id: &str,
@@ -474,7 +517,11 @@ impl Store {
                         return Ok(PendingMailOpEnqueue::Merged(latest_id));
                     }
                 }
-                if not_started && is_archive_inverse(&latest_type, op_type) {
+                let cancels = not_started
+                    && decode_envelope(&latest_type, &latest_payload).is_some_and(|previous| {
+                        is_archive_inverse(&latest_type, &previous, op_type, payload_json)
+                    });
+                if cancels {
                     tx.execute(
                         "UPDATE pending_mail_ops
                          SET status = ?1, last_error = NULL, next_retry_at = NULL, updated_at = ?2
@@ -1240,12 +1287,20 @@ mod tests {
     #[test]
     fn enqueue_cancels_archive_then_unarchive_when_neither_started() {
         let (store, account, _folder, message) = seeded_store();
+        let to_archive = serde_json::json!({
+            "source_folder_id": "inbox", "source_folder_remote_id": "INBOX",
+            "target_folder_id": "archive", "target_folder_remote_id": "Archive",
+        });
+        let back_to_inbox = serde_json::json!({
+            "source_folder_id": "archive", "source_folder_remote_id": "Archive",
+            "target_folder_id": "inbox", "target_folder_remote_id": "INBOX",
+        });
         let PendingMailOpEnqueue::Inserted(archive) = store
             .enqueue_pending_mail_op(
                 &account.id,
                 &message.id,
                 "archive",
-                &envelope("archive", serde_json::json!({})),
+                &envelope("archive", to_archive.clone()),
             )
             .unwrap()
         else {
@@ -1256,7 +1311,7 @@ mod tests {
                 &account.id,
                 &message.id,
                 "unarchive",
-                &envelope("unarchive", serde_json::json!({})),
+                &envelope("unarchive", back_to_inbox.clone()),
             )
             .unwrap();
         assert_eq!(
@@ -1290,6 +1345,116 @@ mod tests {
                     &message.id,
                     "unarchive",
                     &envelope("unarchive", serde_json::json!({}))
+                )
+                .unwrap(),
+            PendingMailOpEnqueue::Inserted(_)
+        ));
+    }
+
+    #[test]
+    fn archive_then_unarchive_to_a_different_folder_is_not_cancelled() {
+        let (store, account, _folder, message) = seeded_store();
+        // Archived from Sent; unarchive always goes to the Inbox.
+        store
+            .enqueue_pending_mail_op(
+                &account.id,
+                &message.id,
+                "archive",
+                &envelope(
+                    "archive",
+                    serde_json::json!({
+                        "source_folder_id": "sent", "target_folder_id": "archive",
+                    }),
+                ),
+            )
+            .unwrap();
+        let result = store
+            .enqueue_pending_mail_op(
+                &account.id,
+                &message.id,
+                "unarchive",
+                &envelope(
+                    "unarchive",
+                    serde_json::json!({
+                        "source_folder_id": "archive", "target_folder_id": "inbox",
+                    }),
+                ),
+            )
+            .unwrap();
+        assert!(matches!(result, PendingMailOpEnqueue::Inserted(_)));
+        assert_eq!(
+            store
+                .list_active_pending_mail_ops(Some(&account.id), 10)
+                .unwrap()
+                .len(),
+            2
+        );
+
+        // Without recorded endpoints the ops are kept too.
+        let (store, account, _folder, message) = seeded_store();
+        store
+            .enqueue_pending_mail_op(
+                &account.id,
+                &message.id,
+                "archive",
+                &envelope("archive", serde_json::json!({})),
+            )
+            .unwrap();
+        assert!(matches!(
+            store
+                .enqueue_pending_mail_op(
+                    &account.id,
+                    &message.id,
+                    "unarchive",
+                    &envelope("unarchive", serde_json::json!({})),
+                )
+                .unwrap(),
+            PendingMailOpEnqueue::Inserted(_)
+        ));
+    }
+
+    #[test]
+    fn gmail_label_edits_cancel_only_when_they_mirror() {
+        let (store, account, _folder, message) = seeded_store();
+        store
+            .enqueue_pending_mail_op(
+                &account.id,
+                &message.id,
+                "archive",
+                &envelope("archive", serde_json::json!({ "remove_labels": ["INBOX"] })),
+            )
+            .unwrap();
+        assert!(matches!(
+            store
+                .enqueue_pending_mail_op(
+                    &account.id,
+                    &message.id,
+                    "unarchive",
+                    &envelope("unarchive", serde_json::json!({ "add_labels": ["INBOX"] })),
+                )
+                .unwrap(),
+            PendingMailOpEnqueue::Cancelled { .. }
+        ));
+
+        let (store, account, _folder, message) = seeded_store();
+        store
+            .enqueue_pending_mail_op(
+                &account.id,
+                &message.id,
+                "archive",
+                &envelope(
+                    "archive",
+                    serde_json::json!({ "remove_labels": ["INBOX", "IMPORTANT"] }),
+                ),
+            )
+            .unwrap();
+        assert!(matches!(
+            store
+                .enqueue_pending_mail_op(
+                    &account.id,
+                    &message.id,
+                    "unarchive",
+                    &envelope("unarchive", serde_json::json!({ "add_labels": ["INBOX"] })),
                 )
                 .unwrap(),
             PendingMailOpEnqueue::Inserted(_)

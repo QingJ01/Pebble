@@ -91,7 +91,9 @@ fn part_body_into_bytes(body: PartType<'_>) -> Vec<u8> {
     match body {
         PartType::Text(text) | PartType::Html(text) => text.into_owned().into_bytes(),
         PartType::Binary(bytes) | PartType::InlineBinary(bytes) => bytes.into_owned(),
-        PartType::Message(message) => message.raw_message.into_owned(),
+        // An unencoded message/rfc822 part borrows the *outer* email in
+        // `raw_message`; the accessor slices out just the nested message.
+        PartType::Message(message) => message.raw_message().to_vec(),
         PartType::Multipart(_) => Vec::new(),
     }
 }
@@ -232,6 +234,41 @@ pub fn parse_raw_email(raw: &[u8]) -> Result<ParsedMessage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unencoded_eml_attachment_keeps_only_the_nested_message() {
+        let raw = b"From: Outer <outer@example.com>\r\n\
+                    To: Bob <bob@example.com>\r\n\
+                    Subject: Outer subject\r\n\
+                    MIME-Version: 1.0\r\n\
+                    Content-Type: multipart/mixed; boundary=\"b1\"\r\n\
+                    \r\n\
+                    --b1\r\n\
+                    Content-Type: text/plain\r\n\
+                    \r\n\
+                    See attached.\r\n\
+                    --b1\r\n\
+                    Content-Type: message/rfc822\r\n\
+                    Content-Disposition: attachment; filename=\"inner.eml\"\r\n\
+                    \r\n\
+                    From: Inner <inner@example.com>\r\n\
+                    Subject: Inner subject\r\n\
+                    \r\n\
+                    Inner body\r\n\
+                    --b1--\r\n";
+
+        let parsed = parse_raw_email(raw).unwrap();
+        let eml = parsed
+            .attachments
+            .iter()
+            .find(|a| a.meta.mime_type.contains("rfc822") || a.meta.filename.ends_with(".eml"))
+            .expect("the nested message is an attachment");
+        let text = String::from_utf8_lossy(&eml.data);
+        assert!(text.starts_with("From: Inner"), "{text}");
+        assert!(text.contains("Inner body"), "{text}");
+        assert!(!text.contains("Outer subject"), "{text}");
+        assert_eq!(eml.meta.size, eml.data.len());
+    }
 
     #[test]
     fn test_parse_simple_email() {
