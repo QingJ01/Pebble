@@ -1924,18 +1924,6 @@ textarea:focus-visible {
   margin-bottom: 20px;
 }
 
-.contact-dialog-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-modal);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: var(--overlay-backdrop);
-  backdrop-filter: blur(3px);
-}
-
 .contact-dialog {
   width: min(620px, 100%);
   max-height: min(760px, calc(100vh - 48px));
@@ -2093,11 +2081,6 @@ textarea:focus-visible {
 
   .contact-detail {
     padding: 24px 22px 38px;
-  }
-
-  .contact-dialog-backdrop {
-    align-items: flex-end;
-    padding: 0;
   }
 
   .contact-dialog {
