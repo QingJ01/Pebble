@@ -6,6 +6,57 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-26
+
+### Added
+
+- Added Undo Send and local scheduled sending: queued messages are encrypted on disk, use UTC deadlines, can be edited or cancelled, and survive restarts. A send whose outcome is uncertain is held for review instead of being retried automatically, and quitting (macOS Cmd-Q, tray Quit or closing the window) asks for confirmation while sends are pending (#105).
+- Added folder management: create and rename folders, and Move To for one or many messages, with correct IMAP namespace handling and Gmail labels preserved. Moves are queued durably and can be undone from the toast (#105).
+- Added image and PDF attachment preview and Save All, which never overwrites existing files (#105).
+- Added a local mail archive (Settings → Local mail archive) with EML and mboxrd import and export. Imported mail stays on this device and is never uploaded (#105).
+- Added a right-click menu on message rows with mark as read/unread (#108, #109).
+- Added account badges: in lists that mix accounts (the unified inbox, search results), each row shows a small monogram in the account's colour.
+- Added account filter chips to the unified folders ("All" plus one chip per account, with unread counts).
+- Added a compact sidebar rail for narrow windows: one badge per account opens that account's folders. "Toggle sidebar" opens the full sidebar as a drawer over the content.
+- Added explicit retry for failed Outbox sends, with a warning to check Sent first to avoid duplicates (#104).
+
+### Changed
+
+- Redesigned the interface on a shared design system: consistent spacing, colours, borders, buttons, inputs, dialogs, menus and focus states in light and dark themes, one content edge in the reader, and calmer use of the accent colour.
+- Archive, delete and mark-as-spam now share one action flow with Undo, partial-failure reporting (failed messages stay selected) and rollback that only touches the affected messages.
+- Thread rows and search results show sender names instead of bare addresses.
+- Reply quotes now appear inside the editor and are expanded by default; quoted remote resources are removed (#109).
+- The account colour palette no longer includes orange, amber or red, which read as brand, star and danger colours. Saved colours are kept.
+- Notification and tray text follows the app language, and new-mail notifications are skipped while Pebble is focused.
+- Faster large mailboxes: message bodies are stored separately and paged with cursors, first syncs for Gmail, Outlook and IMAP stream and resume, IMAP uses `CHANGEDSINCE`, and search indexing is batched (#110).
+- Offline actions are replayed in order per message; repeated or cancelling actions are merged, and sync no longer overwrites changes that are still queued (#110).
+
+### Fixed
+
+- Fixed signature images and other inline images not showing when the sender used a non-standard image type (such as `image/jpg` or `application/octet-stream`) or a differently cased or URL-encoded `cid:` reference (#102).
+- Fixed several sanitizer and privacy bypasses: `<svg><style>` content, relative and protocol-relative links navigating the main window, and remote resources in embedded CSS. Email CSS is now confined to the message area (#110).
+- Fixed batch operations failing on very large selections by chunking database queries; multi-chunk deletes are atomic (#108, #109).
+- Fixed saved drafts losing recipients, Bcc, editor mode or attachments when resumed, and local-only drafts being sent through remote delete operations (#104).
+- Fixed threading for Gmail (`threadId`), Outlook (`conversationId`) and out-of-order IMAP mail, and kept thread and selection state per account (#110).
+- Fixed Gmail and Outlook re-running rules when an existing message was updated, and IMAP first syncs missing read and starred state (#110).
+- Fixed batch delete from Gmail system folders such as Sent, and reported batch deletes where nothing was deleted as failures.
+- Fixed the reader staying on a message that was deleted elsewhere; it now shows "Message not found" with a Back button.
+- Fixed the macOS title bar showing the native window title over the app's own title, and aligned the traffic lights with it.
+
+### Security
+
+- Passwords, tokens and API keys are no longer sent to the frontend; translation endpoints are validated, release builds ignore `.env`, and attachment save paths are restricted (#110).
+- Backups now use Argon2id with a minimum 12-character password for new backups, and a tampered backup can no longer change translation settings. Existing shorter passwords still restore (#110).
+- Data encrypted in the legacy format is re-encrypted at startup; the old format is then refused (#110).
+- Logs rotate daily, and exported logs mask email addresses and home directories (#110).
+
+### Upgrade notes
+
+- The first launch runs a database migration that rewrites the message table. It can take a while on large mailboxes, and disk use roughly doubles until the automatic pre-migration backup is cleaned up. Pebble refuses to open a database created by a newer version.
+- Emptying Trash for several accounts while offline now waits until you are back online, like single deletes.
+- Accounts without a saved colour may get a different colour from the new palette.
+- Automated tests and package builds cover this release, plus native macOS checks against local IMAP and SMTP test servers. Live Gmail and Outlook accounts, POP3 and the native Windows and Linux UI have not been exercised.
+
 ## [0.1.6] - 2026-11-05
 
 ### Added
@@ -362,7 +413,8 @@ This release includes:
 - Windows installers are not code-signed yet, so Windows SmartScreen may show a warning.
 - Outlook support is still experimental and depends on Microsoft Graph permissions configured by the user.
 
-[Unreleased]: https://github.com/QingJ01/Pebble/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/QingJ01/Pebble/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/QingJ01/Pebble/compare/v0.1.6...v0.2.0
 [0.1.6]: https://github.com/QingJ01/Pebble/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/QingJ01/Pebble/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/QingJ01/Pebble/compare/v0.1.3...v0.1.4
