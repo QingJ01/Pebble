@@ -1,19 +1,11 @@
+/* Keyboard-only "Manage folders" entry: off-screen until focused, then shown
+   as a secondary button (.btn--secondary.btn--sm) over the sidebar corner. */
 .sidebar-keyboard-only-action {
   position: fixed;
-  left: 8px;
-  bottom: 8px;
+  left: var(--space-2);
+  bottom: var(--space-2);
   z-index: var(--z-menu);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg);
-  color: var(--color-text-primary);
   box-shadow: var(--shadow-popover);
-  font-size: 12.5px;
-  cursor: pointer;
   opacity: 0;
   pointer-events: none;
   transform: translateX(-240px);

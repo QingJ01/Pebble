@@ -173,12 +173,6 @@ vi.mock("../../../src/features/compose/ComposeToolbar", () => ({
   ),
   EditorToolbar: () => <div />,
   MarkdownToolbar: () => <div />,
-  composeStyles: {
-    backBtn: {},
-    fieldRow: {},
-    fieldLabel: {},
-    toggleBtn: {},
-  },
 }));
 
 vi.mock("@tiptap/react", () => ({

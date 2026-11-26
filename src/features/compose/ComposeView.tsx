@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import Button from "@/components/ui/Button";
 import IconButton from "@/components/ui/IconButton";
+import Popover from "@/components/ui/Popover";
 import { EditorContent } from "@tiptap/react";
 import {
   ArrowLeft, Send, X, AlertCircle, Clock,
@@ -28,7 +29,7 @@ import { toastError, useToastStore } from "@/stores/toast.store";
 import { formatError } from "@/lib/extractErrorMessage";
 import type { Account } from "@/lib/ipc-types";
 import type { ComposeAttachment } from "./compose-draft";
-import { ModeButton, EditorToolbar, MarkdownToolbar, composeStyles } from "./ComposeToolbar";
+import { ModeButton, EditorToolbar, MarkdownToolbar } from "./ComposeToolbar";
 import { subjectAfterAddingAttachments } from "./attachment-subject";
 import { isValidEmailAddress, mergePendingRecipient } from "./recipient-utils";
 import { queryClient } from "@/lib/query-client";
@@ -138,6 +139,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
   // Attachments are part of the draft snapshot and must be declared before
   // the draft persistence hook.
   const attachInputRef = useRef<HTMLInputElement>(null);
+  const templatesButtonRef = useRef<HTMLButtonElement>(null);
   const [attachments, setAttachments] = useState<ComposeAttachment[]>(() =>
     restoredDraft.current?.attachments ?? [],
   );
@@ -701,11 +703,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
       data-compose-root=""
       aria-busy={sendInProgress}
       onKeyDownCapture={handleComposeKeyDown}
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100%",
-      }}
+      className="compose-view"
     >
       {pendingSend && <div className="send-controls-banner" role="status">
         <span>{secondsLeft > 0 ? t("sendControls.countdown", { count: secondsLeft }) : t("sendControls.undoWaiting")}</span>
@@ -717,17 +715,10 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
         {t("sendControls.queueReplyUnknown")}
         <Button size="sm" onClick={() => void resolveQueueReply()}>{t("sendControls.refresh")}</Button>
       </div>}
-      <div inert={sendInProgress} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+      <div inert={sendInProgress} className="compose-view__body">
       {/* Header */}
-      <div
-        style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "10px 20px",
-          borderBottom: "1px solid var(--color-border)",
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+      <div className="compose-header">
+        <div className="compose-header__lead">
           <Button
             variant="ghost"
             size="sm"
@@ -736,11 +727,11 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
           >
             {t("compose.back", "Back")}
           </Button>
-          <h2 style={{ margin: 0, fontWeight: "var(--font-weight-title)", fontSize: "var(--font-md)", color: "var(--color-text-primary)" }}>
+          <h2 className="compose-header__title">
             {title}
           </h2>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <div className="compose-header__actions">
           {sendDisabledReason && (
             <span id="compose-send-disabled-reason" className="compose-send-hint">
               {sendDisabledReason}
@@ -775,7 +766,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
       {showSchedule && (
         <div className="send-controls-options">
           <ScheduleTimeInput value={scheduleValue} onChange={setScheduleValue} />
-          <Button size="sm" variant="primary" disabled={sendDisabled || scheduledInstant(scheduleValue) === null} onClick={() => {
+          <Button disabled={sendDisabled || scheduledInstant(scheduleValue) === null} onClick={() => {
             const instant = scheduledInstant(scheduleValue);
             if (instant === null) { setSendError(t("sendControls.invalidTime")); return; }
             void handleSend(instant);
@@ -786,16 +777,9 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
 
       {/* Error banner */}
       {sendError && (
-        <div role="alert" aria-live="assertive" style={{
-          display: "flex", alignItems: "center", gap: "8px",
-          padding: "4px 12px 4px 20px",
-          backgroundColor: "var(--color-danger-bg)",
-          color: "var(--color-danger)",
-          fontSize: "var(--font-base)",
-          borderBottom: "1px solid var(--color-border)",
-        }}>
+        <div role="alert" aria-live="assertive" className="compose-error-banner">
           <AlertCircle size={14} aria-hidden="true" />
-          <span style={{ flex: 1 }}>{sendError}</span>
+          <span className="compose-error-banner__text">{sendError}</span>
           <IconButton
             label={t("common.dismiss", "Dismiss")}
             icon={<X size={14} />}
@@ -806,12 +790,12 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
       )}
 
       {/* Fields + Editor */}
-      <div className="scroll-region compose-scroll" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflow: "auto" }}>
+      <div className="scroll-region compose-scroll">
         <div className="compose-form-shell">
           {/* From */}
           {accounts.length > 0 && (
-            <div style={composeStyles.fieldRow}>
-              <label htmlFor="compose-from-account" style={composeStyles.fieldLabel}>
+            <div className="compose-field-row">
+              <label htmlFor="compose-from-account" className="compose-field-label">
                 {t("compose.from", "From")}
               </label>
               <select
@@ -819,11 +803,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
                 name="from"
                 value={fromAccountId}
                 onChange={(e) => setFromAccountId(e.target.value)}
-                style={{
-                  flex: 1, padding: "6px 0", border: "none",
-                  backgroundColor: "transparent", fontSize: "13px",
-                  color: "var(--color-text-primary)", cursor: "pointer",
-                }}
+                className="compose-field-control compose-field-control--select"
               >
                 {accounts.map((acc) => (
                   <option key={acc.id} value={acc.id}>
@@ -835,14 +815,14 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
           )}
 
           {accounts.find((acc) => acc.id === fromAccountId)?.provider === "outlook" && (
-            <p style={{ margin: "0 0 8px", fontSize: "12px", color: "var(--color-text-secondary)" }}>
+            <p className="compose-field-note">
               {t("accountSetup.providerManagedName", "The sender name is managed by your email provider.")}
             </p>
           )}
 
           {/* To */}
-          <div style={composeStyles.fieldRow}>
-            <label id="compose-to-label" htmlFor="compose-to-input" style={composeStyles.fieldLabel}>
+          <div className="compose-field-row">
+            <label id="compose-to-label" htmlFor="compose-to-input" className="compose-field-label">
               {t("compose.to", "To")}
             </label>
             <ContactAutocomplete
@@ -856,15 +836,15 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
               onInputValueChange={setToInputValue}
               placeholder={t("compose.toPlaceholder", "Name or email address")}
             />
-            <div style={{ display: "flex", gap: "4px", padding: "0 8px", flexShrink: 0 }}>
+            <div className="compose-field-row__actions">
               {!showCc && <Button variant="ghost" size="sm" onClick={() => setShowCc(true)}>{t("compose.cc", "Cc")}</Button>}
               {!showBcc && <Button variant="ghost" size="sm" onClick={() => setShowBcc(true)}>{t("compose.bcc", "Bcc")}</Button>}
             </div>
           </div>
 
           {showCc && (
-            <div style={composeStyles.fieldRow}>
-              <label id="compose-cc-label" htmlFor="compose-cc-input" style={composeStyles.fieldLabel}>
+            <div className="compose-field-row">
+              <label id="compose-cc-label" htmlFor="compose-cc-input" className="compose-field-label">
                 {t("compose.cc", "Cc")}
               </label>
               <ContactAutocomplete
@@ -882,8 +862,8 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
           )}
 
           {showBcc && (
-            <div style={composeStyles.fieldRow}>
-              <label id="compose-bcc-label" htmlFor="compose-bcc-input" style={composeStyles.fieldLabel}>
+            <div className="compose-field-row">
+              <label id="compose-bcc-label" htmlFor="compose-bcc-input" className="compose-field-label">
                 {t("compose.bcc", "Bcc")}
               </label>
               <ContactAutocomplete
@@ -901,8 +881,8 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
           )}
 
           {/* Subject */}
-          <div style={composeStyles.fieldRow}>
-            <label htmlFor="compose-subject" style={composeStyles.fieldLabel}>
+          <div className="compose-field-row">
+            <label htmlFor="compose-subject" className="compose-field-label">
               {t("compose.subject", "Subject")}
             </label>
               <input
@@ -914,7 +894,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
                 }}
                 placeholder=""
                 autoComplete="off"
-                style={{ flex: 1, padding: "8px 0", border: "none", backgroundColor: "transparent", fontSize: "13px", color: "var(--color-text-primary)" }}
+                className="compose-field-control"
               />
           </div>
 
@@ -922,20 +902,16 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
           <div className="compose-editor-toolbar-row">
             <div className="compose-toolbar-tools">
               <div className="compose-toolbar-actions">
-                <button
-                  type="button"
+                <IconButton
                   onClick={() => attachInputRef.current?.click()}
-                  title={t("compose.attach", "Attach file")}
-                  aria-label={t("compose.attach", "Attach file")}
-                  className="compose-toolbar-icon-button"
-                >
-                  <Paperclip size={13} />
-                </button>
+                  label={t("compose.attach", "Attach file")}
+                  icon={<Paperclip size={14} />}
+                />
                 <input
                   ref={attachInputRef}
                   type="file"
                   multiple
-                  style={{ position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clip: "rect(0,0,0,0)", border: 0 }}
+                  className="sr-only"
                   tabIndex={-1}
                   aria-hidden="true"
                   onChange={(e) => {
@@ -950,47 +926,44 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
                     e.target.value = "";
                   }}
                 />
-                <div style={{ position: "relative" }}>
-                  <button
-                    type="button"
-                    onClick={() => { void refreshTemplates(); setShowTemplates((v) => !v); }}
-                    aria-haspopup="listbox"
-                    aria-expanded={showTemplates}
-                    aria-label={t("compose.templates", "Templates")}
-                    title={t("compose.templates", "Templates")}
-                    className={`compose-toolbar-icon-button${showTemplates ? " is-active" : ""}`}
-                  >
-                    <BookTemplate size={13} />
-                  </button>
-                  {showTemplates && (
-                    <div className="scroll-region compose-template-scroll" style={{
-                      position: "absolute", top: "100%", left: 0, zIndex: "var(--z-menu)",
-                      backgroundColor: "var(--color-popover-bg)", border: "1px solid var(--color-border)",
-                      borderRadius: "var(--radius-lg)", boxShadow: "var(--shadow-popover)",
-                      minWidth: "220px", maxHeight: "300px", overflowY: "auto",
-                    }}>
-                      <div style={{ padding: "8px", borderBottom: "1px solid var(--color-border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span id="compose-templates-label" style={{ fontSize: "var(--font-sm)", fontWeight: 600 }}>{t("compose.templates", "Templates")}</span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => { setShowSaveTemplate(true); setShowTemplates(false); }}
-                          style={{ color: "var(--color-accent-text)" }}
-                        >
-                          {t("compose.saveAsTemplate", "Save current")}
-                        </Button>
-                      </div>
-                      {templates.length === 0 ? (
-                        <div style={{ padding: "16px", textAlign: "center", fontSize: "12px", color: "var(--color-text-secondary)" }}>
-                          {t("compose.noTemplates", "No templates saved")}
-                        </div>
-                      ) : (
-                        <ul
-                          role="listbox"
-                          aria-labelledby="compose-templates-label"
-                          style={{ listStyle: "none", margin: 0, padding: 0 }}
-                        >
-                          {templates.map((tpl) => {
+                <IconButton
+                  ref={templatesButtonRef}
+                  onClick={() => { void refreshTemplates(); setShowTemplates((v) => !v); }}
+                  aria-haspopup="listbox"
+                  aria-expanded={showTemplates}
+                  label={t("compose.templates", "Templates")}
+                  icon={<BookTemplate size={14} />}
+                />
+                <Popover
+                  open={showTemplates}
+                  onClose={() => setShowTemplates(false)}
+                  anchorRef={templatesButtonRef}
+                  placement="bottom-start"
+                  aria-labelledby="compose-templates-label"
+                  className="menu compose-template-menu"
+                >
+                  <div className="compose-template-menu__header">
+                    <span id="compose-templates-label" className="menu-label compose-template-menu__title">{t("compose.templates", "Templates")}</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => { setShowSaveTemplate(true); setShowTemplates(false); }}
+                    >
+                      {t("compose.saveAsTemplate", "Save current")}
+                    </Button>
+                  </div>
+                  <div className="menu-separator" />
+                  {templates.length === 0 ? (
+                    <div className="compose-template-menu__empty">
+                      {t("compose.noTemplates", "No templates saved")}
+                    </div>
+                  ) : (
+                    <ul
+                      role="listbox"
+                      aria-labelledby="compose-templates-label"
+                      className="compose-template-menu__list"
+                    >
+                      {templates.map((tpl) => {
                             const applyTemplate = () => {
                               subjectRef.current = tpl.subject;
                               setSubject(tpl.subject);
@@ -1011,15 +984,11 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
                                     applyTemplate();
                                   }
                                 }}
-                                style={{
-                                  display: "flex", alignItems: "center", padding: "8px",
-                                  borderBottom: "1px solid var(--color-border)", cursor: "pointer",
-                                  fontSize: "12px",
-                                }}
+                                className="menu-item compose-template-item"
                               >
-                                <div style={{ flex: 1, overflow: "hidden" }}>
-                                  <div style={{ fontWeight: 500 }}>{tpl.name}</div>
-                                  <div style={{ color: "var(--color-text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tpl.subject}</div>
+                                <div className="compose-template-item__text">
+                                  <div className="compose-template-item__name">{tpl.name}</div>
+                                  <div className="compose-template-item__subject">{tpl.subject}</div>
                                 </div>
                                 <IconButton
                                   variant="danger"
@@ -1046,12 +1015,10 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
                                 />
                               </li>
                             );
-                          })}
-                        </ul>
-                      )}
-                    </div>
+                      })}
+                    </ul>
                   )}
-                </div>
+                </Popover>
               </div>
               <div className="compose-toolbar-divider" />
 
@@ -1064,16 +1031,15 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
                   <MarkdownToolbar textareaRef={textareaRef} onInsert={setRawSource} source={rawSource} />
                 )}
                 {editorMode === "html" && (
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => setHtmlPreview((v) => !v)}
-                    aria-pressed={htmlPreview}
-                    title={htmlPreview ? t("compose.mode.hidePreview", "Hide preview") : t("compose.mode.showPreview", "Show preview")}
-                    className={`compose-toolbar-text-button${htmlPreview ? " is-active" : ""}`}
+                    pressed={htmlPreview}
+                    icon={htmlPreview ? <EyeOff size={14} /> : <Eye size={14} />}
                   >
-                    {htmlPreview ? <EyeOff size={13} /> : <Eye size={13} />}
                     {htmlPreview ? t("compose.mode.hidePreview", "Hide preview") : t("compose.mode.showPreview", "Show preview")}
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>
@@ -1090,21 +1056,21 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
           {attachments.length > 0 && (
             <div className="compose-inline-panel">
               {attachments.map((att, i) => (
-                <div key={i} style={{
-                  display: "flex", alignItems: "center", gap: "4px",
-                  padding: "2px 2px 2px 8px", borderRadius: "var(--radius-sm)",
-                  backgroundColor: "var(--color-bg-hover)", fontSize: "var(--font-sm)",
-                }}>
-                  <FileText size={12} />
-                  <span style={{ maxWidth: "150px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{att.name}</span>
-                  <span style={{ color: "var(--color-text-secondary)", fontSize: "11px" }}>
+                <div key={i} className="chip chip--md compose-attachment-chip">
+                  <FileText size={12} aria-hidden="true" />
+                  <span className="compose-attachment-chip__name">{att.name}</span>
+                  <span className="compose-attachment-chip__size">
                     {att.size < 1024 * 1024 ? `${(att.size / 1024).toFixed(0)} KB` : `${(att.size / (1024 * 1024)).toFixed(1)} MB`}
                   </span>
-                  <IconButton
+                  <button
+                    type="button"
+                    className="chip__remove"
                     onClick={() => removeAttachment(att)}
-                    label={t("compose.removeAttachment", "Remove attachment {{name}}", { name: att.name })}
-                    icon={<X size={12} />}
-                  />
+                    aria-label={t("compose.removeAttachment", "Remove attachment {{name}}", { name: att.name })}
+                    title={t("compose.removeAttachment", "Remove attachment {{name}}", { name: att.name })}
+                  >
+                    <X size={11} aria-hidden="true" />
+                  </button>
                 </div>
               ))}
             </div>
@@ -1117,11 +1083,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
                 type="text" value={templateName} onChange={(e) => setTemplateName(e.target.value)}
                 placeholder={t("compose.templateName", "Template name")}
                 autoFocus
-                style={{
-                  flex: 1, padding: "6px 8px", fontSize: "var(--font-sm)",
-                  border: "1px solid var(--color-border)", borderRadius: "var(--radius-md)",
-                  backgroundColor: "var(--color-bg)", color: "var(--color-text-primary)",
-                }}
+                className="input input--sm compose-template-name"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && templateName.trim()) {
                     void handleSaveTemplate();
@@ -1224,17 +1186,18 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
               )}
               {quotedReplyHtml && (
                 <div className="compose-quoted-reply">
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     className="compose-quoted-reply-toggle"
                     aria-expanded={showQuotedReply}
                     onClick={() => setShowQuotedReply((value) => !value)}
+                    icon={showQuotedReply ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                   >
-                    {showQuotedReply ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                     {showQuotedReply
                       ? t("compose.hideQuotedReply", "Hide quoted message")
                       : t("compose.showQuotedReply", "Show quoted message")}
-                  </button>
+                  </Button>
                   {showQuotedReply && (
                     <div
                       className="compose-quoted-reply-content"

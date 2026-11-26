@@ -143,19 +143,10 @@ export default function SidebarClassic({ collapsed: sidebarCollapsed }: { collap
       className="app-sidebar"
       aria-label={t("sidebar.navigation", "Sidebar")}
       onContextMenu={handleSidebarContextMenu}
-      style={{
-        width: sidebarCollapsed ? "48px" : "200px",
-        flexShrink: 0,
-        backgroundColor: "var(--color-sidebar-bg)",
-        borderRight: "1px solid var(--color-border)",
-        display: "flex",
-        flexDirection: "column",
-        height: "100%",
-        overflow: "hidden",
-      }}
+      style={{ width: sidebarCollapsed ? "48px" : "200px", flexShrink: 0 }}
     >
       {/* Search button */}
-      <nav aria-label={t("sidebar.search", "Search")} style={{ padding: "8px 6px 0", display: "flex", flexDirection: "column", gap: "1px" }}>
+      <nav aria-label={t("sidebar.search", "Search")} className="sidebar-nav sidebar-nav--top">
         <SidebarButton
           icon={<Search size={16} />}
           label={t("search.title", "Search")}
@@ -167,21 +158,14 @@ export default function SidebarClassic({ collapsed: sidebarCollapsed }: { collap
 
       {/* Section label */}
       {!sidebarCollapsed && (
-        <div style={{
-          padding: "12px 10px 4px 10px",
-          fontSize: "var(--font-xs)",
-          fontWeight: 600,
-          color: "var(--color-text-secondary)",
-          textTransform: "uppercase",
-          letterSpacing: "0.5px",
-        }}>
+        <div className="sidebar-section-label">
           {t("sidebar.mail", "Mail")}
         </div>
       )}
 
       {/* Account switcher */}
       {!sidebarCollapsed && accounts.length > 0 && (
-        <div style={{ padding: "0 10px 8px" }}>
+        <div className="sidebar-account-switcher">
           <select
             aria-label={t("settings.emailAccounts", "Email Accounts")}
             value={activeAccountId || ALL_ACCOUNTS_SELECT_VALUE}
@@ -189,16 +173,7 @@ export default function SidebarClassic({ collapsed: sidebarCollapsed }: { collap
               setActiveAccountId(e.target.value === ALL_ACCOUNTS_SELECT_VALUE ? null : e.target.value);
               setActiveFolderId(null);
             }}
-            style={{
-              width: "100%",
-              padding: "6px 10px",
-              fontSize: "13px",
-              borderRadius: "8px",
-              border: "1.5px solid color-mix(in srgb, var(--color-accent) 50%, var(--color-border))",
-              backgroundColor: "color-mix(in srgb, var(--color-accent) 6%, transparent)",
-              color: "var(--color-text-primary)",
-              cursor: "pointer",
-            }}
+            className="select"
           >
             <option value={ALL_ACCOUNTS_SELECT_VALUE}>
               {t("sidebar.allAccounts", "All accounts")}
@@ -214,16 +189,8 @@ export default function SidebarClassic({ collapsed: sidebarCollapsed }: { collap
 
       {/* Folders section */}
       <nav
-        className="scroll-region sidebar-folder-scroll"
+        className="scroll-region sidebar-folder-scroll sidebar-nav sidebar-nav--folders"
         aria-label={t("sidebar.mailFolders", "Mail folders")}
-        style={{
-          flex: 1,
-          overflowY: "auto",
-          padding: "0 6px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "1px",
-        }}
       >
         {hasRealFolders
           ? dedupedFolders.flatMap((folder) => {
@@ -283,23 +250,12 @@ export default function SidebarClassic({ collapsed: sidebarCollapsed }: { collap
       </nav>
 
       {/* Divider */}
-      <div
-        style={{
-          height: "1px",
-          backgroundColor: "var(--color-border)",
-          margin: "0 6px",
-        }}
-      />
+      <div className="sidebar-divider" />
 
       {/* Bottom nav: Contacts + Snoozed + Kanban + Settings */}
       <nav
         aria-label={t("sidebar.tools", "Tools")}
-        style={{
-          padding: "6px 6px 8px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "1px",
-        }}
+        className="sidebar-nav sidebar-nav--bottom"
       >
         <SidebarButton
           icon={<ContactRound size={16} />}

@@ -331,12 +331,7 @@ export default function StatusBar() {
 
   return (
     <footer
-      className="status-bar flex items-center text-xs border-t gap-3"
-      style={{
-        backgroundColor: "var(--color-statusbar-bg)",
-        borderColor: "var(--color-border)",
-        color: "var(--color-text-secondary)",
-      }}
+      className="status-bar flex items-center gap-3"
     >
       {networkStatus === "offline" ? (
         // The offline banner above the content announces the state; this is a

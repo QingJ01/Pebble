@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { Account, Folder } from "@/lib/api";
 import { FolderManagementModal } from "@/components/FolderManagementButton";
 import ContextMenu, { type ContextMenuPosition } from "@/components/ContextMenu";
+import { buttonClassName } from "@/components/ui/Button";
 import "./sidebar-folder-management.css";
 
 interface Args {
@@ -60,7 +61,7 @@ export function useSidebarFolderManagement({ accounts, folders, accountId }: Arg
       <button
         ref={keyboardButtonRef}
         type="button"
-        className="sidebar-keyboard-only-action"
+        className={buttonClassName("secondary", "sm", "sidebar-keyboard-only-action")}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") event.stopPropagation();
         }}

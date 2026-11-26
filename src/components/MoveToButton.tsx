@@ -98,11 +98,11 @@ function MovePicker({messages,onMoved,onClose,open = true}: {messages: MoveMessa
       finally {setBusy(false);}
     }}>
       {context?.provider === "pop3" && <p>{t("folderManagement.pop3Local", "POP3 folders and moves are stored on this device only.")}</p>}
-      {needsSource && <label>{t("folderManagement.source", "Source folder")}<select disabled={busy || !!result} value={sourceId} onChange={(e) => {setSource(e.target.value);setTarget("");}}>
+      {needsSource && <label>{t("folderManagement.source", "Source folder")}<select className="select" disabled={busy || !!result} value={sourceId} onChange={(e) => {setSource(e.target.value);setTarget("");}}>
         <option value="">{t("folderManagement.chooseSource", "Choose the label to remove")}</option>
         {folderTree(commonSources).map(({folder,path}) => <option key={folder.id} value={folder.id}>{path}</option>)}
       </select></label>}
-      <label>{t("folderManagement.destination", "Destination")}<select disabled={busy || loading || !!hasError || !!result} value={target} onChange={(e) => setTarget(e.target.value)}>
+      <label>{t("folderManagement.destination", "Destination")}<select className="select" disabled={busy || loading || !!hasError || !!result} value={target} onChange={(e) => setTarget(e.target.value)}>
         <option value="">{t("folderManagement.chooseFolder", "Choose a folder")}</option>
         {destinations.map(({folder,path,depth}) => <option key={folder.id} value={folder.id} disabled={targetDisabled(folder)}>{"　".repeat(depth)}{path}{folder.remote_id.startsWith("__local_") ? ` (${t("folderManagement.localOnly", "On this device")})` : ""}</option>)}
       </select></label>

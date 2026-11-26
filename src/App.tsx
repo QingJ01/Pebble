@@ -23,18 +23,12 @@ class ErrorBoundary extends Component<
   render() {
     if (this.state.error) {
       return (
-        <div style={{
-          display: "flex", flexDirection: "column", alignItems: "center",
-          justifyContent: "center", height: "100vh", gap: 16, padding: 24,
-          fontFamily: "var(--font-sans)",
-          color: "var(--color-text-primary)",
-          backgroundColor: "var(--color-bg)",
-        }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>{i18next.t("errorBoundary.title", "Something went wrong")}</h2>
-          <p style={{ margin: 0, fontSize: 14, color: "var(--color-text-secondary)" }}>
+        <div className="error-state error-state--app">
+          <h2 className="error-state__title">{i18next.t("errorBoundary.title", "Something went wrong")}</h2>
+          <p className="error-state__description">
             {i18next.t("errorBoundary.appDescription", "Pebble ran into an unexpected error. Reload to continue; mail stored on this device is not affected.")}
           </p>
-          <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", alignItems: "center", gap: 8, marginTop: 8 }}>
+          <div className="error-state__actions">
             <Button variant="primary" onClick={() => window.location.reload()}>
               {i18next.t("errorBoundary.refresh", "Reload")}
             </Button>

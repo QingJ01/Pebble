@@ -170,8 +170,9 @@ describe("Sidebar folder order", () => {
     render(<Sidebar />);
 
     const selector = screen.getByRole("combobox", { name: "Email Accounts" });
-    const style = selector.getAttribute("style") ?? "";
-    expect(style).toContain("color-mix(in srgb, var(--color-accent) 6%, transparent)");
-    expect(style).not.toContain("background-color: var(--color-bg)");
+    // Styled by the shared .select class; the translucent fill over a
+    // background image comes from shell.css, not an opaque inline background.
+    expect(selector.className).toContain("select");
+    expect(selector.getAttribute("style") ?? "").not.toContain("background-color");
   });
 });

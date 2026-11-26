@@ -143,19 +143,10 @@ export default function SidebarGrouped({ collapsed: sidebarCollapsed }: { collap
       className="app-sidebar"
       aria-label={t("sidebar.navigation", "Sidebar")}
       onContextMenu={handleSidebarContextMenu}
-      style={{
-        width: sidebarCollapsed ? "48px" : "200px",
-        flexShrink: 0,
-        backgroundColor: "var(--color-sidebar-bg)",
-        borderRight: "1px solid var(--color-border)",
-        display: "flex",
-        flexDirection: "column",
-        height: "100%",
-        overflow: "hidden",
-      }}
+      style={{ width: sidebarCollapsed ? "48px" : "200px", flexShrink: 0 }}
     >
       {/* Search button */}
-      <nav aria-label={t("sidebar.search", "Search")} style={{ padding: "8px 6px 0", display: "flex", flexDirection: "column", gap: "1px" }}>
+      <nav aria-label={t("sidebar.search", "Search")} className="sidebar-nav sidebar-nav--top">
         <SidebarButton
           icon={<Search size={16} />}
           label={t("search.title", "Search")}
@@ -167,30 +158,15 @@ export default function SidebarGrouped({ collapsed: sidebarCollapsed }: { collap
 
       {/* Section label */}
       {!sidebarCollapsed && (
-        <div style={{
-          padding: "12px 10px 4px 10px",
-          fontSize: "var(--font-xs)",
-          fontWeight: 600,
-          color: "var(--color-text-secondary)",
-          textTransform: "uppercase",
-          letterSpacing: "0.5px",
-        }}>
+        <div className="sidebar-section-label">
           {t("sidebar.mail", "Mail")}
         </div>
       )}
 
       {/* Overview + per-account folder groups */}
       <nav
-        className="scroll-region sidebar-folder-scroll"
+        className="scroll-region sidebar-folder-scroll sidebar-nav sidebar-nav--folders"
         aria-label={t("sidebar.mailFolders", "Mail folders")}
-        style={{
-          flex: 1,
-          overflowY: "auto",
-          padding: "0 6px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "1px",
-        }}
       >
         {accounts.length > 0 && (
           <>
@@ -217,12 +193,7 @@ export default function SidebarGrouped({ collapsed: sidebarCollapsed }: { collap
               return (
                 <div
                   key={account.id}
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "1px",
-                    marginTop: sidebarCollapsed ? "4px" : undefined,
-                  }}
+                  className={sidebarCollapsed ? "sidebar-group sidebar-group--rail" : "sidebar-group"}
                 >
                   {!sidebarCollapsed && (
                     <button
@@ -256,7 +227,7 @@ export default function SidebarGrouped({ collapsed: sidebarCollapsed }: { collap
                         );
                       })
                     : !sidebarCollapsed && foldersFetched && (
-                        <div style={{ padding: "4px 8px", fontSize: "var(--font-sm)", color: "var(--color-text-secondary)" }}>
+                        <div className="sidebar-empty-note">
                           {t("sidebar.noFolders", "No folders yet")}
                         </div>
                       ))}
@@ -268,23 +239,12 @@ export default function SidebarGrouped({ collapsed: sidebarCollapsed }: { collap
       </nav>
 
       {/* Divider */}
-      <div
-        style={{
-          height: "1px",
-          backgroundColor: "var(--color-border)",
-          margin: "0 6px",
-        }}
-      />
+      <div className="sidebar-divider" />
 
       {/* Bottom nav: Contacts + Snoozed + Kanban + Settings */}
       <nav
         aria-label={t("sidebar.tools", "Tools")}
-        style={{
-          padding: "6px 6px 8px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "1px",
-        }}
+        className="sidebar-nav sidebar-nav--bottom"
       >
         <SidebarButton
           icon={<ContactRound size={16} />}

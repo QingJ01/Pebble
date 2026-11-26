@@ -72,14 +72,15 @@ function ToastItem({ toast }: { toast: Toast }) {
         )}
         {toast.detail && (
           <div>
-            <button
-              type="button"
+            <Button
+              variant="link"
+              size="sm"
               className="toast__detail-toggle"
               aria-expanded={showDetail}
               onClick={() => setShowDetail((v) => !v)}
             >
               {showDetail ? t("common.hideDetails", "Hide details") : t("common.showDetails", "Show details")}
-            </button>
+            </Button>
             {showDetail && <pre className="toast__detail">{toast.detail}</pre>}
           </div>
         )}
@@ -89,7 +90,6 @@ function ToastItem({ toast }: { toast: Toast }) {
           <Button
             variant="ghost"
             size="sm"
-            style={{ color: "var(--color-accent-text)", fontWeight: 600 }}
             onClick={() => {
               toast.action!.onClick();
               removeToast(toast.id);

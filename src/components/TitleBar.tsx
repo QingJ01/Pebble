@@ -22,7 +22,6 @@ export default function TitleBar() {
     <div
       data-tauri-drag-region
       className="titlebar flex items-center justify-between h-9 select-none"
-      style={{ backgroundColor: "var(--color-titlebar-bg)" }}
     >
       {/* Brand block under the native titlebar; the macOS traffic lights sit at
           the top-left corner via trafficLightPosition in tauri.conf.json. */}
@@ -35,10 +34,7 @@ export default function TitleBar() {
           draggable={false}
           className="h-5 w-5 shrink-0 bg-transparent object-contain"
         />
-        <span
-          className="text-sm font-semibold"
-          style={{ color: "var(--color-text-primary)" }}
-        >
+        <span className="titlebar__brand">
           Pebble
         </span>
       </div>

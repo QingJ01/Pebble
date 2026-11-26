@@ -7,6 +7,7 @@ import { createMailFolder, renameMailFolder, renameMailFolderNamespace, getMailF
 import { folderTree, invalidateFolderViews, renameDisabledReason } from "@/lib/folderManagement";
 import { formatError } from "@/lib/extractErrorMessage";
 import Button from "./ui/Button";
+import IconButton from "./ui/IconButton";
 import { accountOptionLabel } from "@/lib/accountIdentity";
 import FolderModal from "./FolderModal";
 import { usePresence } from "@/hooks/usePresence";
@@ -18,9 +19,9 @@ export default function FolderManagementButton(props: Props) {
   const presence = usePresence(open);
   if (!props.accounts.length) return null;
   return <>
-    <button className="folder-action-button" title={t("folderManagement.manage", "Manage folders")} aria-label={t("folderManagement.manage", "Manage folders")} onClick={() => setOpen(true)}>
-      <FolderCog size={14} aria-hidden="true"/>{!props.collapsed && t("folderManagement.manage", "Manage folders")}
-    </button>
+    {props.collapsed
+      ? <IconButton label={t("folderManagement.manage", "Manage folders")} icon={<FolderCog size={14}/>} onClick={() => setOpen(true)}/>
+      : <Button variant="ghost" size="sm" icon={<FolderCog size={14}/>} onClick={() => setOpen(true)}>{t("folderManagement.manage", "Manage folders")}</Button>}
     {presence.mounted && <FolderManager {...props} open={open} onClose={() => setOpen(false)}/>}
   </>;
 }
@@ -63,23 +64,23 @@ function FolderManager({accounts,folders,accountId,onClose,open = true}: Props &
       } catch (e) { setError(formatError(e, { fallbackKey: "folderManagement.failed", fallback: "Folder operation failed" })); }
       finally {setBusy(false);}
     }}>
-      <label>{t("folderManagement.account", "Account")}<select disabled={busy} value={account} onChange={(e) => {setAccount(e.target.value);setFolderId("");setParentId("");setName("");setError("");}}>
+      <label>{t("folderManagement.account", "Account")}<select className="select" disabled={busy} value={account} onChange={(e) => {setAccount(e.target.value);setFolderId("");setParentId("");setName("");setError("");}}>
         {accounts.map((a) => <option key={a.id} value={a.id}>{accountOptionLabel(a)}</option>)}
       </select></label>
       {provider === "pop3" && <p>{t("folderManagement.pop3Local", "POP3 folders and moves are stored on this device only.")}</p>}
-      <label>{t("folderManagement.action", "Action")}<select disabled={busy} value={mode} onChange={(e) => {setMode(e.target.value);setName("");setError("");}}>
+      <label>{t("folderManagement.action", "Action")}<select className="select" disabled={busy} value={mode} onChange={(e) => {setMode(e.target.value);setName("");setError("");}}>
         <option value="create">{t("folderManagement.create", "New folder")}</option>
         <option value="rename">{t("folderManagement.rename", "Rename folder")}</option>
       </select></label>
-      {mode === "create" ? <label>{t("folderManagement.parent", "Parent folder")}<select disabled={busy} value={parentId} onChange={(e) => setParentId(e.target.value)}>
+      {mode === "create" ? <label>{t("folderManagement.parent", "Parent folder")}<select className="select" disabled={busy} value={parentId} onChange={(e) => setParentId(e.target.value)}>
         <option value="">{t("folderManagement.root", "Account root")}</option>
         {provider==="imap" ? serverParents.filter((p)=>p.delimiter).map((p)=><option key={p.remote_id} value={p.remote_id}>{p.name}</option>) : folderTree(parentFolders).map(({folder,path,depth}) => <option key={folder.id} value={folder.id}>{"　".repeat(depth)}{path}</option>)}
-      </select></label> : <label>{t("folderManagement.folder", "Folder")}<select disabled={busy} value={folderId} onChange={(e) => {setFolderId(e.target.value);const f=accountFolders.find((f) => f.id===e.target.value);const p=serverParents.find((p)=>p.remote_id===f?.remote_id||`namespace:${p.remote_id}`===e.target.value);setName(p ? p.name.split(p.delimiter||"/").pop()??"" : provider==="gmail" ? f?.name.split('/').pop()??"" : f?.name??"");setError("");}}>
+      </select></label> : <label>{t("folderManagement.folder", "Folder")}<select className="select" disabled={busy} value={folderId} onChange={(e) => {setFolderId(e.target.value);const f=accountFolders.find((f) => f.id===e.target.value);const p=serverParents.find((p)=>p.remote_id===f?.remote_id||`namespace:${p.remote_id}`===e.target.value);setName(p ? p.name.split(p.delimiter||"/").pop()??"" : provider==="gmail" ? f?.name.split('/').pop()??"" : f?.name??"");setError("");}}>
         <option value="">{t("folderManagement.chooseFolder", "Choose a folder")}</option>
         {entries.map(({folder,path}) => <option key={folder.id} value={folder.id}>{path}</option>)}
         {serverParents.filter((p)=>!p.selectable).map((p)=><option key={p.remote_id} value={`namespace:${p.remote_id}`}>{p.name}</option>)}
       </select></label>}
-      <label>{t("folderManagement.name", "Name")}<input required aria-required="true" disabled={busy || !!disabledReason} value={name} onChange={(e) => setName(e.target.value)} maxLength={255} autoComplete="off"/></label>
+      <label>{t("folderManagement.name", "Name")}<input className="input" required aria-required="true" disabled={busy || !!disabledReason} value={name} onChange={(e) => setName(e.target.value)} maxLength={255} autoComplete="off"/></label>
       {disabledReason && <p>{t(disabledReason)}</p>}
       {(parentError || foldersError) && <p role="alert">{t("folderManagement.loadFailed", "Could not load folders. Check your account and try again.")}</p>}
       {error && <p role="alert">{error}</p>}

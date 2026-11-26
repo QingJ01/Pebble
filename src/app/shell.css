@@ -5,11 +5,18 @@
 /* Hairline between the title bar and the content row (chrome vs canvas). */
 .titlebar {
   border-bottom: 1px solid var(--color-border);
+  background-color: var(--color-chrome-bg);
+}
+.titlebar__brand {
+  color: var(--color-text-primary);
+  font-size: var(--font-md);
+  font-weight: var(--weight-semibold);
 }
 
 /* ─── Title bar window controls ─── */
+/* Window controls follow the OS convention (wider than tall), full bar height. */
 .titlebar-btn {
-  height: 36px;
+  height: var(--control-lg);
   width: 44px;
   display: inline-flex;
   align-items: center;
@@ -27,17 +34,56 @@
 
 /* ─── Sidebar ─── */
 .app-sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  border-right: 1px solid var(--color-border);
+  background-color: var(--color-chrome-bg);
   user-select: none;
   -webkit-user-select: none;
 }
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--space-2);
+}
+.sidebar-nav--top { padding-top: var(--space-2); }
+.sidebar-nav--folders { flex: 1; overflow-y: auto; }
+.sidebar-nav--bottom { padding-top: var(--space-1); padding-bottom: var(--space-2); }
+.sidebar-divider {
+  height: 1px;
+  margin: 0 var(--space-2);
+  background-color: var(--color-divider);
+}
+/* Section / group labels: 11/600 secondary, aligned with row content. */
+.sidebar-section-label {
+  padding: var(--space-3) var(--space-4) var(--space-1);
+  color: var(--color-text-secondary);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.sidebar-account-switcher { padding: 0 var(--space-2) var(--space-2); }
+.sidebar-group { display: flex; flex-direction: column; }
+.sidebar-group--rail { margin-top: var(--space-1); }
+.sidebar-empty-note {
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-sm);
+}
+
+/* Rows: 32px, 4/8 padding; selected = neutral fill (never accent). */
 .sidebar-btn {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   width: 100%;
-  min-height: 30px;
-  padding: 6px 10px;
+  min-height: var(--control-md);
+  padding: var(--space-1) var(--space-2);
   border: none;
   border-radius: var(--radius-md);
   background: transparent;
@@ -48,14 +94,17 @@
   cursor: pointer;
   transition: background-color var(--dur-fast) var(--ease-out);
 }
-.sidebar-btn--indent { padding-left: 26px; }
-.sidebar-btn--rail { justify-content: center; padding: 7px; }
+/* Indented rows line their icon up with the group header label. */
+.sidebar-btn--indent { padding-left: var(--space-6); }
+.sidebar-btn--rail { justify-content: center; padding: var(--space-2); }
 .sidebar-btn:hover:not(:disabled) { background: var(--color-fill-hover); }
 .sidebar-btn:active:not(:disabled) { background: var(--color-fill-pressed); }
 .sidebar-btn.is-active,
 .sidebar-btn.is-active:hover { background: var(--color-fill-selected); }
+.sidebar-btn.is-active { font-weight: var(--weight-medium); }
 .sidebar-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
-.sidebar-btn__icon { display: inline-flex; flex-shrink: 0; }
+.sidebar-btn__icon { display: inline-flex; flex-shrink: 0; color: var(--color-text-secondary); }
+.sidebar-btn.is-active .sidebar-btn__icon { color: var(--color-text-primary); }
 .sidebar-btn__label {
   flex: 1;
   min-width: 0;
@@ -63,18 +112,20 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Unread: the count is neutral; accent is kept for the unread dot only
+   (rail + mail rows), so a folder never shows two orange signals. */
 .sidebar-btn__badge {
-  min-width: 18px;
+  min-width: var(--space-5);
+  color: var(--color-text-secondary);
   font-size: var(--font-xs);
-  font-weight: 600;
-  color: var(--color-accent-text);
+  font-weight: var(--weight-semibold);
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 .sidebar-btn__dot {
   position: absolute;
-  top: 6px;
-  right: 6px;
+  top: var(--space-1);
+  right: var(--space-1);
   width: 6px;
   height: 6px;
   border-radius: var(--radius-full);
@@ -83,19 +134,19 @@
 .sidebar-group-header {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-1);
   width: 100%;
-  min-height: 28px;
-  margin-top: 4px;
-  padding: 6px 8px;
+  min-height: var(--control-sm);
+  margin-top: var(--space-1);
+  padding: 0 var(--space-2);
   border: none;
   border-radius: var(--radius-md);
   background: transparent;
   color: var(--color-text-secondary);
   font: inherit;
   font-size: var(--font-xs);
-  font-weight: 600;
-  letter-spacing: .3px;
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
   text-align: left;
   cursor: pointer;
 }
@@ -104,9 +155,13 @@
 
 /* ─── Status bar ─── */
 .status-bar {
-  height: 30px;
+  height: var(--control-sm);
   flex-shrink: 0;
-  padding: 0 4px 0 12px;
+  padding: 0 var(--space-1) 0 var(--space-3);
+  border-top: 1px solid var(--color-border);
+  background-color: var(--color-chrome-bg);
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
   user-select: none;
   -webkit-user-select: none;
 }
@@ -121,7 +176,7 @@
 .app-shell > .compose-fab,
 .compose-fab {
   position: fixed;
-  right: 24px;
+  right: var(--space-6);
   z-index: 100;
   display: flex;
   align-items: center;
@@ -130,13 +185,13 @@
   border-radius: var(--radius-full);
   background: var(--color-accent-strong);
   color: var(--color-on-accent);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, .2);
+  box-shadow: var(--shadow-toast);
   cursor: pointer;
   transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
 }
 .compose-fab:hover {
   background: var(--color-accent-strong-hover);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, .28);
+  box-shadow: var(--shadow-popover);
   transform: scale(1.06);
 }
 .compose-fab:active {
@@ -151,21 +206,23 @@
 .offline-banner {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   flex-shrink: 0;
-  padding: 6px 16px;
+  padding: var(--space-1) var(--space-4);
   background: var(--color-danger-bg);
-  border-bottom: 1px solid color-mix(in srgb, var(--color-danger) 24%, transparent);
+  border-bottom: 1px solid var(--color-border);
   color: var(--color-danger);
   font-size: var(--font-sm);
 }
+
+.offline-banner__title { font-weight: var(--weight-semibold); }
 
 /* ─── View loading fallback (shown only after a short delay) ─── */
 .view-loading {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: var(--space-2);
   height: 100%;
   color: var(--color-text-secondary);
   font-size: var(--font-base);
@@ -204,3 +261,9 @@
 .list-row-hover { transition: background-color var(--dur-fast) var(--ease-out); }
 .list-row-hover:hover { background-color: var(--color-fill-hover); }
 .list-row-hover:active { background-color: var(--color-fill-pressed); }
+
+/* Over a background image the account switcher stays translucent (the chrome
+   behind it is translucent too). Chevron is kept via background-image. */
+.app-shell--with-background .sidebar-account-switcher .select {
+  background-color: var(--color-fill-hover);
+}
