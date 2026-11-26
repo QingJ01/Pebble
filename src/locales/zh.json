@@ -102,7 +102,12 @@
     "tools": "工具",
     "overview": "总览",
     "noFolders": "暂无文件夹",
-    "allAccounts": "全部账户"
+    "allAccounts": "全部账户",
+    "accounts": "账户",
+    "accountUnread": "{{name}}，{{count}} 封未读",
+    "switchAccount": "切换账户",
+    "switchAccountCurrent": "切换账户（当前：{{name}}）",
+    "moreFolders": "更多文件夹"
   },
   "inbox": {
     "searchPlaceholder": "搜索邮件…",

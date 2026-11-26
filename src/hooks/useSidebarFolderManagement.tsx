@@ -22,6 +22,8 @@ export function useSidebarFolderManagement({ accounts, folders, accountId }: Arg
   const { t } = useTranslation();
   const [menuPosition, setMenuPosition] = useState<ContextMenuPosition | null>(null);
   const [managerOpen, setManagerOpen] = useState(false);
+  // Account preselected in the manager when it is opened for one account (rail menu).
+  const [managerAccountId, setManagerAccountId] = useState<string | null>(null);
   const keyboardButtonRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
 
@@ -52,6 +54,7 @@ export function useSidebarFolderManagement({ accounts, folders, accountId }: Arg
           icon: <FolderCog size={14} />,
           onSelect: () => {
             keyboardButtonRef.current?.focus();
+            setManagerAccountId(null);
             setManagerOpen(true);
           },
         }]}
@@ -65,7 +68,7 @@ export function useSidebarFolderManagement({ accounts, folders, accountId }: Arg
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") event.stopPropagation();
         }}
-        onClick={() => setManagerOpen(true)}
+        onClick={() => { setManagerAccountId(null); setManagerOpen(true); }}
       >
         {menuLabel}
       </button>
@@ -74,11 +77,17 @@ export function useSidebarFolderManagement({ accounts, folders, accountId }: Arg
       <FolderManagementModal
         accounts={accounts}
         folders={folders}
-        accountId={accountId}
+        accountId={managerAccountId ?? accountId}
         onClose={() => setManagerOpen(false)}
       />
     )}
   </>;
 
-  return { handleContextMenu, overlay };
+  /** Open the folder manager directly, preselecting `forAccountId` when given. */
+  function openManager(forAccountId?: string | null) {
+    setManagerAccountId(forAccountId ?? null);
+    setManagerOpen(true);
+  }
+
+  return { handleContextMenu, overlay, openManager };
 }

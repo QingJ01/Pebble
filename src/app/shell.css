@@ -66,9 +66,20 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.sidebar-account-switcher { padding: 0 var(--space-2) var(--space-2); }
+.sidebar-account-switcher {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2) var(--space-2);
+}
+.sidebar-account-switcher .select { flex: 1; min-width: 0; }
+.sidebar-account-switcher__badge {
+  display: inline-flex;
+  flex: none;
+  padding-left: var(--space-2);
+  color: var(--color-text-secondary);
+}
 .sidebar-group { display: flex; flex-direction: column; }
-.sidebar-group--rail { margin-top: var(--space-1); }
 .sidebar-empty-note {
   padding: var(--space-1) var(--space-2);
   color: var(--color-text-tertiary);
@@ -96,7 +107,13 @@
 }
 /* Indented rows line their icon up with the group header label. */
 .sidebar-btn--indent { padding-left: var(--space-6); }
-.sidebar-btn--rail { justify-content: center; padding: var(--space-2); }
+.sidebar-btn--rail {
+  flex: none;
+  justify-content: center;
+  width: var(--control-md);
+  height: var(--control-md);
+  padding: 0;
+}
 .sidebar-btn:hover:not(:disabled) { background: var(--color-fill-hover); }
 .sidebar-btn:active:not(:disabled) { background: var(--color-fill-pressed); }
 .sidebar-btn.is-active,
@@ -152,6 +169,94 @@
 }
 .sidebar-group-header:hover { background: var(--color-fill-hover); }
 .sidebar-group-header:active { background: var(--color-fill-pressed); }
+
+/* ─── Collapsed rail (48px) ───
+   Fixed top group (search, overview, starred) / divider / scrolling middle
+   (account badges, or the classic account switcher + its folders) / divider /
+   fixed bottom group (tools). Every entry is a 32px square centred in the
+   rail; dividers get the same 8px above and below. */
+.app-sidebar--rail {
+  width: 48px;
+  flex-shrink: 0;
+  align-items: center;
+}
+.sidebar-rail__section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-1) 0;
+}
+.sidebar-rail__section--top { flex: none; padding-top: var(--space-2); }
+.sidebar-rail__section--bottom { flex: none; padding-bottom: var(--space-2); }
+/* Only the middle scrolls when the window is short. The scrollbar is hidden
+   so the 32px column stays centred; wheel, trackpad and focus still scroll. */
+.sidebar-rail__section--middle {
+  flex: 1 1 auto;
+  /* Always room for at least one account button. */
+  min-height: calc(var(--control-md) + var(--space-2));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+.sidebar-rail__section--middle::-webkit-scrollbar { display: none; }
+.sidebar-rail__divider {
+  flex: none;
+  width: var(--space-6);
+  height: 1px;
+  margin: var(--space-1) 0;
+  background-color: var(--color-divider);
+}
+/* Account buttons: the badge is the face; selection is the badge ring, so the
+   button itself never takes the selected fill. */
+.sidebar-btn--account.is-active,
+.sidebar-btn--account.is-active:hover { background: transparent; }
+.sidebar-btn--account .account-badge.is-selected {
+  box-shadow: 0 0 0 2px var(--color-chrome-bg), 0 0 0 3px color-mix(in srgb, var(--account-color) 80%, var(--color-text-primary));
+}
+.sidebar-btn--rail .sidebar-btn__dot { top: var(--space-1); right: var(--space-1); }
+
+/* Rail menus (account folders, account switcher, more folders). */
+.sidebar-rail-menu { max-width: 280px; }
+.sidebar-rail-menu__header {
+  display: flex;
+  min-width: 0;
+}
+.sidebar-rail-menu__header-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-rail-menu__icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--color-text-secondary);
+}
+.sidebar-rail-menu__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-rail-menu__count {
+  margin-left: auto;
+  padding-left: var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.sidebar-rail-menu__item.is-current,
+.sidebar-rail-menu__item.is-current:hover { background: var(--color-fill-selected); font-weight: var(--weight-medium); }
+.sidebar-rail-menu__item.is-current .sidebar-rail-menu__icon { color: var(--color-text-primary); }
+.sidebar-rail-menu__empty {
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-sm);
+}
 
 /* ─── Status bar ─── */
 .status-bar {
