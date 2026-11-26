@@ -163,7 +163,10 @@ fn should_notify_with_cache(
     Ok(stored.folder_ids.iter().any(|id| inboxes.contains(id)))
 }
 
-fn new_mail_notification_body(stored: &pebble_mail::StoredMessage) -> String {
+fn new_mail_notification_body(
+    stored: &pebble_mail::StoredMessage,
+    labels: &notifications::NotificationLabels,
+) -> String {
     let sender = if stored.message.from_name.trim().is_empty() {
         stored.message.from_address.trim()
     } else {
@@ -172,7 +175,7 @@ fn new_mail_notification_body(stored: &pebble_mail::StoredMessage) -> String {
     let subject = stored.message.subject.trim();
 
     match (sender.is_empty(), subject.is_empty()) {
-        (true, true) => "New message".to_string(),
+        (true, true) => labels.new_message_fallback.clone(),
         (true, false) => subject.to_string(),
         (false, true) => sender.to_string(),
         (false, false) => format!("{sender}: {subject}"),
@@ -209,9 +212,10 @@ fn open_message_from_notification(app: &tauri::AppHandle, account_id: &str, mess
     all(not(windows), not(target_os = "linux"), not(target_os = "macos"))
 ))]
 fn show_default_new_mail_notification(app: &tauri::AppHandle, body: &str) -> Result<(), String> {
+    let labels = notifications::notification_labels();
     app.notification()
         .builder()
-        .title("Pebble - New Mail")
+        .title(&labels.new_mail_title)
         .body(body)
         .show()
         .map_err(|e| e.to_string())
@@ -225,14 +229,15 @@ fn show_linux_new_mail_notification(
     message_id: &str,
 ) -> Result<(), String> {
     notifications::ensure_notification_environment(app)?;
+    let labels = notifications::notification_labels();
 
     let mut notification = notify_rust::Notification::new();
     notification
-        .summary("Pebble - New Mail")
+        .summary(&labels.new_mail_title)
         .body(body)
         .appname("Pebble")
         .auto_icon()
-        .action("default", "Open");
+        .action("default", &labels.open_action);
 
     let handle = notification.show().map_err(|e| e.to_string())?;
     let app_handle = app.clone();
@@ -276,6 +281,7 @@ fn show_macos_new_mail_notification(
     let account_id = account_id.to_string();
     let message_id = message_id.to_string();
     let body = body.to_string();
+    let labels = notifications::notification_labels();
     let app_id = if tauri::is_dev() {
         "com.apple.Terminal".to_string()
     } else {
@@ -288,9 +294,11 @@ fn show_macos_new_mail_notification(
             let _ = mac_notification_sys::set_application(&app_id);
             let mut notification = mac_notification_sys::Notification::new();
             notification
-                .title("Pebble - New Mail")
+                .title(&labels.new_mail_title)
                 .message(&body)
-                .main_button(mac_notification_sys::MainButton::SingleAction("Open"))
+                .main_button(mac_notification_sys::MainButton::SingleAction(
+                    &labels.open_action,
+                ))
                 .wait_for_click(true);
 
             match notification.send() {
@@ -313,14 +321,15 @@ fn show_windows_new_mail_notification(
     message_id: &str,
 ) -> Result<(), String> {
     notifications::ensure_notification_environment(app)?;
+    let labels = notifications::notification_labels();
     let app_handle = app.clone();
     let account_id = account_id.to_string();
     let message_id = message_id.to_string();
     tauri_winrt_notification::Toast::new(&notifications::windows_notification_app_id(app))
-        .title("Pebble - New Mail")
+        .title(&labels.new_mail_title)
         .text1(body)
         .duration(tauri_winrt_notification::Duration::Short)
-        .add_button("Open", NOTIFICATION_OPEN_ACTION)
+        .add_button(&labels.open_action, NOTIFICATION_OPEN_ACTION)
         .on_activated(move |action| {
             if action
                 .as_deref()
@@ -385,7 +394,10 @@ struct NotifyItem {
 /// Decide which toasts to show for one flush: per account, up to
 /// [`MAX_INDIVIDUAL_NOTIFICATIONS`] individual toasts, otherwise a single
 /// summary that opens the newest message. Returns `(body, account, message)`.
-fn plan_notifications(items: Vec<NotifyItem>) -> Vec<(String, String, String)> {
+fn plan_notifications(
+    items: Vec<NotifyItem>,
+    labels: &notifications::NotificationLabels,
+) -> Vec<(String, String, String)> {
     let mut by_account: Vec<(String, Vec<NotifyItem>)> = Vec::new();
     for item in items {
         match by_account
@@ -407,7 +419,7 @@ fn plan_notifications(items: Vec<NotifyItem>) -> Vec<(String, String, String)> {
             list.sort_by_key(|item| item.date);
             let newest = list.last().expect("non-empty");
             toasts.push((
-                format!("{} new messages — latest: {}", list.len(), newest.body),
+                labels.summary(list.len(), &newest.body),
                 account_id,
                 newest.message_id.clone(),
             ));
@@ -426,7 +438,12 @@ fn send_planned_notifications(app: &tauri::AppHandle, items: Vec<NotifyItem>) {
     if !notifications_enabled {
         return;
     }
-    for (body, account_id, message_id) in plan_notifications(items) {
+    // The user is already looking at Pebble: the list refresh is the signal.
+    if notifications::main_window_has_focus(app) {
+        return;
+    }
+    let labels = notifications::notification_labels();
+    for (body, account_id, message_id) in plan_notifications(items, &labels) {
         if let Err(e) = show_new_mail_notification(app, &body, &account_id, &message_id) {
             warn!("Failed to show new mail notification: {e}");
         }
@@ -597,6 +614,7 @@ fn process_flush_window(
 ) -> FlushOutcome {
     let mut outcome = FlushOutcome::default();
     let mut inbox_cache = InboxFolderCache::default();
+    let labels = notifications::notification_labels();
     // account_id -> (newest stored message, union of folder ids)
     let mut per_account: Vec<(String, usize, Vec<String>)> = Vec::new();
 
@@ -626,7 +644,7 @@ fn process_flush_window(
             Ok(true) => outcome.notifications.push(NotifyItem {
                 account_id: account_id.clone(),
                 message_id: stored.message.id.clone(),
-                body: new_mail_notification_body(stored),
+                body: new_mail_notification_body(stored, &labels),
                 date: stored.message.date,
             }),
             Ok(false) => {}
@@ -1157,7 +1175,10 @@ mod rule_writeback_tests {
             (0..50).map(|i| item("bulk", &format!("b{i}"), i)).collect();
         items.push(item("quiet", "q1", 5));
         items.push(item("quiet", "q2", 6));
-        let toasts = plan_notifications(items);
+        let toasts = plan_notifications(
+            items,
+            &crate::commands::notifications::NotificationLabels::default(),
+        );
         assert_eq!(toasts.len(), 3);
         assert_eq!(toasts[0].1, "bulk");
         assert_eq!(toasts[0].2, "b49", "summary opens the newest message");

@@ -1,7 +1,8 @@
 use crate::state::AppState;
 use pebble_core::PebbleError;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::atomic::Ordering;
+use std::sync::RwLock;
 use tauri::image::Image;
 use tauri::{AppHandle, Manager, Runtime, State};
 #[cfg(not(windows))]
@@ -9,7 +10,105 @@ use tauri_plugin_notification::NotificationExt;
 use tracing::warn;
 
 const TRAY_DEFAULT_TOOLTIP: &str = "Pebble";
-const TRAY_ATTENTION_TOOLTIP: &str = "Pebble - New mail";
+
+/// User-facing notification and tray strings, localized by the frontend (like
+/// the tray menu labels) and pushed with `set_notification_labels`. Until the
+/// frontend reports in, English defaults are used.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct NotificationLabels {
+    /// Title of a new-mail notification.
+    pub new_mail_title: String,
+    /// Body used when a message has neither sender nor subject.
+    pub new_message_fallback: String,
+    /// Summary body for a burst of mail; `{n}` = count, `{latest}` = newest message.
+    pub new_mail_summary: String,
+    /// Label of the "open" action button.
+    pub open_action: String,
+    /// Title of a snooze-reminder notification.
+    pub snoozed_title: String,
+    pub test_title: String,
+    pub test_body: String,
+    /// Tray tooltip while unread new mail is waiting.
+    pub tray_attention_tooltip: String,
+}
+
+impl Default for NotificationLabels {
+    fn default() -> Self {
+        Self {
+            new_mail_title: "Pebble - New mail".to_string(),
+            new_message_fallback: "New message".to_string(),
+            new_mail_summary: "{n} new messages — latest: {latest}".to_string(),
+            open_action: "Open".to_string(),
+            snoozed_title: "Pebble - Snoozed message".to_string(),
+            test_title: "Pebble - Test notification".to_string(),
+            test_body: "Desktop notifications are working.".to_string(),
+            tray_attention_tooltip: "Pebble - New mail".to_string(),
+        }
+    }
+}
+
+impl NotificationLabels {
+    /// Fill the burst-summary template.
+    pub fn summary(&self, count: usize, latest: &str) -> String {
+        self.new_mail_summary
+            .replace("{n}", &count.to_string())
+            .replace("{latest}", latest)
+    }
+
+    /// Replace blank fields with the English defaults so a partial update can
+    /// never produce an empty notification title.
+    fn or_defaults(mut self) -> Self {
+        let defaults = Self::default();
+        let fields = [
+            (&mut self.new_mail_title, defaults.new_mail_title),
+            (
+                &mut self.new_message_fallback,
+                defaults.new_message_fallback,
+            ),
+            (&mut self.new_mail_summary, defaults.new_mail_summary),
+            (&mut self.open_action, defaults.open_action),
+            (&mut self.snoozed_title, defaults.snoozed_title),
+            (&mut self.test_title, defaults.test_title),
+            (&mut self.test_body, defaults.test_body),
+            (
+                &mut self.tray_attention_tooltip,
+                defaults.tray_attention_tooltip,
+            ),
+        ];
+        for (field, default) in fields {
+            if field.trim().is_empty() {
+                *field = default;
+            }
+        }
+        self
+    }
+}
+
+static NOTIFICATION_LABELS: RwLock<Option<NotificationLabels>> = RwLock::new(None);
+
+/// Current localized notification strings (English until the frontend sets them).
+pub fn notification_labels() -> NotificationLabels {
+    NOTIFICATION_LABELS
+        .read()
+        .ok()
+        .and_then(|labels| labels.clone())
+        .unwrap_or_default()
+}
+
+fn store_notification_labels(labels: NotificationLabels) {
+    if let Ok(mut slot) = NOTIFICATION_LABELS.write() {
+        *slot = Some(labels.or_defaults());
+    }
+}
+
+/// True while the main window is visible and focused: the user is already
+/// looking at Pebble, so new-mail toasts and the tray badge are redundant.
+pub fn main_window_has_focus<R: Runtime>(app: &AppHandle<R>) -> bool {
+    app.get_webview_window("main")
+        .map(|window| window.is_visible().unwrap_or(false) && window.is_focused().unwrap_or(false))
+        .unwrap_or(false)
+}
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[cfg_attr(test, derive(ts_rs::TS))]
@@ -195,13 +294,7 @@ pub fn tray_attention_icon(base: &Image<'_>) -> Image<'static> {
 }
 
 fn should_mark_attention<R: Runtime>(app: &AppHandle<R>) -> bool {
-    app.get_webview_window("main")
-        .map(|window| {
-            let visible = window.is_visible().unwrap_or(false);
-            let focused = window.is_focused().unwrap_or(false);
-            !(visible && focused)
-        })
-        .unwrap_or(true)
+    !main_window_has_focus(app)
 }
 
 pub fn mark_attention_indicator<R: Runtime>(app: &AppHandle<R>) {
@@ -237,9 +330,9 @@ fn set_attention_indicator<R: Runtime>(app: &AppHandle<R>, active: bool) {
         }
 
         let tooltip = if active {
-            TRAY_ATTENTION_TOOLTIP
+            notification_labels().tray_attention_tooltip
         } else {
-            TRAY_DEFAULT_TOOLTIP
+            TRAY_DEFAULT_TOOLTIP.to_string()
         };
         let _ = tray.set_tooltip(Some(tooltip));
     }
@@ -282,12 +375,26 @@ pub async fn show_test_notification(
         ));
     }
 
-    show_desktop_notification(
-        &app,
-        "Pebble - Test Notification",
-        "Desktop notifications are working.",
-    )
-    .map_err(PebbleError::Internal)
+    let labels = notification_labels();
+    show_desktop_notification(&app, &labels.test_title, &labels.test_body)
+        .map_err(PebbleError::Internal)
+}
+
+/// Localized notification/tray strings from the frontend (see `useTrayI18n`).
+#[tauri::command]
+pub async fn set_notification_labels(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    labels: NotificationLabels,
+) -> std::result::Result<(), PebbleError> {
+    store_notification_labels(labels);
+    // Refresh a tooltip that is already showing the attention text.
+    if state.notification_attention_active.load(Ordering::SeqCst) {
+        if let Some(tray) = app.tray_by_id("main") {
+            let _ = tray.set_tooltip(Some(notification_labels().tray_attention_tooltip));
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -314,6 +421,31 @@ mod tests {
         assert!(!status.attention_active);
         assert_eq!(status.platform, "windows");
         assert_eq!(status.app_id.as_deref(), Some("com.qingj01.pebble"));
+    }
+
+    #[test]
+    fn notification_labels_fill_summary_template() {
+        let labels = NotificationLabels {
+            new_mail_summary: "{n} 封新邮件，最新：{latest}".to_string(),
+            ..NotificationLabels::default()
+        };
+        assert_eq!(labels.summary(5, "Ann: Hi"), "5 封新邮件，最新：Ann: Hi");
+        assert_eq!(
+            NotificationLabels::default().summary(4, "x"),
+            "4 new messages — latest: x"
+        );
+    }
+
+    #[test]
+    fn notification_labels_blank_fields_fall_back_to_defaults() {
+        let labels = NotificationLabels {
+            new_mail_title: "  ".to_string(),
+            snoozed_title: "稍后提醒".to_string(),
+            ..NotificationLabels::default()
+        }
+        .or_defaults();
+        assert_eq!(labels.new_mail_title, "Pebble - New mail");
+        assert_eq!(labels.snoozed_title, "稍后提醒");
     }
 
     #[test]
