@@ -14,9 +14,15 @@ import {
   Clock,
   Star,
   ContactRound,
+  Layers,
+  FolderOpen,
+  FolderCog,
+  Users,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import SidebarButton from "./SidebarButton";
+import SidebarRail, { RailMenuButton, type RailMenuItem } from "./SidebarRail";
+import AccountBadge, { accountShortName } from "./ui/AccountBadge";
 import { useUIStore } from "../stores/ui.store";
 import { isComposeDirty, useComposeStore } from "../stores/compose.store";
 import { useMailStore } from "../stores/mail.store";
@@ -75,7 +81,7 @@ export default function SidebarClassic({ collapsed: sidebarCollapsed }: { collap
   );
   const { data: folders = EMPTY_FOLDERS, isFetched: foldersFetched } = useFoldersForAccountsQuery(folderAccountIds);
   const { data: unreadCounts = {} } = useFolderUnreadCountsForAccounts(folderAccountIds);
-  const { handleContextMenu: handleSidebarContextMenu, overlay: folderManagementOverlay } = useSidebarFolderManagement({ accounts, folders, accountId: activeAccountId });
+  const { handleContextMenu: handleSidebarContextMenu, overlay: folderManagementOverlay, openManager } = useSidebarFolderManagement({ accounts, folders, accountId: activeAccountId });
   const ROLE_LABELS: Record<string, string> = {
     inbox: t("sidebar.inbox"),
     sent: t("sidebar.sent"),
@@ -125,6 +131,11 @@ export default function SidebarClassic({ collapsed: sidebarCollapsed }: { collap
     setActiveView(view);
   }
 
+  function switchAccount(accountId: string | null) {
+    setActiveAccountId(accountId);
+    setActiveFolderId(null);
+  }
+
   async function handleFolderClick(folderId: string) {
     if (isComposeDirty()) {
       useComposeStore.setState({
@@ -138,41 +149,181 @@ export default function SidebarClassic({ collapsed: sidebarCollapsed }: { collap
   }
 
 
+  const toolsButtons = (
+    <>
+      <SidebarButton
+        icon={<ContactRound size={16} />}
+        label={t("sidebar.contacts", "Contacts")}
+        isActive={activeView === "contacts"}
+        collapsed={sidebarCollapsed}
+        onClick={() => safeSetActiveView("contacts")}
+      />
+      <SidebarButton
+        icon={<Clock size={16} />}
+        label={t("sidebar.snoozed", "Snoozed")}
+        isActive={activeView === "snoozed"}
+        collapsed={sidebarCollapsed}
+        onClick={() => safeSetActiveView("snoozed")}
+      />
+      <SidebarButton
+        icon={<LayoutGrid size={16} />}
+        label={t("sidebar.kanban", "Kanban")}
+        isActive={activeView === "kanban"}
+        collapsed={sidebarCollapsed}
+        onClick={() => safeSetActiveView("kanban")}
+      />
+      <SidebarButton
+        icon={<Settings size={16} />}
+        label={t("sidebar.settings", "Settings")}
+        isActive={activeView === "settings"}
+        collapsed={sidebarCollapsed}
+        onClick={() => safeSetActiveView("settings")}
+      />
+    </>
+  );
+
+  const searchButton = (
+    <SidebarButton
+      icon={<Search size={16} />}
+      label={t("search.title", "Search")}
+      isActive={activeView === "search"}
+      collapsed={sidebarCollapsed}
+      onClick={() => safeSetActiveView("search")}
+    />
+  );
+
+  const starredButton = (
+    <SidebarButton
+      key="__starred__"
+      icon={<Star size={16} />}
+      label={t("sidebar.starred", "Starred")}
+      isActive={activeView === "starred"}
+      collapsed={sidebarCollapsed}
+      onClick={() => safeSetActiveView("starred")}
+    />
+  );
+
+  if (sidebarCollapsed) {
+    const activeAccount = accounts.find((account) => account.id === activeAccountId) ?? null;
+    const allAccountsLabel = t("sidebar.allAccounts", "All accounts");
+    const currentName = activeAccount ? accountShortName(activeAccount) : allAccountsLabel;
+    // Only the current account's system folders sit on the rail; custom
+    // folders go behind one "More folders" menu so the rail stays short.
+    const mainFolders = dedupedFolders.filter((folder) => folder.role);
+    const otherFolders = dedupedFolders.filter((folder) => !folder.role);
+    const folderItem = (folder: FolderType): RailMenuItem => ({
+      id: folder.id,
+      icon: folderIcon(folder.role),
+      label: folderLabel(folder),
+      count: showUnread ? unreadCountForFolder(folder.id, folders, unreadCounts) : undefined,
+      current: folder.id === activeFolderId && activeView === "inbox",
+      onSelect: () => handleFolderClick(folder.id),
+    });
+    const switcherItems: RailMenuItem[] = accounts.map((account) => ({
+      id: account.id,
+      icon: <AccountBadge account={account} size="xs" />,
+      label: accountOptionLabel(account),
+      current: account.id === activeAccountId,
+      onSelect: () => switchAccount(account.id),
+    }));
+    // "Overview" is the classic sidebar's all-accounts mailbox.
+    const overviewButton = accounts.length > 1 && (
+      <SidebarButton
+        icon={<Layers size={16} />}
+        label={t("sidebar.overview", "Overview")}
+        isActive={!activeAccountId && activeView === "inbox"}
+        collapsed
+        onClick={() => {
+          if (activeAccountId) switchAccount(null);
+          setActiveView("inbox");
+        }}
+      />
+    );
+    return (
+      <SidebarRail
+        label={t("sidebar.navigation", "Sidebar")}
+        topLabel={t("sidebar.mail", "Mail")}
+        top={<>{searchButton}{overviewButton}{starredButton}</>}
+        middleLabel={t("sidebar.mailFolders", "Mail folders")}
+        middle={accounts.length > 0 && (
+          <>
+            <RailMenuButton
+              className="sidebar-btn--account"
+              face={activeAccount
+                ? <AccountBadge account={activeAccount} size="md" />
+                : <span className="sidebar-btn__icon" aria-hidden="true"><Users size={16} /></span>}
+              label={t("sidebar.switchAccountCurrent", "Switch account (current: {{name}})", { name: currentName })}
+              title={currentName}
+              menuLabel={t("sidebar.switchAccount", "Switch account")}
+              items={switcherItems}
+            />
+            {mainFolders.map((folder) => (
+              <SidebarButton
+                key={folder.id}
+                icon={folderIcon(folder.role)}
+                label={folderLabel(folder)}
+                badge={showUnread ? unreadCountForFolder(folder.id, folders, unreadCounts) : undefined}
+                isActive={folder.id === activeFolderId && activeView === "inbox"}
+                collapsed
+                onClick={() => handleFolderClick(folder.id)}
+              />
+            ))}
+            {(otherFolders.length > 0 || hasRealFolders) && (
+              <RailMenuButton
+                face={<span className="sidebar-btn__icon" aria-hidden="true"><FolderOpen size={16} /></span>}
+                label={t("sidebar.moreFolders", "More folders")}
+                isActive={otherFolders.some((folder) => folder.id === activeFolderId) && activeView === "inbox"}
+                menuLabel={t("sidebar.moreFolders", "More folders")}
+                items={otherFolders.map(folderItem)}
+                emptyNote={t("sidebar.noFolders", "No folders yet")}
+                footerItems={[{
+                  id: "__manage__",
+                  icon: <FolderCog size={16} />,
+                  label: t("folderManagement.manage", "Manage folders"),
+                  onSelect: () => openManager(activeAccountId),
+                }]}
+              />
+            )}
+          </>
+        )}
+        bottomLabel={t("sidebar.tools", "Tools")}
+        bottom={toolsButtons}
+        onContextMenu={handleSidebarContextMenu}
+      >
+        {folderManagementOverlay}
+      </SidebarRail>
+    );
+  }
+
+  const activeAccountForSwitcher = accounts.find((account) => account.id === activeAccountId) ?? null;
+
   return (
     <aside
       className="app-sidebar"
       aria-label={t("sidebar.navigation", "Sidebar")}
       onContextMenu={handleSidebarContextMenu}
-      style={{ width: sidebarCollapsed ? "48px" : "200px", flexShrink: 0 }}
+      style={{ width: "200px", flexShrink: 0 }}
     >
-      {/* Search button */}
       <nav aria-label={t("sidebar.search", "Search")} className="sidebar-nav sidebar-nav--top">
-        <SidebarButton
-          icon={<Search size={16} />}
-          label={t("search.title", "Search")}
-          isActive={activeView === "search"}
-          collapsed={sidebarCollapsed}
-          onClick={() => safeSetActiveView("search")}
-        />
+        {searchButton}
       </nav>
 
-      {/* Section label */}
-      {!sidebarCollapsed && (
-        <div className="sidebar-section-label">
-          {t("sidebar.mail", "Mail")}
-        </div>
-      )}
+      <div className="sidebar-section-label">
+        {t("sidebar.mail", "Mail")}
+      </div>
 
       {/* Account switcher */}
-      {!sidebarCollapsed && accounts.length > 0 && (
+      {accounts.length > 0 && (
         <div className="sidebar-account-switcher">
+          <span className="sidebar-account-switcher__badge" aria-hidden="true">
+            {activeAccountForSwitcher
+              ? <AccountBadge account={activeAccountForSwitcher} size="xs" />
+              : <Layers size={16} />}
+          </span>
           <select
             aria-label={t("settings.emailAccounts", "Email Accounts")}
             value={activeAccountId || ALL_ACCOUNTS_SELECT_VALUE}
-            onChange={(e) => {
-              setActiveAccountId(e.target.value === ALL_ACCOUNTS_SELECT_VALUE ? null : e.target.value);
-              setActiveFolderId(null);
-            }}
+            onChange={(e) => switchAccount(e.target.value === ALL_ACCOUNTS_SELECT_VALUE ? null : e.target.value)}
             className="select"
           >
             <option value={ALL_ACCOUNTS_SELECT_VALUE}>
@@ -195,27 +346,15 @@ export default function SidebarClassic({ collapsed: sidebarCollapsed }: { collap
         {hasRealFolders
           ? dedupedFolders.flatMap((folder) => {
               const items: React.ReactNode[] = [];
-              if (folder.role === "drafts") {
-                items.push(
-                  <SidebarButton
-                    key="__starred__"
-                    icon={<Star size={16} />}
-                    label={t("sidebar.starred", "Starred")}
-                    isActive={activeView === "starred"}
-                    collapsed={sidebarCollapsed}
-                    onClick={() => safeSetActiveView("starred")}
-                  />
-                );
-              }
-              const isActive = folder.id === activeFolderId && activeView === "inbox";
+              if (folder.role === "drafts") items.push(starredButton);
               items.push(
                 <SidebarButton
                   key={folder.id}
                   icon={folderIcon(folder.role)}
                   label={folderLabel(folder)}
                   badge={showUnread ? unreadCountForFolder(folder.id, folders, unreadCounts) : undefined}
-                  isActive={isActive}
-                  collapsed={sidebarCollapsed}
+                  isActive={folder.id === activeFolderId && activeView === "inbox"}
+                  collapsed={false}
                   onClick={() => handleFolderClick(folder.id)}
                 />
               );
@@ -223,25 +362,14 @@ export default function SidebarClassic({ collapsed: sidebarCollapsed }: { collap
             })
           : DEFAULT_FOLDERS.flatMap((df, index) => {
               const items: React.ReactNode[] = [];
-              if (df.role === "drafts") {
-                items.push(
-                  <SidebarButton
-                    key="__starred__"
-                    icon={<Star size={16} />}
-                    label={t("sidebar.starred", "Starred")}
-                    isActive={activeView === "starred"}
-                    collapsed={sidebarCollapsed}
-                    onClick={() => safeSetActiveView("starred")}
-                  />
-                );
-              }
+              if (df.role === "drafts") items.push(starredButton);
               items.push(
                 <SidebarButton
                   key={df.role}
                   icon={ROLE_ICONS[df.role] || <Folder size={16} />}
                   label={t(df.labelKey)}
                   isActive={index === 0 && activeView === "inbox"}
-                  collapsed={sidebarCollapsed}
+                  collapsed={false}
                   onClick={() => safeSetActiveView("inbox")}
                 />
               );
@@ -249,7 +377,6 @@ export default function SidebarClassic({ collapsed: sidebarCollapsed }: { collap
             })}
       </nav>
 
-      {/* Divider */}
       <div className="sidebar-divider" />
 
       {/* Bottom nav: Contacts + Snoozed + Kanban + Settings */}
@@ -257,34 +384,7 @@ export default function SidebarClassic({ collapsed: sidebarCollapsed }: { collap
         aria-label={t("sidebar.tools", "Tools")}
         className="sidebar-nav sidebar-nav--bottom"
       >
-        <SidebarButton
-          icon={<ContactRound size={16} />}
-          label={t("sidebar.contacts", "Contacts")}
-          isActive={activeView === "contacts"}
-          collapsed={sidebarCollapsed}
-          onClick={() => safeSetActiveView("contacts")}
-        />
-        <SidebarButton
-          icon={<Clock size={16} />}
-          label={t("sidebar.snoozed", "Snoozed")}
-          isActive={activeView === "snoozed"}
-          collapsed={sidebarCollapsed}
-          onClick={() => safeSetActiveView("snoozed")}
-        />
-        <SidebarButton
-          icon={<LayoutGrid size={16} />}
-          label={t("sidebar.kanban", "Kanban")}
-          isActive={activeView === "kanban"}
-          collapsed={sidebarCollapsed}
-          onClick={() => safeSetActiveView("kanban")}
-        />
-        <SidebarButton
-          icon={<Settings size={16} />}
-          label={t("sidebar.settings", "Settings")}
-          isActive={activeView === "settings"}
-          collapsed={sidebarCollapsed}
-          onClick={() => safeSetActiveView("settings")}
-        />
+        {toolsButtons}
       </nav>
       {folderManagementOverlay}
     </aside>

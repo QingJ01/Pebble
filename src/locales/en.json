@@ -103,7 +103,12 @@
     "tools": "Tools",
     "overview": "Overview",
     "noFolders": "No folders yet",
-    "allAccounts": "All accounts"
+    "allAccounts": "All accounts",
+    "accounts": "Accounts",
+    "accountUnread": "{{name}}, {{count}} unread",
+    "switchAccount": "Switch account",
+    "switchAccountCurrent": "Switch account (current: {{name}})",
+    "moreFolders": "More folders"
   },
   "inbox": {
     "searchPlaceholder": "Search mail…",

@@ -86,6 +86,11 @@ function folder(id: string, accountId: string, role: Folder["role"]): Folder {
   };
 }
 
+/** Visible label of a sidebar row, without the decorative account badge. */
+function buttonLabel(button: HTMLElement) {
+  return button.querySelector(".sidebar-btn__label")?.textContent ?? button.textContent;
+}
+
 function mailNav() {
   return screen.getByRole("navigation", { name: "Mail folders" });
 }
@@ -128,7 +133,7 @@ describe("Sidebar account groups", () => {
 
     const labels = within(mailNav())
       .getAllByRole("button")
-      .map((button) => button.textContent);
+      .map(buttonLabel);
 
     expect(labels).toEqual([
       "Overview",
@@ -192,7 +197,7 @@ describe("Sidebar account groups", () => {
 
     render(<Sidebar />);
 
-    const labels = within(mailNav()).getAllByRole("button").map((button) => button.textContent);
+    const labels = within(mailNav()).getAllByRole("button").map(buttonLabel);
     expect(labels.slice(labels.indexOf("second@example.com"))).toEqual([
       "second@example.com", "Inbox", "Sent", "Drafts", "Trash", "Spam", "Projects",
     ]);
@@ -222,7 +227,8 @@ describe("Sidebar account groups", () => {
     mocks.folders.push(folder("Projects", "account-2", null));
 
     render(<Sidebar />);
-    fireEvent.click(screen.getByRole("button", { name: "second@example.com · Projects" }));
+    fireEvent.click(screen.getByRole("button", { name: "second@example.com" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Projects" }));
 
     await waitFor(() => {
       expect(useMailStore.getState().activeAccountId).toBe("account-2");
@@ -239,10 +245,12 @@ describe("Sidebar account groups", () => {
       removeEventListener: () => {},
     })) as unknown as typeof window.matchMedia;
     try {
-      render(<Sidebar />);
+      const { container } = render(<Sidebar />);
       expect(useUIStore.getState().sidebarCollapsed).toBe(false);
-      // Rail mode: labels move into accessible names/tooltips, headers disappear.
-      expect(screen.queryByRole("button", { name: "user@example.com" })).toBeNull();
+      // Rail mode: group headers disappear, accounts become menu buttons and
+      // labels move into accessible names/tooltips.
+      expect(container.querySelector(".sidebar-group-header")).toBeNull();
+      expect(screen.getByRole("button", { name: "user@example.com" }).getAttribute("aria-haspopup")).toBe("menu");
       expect(screen.getByRole("button", { name: "Settings" }).getAttribute("title")).toBe("Settings");
     } finally {
       window.matchMedia = original;
