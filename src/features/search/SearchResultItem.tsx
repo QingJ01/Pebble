@@ -37,7 +37,8 @@ interface Props {
 export default function SearchResultItem({ hit, message, isSelected, onClick, query = "", tabIndex = 0, onRowFocus, account }: Props) {
   const { t, i18n } = useTranslation();
   const subject = hit.subject || message?.subject || hit.snippet || t("common.noSubject");
-  const from = hit.from_address || message?.from_address || "";
+  // Sender name like the message list, falling back to the address.
+  const from = hit.from_name || message?.from_name || hit.from_address || message?.from_address || "";
   const date = (hit.date || message?.date) ? formatListDate(hit.date || message!.date, i18n?.language) : "";
 
   return (

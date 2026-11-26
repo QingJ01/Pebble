@@ -147,6 +147,12 @@
   font-size: var(--font-md);
   text-align: center;
 }
+/* Under the Back toolbar (error / not found): fill the rest of the pane. */
+.message-detail-container > .reader-state {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+}
 
 .reader-state--error {
   color: var(--color-danger);

@@ -398,6 +398,19 @@ describe("mail actions with undo", () => {
     await first;
   });
 
+  it("offers no Undo when a message had several labels (Undo would restore only one)", async () => {
+    mocks.listFolders.mockResolvedValue([...FOLDERS, { ...folder("work", null), is_system: false }]);
+    mocks.getMailMoveContext.mockImplementation(async (_account: string, ids: string[]) => ({
+      provider: "gmail",
+      folder_ids_by_message: Object.fromEntries(ids.map((id) => [id, ["inbox", "work"]])),
+    }));
+
+    await runMailAction(client, "archive", [message("m1")]);
+
+    expect(mocks.archiveMessage).toHaveBeenCalledWith("m1");
+    expect(lastToast().action).toBeUndefined();
+  });
+
   it("marks spam with undo back to the original folder", async () => {
     await runMailAction(client, "spam", [message("m1")], { spamFolderId: "spam" });
 

@@ -55,6 +55,8 @@ interface Origin {
   id: string;
   accountId: string;
   sourceFolderId: string;
+  /** The message was in more than one folder/label (e.g. Gmail labels). */
+  multiFolder: boolean;
 }
 
 export interface MailActionPlan {
@@ -158,7 +160,11 @@ async function captureOrigins(
         for (const id of ids) {
           const memberships = context?.folder_ids_by_message?.[id] ?? [];
           const source = memberships.find((folderId) => viewFolderIds.includes(folderId)) ?? memberships[0];
-          if (source) origins.set(id, { id, accountId, sourceFolderId: source });
+          // Category labels (Gmail Promotions…) aren't folders the user files into.
+          const folders = foldersByAccount.get(accountId) ?? [];
+          const realMemberships = memberships.filter((folderId) =>
+            folders.find((f) => f.id === folderId)?.folder_type !== "category");
+          if (source) origins.set(id, { id, accountId, sourceFolderId: source, multiFolder: realMemberships.length > 1 });
         }
       } catch {
         // No origin → no undo for these messages; the action itself still works.
@@ -200,7 +206,11 @@ export async function planMailAction(
     return foldersByAccount.get(message.account_id)?.find((f) => f.id === origin.sourceFolderId)?.role ?? null;
   };
 
-  let undoable = messages.length > 0 && messages.every((m) => origins.has(m.id));
+  // Archive/trash/spam keep only the target folder locally (the store drops
+  // every other membership), so Undo could bring back one label of a
+  // multi-label message: no Undo for those rather than a lossy one.
+  let undoable = messages.length > 0
+    && messages.every((m) => origins.has(m.id) && !origins.get(m.id)!.multiFolder);
   let permanent = false;
   let mixedPermanent = false;
 

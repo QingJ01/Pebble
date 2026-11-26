@@ -1,7 +1,7 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message, PrivacyMode, RenderedHtml } from "../../src/lib/api";
-import { clearMessageCache, useMessageLoader } from "../../src/hooks/useMessageLoader";
+import { clearMessageCache, revalidateMessage, useMessageLoader } from "../../src/hooks/useMessageLoader";
 import { getMessageWithHtml, getRenderedHtml } from "../../src/lib/api";
 
 vi.mock("../../src/lib/api", () => ({
@@ -200,5 +200,14 @@ describe("useMessageLoader", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.message).toBeNull();
     expect(result.current.isStale).toBe(false);
+  });
+  it("switches an open message to not-found when a revalidation finds it gone", async () => {
+    vi.mocked(getMessageWithHtml).mockResolvedValueOnce([makeMessage(), makeRendered()]);
+    const { result } = renderHook(() => useMessageLoader("message-1", "Strict"));
+    await waitFor(() => expect(result.current.message?.id).toBe("message-1"));
+
+    vi.mocked(getMessageWithHtml).mockResolvedValueOnce(null);
+    act(() => revalidateMessage("message-1"));
+    await waitFor(() => expect(result.current.message).toBeNull());
   });
 });

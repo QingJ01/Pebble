@@ -50,6 +50,7 @@ mod tests {
             snippet: String::new(),
             subject: None,
             from_address: None,
+            from_name: None,
             date: None,
             account_id: None,
         }

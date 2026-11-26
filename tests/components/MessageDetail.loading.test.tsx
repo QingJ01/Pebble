@@ -135,4 +135,11 @@ describe("MessageDetail loading (D3)", () => {
     view.rerender(<MessageDetail messageId="m2" onBack={vi.fn()} />);
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Back" }));
   });
+  it("keeps a Back button when the message is not found", () => {
+    const onBack = vi.fn();
+    loaderState.current = { message: null, loading: false, isStale: false };
+    render(<MessageDetail messageId="gone" onBack={onBack} />);
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(onBack).toHaveBeenCalled();
+  });
 });

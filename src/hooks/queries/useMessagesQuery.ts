@@ -49,6 +49,8 @@ export function useMessagesQuery(
     hasNextPage: query.hasNextPage,
     isFetchingNextPage: query.isFetchingNextPage,
     fetchNextPage: query.fetchNextPage,
+    /** Changes whenever the list data changes (for effects keyed on it). */
+    dataUpdatedAt: query.dataUpdatedAt,
   };
 }
 

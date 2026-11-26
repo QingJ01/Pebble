@@ -219,18 +219,36 @@ export default function MessageDetail({ messageId, onBack, onReopen, folderRole 
     return <div aria-busy="true" className="reader-state" />;
   }
 
+  // Error and not-found states keep a Back button: the user needs a way out.
+  const backOnlyToolbar = (
+    <div className="reader-toolbar">
+      <IconButton
+        size="md"
+        label={t("compose.back", "Back")}
+        icon={<ArrowLeft size={16} />}
+        onClick={onBack}
+      />
+    </div>
+  );
+
   if (error) {
     return (
-      <div role="alert" className="reader-state reader-state--error" title={errorInfo?.detail || error}>
-        {errorInfo?.title ?? t("common.messageLoadFailed", "Failed to load message")}
+      <div className="message-detail-container">
+        {backOnlyToolbar}
+        <div role="alert" className="reader-state reader-state--error" title={errorInfo?.detail || error}>
+          {errorInfo?.title ?? t("common.messageLoadFailed", "Failed to load message")}
+        </div>
       </div>
     );
   }
 
   if (!message) {
     return (
-      <div className="reader-state">
-        {t("common.messageNotFound", "Message not found")}
+      <div className="message-detail-container">
+        {backOnlyToolbar}
+        <div className="reader-state">
+          {t("common.messageNotFound", "Message not found")}
+        </div>
       </div>
     );
   }

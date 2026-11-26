@@ -50,6 +50,7 @@
         "center": true,
         "visible": false,
         "backgroundColor": "#1a1a1a",
+        "hiddenTitle": true,
         "trafficLightPosition": { "x": 12, "y": 12 }
       }
     ]

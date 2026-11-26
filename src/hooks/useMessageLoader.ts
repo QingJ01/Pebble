@@ -56,6 +56,17 @@ export function prefetchMessage(id: string, mode: PrivacyMode): Promise<void> {
   return fetchEntry(id, mode).then(() => undefined, () => undefined);
 }
 
+const revalidateListeners = new Set<(id: string) => void>();
+
+/**
+ * Ask any open reader showing `id` to reload it now (e.g. it vanished from the
+ * list after a sync or an outside delete). A reader whose message no longer
+ * exists switches to "not found" instead of showing stale content.
+ */
+export function revalidateMessage(id: string) {
+  for (const listener of revalidateListeners) listener(id);
+}
+
 /** Drop cached messages (tests; or after bulk changes such as account removal). */
 export function clearMessageCache(id?: string) {
   if (id) cache.delete(id);
@@ -104,6 +115,33 @@ export function useMessageLoader(messageId: string | null, privacyMode: PrivacyM
       return value;
     });
   }, []);
+
+  // Reload on request (revalidateMessage) while this message is open.
+  useEffect(() => {
+    if (!messageId) return;
+    let cancelled = false;
+    const listener = (id: string) => {
+      if (id !== messageId) return;
+      const mode = privacyModeRef.current;
+      fetchEntry(id, mode).then((entry) => {
+        if (cancelled) return;
+        if (!entry) {
+          cache.delete(id);
+          setMessageState(null);
+          setRendered(null);
+          renderedKeyRef.current = null;
+          return;
+        }
+        setMessageState(entry.message);
+        if (renderedKeyRef.current === entry.renderKey) setRendered(entry.rendered);
+      }, () => { /* keep what is shown; the next action reports errors */ });
+    };
+    revalidateListeners.add(listener);
+    return () => {
+      cancelled = true;
+      revalidateListeners.delete(listener);
+    };
+  }, [messageId]);
 
   // Load message when messageId changes
   useEffect(() => {

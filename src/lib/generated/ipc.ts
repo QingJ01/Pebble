@@ -124,7 +124,11 @@ export type RenderedHtml = { html: string, trackers_blocked: Array<TrackerInfo>,
 
 export type Rule = { id: string, name: string, priority: number, conditions: string, actions: string, is_enabled: boolean, created_at: number, updated_at: number, };
 
-export type SearchHit = { message_id: string, score: number, snippet: string, subject?: string, from_address?: string, date?: number, 
+export type SearchHit = { message_id: string, score: number, snippet: string, subject?: string, from_address?: string, 
+/**
+ * Sender display name, when the message has one.
+ */
+from_name?: string, date?: number, 
 /**
  * Owning account, filled in from the store after the index search.
  */

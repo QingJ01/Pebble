@@ -26,6 +26,7 @@ import { useAccountBadges, withResolvedColors } from "@/hooks/useAccountBadges";
 import AccountFilterBar from "./AccountFilterBar";
 import type { ThreadSummary } from "@/lib/api";
 import { clearActiveMailList, setActiveMailList } from "@/lib/activeMailList";
+import { revalidateMessage } from "@/hooks/useMessageLoader";
 
 const EMPTY_THREADS: ThreadSummary[] = [];
 
@@ -78,6 +79,7 @@ export default function InboxView() {
     hasNextPage,
     isFetchingNextPage,
     fetchNextPage,
+    dataUpdatedAt: messagesUpdatedAt,
   } = useMessagesQuery(
     threadView ? null : queryFolderId,
     threadView ? undefined : queryFolderIds,
@@ -93,6 +95,14 @@ export default function InboxView() {
     setActiveMailList(threadView ? { messages: null, threads } : { messages, threads: null });
   });
   useEffect(() => clearActiveMailList, []);
+
+  // The open message left the list without the user acting on it (sync, an
+  // outside delete): have the reader re-check it instead of showing it stale.
+  // Keyed on the list's update time, so it runs once per list change.
+  useEffect(() => {
+    if (threadView || loadingMessages || !selectedMessageId || !messagesUpdatedAt) return;
+    if (!messages.some((m) => m.id === selectedMessageId)) revalidateMessage(selectedMessageId);
+  }, [messagesUpdatedAt, selectedMessageId, loadingMessages, threadView]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleLoadMore = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) fetchNextPage();

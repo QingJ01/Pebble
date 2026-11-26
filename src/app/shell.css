@@ -8,7 +8,8 @@
   background-color: var(--color-chrome-bg);
 }
 /* macOS overlay title bar: keep the brand clear of the traffic lights
-   (three 12px buttons from x=8 with 8px gaps ≈ 68px, plus breathing room). */
+   (trafficLightPosition x=12 in tauri.conf.json; three buttons end near
+   x≈66, plus breathing room). The native title is hidden (hiddenTitle). */
 .titlebar--mac { padding-left: 72px; }
 
 .titlebar__brand {
