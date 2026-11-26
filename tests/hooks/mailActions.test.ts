@@ -36,7 +36,7 @@ vi.mock("i18next", () => ({
   },
 }));
 
-import { executeMailAction, planMailAction, runMailAction } from "../../src/hooks/mutations/mailActions";
+import { executeMailAction, moveMessagesWithUndo, planMailAction, runMailAction } from "../../src/hooks/mutations/mailActions";
 import { useToastStore } from "../../src/stores/toast.store";
 import { useMailStore } from "../../src/stores/mail.store";
 
@@ -229,5 +229,58 @@ describe("mail actions with undo", () => {
     await runMailAction(client, "archive", [message("m1")]);
 
     expect(lastToast().action).toBeUndefined();
+  });
+  it("moves to a folder and undoes back to the chosen source folder", async () => {
+    const result = await moveMessagesWithUndo(client, {
+      accountId: "acc",
+      messageIds: ["m1", "m2"],
+      sourceFolderId: "inbox",
+      targetFolderId: "projects",
+      targetFolderName: "Projects",
+    });
+
+    expect(result.moved_ids).toEqual(["m1", "m2"]);
+    expect(mocks.moveMailMessages).toHaveBeenCalledWith("acc", ["m1", "m2"], "inbox", "projects");
+    const toast = lastToast();
+    expect(toast.type).toBe("success");
+    expect(toast.message).toMatch(/^Moved to/);
+    expect(toast.action?.label).toBe("Undo");
+
+    toast.action!.onClick();
+    await vi.waitFor(() =>
+      expect(mocks.moveMailMessages).toHaveBeenLastCalledWith("acc", ["m1", "m2"], "projects", "inbox"));
+    await vi.waitFor(() => expect(lastToast().message).toBe("Undone"));
+    // A single-folder undo of "Move to" never falls back to move_to_folder.
+    expect(mocks.moveToFolder).not.toHaveBeenCalled();
+  });
+
+  it("undoes only the moved messages, each back to its own folder", async () => {
+    mocks.moveMailMessages.mockResolvedValueOnce({
+      moved_ids: ["m1", "m2"],
+      failures: [{ message_id: "m3", error: "busy" }],
+    });
+
+    await moveMessagesWithUndo(client, {
+      accountId: "acc",
+      messageIds: ["m1", "m2", "m3"],
+      sourceFolderId: null,
+      targetFolderId: "projects",
+      sourceByMessage: { m1: "inbox", m2: "archive", m3: "inbox" },
+    });
+
+    lastToast().action!.onClick();
+    await vi.waitFor(() => expect(mocks.moveMailMessages).toHaveBeenCalledTimes(3));
+    expect(mocks.moveMailMessages).toHaveBeenCalledWith("acc", ["m1"], "projects", "inbox");
+    expect(mocks.moveMailMessages).toHaveBeenCalledWith("acc", ["m2"], "projects", "archive");
+  });
+
+  it("offers no undo when nothing was moved", async () => {
+    mocks.moveMailMessages.mockResolvedValueOnce({ moved_ids: [], failures: [{ message_id: "m1", error: "x" }] });
+
+    await moveMessagesWithUndo(client, {
+      accountId: "acc", messageIds: ["m1"], sourceFolderId: "inbox", targetFolderId: "projects",
+    });
+
+    expect(useToastStore.getState().toasts).toHaveLength(0);
   });
 });

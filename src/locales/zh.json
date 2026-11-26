@@ -310,6 +310,7 @@
     "confirmRemoveAccountDetail": "要从 Pebble 中移除 {{email}} 吗？此设备上的本地邮件、附件和尚未同步的更改都会被删除，服务器上的邮件不受影响。"
   },
   "cloudSync": {
+    "autoBackupConfigSaveFailed": "无法保存自动备份设置：{{error}}",
     "title": "设置备份",
     "description": "将联系人、规则、看板卡片和备注、账户元数据备份到 WebDAV。邮箱密码、OAuth tokens 和 API keys 可使用单独的备份加密密码一并备份。",
     "webdavUrl": "WebDAV 地址",
@@ -508,6 +509,7 @@
     "toggleBilingual": "切换双语对照"
   },
   "messageActions": {
+    "moreActions": "更多操作",
     "reply": "回复",
     "forward": "转发",
     "star": "标星",

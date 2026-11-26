@@ -127,11 +127,6 @@
   visibility: hidden;
 }
 
-.message-row-actions .folder-action-button {
-  min-width: 28px;
-  min-height: 28px;
-}
-
 .icon-btn.message-row-actions__star[aria-pressed="true"] {
   color: var(--color-warning);
   background: transparent;

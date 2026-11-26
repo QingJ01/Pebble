@@ -1,5 +1,8 @@
 {
   "folderManagement": {
+    "moved": "已移动",
+    "movedTo": "已移动到“{{folder}}”",
+    "moveToMenu": "移动到…",
     "manage": "管理文件夹",
     "account": "账户",
     "action": "操作",

@@ -11,7 +11,6 @@ import SnoozePopover from "../features/inbox/SnoozePopover";
 import { ShadowDomEmail } from "./ShadowDomEmail";
 import TranslatePopover from "../features/translate/TranslatePopover";
 import MessageActionToolbar from "./MessageActionToolbar";
-import MoveToButton from "./MoveToButton";
 import { useMessageLoader } from "@/hooks/useMessageLoader";
 import { useBilingualTranslation } from "@/hooks/useBilingualTranslation";
 import { defaultPrivacyMode } from "@/lib/privacyMode";
@@ -270,6 +269,7 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
             onClick={onBack}
           />
           <h2
+            title={message.subject || undefined}
             style={{
               fontSize: "16px",
               fontWeight: "600",
@@ -277,6 +277,8 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
+              flex: 1,
+              minWidth: 0,
               margin: 0,
             }}
           >
@@ -317,7 +319,6 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
           onBack={onBack}
           onMessageUpdate={setMessage}
         />
-        <div style={{ paddingLeft: "48px" }}><MoveToButton messages={[message]} showLabel onMoved={(ids) => {if (ids.includes(message.id)) onBack();}}/></div>
         <div style={{ paddingLeft: "32px" }}>
           <div
             style={{
