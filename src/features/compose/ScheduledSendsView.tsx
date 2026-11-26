@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import Button from "@/components/ui/Button";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
@@ -60,16 +61,16 @@ function ScheduledRow({ job }: { job: ControlledSend }) {
     {job.state === "draft" && <p>{t("sendControls.restored")}</p>}
     {mutable && <ScheduleTimeInput value={date} onChange={setDate} />}
     <div className="send-controls-actions">
-      {mutable && <button disabled={busy || dateInstant === null} onClick={() => void run(() => rescheduleControlledSend(job, dateInstant!))}>{t("sendControls.reschedule")}</button>}
-      {job.state !== "dispatching" && job.state !== "sent" && <button disabled={busy} onClick={() => void run(async () => {
+      {mutable && <Button size="sm" variant="primary" disabled={busy || dateInstant === null} onClick={() => void run(() => rescheduleControlledSend(job, dateInstant!))}>{t("sendControls.reschedule")}</Button>}
+      {job.state !== "dispatching" && job.state !== "sent" && <Button size="sm" disabled={busy} onClick={() => void run(async () => {
         if (!(await useConfirmStore.getState().confirm({ title: t("sendControls.edit"), message: t("sendControls.restoreWarning") }))) return;
         if (isComposeDirty()) throw new Error("Existing compose is dirty");
         const snapshot = await restoreControlledSend(job);
         if (!openSendSnapshot(snapshot)) throw new Error("Existing compose is dirty");
-      })}>{t("sendControls.edit")}</button>}
-      {(job.state === "draft" || job.state === "sent") && <button disabled={busy} onClick={() => void run(async () => {
-        if (await useConfirmStore.getState().confirm({ title: t("sendControls.remove"), message: t("sendControls.removeWarning"), destructive: true })) await deleteControlledSend(job);
-      })}>{t("sendControls.remove")}</button>}
+      })}>{t("sendControls.edit")}</Button>}
+      {(job.state === "draft" || job.state === "sent") && <Button size="sm" variant="danger" disabled={busy} onClick={() => void run(async () => {
+        if (await useConfirmStore.getState().confirm({ title: t("sendControls.remove"), message: t("sendControls.removeWarning"), confirmLabel: t("sendControls.remove"), destructive: true })) await deleteControlledSend(job);
+      })}>{t("sendControls.remove")}</Button>}
     </div>
     {error && <p role="alert">{t("sendControls.error")}</p>}
   </article>;
@@ -93,7 +94,7 @@ export default function ScheduledSendsView() {
     <h3>{t("sendControls.title")}</h3>
     <p>{t("sendControls.policy")}</p>
     <UndoSendPreference />
-    <button onClick={() => void query.refetch()}>{t("sendControls.refresh")}</button>
+    <Button size="sm" onClick={() => void query.refetch()}>{t("sendControls.refresh")}</Button>
     {query.isError && <p role="alert">{t("sendControls.loadError")}</p>}
     {query.data?.length === 0 && <p>{t("sendControls.empty")}</p>}
     {query.data?.map((job) => <ScheduledRow key={`${job.id}:${job.revision}`} job={job} />)}

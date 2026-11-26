@@ -3,6 +3,7 @@ import { Keyboard, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useShortcutStore } from "@/stores/shortcut.store";
 import { eventToKeyString } from "@/hooks/useKeyboard";
+import Button from "@/components/ui/Button";
 
 const ACTION_I18N_MAP: Record<string, string> = {
   "command-palette": "shortcuts.openCommandPalette",
@@ -32,6 +33,46 @@ const SHORTCUT_GROUPS = [
   { categoryKey: "shortcuts.mailActions", actions: ["compose-new", "reply", "reply-all", "forward", "toggle-star", "archive-message", "toggle-view-inbox", "toggle-view-kanban"] },
   { categoryKey: "shortcuts.translate", actions: ["translate-selection", "toggle-bilingual"] },
 ];
+
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent);
+
+/** Fixed (not rebindable) shortcuts that only apply inside a specific view. */
+const FIXED_SHORTCUTS: Array<{ id: string; labelKey: string; fallback: string; keys: string }> = [
+  { id: "compose-send", labelKey: "shortcuts.composeSend", fallback: "Send message (in compose)", keys: IS_MAC ? "⌘ Enter" : "Ctrl+Enter" },
+];
+
+function FixedShortcutRow({ labelKey, fallback, keys }: { labelKey: string; fallback: string; keys: string }) {
+  const { t } = useTranslation();
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "10px 16px",
+        backgroundColor: "var(--color-bg)",
+      }}
+    >
+      <span style={{ fontSize: "var(--font-base)", color: "var(--color-text-primary)" }}>{t(labelKey, fallback)}</span>
+      <kbd
+        title={t("shortcuts.fixedBinding", "This shortcut can't be changed")}
+        style={{
+          padding: "3px 8px",
+          borderRadius: "var(--radius-sm)",
+          border: "1px solid var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
+          fontSize: "var(--font-sm)",
+          fontFamily: "var(--font-mono)",
+          color: "var(--color-text-secondary)",
+          minWidth: "60px",
+          textAlign: "center",
+        }}
+      >
+        {keys}
+      </kbd>
+    </div>
+  );
+}
 
 function ShortcutRow({ actionId }: { actionId: string }) {
   const { t } = useTranslation();
@@ -121,7 +162,7 @@ function ShortcutRow({ actionId }: { actionId: string }) {
             aria-live="polite"
             style={{
               fontSize: "11px",
-              color: "var(--color-error, #e53e3e)",
+              color: "var(--color-danger)",
               minWidth: conflict ? undefined : 0,
             }}
           >
@@ -150,15 +191,15 @@ function ShortcutRow({ actionId }: { actionId: string }) {
               padding: "3px 8px",
               borderRadius: "4px",
               border: isRecording
-                ? "1px solid var(--color-accent, #3b82f6)"
+                ? "1px solid var(--color-accent)"
                 : "1px solid var(--color-border)",
               backgroundColor: isRecording
-                ? "var(--color-accent-bg, rgba(59,130,246,0.1))"
+                ? "var(--color-accent-subtle)"
                 : "var(--color-bg-secondary)",
               fontSize: "12px",
-              fontFamily: "monospace",
+              fontFamily: "var(--font-mono)",
               color: isRecording
-                ? "var(--color-accent, #3b82f6)"
+                ? "var(--color-accent-text)"
                 : "var(--color-text-secondary)",
               cursor: "pointer",
               minWidth: "60px",
@@ -201,24 +242,9 @@ export default function ShortcutsTab() {
             {t("shortcuts.title")}
           </h3>
         </div>
-        <button
-          onClick={handleReset}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "4px",
-            padding: "4px 10px",
-            borderRadius: "6px",
-            border: "1px solid var(--color-border)",
-            backgroundColor: "var(--color-bg-secondary)",
-            color: "var(--color-text-secondary)",
-            fontSize: "12px",
-            cursor: "pointer",
-          }}
-        >
-          <RotateCcw size={12} />
+        <Button size="sm" onClick={handleReset} icon={<RotateCcw size={12} />}>
           {t("shortcuts.resetDefaults")}
-        </button>
+        </Button>
       </div>
 
       <div role="status" aria-live="polite">
@@ -228,8 +254,8 @@ export default function ShortcutsTab() {
               padding: "8px 12px",
               marginBottom: "16px",
               borderRadius: "6px",
-              backgroundColor: "var(--color-accent-bg, rgba(59,130,246,0.1))",
-              color: "var(--color-accent, #3b82f6)",
+              backgroundColor: "var(--color-success-bg)",
+              color: "var(--color-success)",
               fontSize: "12px",
             }}
           >
@@ -272,6 +298,28 @@ export default function ShortcutsTab() {
           </div>
         </div>
       ))}
+
+      <div style={{ marginBottom: "24px" }}>
+        <h4
+          style={{
+            fontSize: "12px",
+            fontWeight: 600,
+            textTransform: "uppercase",
+            letterSpacing: "0.05em",
+            color: "var(--color-text-secondary)",
+            marginBottom: "10px",
+          }}
+        >
+          {t("shortcuts.compose", "Compose")}
+        </h4>
+        <div style={{ borderRadius: "8px", border: "1px solid var(--color-border)", overflow: "hidden" }}>
+          {FIXED_SHORTCUTS.map((shortcut, index) => (
+            <div key={shortcut.id} style={{ borderTop: index > 0 ? "1px solid var(--color-border)" : "none" }}>
+              <FixedShortcutRow labelKey={shortcut.labelKey} fallback={shortcut.fallback} keys={shortcut.keys} />
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

@@ -3,7 +3,9 @@ import { useTranslation } from "react-i18next";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import { getDraft } from "@/lib/api";
 import { useComposeStore } from "@/stores/compose.store";
-import { useToastStore } from "@/stores/toast.store";
+import { toastError, useToastStore } from "@/stores/toast.store";
+import Button from "@/components/ui/Button";
+import { PenLine } from "lucide-react";
 
 export default function ResumeDraftButton({ messageId }: { messageId: string }) {
   const { t } = useTranslation();
@@ -28,13 +30,27 @@ export default function ResumeDraftButton({ messageId }: { messageId: string }) 
       });
     } catch (error) {
       const reason = extractErrorMessage(error);
-      const message = reason.includes("draft_inline_attachments_unsupported")
-        ? t("compose.inlineDraftUnsupported", "This draft contains embedded images that the editor cannot preserve. It has not been opened for editing; the original draft is unchanged.")
-        : reason;
-      useToastStore.getState().addToast({ type: "error", message });
+      if (reason.includes("draft_inline_attachments_unsupported")) {
+        useToastStore.getState().addToast({
+          type: "error",
+          message: t("compose.inlineDraftUnsupported", "This draft contains embedded images that the editor cannot preserve. It has not been opened for editing; the original draft is unchanged."),
+        });
+      } else {
+        toastError(error, "compose.resumeDraftFailed");
+      }
     } finally {
       setResuming(false);
     }
   }
-  return <button disabled={resuming} onClick={() => { void resume(); }}>{t("compose.resumeDraft", "Resume draft")}</button>;
+  return (
+    <Button
+      variant="secondary"
+      size="sm"
+      loading={resuming}
+      icon={<PenLine size={14} />}
+      onClick={() => { void resume(); }}
+    >
+      {t("compose.resumeDraft", "Resume draft")}
+    </Button>
+  );
 }

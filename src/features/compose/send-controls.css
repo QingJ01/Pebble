@@ -5,6 +5,8 @@
 .send-controls-panel { padding: 20px; overflow: auto; height: 100%; color: var(--color-text-primary); }
 .send-controls-panel article { padding: 12px; margin: 12px 0; border: 1px solid var(--color-border); border-radius: 6px; }
 .send-controls-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.send-controls-panel button, .send-controls-banner button, .send-controls-options button { cursor: pointer; padding: 5px 10px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg); color: var(--color-text-primary); }
-.send-controls-panel button:disabled, .send-controls-banner button:disabled, .send-controls-options button:disabled { cursor: default; opacity: .5; }
+.send-controls-panel button:not(.btn):not(.icon-btn), .send-controls-banner button:not(.btn):not(.icon-btn), .send-controls-options button:not(.btn):not(.icon-btn) { cursor: pointer; padding: 5px 10px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg); color: var(--color-text-primary); }
+.send-controls-panel button:not(.btn):disabled, .send-controls-banner button:not(.btn):disabled, .send-controls-options button:not(.btn):disabled { cursor: default; opacity: .5; }
 .send-controls-options select, .send-controls-time input { padding: 5px; color: var(--color-text-primary); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 4px; }
+.compose-send-hint { font-size: var(--font-sm); color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+@media (max-width: 900px) { .compose-send-hint { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); } }

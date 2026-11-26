@@ -17,6 +17,7 @@ export function ModeButton({ icon: Icon, label, active, onClick }: {
       type="button"
       onClick={onClick}
       title={label}
+      aria-pressed={active}
       className={`compose-mode-button${active ? " is-active" : ""}`}
     >
       <Icon size={13} />
@@ -75,6 +76,7 @@ export function EditorToolbar({ editor }: { editor: Editor }) {
             onClick={item.action}
             title={item.label}
             aria-label={item.label}
+            aria-pressed={item.active === undefined ? undefined : item.active}
             className={`compose-format-button${item.active ? " is-active" : ""}`}
           >
             <Icon size={15} />
@@ -160,18 +162,5 @@ export const composeStyles = {
   fieldRow: {
     display: "flex", alignItems: "center",
     borderBottom: "1px solid var(--color-border)",
-  } as React.CSSProperties,
-
-  toggleBtn: {
-    padding: "4px 8px", border: "none", background: "none", cursor: "pointer",
-    color: "var(--color-text-secondary)", fontSize: "12px", whiteSpace: "nowrap",
-    borderRadius: "4px",
-  } as React.CSSProperties,
-
-  backBtn: {
-    display: "flex", alignItems: "center", gap: "4px",
-    background: "none", border: "none", cursor: "pointer",
-    color: "var(--color-text-secondary)", fontSize: "13px",
-    padding: "4px 8px", borderRadius: "4px",
   } as React.CSSProperties,
 };
