@@ -52,11 +52,13 @@ describe("ConfirmDialog", () => {
       />,
     );
 
-    const panel = screen.getByRole("dialog").firstElementChild as HTMLElement;
+    // Surface colors come from the shared dialog tokens in index.css.
+    const panel = screen.getByRole("dialog");
 
-    expect(panel.style.backgroundColor).toBe("var(--color-sidebar-bg)");
-    expect(panel.style.color).toBe("var(--color-text-primary)");
-    expect(panel.style.border).toBe("1px solid var(--color-border)");
+    expect(panel.classList.contains("dialog-panel")).toBe(true);
+    expect(panel.parentElement?.classList.contains("overlay-backdrop")).toBe(true);
+    // Portaled outside the app shell so transformed/isolated ancestors can't trap it.
+    expect(panel.parentElement?.parentElement).toBe(document.body);
   });
 
   it("does not cancel when clicking outside the dialog panel", () => {
@@ -111,5 +113,45 @@ describe("ConfirmDialog", () => {
     expect(document.activeElement).toBe(confirmButton);
     fireEvent.keyDown(document, { key: "Tab" });
     expect(document.activeElement).toBe(cancelButton);
+  });
+
+  it("renders an error under the message and consumes Escape before global shortcuts", () => {
+    const onCancel = vi.fn();
+    const globalHandler = vi.fn();
+    document.addEventListener("keydown", globalHandler);
+
+    render(
+      <ConfirmDialog
+        title="Quit?"
+        message="Scheduled sends are pending."
+        error="Couldn't cancel the scheduled send."
+        onConfirm={vi.fn()}
+        onCancel={onCancel}
+      />,
+    );
+
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toBe("Couldn't cancel the scheduled send.");
+    expect(screen.getByRole("dialog").getAttribute("aria-describedby")).toContain(alert.id);
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(globalHandler).not.toHaveBeenCalled();
+    document.removeEventListener("keydown", globalHandler);
+  });
+
+  it("only lets the top-most of two stacked dialogs handle Escape", () => {
+    const lower = vi.fn();
+    const upper = vi.fn();
+    render(
+      <>
+        <ConfirmDialog title="Lower" message="l" onConfirm={vi.fn()} onCancel={lower} />
+        <ConfirmDialog title="Upper" message="u" onConfirm={vi.fn()} onCancel={upper} />
+      </>,
+    );
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(upper).toHaveBeenCalledOnce();
+    expect(lower).not.toHaveBeenCalled();
   });
 });

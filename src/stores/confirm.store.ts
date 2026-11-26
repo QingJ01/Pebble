@@ -1,3 +1,8 @@
+/**
+ * Global confirm dialog: `await useConfirmStore.getState().confirm({ title, message, ... })`
+ * resolves true/false. Calling confirm() while another confirm is still open
+ * resolves the previous promise with `false` (it never dangles) and replaces it.
+ */
 import { create } from "zustand";
 
 interface ConfirmState {
@@ -29,6 +34,8 @@ export const useConfirmStore = create<ConfirmState>((set, get) => ({
   resolve: null,
   confirm: (opts) =>
     new Promise<boolean>((resolve) => {
+      const previous = get().resolve;
+      previous?.(false);
       set({
         isOpen: true,
         title: opts.title,

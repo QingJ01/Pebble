@@ -10,6 +10,7 @@ import { queryClient } from "@/lib/query-client";
 import type { MessageSummary, ThreadSummary } from "@/lib/api";
 import { patchMessagesCache, readFirstCachedMessages } from "@/hooks/queries";
 import i18n from "@/lib/i18n";
+import { hasModalOverlay, hasOverlay } from "@/lib/overlayStack";
 
 function eventToKeyString(e: KeyboardEvent): string {
   const parts: string[] = [];
@@ -65,7 +66,11 @@ export function useKeyboard() {
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (document.querySelector('[role="dialog"]')) return;
+      // Modal overlays own the keyboard. Non-modal popovers don't block global
+      // shortcuts; ones registered on the overlay stack get Escape first (the
+      // stack consumes it in the capture phase), so only skip Escape here.
+      if (hasModalOverlay() || document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      if (e.key === "Escape" && hasOverlay()) return;
       // Don't interfere with shortcut recording
       if (useShortcutStore.getState().recording) return;
 

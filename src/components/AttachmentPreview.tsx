@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
 import type { Attachment } from "@/lib/api";
 import { previewAttachment, type AttachmentPreviewData } from "@/lib/attachments-api";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import "./attachment-preview.css";
 
 const AttachmentPdfPreview = lazy(() => import("./AttachmentPdfPreview"));
@@ -40,11 +41,14 @@ export default function AttachmentPreview(props: Props) {
   const preview = loaded?.id === attachment.id ? loaded.data : null;
   const error = failure?.id === attachment.id ? failure.reason : null;
   const setError = (reason: string) => setFailure({ id: attachment.id, reason });
+  const layer = useOverlayLayer({ modal: true });
 
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     closeRef.current?.focus();
     function handleKey(event: KeyboardEvent) {
+      // A dialog stacked above this viewer owns the keyboard.
+      if (!layer.isTop()) return;
       const { index, attachments, onNavigate, onClose } = latest.current;
       // Do not let mail-list shortcuts act on the message behind this modal.
       event.stopImmediatePropagation();
@@ -60,7 +64,7 @@ export default function AttachmentPreview(props: Props) {
     }
     document.addEventListener("keydown", handleKey, true);
     return () => { document.removeEventListener("keydown", handleKey, true); if (previous?.isConnected) previous.focus(); };
-  }, []);
+  }, [layer]);
 
   useEffect(() => {
     let cancelled = false;

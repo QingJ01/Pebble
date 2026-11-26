@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useCommandStore } from "@/stores/command.store";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
+import OverlayPortal from "@/components/ui/OverlayPortal";
 
 export default function CommandPalette() {
   const { t } = useTranslation();
@@ -9,6 +11,8 @@ export default function CommandPalette() {
   const inputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  useOverlayLayer({ open: isOpen, modal: true, onEscape: close, containerRef: dialogRef });
 
   useEffect(() => {
     if (isOpen) {
@@ -79,33 +83,36 @@ export default function CommandPalette() {
   }
 
   return (
+    <OverlayPortal>
     <div
       onClick={close}
+      className="anim-backdrop-in"
       role="dialog"
       aria-modal="true"
       aria-label={t("commandPalette.title", "Command Palette")}
       style={{
         position: "fixed",
         inset: 0,
-        backgroundColor: "rgba(0,0,0,0.5)",
+        backgroundColor: "var(--overlay-backdrop)",
         display: "flex",
         alignItems: "flex-start",
         justifyContent: "center",
         paddingTop: "20vh",
-        zIndex: 1000,
+        zIndex: "var(--z-modal)",
       }}
     >
       <div
         ref={dialogRef}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
+        className="anim-dialog-in"
         style={{
           width: "100%",
           maxWidth: "480px",
-          backgroundColor: "var(--color-bg)",
-          borderRadius: "12px",
+          backgroundColor: "var(--color-dialog-bg)",
+          borderRadius: "var(--radius-xl)",
           border: "1px solid var(--color-border)",
-          boxShadow: "0 25px 50px -12px rgba(0,0,0,0.25)",
+          boxShadow: "var(--shadow-dialog)",
           overflow: "hidden",
         }}
       >
@@ -201,5 +208,6 @@ export default function CommandPalette() {
         </div>
       </div>
     </div>
+    </OverlayPortal>
   );
 }

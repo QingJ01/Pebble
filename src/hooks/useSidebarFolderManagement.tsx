@@ -57,9 +57,9 @@ export function useSidebarFolderManagement({ accounts, folders, accountId }: Arg
           padding: "4px",
           borderRadius: "8px",
           border: "1px solid var(--color-border)",
-          backgroundColor: "var(--color-bg)",
-          boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-          zIndex: 1000,
+          backgroundColor: "var(--color-popover-bg)",
+          boxShadow: "var(--shadow-popover)",
+          zIndex: "var(--z-menu)",
         }}
         onClick={(event) => event.stopPropagation()}
         onKeyDown={(event) => {
