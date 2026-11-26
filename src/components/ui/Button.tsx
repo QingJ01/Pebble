@@ -2,11 +2,19 @@
  * Button — the shared text button (styles: `.btn*` in src/styles/index.css).
  *
  *   <Button variant="primary" size="md" onClick={save}>Save</Button>
- *   <Button variant="danger" loading={busy}>Delete</Button>
+ *   <Button variant="danger" loading={busy}>Delete</Button>          // confirm dialog
+ *   <Button variant="danger-ghost" size="sm">Remove</Button>          // inline destructive
+ *   <Button variant="link" size="sm">Learn more</Button>
  *   <Button variant="secondary" icon={<Archive size={14} />}>Archive</Button>
  *
- * - variant: "primary" | "secondary" (default) | "ghost" | "danger"
- * - size: "sm" (28px) | "md" (32px, default)
+ * - variant: "primary" | "secondary" (default) | "ghost" | "danger" |
+ *   "danger-ghost" | "link". At most ONE primary per view. "danger" (solid red)
+ *   only confirms a destructive action; inline destructive triggers use
+ *   "danger-ghost". "link" is accent text, underlined on hover.
+ * - size: "sm" (28px) | "md" (32px, default) | "lg" (36px)
+ * - pressed: toggle state → aria-pressed (neutral selected fill). Omit otherwise.
+ * - Native elements that must look like a button (e.g. <a>, <label>):
+ *   className={buttonClassName("secondary", "sm")}
  * - loading: shows a spinner, sets aria-busy + aria-disabled and swallows clicks,
  *   but keeps the button focusable (focus is not lost while an action runs).
  * - disabled: native disabled. Prefer `loading` for in-flight actions.
@@ -16,13 +24,15 @@
 import type { ComponentPropsWithRef, MouseEvent, ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 
-export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
-export type ButtonSize = "sm" | "md";
+export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "danger-ghost" | "link";
+export type ButtonSize = "sm" | "md" | "lg";
 
-export interface ButtonProps extends ComponentPropsWithRef<"button"> {
+export interface ButtonProps extends Omit<ComponentPropsWithRef<"button">, "aria-pressed"> {
   variant?: ButtonVariant;
   size?: ButtonSize;
   loading?: boolean;
+  /** Toggle state → aria-pressed. Omit for non-toggle buttons. */
+  pressed?: boolean;
   /** Leading icon (rendered before children, hidden from assistive tech). */
   icon?: ReactNode;
 }
@@ -35,6 +45,7 @@ export default function Button({
   variant = "secondary",
   size = "md",
   loading = false,
+  pressed,
   icon,
   className,
   type = "button",
@@ -57,6 +68,7 @@ export default function Button({
       {...rest}
       type={type}
       className={buttonClassName(variant, size, className)}
+      aria-pressed={pressed === undefined ? undefined : pressed}
       aria-busy={loading || undefined}
       aria-disabled={inert || undefined}
       onClick={handleClick}

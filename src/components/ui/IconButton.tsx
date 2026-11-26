@@ -7,22 +7,29 @@
  *
  * - label (required): becomes aria-label and, unless `tooltip` overrides it,
  *   the native title tooltip. Pass tooltip={false} to suppress the tooltip.
- * - size: "sm" (28×28, default) | "md" (32×32). Hit area never drops below 28px.
- * - variant: "ghost" (default) | "secondary" | "danger"
- * - pressed: toggle state → aria-pressed (+ accent styling). Omit for non-toggles.
+ * - size: "sm" (28×28, default) | "md" (32×32) | "lg" (36×36). Use one size per
+ *   toolbar row, matching any text Buttons in it. Hit area never drops below 28px.
+ * - variant: "ghost" (default) | "secondary" | "danger" (red icon, ghost)
+ * - pressed: toggle state → aria-pressed (neutral selected fill). Omit for non-toggles.
+ * - iconButtonClassName(variant, size) styles a native element the same way.
  * - loading: spinner replaces the icon; aria-busy + aria-disabled, clicks ignored.
  */
 import type { ComponentPropsWithRef, MouseEvent, ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 
 export type IconButtonVariant = "ghost" | "secondary" | "danger";
+export type IconButtonSize = "sm" | "md" | "lg";
+
+export function iconButtonClassName(variant: IconButtonVariant = "ghost", size: IconButtonSize = "sm", extra?: string) {
+  return ["icon-btn", `icon-btn--${variant}`, `icon-btn--${size}`, extra].filter(Boolean).join(" ");
+}
 
 export interface IconButtonProps
   extends Omit<ComponentPropsWithRef<"button">, "children" | "aria-label" | "title" | "aria-pressed"> {
   label: string;
   icon: ReactNode;
   tooltip?: string | false;
-  size?: "sm" | "md";
+  size?: IconButtonSize;
   variant?: IconButtonVariant;
   pressed?: boolean;
   loading?: boolean;
@@ -55,7 +62,7 @@ export default function IconButton({
     <button
       {...rest}
       type={type}
-      className={["icon-btn", `icon-btn--${variant}`, `icon-btn--${size}`, className].filter(Boolean).join(" ")}
+      className={iconButtonClassName(variant, size, className)}
       aria-label={label}
       title={tooltip === false ? undefined : tooltip ?? label}
       aria-pressed={pressed === undefined ? undefined : pressed}
