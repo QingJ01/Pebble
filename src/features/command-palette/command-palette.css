@@ -1,0 +1,97 @@
+/* ─── Command palette ──────────────────────────────────────────────────
+   Overlay surface (dialog spec: radius-xl, --shadow-dialog, one border);
+   36px search field; options follow the menu-item rhythm at 36px rows. */
+
+.command-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 20vh var(--space-4) 0;
+  background-color: var(--overlay-backdrop);
+}
+
+.command-palette {
+  width: 100%;
+  max-width: 480px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background-color: var(--color-surface-overlay);
+  box-shadow: var(--shadow-dialog);
+}
+
+.command-palette__input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-4);
+  border: none;
+  border-bottom: 1px solid var(--color-divider);
+  background-color: transparent;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-md);
+}
+
+.command-palette__input:focus-visible {
+  outline: none;
+}
+
+.command-palette__input::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.command-palette__list {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: var(--space-1);
+}
+
+.command-palette__option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: var(--control-lg);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.command-palette__option[aria-selected="true"] {
+  background-color: var(--color-fill-hover);
+}
+
+.command-palette__name {
+  font-size: var(--font-base);
+}
+
+.command-palette__category {
+  margin-left: var(--space-2);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-xs);
+}
+
+.command-palette__kbd {
+  padding: 0 var(--space-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-raised);
+  color: var(--color-text-secondary);
+  font-family: inherit;
+  font-size: var(--font-xs);
+  line-height: 18px;
+}
+
+.command-palette__empty {
+  padding: var(--space-6) var(--space-4);
+  color: var(--color-text-secondary);
+  font-size: var(--font-base);
+  text-align: center;
+}

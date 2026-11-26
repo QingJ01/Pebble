@@ -7,6 +7,8 @@ import { describeError, type DescribedError } from "@/lib/extractErrorMessage";
 import Popover from "@/components/ui/Popover";
 import Button from "@/components/ui/Button";
 import IconButton from "@/components/ui/IconButton";
+import { selectClassName } from "@/components/ui/Select";
+import "./translate.css";
 
 interface Props {
   text: string;
@@ -74,35 +76,18 @@ export default function TranslatePopover({ text, position, open = true, onClose 
       role="dialog"
       aria-labelledby={titleId}
       initialFocus="container"
-      style={{ width: "min(320px, calc(100vw - 16px))", padding: "12px" }}
+      className="translate-popover"
     >
       {/* Header with target lang selector */}
-      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-        <h2
-          id={titleId}
-          style={{
-            flex: 1,
-            margin: 0,
-            fontSize: "var(--font-sm)",
-            fontWeight: "var(--font-weight-title)",
-            color: "var(--color-text-secondary)",
-          }}
-        >
+      <div className="translate-popover__header">
+        <h2 id={titleId} className="translate-popover__title">
           {t("translate.title")}
         </h2>
         <select
           value={targetLang}
           onChange={(e) => setTargetLang(e.target.value)}
           aria-label={t("translate.targetLanguage", "Target language")}
-          style={{
-            fontSize: "var(--font-sm)",
-            minHeight: "28px",
-            padding: "2px 6px",
-            border: "1px solid var(--color-border)",
-            borderRadius: "var(--radius-md)",
-            backgroundColor: "var(--color-bg)",
-            color: "var(--color-text-primary)",
-          }}
+          className={selectClassName("sm")}
         >
           <option value="zh">{t("languages.chinese", "Chinese")}</option>
           <option value="en">{t("languages.english", "English")}</option>
@@ -117,8 +102,8 @@ export default function TranslatePopover({ text, position, open = true, onClose 
 
       {/* Privacy notice for first-time use */}
       {!privacyAcked ? (
-        <div style={{ fontSize: "var(--font-base)", lineHeight: 1.5, padding: "4px 0" }}>
-          <p style={{ margin: "0 0 10px", color: "var(--color-warning)" }}>
+        <div className="translate-popover__notice">
+          <p>
             {t(
               "translate.privacyNotice",
               "Translation will send the selected text to a third-party translation service. Your email content will leave this device.",
@@ -129,23 +114,23 @@ export default function TranslatePopover({ text, position, open = true, onClose 
           </Button>
         </div>
       ) : loading ? (
-        <div role="status" style={{ fontSize: "var(--font-base)", color: "var(--color-text-secondary)", padding: "8px 0" }}>
+        <div role="status" className="translate-popover__status">
           {t("common.translating")}
         </div>
       ) : error ? (
-        <div role="alert" className="dialog-error" style={{ margin: 0 }} title={error.detail || undefined}>
+        <div role="alert" className="dialog-error translate-popover__error" title={error.detail || undefined}>
           {error.title}
         </div>
       ) : (
         <div>
-          <div style={{ fontSize: "var(--font-base)", lineHeight: 1.6, marginBottom: "8px", userSelect: "text", overflowWrap: "anywhere" }}>
+          <div className="translate-popover__result">
             {translated}
           </div>
           <Button
             variant="ghost"
             size="sm"
             onClick={handleCopy}
-            icon={copied ? <Check size={12} /> : <Copy size={12} />}
+            icon={copied ? <Check size={14} /> : <Copy size={14} />}
           >
             {copied ? t("common.copied") : t("common.copy")}
           </Button>
