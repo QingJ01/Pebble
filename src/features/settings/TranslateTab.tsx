@@ -431,8 +431,8 @@ export default function TranslateTab() {
         <button
           style={{
             ...buttonStyle,
-            background: "var(--color-accent)",
-            color: "#fff",
+            background: "var(--color-accent-strong)",
+            color: "var(--color-on-accent)",
             opacity: saving ? 0.6 : 1,
           }}
           onClick={handleSave}
@@ -465,7 +465,7 @@ export default function TranslateTab() {
             borderRadius: "6px",
             fontSize: "13px",
             background: statusType === "success" ? "var(--color-bg-hover)" : "rgba(220, 53, 69, 0.1)",
-            color: statusType === "success" ? "var(--color-text-primary)" : "#dc3545",
+            color: statusType === "success" ? "var(--color-text-primary)" : "var(--color-danger)",
             border: `1px solid ${statusType === "success" ? "var(--color-border)" : "rgba(220, 53, 69, 0.3)"}`,
           }}
         >

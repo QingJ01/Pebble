@@ -231,8 +231,8 @@ export default function AppearanceTab() {
               padding: "7px 12px",
               borderRadius: "6px",
               border: "1px solid var(--color-accent)",
-              backgroundColor: uploading ? "var(--color-bg-hover)" : "var(--color-accent)",
-              color: uploading ? "var(--color-text-secondary)" : "#fff",
+              backgroundColor: uploading ? "var(--color-bg-hover)" : "var(--color-accent-strong)",
+              color: uploading ? "var(--color-text-secondary)" : "var(--color-on-accent)",
               cursor: uploading ? "default" : "pointer",
               fontSize: "13px",
               fontWeight: 600,
@@ -312,7 +312,7 @@ export default function AppearanceTab() {
         )}
 
         {error && (
-          <div role="alert" style={{ color: "#ef4444", fontSize: "12px" }}>
+          <div role="alert" style={{ color: "var(--color-danger)", fontSize: "12px" }}>
             {error}
           </div>
         )}

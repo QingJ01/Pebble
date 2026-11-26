@@ -80,8 +80,8 @@ export default function PrivacyTab() {
               padding: "8px 16px",
               borderRadius: "6px",
               border: "1px solid var(--color-border)",
-              backgroundColor: privacyMode === "strict" ? "var(--color-accent)" : "var(--color-bg)",
-              color: privacyMode === "strict" ? "#fff" : "var(--color-text-primary)",
+              backgroundColor: privacyMode === "strict" ? "var(--color-accent-strong)" : "var(--color-bg)",
+              color: privacyMode === "strict" ? "var(--color-on-accent)" : "var(--color-text-primary)",
               cursor: "pointer",
               fontSize: "13px",
             }}
@@ -94,8 +94,8 @@ export default function PrivacyTab() {
               padding: "8px 16px",
               borderRadius: "6px",
               border: "1px solid var(--color-border)",
-              backgroundColor: privacyMode === "relaxed" ? "var(--color-accent)" : "var(--color-bg)",
-              color: privacyMode === "relaxed" ? "#fff" : "var(--color-text-primary)",
+              backgroundColor: privacyMode === "relaxed" ? "var(--color-accent-strong)" : "var(--color-bg)",
+              color: privacyMode === "relaxed" ? "var(--color-on-accent)" : "var(--color-text-primary)",
               cursor: "pointer",
               fontSize: "13px",
             }}
@@ -108,8 +108,8 @@ export default function PrivacyTab() {
               padding: "8px 16px",
               borderRadius: "6px",
               border: "1px solid var(--color-border)",
-              backgroundColor: privacyMode === "off" ? "var(--color-accent)" : "var(--color-bg)",
-              color: privacyMode === "off" ? "#fff" : "var(--color-text-primary)",
+              backgroundColor: privacyMode === "off" ? "var(--color-accent-strong)" : "var(--color-bg)",
+              color: privacyMode === "off" ? "var(--color-on-accent)" : "var(--color-text-primary)",
               cursor: "pointer",
               fontSize: "13px",
             }}
@@ -173,8 +173,8 @@ export default function PrivacyTab() {
                     fontSize: "11px",
                     padding: "2px 6px",
                     borderRadius: "4px",
-                    backgroundColor: sender.trust_type === "all" ? "var(--color-accent)" : "var(--color-bg-hover)",
-                    color: sender.trust_type === "all" ? "#fff" : "var(--color-text-secondary)",
+                    backgroundColor: sender.trust_type === "all" ? "var(--color-accent-strong)" : "var(--color-bg-hover)",
+                    color: sender.trust_type === "all" ? "var(--color-on-accent)" : "var(--color-text-secondary)",
                   }}>
                     {sender.trust_type === "all"
                       ? t("privacy.trustAll", "Trust sender")

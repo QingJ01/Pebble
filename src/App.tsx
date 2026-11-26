@@ -25,11 +25,11 @@ class ErrorBoundary extends Component<
           display: "flex", flexDirection: "column", alignItems: "center",
           justifyContent: "center", height: "100vh", gap: 16, padding: 24,
           fontFamily: "var(--font-sans)",
-          color: "var(--color-text-primary, #333)",
-          backgroundColor: "var(--color-bg, #fff)",
+          color: "var(--color-text-primary)",
+          backgroundColor: "var(--color-bg)",
         }}>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>{i18next.t("errorBoundary.title", "Something went wrong")}</h2>
-          <p style={{ margin: 0, fontSize: 14, color: "var(--color-text-secondary, #666)" }}>
+          <p style={{ margin: 0, fontSize: 14, color: "var(--color-text-secondary)" }}>
             {i18next.t("errorBoundary.description", "Please try refreshing the application.")}
           </p>
           <Button variant="primary" onClick={() => window.location.reload()} style={{ marginTop: 8 }}>

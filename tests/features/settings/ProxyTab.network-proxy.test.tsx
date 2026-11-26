@@ -197,8 +197,8 @@ describe("ProxyTab global proxy", () => {
     expect(customModeButton.getAttribute("style")).toContain("background-color: var(--color-bg-hover)");
     expect(screen.queryAllByText("Inherit global proxy unless a custom proxy or disabled mode is selected.")).toHaveLength(0);
     const saveButton = within(imapGroup).getByRole("button", { name: "Save account proxy" });
-    expect(saveButton.getAttribute("style")).toContain("background-color: var(--color-accent)");
-    expect(saveButton.getAttribute("style")).toContain("color: rgb(255, 255, 255)");
+    expect(saveButton.getAttribute("style")).toContain("background-color: var(--color-accent-strong)");
+    expect(saveButton.getAttribute("style")).toContain("color: var(--color-on-accent)");
     const accountProxyHostInput = within(imapGroup).getByLabelText("SOCKS5 Proxy") as HTMLInputElement;
     const accountProxyPortInput = within(imapGroup).getByLabelText("Port") as HTMLInputElement;
     expect(accountProxyHostInput.value).toBe("192.168.0.2");
