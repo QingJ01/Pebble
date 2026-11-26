@@ -38,6 +38,15 @@ describe("usePaneWidth", () => {
     vi.useRealTimers();
   });
 
+  it("flushes a pending width when the pane unmounts", () => {
+    vi.useFakeTimers();
+    const { result, unmount } = renderHook(() => usePaneWidth("pane", 340, 260, 560));
+    act(() => result.current.setWidth(420));
+    unmount();
+    expect(window.localStorage.getItem("pane")).toBe("420");
+    vi.useRealTimers();
+  });
+
   it("falls back to the default when storage is unavailable", () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("blocked"); });
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("blocked"); });

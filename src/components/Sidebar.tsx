@@ -4,6 +4,7 @@ import { useUIStore } from "../stores/ui.store";
 import { useMailStore } from "../stores/mail.store";
 import { useNarrowWindow } from "../lib/narrowWindow";
 import { useOverlayLayer } from "../hooks/useOverlayLayer";
+import { useFocusScope } from "../hooks/useFocusScope";
 import SidebarClassic from "./SidebarClassic";
 import SidebarGrouped from "./SidebarGrouped";
 
@@ -20,6 +21,9 @@ function NarrowSidebarDrawer({ classic }: { classic: boolean }) {
   const { t } = useTranslation();
   const panelRef = useRef<HTMLDivElement>(null);
   useOverlayLayer({ open: true, modal: false, onEscape: closeNarrowSidebar, containerRef: panelRef });
+  // Opened from the keyboard (command palette): put focus in the drawer, and
+  // hand it back when the drawer closes.
+  useFocusScope({ active: true, containerRef: panelRef, initialFocus: "first", restoreFocus: true });
 
   // Picking a folder or view is the end of the trip: close the drawer.
   const activeFolderId = useMailStore((s) => s.activeFolderId);

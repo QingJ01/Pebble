@@ -189,6 +189,8 @@ export async function planMailAction(
     const source = folderById(m.account_id, origin?.sourceFolderId);
     const target = folderByRole(foldersByAccount.get(m.account_id), role);
     const provider = providers.get(m.account_id);
+    // Already there: nothing to move now or on Undo.
+    if (source && target && source.id === target.id) return true;
     return canManagedMove(provider, source, target) && canManagedMove(provider, target, source);
   });
 
@@ -219,10 +221,15 @@ export async function planMailAction(
     const everyAccountHasArchive = accountIds.every((id) => Boolean(folderByRole(foldersByAccount.get(id), "archive")));
     const unarchiving = messages.some((m) => sourceRole(m) === "archive");
     const everyAccountHasInbox = accountIds.every((id) => Boolean(folderByRole(foldersByAccount.get(id), "inbox")));
-    // A batch undo moves back with move_mail_messages: only offer it when
-    // that route accepts every message (Gmail's archive is All Mail: no).
-    const undoMovable = messages.length === 1 || allManagedMovable(unarchiving ? "inbox" : "archive");
-    undoable = undoable && everyAccountHasArchive && (!unarchiving || everyAccountHasInbox) && undoMovable;
+    // Gmail's archive is All Mail, which move_mail_messages refuses: no batch undo there.
+    if (messages.length === 1) {
+      // archive_message toggles: a message already in Archive goes to Inbox.
+      undoable = undoable && everyAccountHasArchive && (!unarchiving || everyAccountHasInbox);
+    } else {
+      // batch_archive always moves to Archive; Undo moves each one back with
+      // move_mail_messages, so that route must accept every message.
+      undoable = undoable && everyAccountHasArchive && allManagedMovable("archive");
+    }
   } else {
     const undoMovable = messages.length === 1 || allManagedMovable("spam");
     undoable = undoable && Boolean(options.spamFolderId) && undoMovable;
@@ -426,7 +433,32 @@ export async function executeMailAction(
       };
     } else if (plan.kind === "spam") {
       if (!plan.spamFolderId) throw new Error("No spam folder");
-      for (const id of ids) await moveToFolder(id, plan.spamFolderId);
+      // One move per message: count what really moved, so a failure midway
+      // neither reports the moved ones as failed nor loses their Undo.
+      const moved: string[] = [];
+      let firstError: unknown;
+      for (const id of ids) {
+        try {
+          await moveToFolder(id, plan.spamFolderId);
+          moved.push(id);
+        } catch (error) {
+          firstError ??= error;
+        }
+      }
+      if (moved.length === 0) throw firstError ?? new Error("No messages were marked as spam");
+      count = moved.length;
+      undoIds = moved;
+      if (moved.length < ids.length) {
+        const movedSet = new Set(moved);
+        const notMoved = ids.filter((id) => !movedSet.has(id));
+        failedIds = notMoved;
+        restoreMessagesInCache(client, previousLists, notMoved);
+        invalidateMailViews(client);
+        useToastStore.getState().addToast({
+          type: "warning",
+          message: t("batch.spamPartialFailure", "{{count}} messages could not be marked as spam", { count: notMoved.length }),
+        });
+      }
       currentFolder = () => plan.spamFolderId;
     } else if (ids.length === 1) {
       await deleteMessage(ids[0]);
@@ -516,6 +548,8 @@ export function showUndoableToast(client: QueryClient, message: string, moves: U
               type: "info",
               message: t("messageActions.undoing", "Undoing…"),
               duration: 30_000,
+              // One indicator per Undo: merged ones would vanish when the first finishes.
+              mergeable: false,
             });
             void undoMoves(client, moves).then((failed) => {
               useToastStore.getState().removeToast(pending);
@@ -591,14 +625,19 @@ export async function runMailAction(
   options: RunOptions = {},
 ): Promise<MailActionResult> {
   const targets = messages.filter((m) => !actionsInFlight.has(m.id));
-  if (targets.length === 0) return { ok: false, count: 0 };
+  // Messages still busy with another action are left alone; report them as
+  // not done so callers keep them selected instead of silently dropping them.
+  const busyIds = messages.filter((m) => actionsInFlight.has(m.id)).map((m) => m.id);
+  if (targets.length === 0) return { ok: false, count: 0, ...(busyIds.length ? { failedIds: busyIds } : {}) };
   for (const m of targets) actionsInFlight.add(m.id);
   try {
     const plan = await planMailAction(client, kind, targets, { spamFolderId: options.spamFolderId });
     if (plan.needsConfirm && options.confirm && !(await options.confirm(plan))) {
       return { ok: false, count: 0 };
     }
-    return await executeMailAction(client, plan, options);
+    const result = await executeMailAction(client, plan, options);
+    if (!result.ok || busyIds.length === 0) return result;
+    return { ...result, failedIds: [...(result.failedIds ?? []), ...busyIds] };
   } finally {
     for (const m of targets) actionsInFlight.delete(m.id);
   }

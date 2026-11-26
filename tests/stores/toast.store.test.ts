@@ -55,6 +55,13 @@ describe("toast store", () => {
     expect(store().toasts.every((t) => t.exiting)).toBe(true);
   });
 
+  it("never merges toasts marked not mergeable", () => {
+    const a = store().addToast({ type: "info", message: "Undoing…", mergeable: false });
+    const b = store().addToast({ type: "info", message: "Undoing…", mergeable: false });
+    expect(a).not.toBe(b);
+    expect(store().toasts).toHaveLength(2);
+  });
+
   it("never merges toasts that carry an action", () => {
     const undoA = vi.fn();
     const undoB = vi.fn();

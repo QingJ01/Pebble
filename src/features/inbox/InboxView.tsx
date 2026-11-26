@@ -250,8 +250,18 @@ export default function InboxView() {
                 messageId={selectedMessageId}
                 onBack={() => setSelectedMessage(null)}
                 onReopen={(id) => {
-                  // Only if the user hasn't opened something else meanwhile.
-                  if (useMailStore.getState().selectedMessageId === null) setSelectedMessage(id);
+                  // Only if the user is still on the same list and hasn't
+                  // opened something else meanwhile (this closure holds the
+                  // folder and filter the action started in).
+                  const state = useMailStore.getState();
+                  if (
+                    state.selectedMessageId === null
+                    && state.activeFolderId === activeFolderId
+                    && state.activeAccountId === activeAccountId
+                    && state.unifiedAccountFilter === unifiedAccountFilter
+                  ) {
+                    setSelectedMessage(id);
+                  }
                 }}
                 folderRole={activeFolderRole}
               />

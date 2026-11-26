@@ -124,4 +124,15 @@ describe("MessageDetail loading (D3)", () => {
     expect(screen.getByText("actions").closest("[inert]")).not.toBeNull();
     expect(screen.getByText("First subject").closest("[inert]")).not.toBeNull();
   });
+  it("moves focus to Back when the toolbar it was on goes stale", () => {
+    loaderState.current = { message: baseMessage, loading: false, isStale: false };
+    const view = render(<MessageDetail messageId="m1" onBack={vi.fn()} />);
+    const snooze = screen.getByRole("button", { name: "Snooze message" });
+    snooze.focus();
+    expect(document.activeElement).toBe(snooze);
+
+    loaderState.current = { message: baseMessage, loading: true, isStale: true };
+    view.rerender(<MessageDetail messageId="m2" onBack={vi.fn()} />);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Back" }));
+  });
 });

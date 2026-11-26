@@ -1021,7 +1021,9 @@
     "deleteMixedSuccess_one": "{{count}} message deleted: local drafts permanently, the rest moved to Trash",
     "deleteMixedSuccess_other": "{{count}} messages deleted: local drafts permanently, the rest moved to Trash",
     "deletePartialFailure_one": "{{count}} message could not be deleted",
-    "deletePartialFailure_other": "{{count}} messages could not be deleted"
+    "deletePartialFailure_other": "{{count}} messages could not be deleted",
+    "spamPartialFailure_one": "{{count}} message could not be marked as spam",
+    "spamPartialFailure_other": "{{count}} messages could not be marked as spam"
   },
   "messageDetail": {
     "body": "Message body",

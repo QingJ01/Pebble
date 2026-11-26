@@ -355,6 +355,49 @@ describe("mail actions with undo", () => {
     expect(useToastStore.getState().toasts.some((t) => t.message === "Undoing…" && !t.exiting)).toBe(false);
   });
 
+  it("keeps Undo for the messages a partly failed spam batch did move", async () => {
+    seedList(client, [message("m1"), message("m2"), message("m3")]);
+    mocks.moveToFolder.mockImplementation(async (id: string) => {
+      if (id === "m2") throw { kind: "Network", message: "offline" };
+    });
+
+    const result = await runMailAction(client, "spam", [message("m1"), message("m2"), message("m3")], { spamFolderId: "spam" });
+
+    expect(result).toMatchObject({ ok: true, count: 2, failedIds: ["m2"] });
+    expect(listIds(client)).toEqual(["m2"]);
+    const toasts = useToastStore.getState().toasts;
+    expect(toasts.some((t) => t.type === "warning")).toBe(true);
+    expect(toasts.find((t) => t.action)).toBeTruthy();
+  });
+
+  it("keeps Undo for a batch archive that includes an already archived message", async () => {
+    mocks.getMailMoveContext.mockImplementation(async (_account: string, ids: string[]) => ({
+      provider: "imap",
+      folder_ids_by_message: Object.fromEntries(ids.map((id) => [id, [id === "m3" ? "archive" : "inbox"]])),
+    }));
+
+    await runMailAction(client, "archive", [message("m1"), message("m2"), message("m3")]);
+
+    lastToast().action!.onClick();
+    await vi.waitFor(() =>
+      expect(mocks.moveMailMessages).toHaveBeenCalledWith("acc", ["m1", "m2"], "archive", "inbox"));
+  });
+
+  it("reports messages busy with another action instead of dropping them", async () => {
+    let finishFirst!: () => void;
+    mocks.archiveMessage.mockImplementationOnce(() => new Promise((resolve) => { finishFirst = () => resolve("archived"); }));
+    const first = runMailAction(client, "archive", [message("m1")]);
+    await vi.waitFor(() => expect(mocks.archiveMessage).toHaveBeenCalled());
+
+    mocks.batchDelete.mockResolvedValue(1);
+    const result = await runMailAction(client, "trash", [message("m1"), message("m2")], { confirm: vi.fn().mockResolvedValue(true) });
+
+    expect(result.ok).toBe(true);
+    expect(result.failedIds).toContain("m1");
+    finishFirst();
+    await first;
+  });
+
   it("marks spam with undo back to the original folder", async () => {
     await runMailAction(client, "spam", [message("m1")], { spamFolderId: "spam" });
 

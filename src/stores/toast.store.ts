@@ -34,6 +34,8 @@ export interface Toast {
   action?: ToastAction;
   /** Raw/technical text shown on demand ("Show details"). */
   detail?: string;
+  /** false: never merge with an identical toast (e.g. per-operation progress). */
+  mergeable?: boolean;
   /** Number of merged identical toasts (≥ 1). */
   count: number;
   /** True while the exit animation runs. */
@@ -91,6 +93,7 @@ function sameToast(a: Toast, b: ToastInput) {
   // Toasts with an action (Undo, Retry…) are never merged: each carries its own
   // callback, and merging would leave earlier actions unreachable.
   if (a.action || b.action) return false;
+  if (a.mergeable === false || b.mergeable === false) return false;
   return a.type === b.type
     && a.message === b.message
     && (a.detail ?? "") === (b.detail ?? "");

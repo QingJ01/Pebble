@@ -5,33 +5,51 @@ import { profileLocalStorage } from "@/lib/profileStorage";
 
 /**
  * Width of a resizable left pane, persisted per profile under `storageKey`.
- * Writes are debounced so a drag doesn't hit storage on every pointermove.
+ * Writes are debounced so a drag doesn't hit storage on every pointermove;
+ * a write still pending when the pane unmounts is flushed. Widths saved by
+ * older versions (unscoped localStorage) are still read.
  * Storage failures (private mode, quota, blocked) are ignored.
  */
 export function usePaneWidth(storageKey: string, defaultWidth: number, min: number, max: number) {
   const clamp = useCallback((value: number) => Math.round(Math.min(max, Math.max(min, value))), [min, max]);
   const [width, setWidthState] = useState(() => {
     try {
-      const stored = Number(profileLocalStorage.getItem(storageKey));
-      return Number.isFinite(stored) && stored > 0 ? clamp(stored) : defaultWidth;
+      const raw = profileLocalStorage.getItem(storageKey) ?? window.localStorage.getItem(storageKey);
+      const stored = Number(raw);
+      return raw !== null && Number.isFinite(stored) && stored > 0 ? clamp(stored) : defaultWidth;
     } catch {
       return defaultWidth;
     }
   });
   // Only widths the user set are persisted (not the initial or reset width).
   const dirtyRef = useRef(false);
+  const pendingRef = useRef<number | null>(null);
+
+  const persist = useCallback((value: number) => {
+    try {
+      profileLocalStorage.setItem(storageKey, String(value));
+    } catch {
+      // Persisting is best-effort.
+    }
+  }, [storageKey]);
 
   useEffect(() => {
     if (!dirtyRef.current) return;
+    pendingRef.current = width;
     const handle = setTimeout(() => {
-      try {
-        profileLocalStorage.setItem(storageKey, String(width));
-      } catch {
-        // Persisting is best-effort.
-      }
+      pendingRef.current = null;
+      persist(width);
     }, 250);
     return () => clearTimeout(handle);
-  }, [storageKey, width]);
+  }, [persist, width]);
+
+  // Leaving the view right after a drag must not lose the new width.
+  useEffect(() => () => {
+    if (pendingRef.current !== null) {
+      persist(pendingRef.current);
+      pendingRef.current = null;
+    }
+  }, [persist]);
 
   const setWidth = useCallback((value: number) => {
     dirtyRef.current = true;
@@ -40,9 +58,11 @@ export function usePaneWidth(storageKey: string, defaultWidth: number, min: numb
 
   const reset = useCallback(() => {
     dirtyRef.current = false;
+    pendingRef.current = null;
     setWidthState(defaultWidth);
     try {
       profileLocalStorage.removeItem(storageKey);
+      window.localStorage.removeItem(storageKey);
     } catch {
       // ignore
     }

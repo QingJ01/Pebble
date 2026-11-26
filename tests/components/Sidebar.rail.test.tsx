@@ -248,6 +248,12 @@ describe("Collapsed sidebar rail", () => {
       expect(useUIStore.getState().sidebarNarrowExpanded).toBe(false);
     });
 
+    it("moves focus into the drawer when it opens", () => {
+      const { container } = render(<Sidebar />);
+      const drawer = container.querySelector(".sidebar-drawer")!;
+      expect(drawer.contains(document.activeElement)).toBe(true);
+    });
+
     it("closes after navigating to another folder", () => {
       render(<Sidebar />);
       act(() => { useMailStore.setState({ activeFolderId: "a1-sent" }); });

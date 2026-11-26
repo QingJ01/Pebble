@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowLeft, Clock, Languages } from "lucide-react";
 import { trustSender } from "@/lib/api";
 import ResumeDraftButton from "./ResumeDraftButton";
@@ -75,12 +75,26 @@ export default function MessageDetail({ messageId, onBack, onReopen, folderRole 
   const [showTranslate, setShowTranslate] = useState<{ text: string; position: { x: number; y: number } } | null>(null);
 
   const snoozeButtonRef = useRef<HTMLButtonElement>(null);
+  const backButtonRef = useRef<HTMLButtonElement>(null);
+  const toolbarScopeRef = useRef<HTMLDivElement>(null);
+  const bodyScopeRef = useRef<HTMLDivElement>(null);
   const selectionPopover = useLatched<PopoverAnchor>(showSelectionActions);
   const translatePopover = useLatched<PopoverAnchor>(showTranslate);
 
   const { message, setMessage, rendered, loading, isStale, error, errorInfo } = useMessageLoader(messageId, privacyMode);
   const { bilingualMode, bilingualResult, bilingualLoading, handleBilingualToggle, resetBilingual } = useBilingualTranslation(messageId, rendered, message);
   const showSkeleton = useDelayedFlag(loading, { delayMs: SKELETON_DELAY_MS, minVisibleMs: SKELETON_MIN_VISIBLE_MS });
+
+  // Going stale makes the toolbar and body inert, which would drop focus to
+  // <body>; keep it in the reader on Back (still usable) instead.
+  useLayoutEffect(() => {
+    if (!isStale) return;
+    const active = document.activeElement;
+    if (!active) return;
+    if (toolbarScopeRef.current?.contains(active) || bodyScopeRef.current?.contains(active)) {
+      backButtonRef.current?.focus();
+    }
+  }, [isStale]);
 
   // Reset bilingual state when messageId changes
   useEffect(() => {
@@ -234,6 +248,7 @@ export default function MessageDetail({ messageId, onBack, onReopen, folderRole 
       {/* Toolbar row: back · message actions · snooze / bilingual (all 32px) */}
       <div className="reader-toolbar">
         <IconButton
+          ref={backButtonRef}
           size="md"
           label={t("compose.back", "Back")}
           icon={<ArrowLeft size={16} />}
@@ -241,7 +256,7 @@ export default function MessageDetail({ messageId, onBack, onReopen, folderRole 
         />
         {/* While the next message loads, only Back stays usable: the other
             actions would act on the previous (stale) message. */}
-        <div className="contents" inert={isStale || undefined}>
+        <div ref={toolbarScopeRef} className="contents" inert={isStale || undefined}>
         <span className="toolbar-separator" aria-hidden="true" />
         <MessageActionToolbar
           message={message}
@@ -281,7 +296,7 @@ export default function MessageDetail({ messageId, onBack, onReopen, folderRole 
         </div>
       </div>
 
-      <div className="contents" inert={isStale || undefined}>
+      <div ref={bodyScopeRef} className="contents" inert={isStale || undefined}>
 
       {/* Header: subject, draft resume, sender card — on the content edge */}
       <div className="reader-header">
