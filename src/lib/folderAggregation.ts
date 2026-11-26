@@ -80,11 +80,23 @@ export function sortFoldersForSidebar(folders: Folder[]): Folder[] {
   ];
 }
 
-export function folderIdsForSelection(folderId: string | null, folders: Folder[]): string[] {
+/**
+ * Folder ids a sidebar selection covers: every folder with the selection's
+ * role (unified "all:*" folders and system folders), else the folder itself.
+ * `accountId` narrows a role selection to one account's folders — the unified
+ * inbox's account filter.
+ */
+export function folderIdsForSelection(
+  folderId: string | null,
+  folders: Folder[],
+  accountId?: string | null,
+): string[] {
   if (!folderId) return [];
   const role = roleFromAllAccountsFolderId(folderId) ?? folders.find((folder) => folder.id === folderId)?.role;
   if (!role) return folders.some((folder) => folder.id === folderId) ? [folderId] : [];
-  return folders.filter((folder) => folder.role === role).map((folder) => folder.id);
+  return folders
+    .filter((folder) => folder.role === role && (!accountId || folder.account_id === accountId))
+    .map((folder) => folder.id);
 }
 
 export function roleForSelection(folderId: string | null, folders: Folder[]): Folder["role"] {

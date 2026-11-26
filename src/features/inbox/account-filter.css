@@ -1,0 +1,80 @@
+/* Unified inbox account filter (AccountFilterBar): one row of .chip--md radios
+   above the list. Never wraps: it scrolls sideways with a hidden scrollbar and
+   fades the edge that has more chips. Selected = neutral fill, not orange. */
+.account-filter-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-divider);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+
+.account-filter-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.account-filter-bar[data-fade="end"] {
+  mask-image: linear-gradient(to right, #000 calc(100% - var(--space-6)), transparent);
+}
+
+.account-filter-bar[data-fade="start"] {
+  mask-image: linear-gradient(to left, #000 calc(100% - var(--space-6)), transparent);
+}
+
+.account-filter-bar[data-fade="start end"] {
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--space-6),
+    #000 calc(100% - var(--space-6)),
+    transparent
+  );
+}
+
+.account-filter-chip {
+  flex: none;
+  max-width: none;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.account-filter-chip:hover {
+  background: var(--color-fill-hover);
+  color: var(--color-text-primary);
+}
+
+.account-filter-chip:active {
+  background: var(--color-fill-pressed);
+}
+
+.account-filter-chip[aria-checked="true"] {
+  border-color: transparent;
+  background: var(--color-fill-selected);
+  color: var(--color-text-primary);
+}
+
+.account-filter-chip__name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.account-filter-chip__count {
+  color: var(--color-text-tertiary);
+  font-weight: var(--weight-regular);
+  font-variant-numeric: tabular-nums;
+}
+
+.account-filter-chip[aria-checked="true"] .account-filter-chip__count {
+  color: var(--color-text-secondary);
+}

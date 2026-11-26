@@ -21,7 +21,10 @@ import IconButton from "@/components/ui/IconButton";
 import "@/components/mail-list.css";
 import { eventToKeyString, useShortcutStore } from "@/stores/shortcut.store";
 import { emptyTrash } from "@/lib/api";
-import { folderIdsForSelection, roleForSelection } from "@/lib/folderAggregation";
+import { folderIdsForSelection, isAllAccountsFolderId, roleForSelection } from "@/lib/folderAggregation";
+import { assignAccountColors } from "@/lib/accountColors";
+import { useAccountBadges } from "@/hooks/useAccountBadges";
+import AccountFilterBar from "./AccountFilterBar";
 import type { ThreadSummary } from "@/lib/api";
 
 const EMPTY_THREADS: ThreadSummary[] = [];
@@ -39,6 +42,8 @@ export default function InboxView() {
   const selectedThreadAccountId = useMailStore((s) => s.selectedThreadAccountId);
   const selectThread = useMailStore((s) => s.selectThread);
   const batchMode = useMailStore((s) => s.batchMode);
+  const unifiedAccountFilter = useMailStore((s) => s.unifiedAccountFilter);
+  const setUnifiedAccountFilter = useMailStore((s) => s.setUnifiedAccountFilter);
   const { data: accounts = [] } = useAccountsQuery();
   const folderAccountIds = useMemo(
     () => activeAccountId ? [activeAccountId] : accounts.map((account) => account.id),
@@ -52,7 +57,19 @@ export default function InboxView() {
 
   const activeFolderRole = roleForSelection(activeFolderId, folders);
   const isTrashFolder = activeFolderRole === "trash";
-  const selectedFolderIds = folderIdsForSelection(activeFolderId, folders);
+  // Unified view with several accounts: the account filter bar narrows the
+  // merged query to one account's folders (a stale filter is ignored).
+  const showAccountFilter = !activeAccountId && isAllAccountsFolderId(activeFolderId) && accounts.length > 1;
+  const accountFilter = showAccountFilter && accounts.some((account) => account.id === unifiedAccountFilter)
+    ? unifiedAccountFilter
+    : null;
+  const spansAccounts = showAccountFilter && !accountFilter;
+  const filterAccounts = useMemo(() => {
+    if (!showAccountFilter) return [];
+    const colors = assignAccountColors(accounts);
+    return accounts.map((account) => ({ ...account, color: colors.get(account.id) ?? account.color }));
+  }, [accounts, showAccountFilter]);
+  const selectedFolderIds = folderIdsForSelection(activeFolderId, folders, accountFilter);
   const queryFolderId = selectedFolderIds[0] ?? null;
   const queryFolderIds = selectedFolderIds.length > 1 ? selectedFolderIds : undefined;
 
@@ -119,7 +136,7 @@ export default function InboxView() {
             {showTrashConfirm && (
               <ConfirmDialog
                 title={t("messageActions.emptyTrash", "Empty Trash")}
-                message={activeAccountId
+                message={activeAccountId || accountFilter
                   ? t("messageActions.emptyTrashConfirm", "Permanently delete all messages in this account's Trash? This can't be undone.")
                   : t("messageActions.emptyTrashConfirmAll", "Permanently delete all messages in Trash for all accounts? This can't be undone.")}
                 confirmLabel={t("messageActions.deletePermanently", "Delete permanently")}
@@ -128,7 +145,8 @@ export default function InboxView() {
                 onConfirm={async () => {
                   setShowTrashConfirm(false);
                   try {
-                    const targetAccountIds = activeAccountId ? [activeAccountId] : accounts.map((account) => account.id);
+                    const scopedAccountId = activeAccountId ?? accountFilter;
+                    const targetAccountIds = scopedAccountId ? [scopedAccountId] : accounts.map((account) => account.id);
                     const counts = await Promise.all(targetAccountIds.map((accountId) => emptyTrash(accountId)));
                     const count = counts.reduce((sum, current) => sum + current, 0);
                     queryClient.invalidateQueries({ queryKey: ["messages"] });
@@ -171,6 +189,15 @@ export default function InboxView() {
             overflow: "hidden",
           }}
         >
+          {showAccountFilter && (
+            <AccountFilterBar
+              accounts={filterAccounts}
+              folders={folders}
+              role={activeFolderRole}
+              value={accountFilter}
+              onChange={setUnifiedAccountFilter}
+            />
+          )}
           {threadView ? (
             <ThreadList
               threads={threads}
@@ -180,6 +207,7 @@ export default function InboxView() {
               selectedThreadAccountId={selectedThreadAccountId}
               onSelectThread={selectThread}
               loading={loadingThreads}
+              spansAccounts={spansAccounts}
             />
           ) : (
             <MessageList
@@ -191,6 +219,7 @@ export default function InboxView() {
               hasNextPage={hasNextPage}
               isFetchingNextPage={isFetchingNextPage}
               onToggleStar={handleToggleStar}
+              spansAccounts={spansAccounts}
             />
           )}
         </div>
@@ -226,7 +255,9 @@ export default function InboxView() {
 }
 
 // Inline ThreadList component using virtualizer
-function ThreadList({ threads, folderIds, folderRole, selectedThreadId, selectedThreadAccountId, onSelectThread, loading }: {
+function ThreadList({
+  threads, folderIds, folderRole, selectedThreadId, selectedThreadAccountId, onSelectThread, loading, spansAccounts = false,
+}: {
   threads: ThreadSummary[];
   folderIds: string[];
   folderRole?: ReturnType<typeof roleForSelection>;
@@ -234,6 +265,8 @@ function ThreadList({ threads, folderIds, folderRole, selectedThreadId, selected
   selectedThreadAccountId: string | null;
   onSelectThread: (thread: ThreadSummary) => void;
   loading: boolean;
+  /** The unfiltered unified view: badge rows by account even on a one-account page. */
+  spansAccounts?: boolean;
 }) {
   const { t } = useTranslation();
   const parentRef = useRef<HTMLDivElement>(null);
@@ -245,6 +278,8 @@ function ThreadList({ threads, folderIds, folderRole, selectedThreadId, selected
     measureElement: (el) => el.getBoundingClientRect().height,
     overscan: 5,
   });
+  const threadAccountIds = useMemo(() => threads.map((thread) => thread.account_id), [threads]);
+  const badgeAccounts = useAccountBadges(threadAccountIds, spansAccounts);
   const rowKey = (thread: ThreadSummary) => `${thread.account_id}:${thread.thread_id}`;
   const selectedIndex = threads.findIndex((thread) => isThreadSelected({ selectedThreadId, selectedThreadAccountId }, thread));
   const [activeKey, setActiveKey] = useState<string | null>(null);
@@ -370,6 +405,7 @@ function ThreadList({ threads, folderIds, folderRole, selectedThreadId, selected
                 folderRole={folderRole}
                 tabIndex={virtualItem.index === activeIndex ? 0 : -1}
                 onRowFocus={(focused) => setActiveKey(rowKey(focused))}
+                account={badgeAccounts?.get(thread.account_id)}
               />
             </div>
           );
