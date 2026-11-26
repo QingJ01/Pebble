@@ -1,18 +1,20 @@
 use crate::commands::attachments::cleanup_staged_attachment_records;
+use crate::commands::sync_cmd::request_sync;
+use crate::realtime::SyncTrigger;
 use crate::{events, state::AppState};
-use pebble_core::traits::{FolderProvider, LabelProvider};
-use pebble_core::{FolderRole, Message, PebbleError, ProviderType};
-use pebble_store::pending_ops::{PendingMailOp, PendingMailOpsSummary};
+use pebble_core::{FolderRole, PebbleError, ProviderType};
+use pebble_store::pending_ops::{
+    AbandonedPendingMailOp, MailOp, PendingMailOp, PendingMailOpCompensation,
+    PendingMailOpsSummary, MAX_PENDING_MAIL_OP_ATTEMPTS,
+};
 use pebble_store::Store;
 use serde::Serialize;
-use serde_json::Value;
 use tauri::{Emitter, Manager, State};
 use tracing::{debug, warn};
 
 use super::compose::{self, LocalOutgoingState};
 use super::messages::{
-    classify_remote_delete_result, connect_gmail, connect_imap, connect_outlook,
-    find_folder_by_role, find_message_folder, imap_move_tracked, refresh_search_document,
+    connect_remote, execute_mail_op, refresh_search_document, refresh_search_documents,
     remove_search_documents,
 };
 
@@ -37,6 +39,8 @@ pub fn retry_failed_send(
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "PendingMailOpsSummary"))]
 pub struct PendingMailOpsSummaryResponse {
     pub pending_count: i64,
     pub in_progress_count: i64,
@@ -60,11 +64,17 @@ impl From<PendingMailOpsSummary> for PendingMailOpsSummaryResponse {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "PendingMailOp"))]
 pub struct PendingMailOpResponse {
     pub id: String,
     pub account_id: String,
     pub message_id: String,
     pub op_type: String,
+    #[cfg_attr(
+        test,
+        ts(type = "\"pending\" | \"in_progress\" | \"failed\" | \"done\"")
+    )]
     pub status: String,
     pub attempts: i64,
     pub last_error: Option<String>,
@@ -114,26 +124,6 @@ pub fn list_pending_mail_ops(
         .map(|ops| ops.into_iter().map(Into::into).collect())
 }
 
-pub fn queue_pending_mail_op(
-    store: &Store,
-    message: &Message,
-    op_type: &str,
-    payload: Value,
-) -> std::result::Result<String, PebbleError> {
-    let payload = serde_json::json!({
-        "provider_account_id": message.account_id,
-        "remote_id": message.remote_id,
-        "op": op_type,
-        "payload": payload,
-    });
-    store.insert_pending_mail_op(
-        &message.account_id,
-        &message.id,
-        op_type,
-        &payload.to_string(),
-    )
-}
-
 pub async fn run_pending_mail_ops_worker(app: tauri::AppHandle) {
     let mut interval =
         tokio::time::interval(tokio::time::Duration::from_secs(WORKER_INTERVAL_SECS));
@@ -162,6 +152,7 @@ pub async fn process_pending_mail_ops(
         .list_retryable_pending_mail_ops(WORKER_BATCH_LIMIT)?;
     let mut changed = false;
     let mut completed = 0usize;
+    let mut abandoned = Vec::new();
 
     for op in ops {
         state.store.mark_pending_mail_op_in_progress(&op.id)?;
@@ -173,6 +164,9 @@ pub async fn process_pending_mail_ops(
                 completed += 1;
             }
             Err(ReplayPendingMailOpError::Retryable(ref e)) if is_permanent_error(e) => {
+                // Compensate before marking done so the revert sees this op
+                // as the latest one for the message.
+                abandoned.extend(compensate_abandoned(state, &op.id));
                 state.store.mark_pending_mail_op_done(&op.id)?;
                 warn!(
                     "Pending mail op {} permanently failed (non-retryable): {e}",
@@ -195,6 +189,13 @@ pub async fn process_pending_mail_ops(
                     .store
                     .mark_pending_mail_op_failed(&op.id, &e.to_string())?;
                 warn!("Pending mail op {} retry failed: {e}", op.id);
+                if retries_exhausted_after_failure(op.attempts) {
+                    warn!(
+                        "Pending mail op {} gave up after {MAX_PENDING_MAIL_OP_ATTEMPTS} attempts",
+                        op.id
+                    );
+                    abandoned.extend(compensate_abandoned(state, &op.id));
+                }
             }
             Err(ReplayPendingMailOpError::SenderIdentityBlocked(e)) => {
                 state.store.mark_pending_mail_op_stopped(
@@ -205,10 +206,70 @@ pub async fn process_pending_mail_ops(
         }
     }
 
+    finish_abandoned_ops(state, app, abandoned).await;
     if changed {
         emit_pending_ops_changed(app);
     }
     Ok(completed)
+}
+
+fn retries_exhausted_after_failure(attempts_before_failure: i64) -> bool {
+    attempts_before_failure + 1 >= MAX_PENDING_MAIL_OP_ATTEMPTS
+}
+
+fn compensate_abandoned(state: &AppState, op_id: &str) -> Option<AbandonedPendingMailOp> {
+    match state.store.compensate_abandoned_pending_mail_op(op_id) {
+        Ok(result) => result,
+        Err(e) => {
+            warn!("Failed to compensate abandoned pending mail op {op_id}: {e}");
+            None
+        }
+    }
+}
+
+/// Accounts whose local state must be refreshed from the server after the
+/// given ops were abandoned, and messages whose search docs need refreshing.
+fn abandoned_followups(abandoned: &[AbandonedPendingMailOp]) -> (Vec<String>, Vec<String>) {
+    let mut resync_accounts = Vec::new();
+    let mut reverted_messages = Vec::new();
+    for op in abandoned {
+        match op.compensation {
+            PendingMailOpCompensation::Reverted => {
+                if !reverted_messages.contains(&op.message_id) {
+                    reverted_messages.push(op.message_id.clone());
+                }
+            }
+            PendingMailOpCompensation::NeedsResync => {
+                if !resync_accounts.contains(&op.account_id) {
+                    resync_accounts.push(op.account_id.clone());
+                }
+            }
+            PendingMailOpCompensation::NotNeeded => {}
+        }
+    }
+    (resync_accounts, reverted_messages)
+}
+
+/// After ops are abandoned: refresh search docs for reverted messages and ask
+/// the sync worker for an authoritative refetch where no revert was possible.
+async fn finish_abandoned_ops(
+    state: &AppState,
+    app: Option<&tauri::AppHandle>,
+    abandoned: Vec<AbandonedPendingMailOp>,
+) {
+    if abandoned.is_empty() {
+        return;
+    }
+    let (resync_accounts, reverted_messages) = abandoned_followups(&abandoned);
+    if let Err(e) = refresh_search_documents(state, &reverted_messages) {
+        warn!("Failed to refresh search after reverting abandoned ops: {e}");
+    }
+    for account_id in resync_accounts {
+        if let Err(e) = request_sync(app, state, &account_id, SyncTrigger::Manual).await {
+            warn!("Failed to request resync for {account_id} after abandoned ops: {e}");
+        }
+    }
+    emit_pending_ops_changed(app);
 }
 
 #[derive(Debug)]
@@ -247,16 +308,17 @@ fn is_permanent_error(e: &PebbleError) -> bool {
 }
 
 #[tauri::command]
-pub fn dismiss_failed_pending_mail_ops(
+pub async fn dismiss_failed_pending_mail_ops(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
     account_id: Option<String>,
 ) -> std::result::Result<u64, PebbleError> {
-    let dismissed = state
+    let abandoned = state
         .store
-        .dismiss_failed_pending_mail_ops(account_id.as_deref())?;
+        .dismiss_failed_pending_mail_ops_with_compensation(account_id.as_deref())?;
+    let dismissed = abandoned.len() as u64;
     if dismissed > 0 {
-        emit_pending_ops_changed(Some(&app));
+        finish_abandoned_ops(&state, Some(&app), abandoned).await;
     }
     Ok(dismissed)
 }
@@ -280,51 +342,26 @@ async fn replay_pending_mail_op(
         return Ok(());
     };
 
-    let payload = op_payload(op)?;
-    match op.op_type.as_str() {
-        "update_flags" => {
-            let is_read = optional_bool(&payload, "is_read");
-            let is_starred = optional_bool(&payload, "is_starred");
-            replay_remote_update_flags(
-                state,
-                account.provider,
-                &message,
-                &payload,
-                is_read,
-                is_starred,
-            )
-            .await?;
-        }
-        "archive" => {
-            replay_remote_archive(state, account.provider, &message, &payload).await?;
-        }
-        "unarchive" | "restore" => {
-            replay_remote_restore(state, account.provider, &message, &payload).await?;
-        }
-        "delete" => {
-            replay_remote_delete(state, account.provider, &message, &payload, false).await?;
-        }
-        "delete_permanent" => {
-            replay_remote_delete(state, account.provider, &message, &payload, true).await?;
-        }
-        "move_to_folder" => {
-            replay_remote_move_to_folder(state, account.provider, &message, &payload).await?;
-        }
-        "managed_move" => {
-            super::folder_management::replay_managed_move(state, &message, &payload).await?;
-        }
-        "send" => {
-            if !remote_side_effect_already_applied(op)? {
-                replay_remote_send(state, account.provider.clone(), &account, &message).await?;
+    let envelope = op.envelope()?;
+    match &envelope.op {
+        MailOp::Send(_) => {
+            if !envelope.remote_succeeded {
+                replay_remote_send(state, &account, &message).await?;
                 classify_remote_send_receipt_write(
                     state.store.mark_pending_mail_op_remote_succeeded(&op.id),
                 )?;
             }
         }
-        other => {
-            return Err(ReplayPendingMailOpError::Retryable(PebbleError::Internal(
-                format!("Unsupported pending mail op type: {other}"),
-            )));
+        MailOp::ManagedMove(managed) => {
+            super::folder_management::replay_managed_move(state, &message, managed).await?;
+        }
+        // POP3 has no remote state; the local commit below is all there is.
+        _ if account.provider == ProviderType::Pop3 => {}
+        mutation => {
+            let remote = connect_remote(state, &message.account_id, &account.provider).await?;
+            let result = execute_mail_op(state, remote.as_ref(), &message, mutation).await;
+            remote.close().await;
+            result?;
         }
     }
 
@@ -333,313 +370,8 @@ async fn replay_pending_mail_op(
     Ok(())
 }
 
-async fn replay_remote_update_flags(
-    state: &AppState,
-    provider_type: ProviderType,
-    message: &pebble_core::Message,
-    payload: &Value,
-    is_read: Option<bool>,
-    is_starred: Option<bool>,
-) -> std::result::Result<(), PebbleError> {
-    match provider_type {
-        ProviderType::Gmail => {
-            let add = string_array(payload, "add_labels").unwrap_or_else(|| {
-                let mut labels = Vec::new();
-                if is_read == Some(false) {
-                    labels.push("UNREAD".to_string());
-                }
-                if is_starred == Some(true) {
-                    labels.push("STARRED".to_string());
-                }
-                labels
-            });
-            let remove = string_array(payload, "remove_labels").unwrap_or_else(|| {
-                let mut labels = Vec::new();
-                if is_read == Some(true) {
-                    labels.push("UNREAD".to_string());
-                }
-                if is_starred == Some(false) {
-                    labels.push("STARRED".to_string());
-                }
-                labels
-            });
-            if add.is_empty() && remove.is_empty() {
-                return Ok(());
-            }
-            connect_gmail(state, &message.account_id)
-                .await?
-                .modify_labels(&message.remote_id, &add, &remove)
-                .await
-        }
-        ProviderType::Outlook => {
-            let provider = connect_outlook(state, &message.account_id).await?;
-            if let Some(read) = is_read {
-                provider
-                    .update_read_status(&message.remote_id, read)
-                    .await?;
-            }
-            if let Some(starred) = is_starred {
-                provider
-                    .update_flag_status(&message.remote_id, starred)
-                    .await?;
-            }
-            Ok(())
-        }
-        ProviderType::Imap => {
-            let folder_remote_id = string_field(payload, "folder_remote_id")
-                .or_else(|| {
-                    find_message_folder(state, &message.id, &message.account_id)
-                        .ok()
-                        .map(|folder| folder.remote_id)
-                })
-                .ok_or_else(|| {
-                    PebbleError::Internal("Pending update_flags has no IMAP folder".to_string())
-                })?;
-            let uid = message
-                .remote_id
-                .parse::<u32>()
-                .map_err(|e| PebbleError::Internal(format!("Invalid IMAP UID: {e}")))?;
-            let imap = connect_imap(state, &message.account_id).await?;
-            let result = imap
-                .set_flags(&folder_remote_id, uid, is_read, is_starred)
-                .await;
-            let _ = imap.disconnect().await;
-            result
-        }
-        ProviderType::Pop3 => Ok(()),
-    }
-}
-
-async fn replay_remote_archive(
-    state: &AppState,
-    provider_type: ProviderType,
-    message: &pebble_core::Message,
-    payload: &Value,
-) -> std::result::Result<(), PebbleError> {
-    match provider_type {
-        ProviderType::Gmail => {
-            let add = string_array(payload, "add_labels").unwrap_or_default();
-            let remove =
-                string_array(payload, "remove_labels").unwrap_or_else(|| vec!["INBOX".to_string()]);
-            connect_gmail(state, &message.account_id)
-                .await?
-                .modify_labels(&message.remote_id, &add, &remove)
-                .await
-        }
-        ProviderType::Outlook => {
-            let target_remote_id =
-                target_folder_remote_id(state, message, payload, FolderRole::Archive)?;
-            let new_remote_id = connect_outlook(state, &message.account_id)
-                .await?
-                .move_message(&message.remote_id, &target_remote_id)
-                .await?;
-            state.store.update_remote_id(&message.id, &new_remote_id)?;
-            Ok(())
-        }
-        ProviderType::Imap => {
-            let source_remote_id = source_folder_remote_id(state, message, payload)?;
-            let target_remote_id =
-                target_folder_remote_id(state, message, payload, FolderRole::Archive)?;
-            let uid = parse_uid(message)?;
-            let imap = connect_imap(state, &message.account_id).await?;
-            let result = imap_move_tracked(
-                state,
-                &imap,
-                message,
-                &source_remote_id,
-                uid,
-                &target_remote_id,
-            )
-            .await;
-            let _ = imap.disconnect().await;
-            result
-        }
-        ProviderType::Pop3 => Ok(()),
-    }
-}
-
-async fn replay_remote_restore(
-    state: &AppState,
-    provider_type: ProviderType,
-    message: &pebble_core::Message,
-    payload: &Value,
-) -> std::result::Result<(), PebbleError> {
-    match provider_type {
-        ProviderType::Gmail => {
-            let current_folder = find_message_folder(state, &message.id, &message.account_id).ok();
-            let provider = connect_gmail(state, &message.account_id).await?;
-            if current_folder
-                .as_ref()
-                .is_some_and(|folder| folder.role == Some(FolderRole::Trash))
-            {
-                provider.untrash_message(&message.remote_id).await
-            } else {
-                provider
-                    .modify_labels(&message.remote_id, &["INBOX".to_string()], &[])
-                    .await
-            }
-        }
-        ProviderType::Outlook => {
-            let new_remote_id =
-                if let Some(target_remote_id) = string_field(payload, "target_folder_remote_id") {
-                    connect_outlook(state, &message.account_id)
-                        .await?
-                        .move_message(&message.remote_id, &target_remote_id)
-                        .await?
-                } else {
-                    connect_outlook(state, &message.account_id)
-                        .await?
-                        .restore_message(&message.remote_id)
-                        .await?
-                };
-            state.store.update_remote_id(&message.id, &new_remote_id)?;
-            Ok(())
-        }
-        ProviderType::Imap => {
-            let source_remote_id = source_folder_remote_id(state, message, payload)?;
-            let target_remote_id =
-                target_folder_remote_id(state, message, payload, FolderRole::Inbox)?;
-            let uid = parse_uid(message)?;
-            let imap = connect_imap(state, &message.account_id).await?;
-            let result = imap_move_tracked(
-                state,
-                &imap,
-                message,
-                &source_remote_id,
-                uid,
-                &target_remote_id,
-            )
-            .await;
-            let _ = imap.disconnect().await;
-            result
-        }
-        ProviderType::Pop3 => Ok(()),
-    }
-}
-
-async fn replay_remote_delete(
-    state: &AppState,
-    provider_type: ProviderType,
-    message: &pebble_core::Message,
-    payload: &Value,
-    permanent: bool,
-) -> std::result::Result<(), PebbleError> {
-    match provider_type {
-        ProviderType::Gmail => {
-            let provider = connect_gmail(state, &message.account_id).await?;
-            let result = if permanent {
-                provider
-                    .delete_message_permanently(&message.remote_id)
-                    .await
-            } else {
-                provider.trash_message(&message.remote_id).await
-            };
-            classify_remote_delete_result(result, permanent)
-        }
-        ProviderType::Outlook => {
-            let provider = connect_outlook(state, &message.account_id).await?;
-            if permanent {
-                classify_remote_delete_result(
-                    provider
-                        .delete_message_permanently(&message.remote_id)
-                        .await,
-                    true,
-                )
-            } else {
-                let new_remote_id = provider.trash_message(&message.remote_id).await?;
-                state.store.update_remote_id(&message.id, &new_remote_id)?;
-                Ok(())
-            }
-        }
-        ProviderType::Imap => {
-            let source_remote_id = source_folder_remote_id(state, message, payload)?;
-            let uid = parse_uid(message)?;
-            let imap = connect_imap(state, &message.account_id).await?;
-            let result = if permanent {
-                imap.delete_message(&source_remote_id, uid).await
-            } else if let Some(trash_remote_id) = string_field(payload, "trash_folder_remote_id")
-                .or_else(|| {
-                    find_folder_by_role(state, &message.account_id, FolderRole::Trash)
-                        .ok()
-                        .map(|folder| folder.remote_id)
-                })
-            {
-                if trash_remote_id == source_remote_id {
-                    imap.delete_message(&source_remote_id, uid).await
-                } else {
-                    imap.move_message_with_dedup(
-                        &source_remote_id,
-                        uid,
-                        &trash_remote_id,
-                        message.message_id_header.as_deref(),
-                    )
-                    .await
-                }
-            } else {
-                imap.delete_message(&source_remote_id, uid).await
-            };
-            let _ = imap.disconnect().await;
-            classify_remote_delete_result(result, permanent)
-        }
-        ProviderType::Pop3 => Ok(()),
-    }
-}
-
-async fn replay_remote_move_to_folder(
-    state: &AppState,
-    provider_type: ProviderType,
-    message: &pebble_core::Message,
-    payload: &Value,
-) -> std::result::Result<(), PebbleError> {
-    match provider_type {
-        ProviderType::Gmail => {
-            let add = string_array(payload, "add_labels").unwrap_or_else(|| {
-                string_field(payload, "target_folder_remote_id")
-                    .into_iter()
-                    .collect()
-            });
-            let remove =
-                string_array(payload, "remove_labels").unwrap_or_else(|| vec!["INBOX".to_string()]);
-            connect_gmail(state, &message.account_id)
-                .await?
-                .modify_labels(&message.remote_id, &add, &remove)
-                .await
-        }
-        ProviderType::Outlook => {
-            let target_remote_id =
-                target_folder_remote_id(state, message, payload, FolderRole::Inbox)?;
-            let new_remote_id = connect_outlook(state, &message.account_id)
-                .await?
-                .move_message(&message.remote_id, &target_remote_id)
-                .await?;
-            state.store.update_remote_id(&message.id, &new_remote_id)?;
-            Ok(())
-        }
-        ProviderType::Imap => {
-            let source_remote_id = source_folder_remote_id(state, message, payload)?;
-            let target_remote_id =
-                target_folder_remote_id(state, message, payload, FolderRole::Inbox)?;
-            let uid = parse_uid(message)?;
-            let imap = connect_imap(state, &message.account_id).await?;
-            let result = imap_move_tracked(
-                state,
-                &imap,
-                message,
-                &source_remote_id,
-                uid,
-                &target_remote_id,
-            )
-            .await;
-            let _ = imap.disconnect().await;
-            result
-        }
-        ProviderType::Pop3 => Ok(()),
-    }
-}
-
 async fn replay_remote_send(
     state: &AppState,
-    _provider_type: ProviderType,
     account: &pebble_core::Account,
     message: &pebble_core::Message,
 ) -> std::result::Result<(), ReplayPendingMailOpError> {
@@ -690,99 +422,82 @@ fn apply_pending_local_commit(
     store: &Store,
     op: &PendingMailOp,
 ) -> std::result::Result<(), PebbleError> {
-    let payload = op_payload(op)?;
-    let placeholder_attachments =
-        if op.op_type == "send" && compose::send_finalize_deletes_placeholder(&payload) {
-            store.list_attachments_by_message(&op.message_id)?
-        } else {
-            Vec::new()
-        };
-    match op.op_type.as_str() {
-        "update_flags" => {
-            store.update_message_flags(
-                &op.message_id,
-                optional_bool(&payload, "is_read"),
-                optional_bool(&payload, "is_starred"),
-            )?;
+    let envelope = op.envelope()?;
+    let role_folder = |role: FolderRole| {
+        store
+            .find_folder_by_role(&op.account_id, role)
+            .ok()
+            .flatten()
+            .map(|folder| folder.id)
+    };
+    let mut placeholder_attachments = Vec::new();
+    match &envelope.op {
+        MailOp::UpdateFlags(flags) => {
+            store.update_message_flags(&op.message_id, flags.is_read, flags.is_starred)?;
         }
-        "archive" => {
-            if let Some(folder_id) = string_field(&payload, "target_folder_id")
-                .or_else(|| string_field(&payload, "archive_folder_id"))
-                .or_else(|| {
-                    store
-                        .find_folder_by_role(&op.account_id, FolderRole::Archive)
-                        .ok()
-                        .flatten()
-                        .map(|folder| folder.id)
-                })
+        MailOp::Archive(change) => {
+            if let Some(folder_id) = change
+                .target_id()
+                .map(str::to_owned)
+                .or_else(|| role_folder(FolderRole::Archive))
             {
                 store.move_message_to_folder(&op.message_id, &folder_id)?;
             } else {
                 store.soft_delete_message(&op.message_id)?;
             }
         }
-        "unarchive" | "restore" => {
-            let folder_id = string_field(&payload, "target_folder_id")
-                .or_else(|| {
-                    store
-                        .find_folder_by_role(&op.account_id, FolderRole::Inbox)
-                        .ok()
-                        .flatten()
-                        .map(|folder| folder.id)
-                })
+        MailOp::Unarchive(change) | MailOp::Restore(change) => {
+            let folder_id = change
+                .target_id()
+                .map(str::to_owned)
+                .or_else(|| role_folder(FolderRole::Inbox))
                 .ok_or_else(|| PebbleError::Internal("No restore target folder".to_string()))?;
             store.move_message_to_folder(&op.message_id, &folder_id)?;
         }
-        "delete" => {
-            if let Some(trash_folder_id) = string_field(&payload, "trash_folder_id") {
+        MailOp::Delete(delete) => {
+            if let Some(trash_folder_id) = delete.trash_folder_id.as_deref() {
                 let current = store
                     .get_message_folder_ids(&op.message_id)?
                     .into_iter()
                     .next();
-                if current.as_deref() != Some(trash_folder_id.as_str()) {
-                    store.move_message_to_folder(&op.message_id, &trash_folder_id)?;
+                if current.as_deref() != Some(trash_folder_id) {
+                    store.move_message_to_folder(&op.message_id, trash_folder_id)?;
                 } else {
                     store.soft_delete_message(&op.message_id)?;
                 }
-            } else if let Some(trash) =
-                store.find_folder_by_role(&op.account_id, FolderRole::Trash)?
-            {
-                store.move_message_to_folder(&op.message_id, &trash.id)?;
+            } else if let Some(trash_id) = role_folder(FolderRole::Trash) {
+                store.move_message_to_folder(&op.message_id, &trash_id)?;
             } else {
                 store.soft_delete_message(&op.message_id)?;
             }
         }
-        "delete_permanent" => {
+        MailOp::DeletePermanent(_) => {
             store.hard_delete_messages(std::slice::from_ref(&op.message_id))?;
         }
-        "move_to_folder" => {
-            let folder_id = string_field(&payload, "target_folder_id")
+        MailOp::MoveToFolder(change) => {
+            let folder_id = change
+                .target_id()
                 .ok_or_else(|| PebbleError::Internal("No move target folder".to_string()))?;
-            store.move_message_to_folder(&op.message_id, &folder_id)?;
+            store.move_message_to_folder(&op.message_id, folder_id)?;
         }
         // The provider-aware replay commits membership and destination identity atomically.
-        "managed_move" => {}
-        "send" => {
+        MailOp::ManagedMove(_) => {}
+        MailOp::Send(send) => {
+            let payload = envelope.op.payload();
             if compose::send_finalize_deletes_placeholder(&payload) {
+                placeholder_attachments = store.list_attachments_by_message(&op.message_id)?;
                 store.complete_outgoing_send(&op.message_id, &op.id, None)?;
             } else {
-                let sent_folder_id = string_field(&payload, "sent_folder_id")
-                    .map(Ok)
-                    .unwrap_or_else(|| {
-                        compose::ensure_local_outgoing_folder(
-                            store,
-                            &op.account_id,
-                            LocalOutgoingState::Sent,
-                        )
-                        .map(|folder| folder.id)
-                    })?;
+                let sent_folder_id = send.sent_folder_id.clone().map(Ok).unwrap_or_else(|| {
+                    compose::ensure_local_outgoing_folder(
+                        store,
+                        &op.account_id,
+                        LocalOutgoingState::Sent,
+                    )
+                    .map(|folder| folder.id)
+                })?;
                 store.complete_outgoing_send(&op.message_id, &op.id, Some(&sent_folder_id))?;
             }
-        }
-        other => {
-            return Err(PebbleError::Internal(format!(
-                "Unsupported pending mail op type: {other}"
-            )));
         }
     }
     cleanup_staged_attachment_records(&placeholder_attachments);
@@ -800,95 +515,11 @@ fn refresh_after_pending_commit(
     }
 }
 
-fn op_payload(op: &PendingMailOp) -> std::result::Result<Value, PebbleError> {
-    let value: Value = serde_json::from_str(&op.payload_json)
-        .map_err(|e| PebbleError::Internal(format!("Invalid pending op payload: {e}")))?;
-    Ok(value.get("payload").cloned().unwrap_or(value))
-}
-
+#[cfg(test)]
 fn remote_side_effect_already_applied(
     op: &PendingMailOp,
 ) -> std::result::Result<bool, PebbleError> {
-    let value: Value = serde_json::from_str(&op.payload_json)
-        .map_err(|e| PebbleError::Internal(format!("Invalid pending op payload: {e}")))?;
-    Ok(value
-        .get("remote_succeeded")
-        .and_then(Value::as_bool)
-        .unwrap_or(false))
-}
-
-fn string_field(payload: &Value, key: &str) -> Option<String> {
-    payload
-        .get(key)
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
-}
-
-fn optional_bool(payload: &Value, key: &str) -> Option<bool> {
-    payload.get(key).and_then(Value::as_bool)
-}
-
-fn string_array(payload: &Value, key: &str) -> Option<Vec<String>> {
-    payload.get(key).and_then(|value| {
-        value.as_array().map(|items| {
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(ToOwned::to_owned)
-                .collect()
-        })
-    })
-}
-
-fn source_folder_remote_id(
-    state: &AppState,
-    message: &pebble_core::Message,
-    payload: &Value,
-) -> std::result::Result<String, PebbleError> {
-    string_field(payload, "source_folder_remote_id")
-        .or_else(|| {
-            find_message_folder(state, &message.id, &message.account_id)
-                .ok()
-                .map(|folder| folder.remote_id)
-        })
-        .ok_or_else(|| PebbleError::Internal("No source folder for pending op".to_string()))
-}
-
-fn target_folder_remote_id(
-    state: &AppState,
-    message: &pebble_core::Message,
-    payload: &Value,
-    fallback_role: FolderRole,
-) -> std::result::Result<String, PebbleError> {
-    string_field(payload, "target_folder_remote_id")
-        .or_else(|| string_field(payload, "archive_folder_remote_id"))
-        .or_else(|| string_field(payload, "trash_folder_remote_id"))
-        .or_else(|| {
-            string_field(payload, "target_folder_id")
-                .or_else(|| string_field(payload, "archive_folder_id"))
-                .and_then(|folder_id| {
-                    state
-                        .store
-                        .list_folders(&message.account_id)
-                        .ok()?
-                        .into_iter()
-                        .find(|folder| folder.id == folder_id)
-                        .map(|folder| folder.remote_id)
-                })
-        })
-        .or_else(|| {
-            find_folder_by_role(state, &message.account_id, fallback_role)
-                .ok()
-                .map(|folder| folder.remote_id)
-        })
-        .ok_or_else(|| PebbleError::Internal("No target folder for pending op".to_string()))
-}
-
-fn parse_uid(message: &pebble_core::Message) -> std::result::Result<u32, PebbleError> {
-    message
-        .remote_id
-        .parse::<u32>()
-        .map_err(|e| PebbleError::Internal(format!("Invalid IMAP UID: {e}")))
+    Ok(op.envelope()?.remote_succeeded)
 }
 
 #[cfg(test)]
@@ -1014,6 +645,38 @@ mod tests {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    #[test]
+    fn give_up_is_detected_on_the_final_attempt_only() {
+        use pebble_store::pending_ops::MAX_PENDING_MAIL_OP_ATTEMPTS;
+        assert!(!super::retries_exhausted_after_failure(0));
+        assert!(!super::retries_exhausted_after_failure(
+            MAX_PENDING_MAIL_OP_ATTEMPTS - 2
+        ));
+        assert!(super::retries_exhausted_after_failure(
+            MAX_PENDING_MAIL_OP_ATTEMPTS - 1
+        ));
+    }
+
+    #[test]
+    fn abandoned_followups_split_reverts_from_resyncs() {
+        use pebble_store::pending_ops::{AbandonedPendingMailOp, PendingMailOpCompensation};
+        let op = |id: &str, account: &str, message: &str, compensation| AbandonedPendingMailOp {
+            id: id.into(),
+            account_id: account.into(),
+            message_id: message.into(),
+            compensation,
+        };
+        let (resync, reverted) = super::abandoned_followups(&[
+            op("1", "a", "m1", PendingMailOpCompensation::Reverted),
+            op("2", "a", "m1", PendingMailOpCompensation::Reverted),
+            op("3", "b", "m2", PendingMailOpCompensation::NeedsResync),
+            op("4", "b", "m3", PendingMailOpCompensation::NeedsResync),
+            op("5", "c", "m4", PendingMailOpCompensation::NotNeeded),
+        ]);
+        assert_eq!(resync, vec!["b".to_string()]);
+        assert_eq!(reverted, vec!["m1".to_string()]);
     }
 
     #[test]

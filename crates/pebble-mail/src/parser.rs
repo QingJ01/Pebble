@@ -1,4 +1,4 @@
-use mail_parser::{Address, HeaderValue, MessageParser, MimeHeaders};
+use mail_parser::{Address, HeaderValue, MessageParser, MimeHeaders, PartType};
 use pebble_core::{build_snippet, EmailAddress, PebbleError, Result};
 
 /// Metadata about a parsed attachment.
@@ -79,9 +79,28 @@ fn extract_id_list(hv: &HeaderValue<'_>) -> Option<String> {
     (!ids.is_empty()).then(|| ids.join(" "))
 }
 
+/// Maximum number of attachment parts kept from one message.
+pub const MAX_ATTACHMENT_PARTS: usize = 500;
+/// Maximum total decoded attachment bytes kept from one message.
+pub const MAX_TOTAL_ATTACHMENT_BYTES: usize = 100 * 1024 * 1024;
+
+/// Take ownership of a part body. Decoded (base64/quoted-printable) bodies
+/// are already owned by the parser and move out without copying; only
+/// bodies borrowed from the raw message are copied once.
+fn part_body_into_bytes(body: PartType<'_>) -> Vec<u8> {
+    match body {
+        PartType::Text(text) | PartType::Html(text) => text.into_owned().into_bytes(),
+        PartType::Binary(bytes) | PartType::InlineBinary(bytes) => bytes.into_owned(),
+        // An unencoded message/rfc822 part borrows the *outer* email in
+        // `raw_message`; the accessor slices out just the nested message.
+        PartType::Message(message) => message.raw_message().to_vec(),
+        PartType::Multipart(_) => Vec::new(),
+    }
+}
+
 /// Parse a raw email byte slice into a `ParsedMessage`.
 pub fn parse_raw_email(raw: &[u8]) -> Result<ParsedMessage> {
-    let message = MessageParser::default()
+    let mut message = MessageParser::default()
         .parse(raw)
         .ok_or_else(|| PebbleError::Sync("Failed to parse email message".to_string()))?;
 
@@ -130,40 +149,66 @@ pub fn parse_raw_email(raw: &[u8]) -> Result<ParsedMessage> {
     // Snippet: prefer body_text, but strip HTML/CSS; fall back to body_html
     let snippet = build_snippet(&body_text, &body_html);
 
-    // Attachments
-    let attachments: Vec<AttachmentData> = message
-        .attachments()
-        .map(|part| {
-            let filename = part.attachment_name().unwrap_or("unnamed").to_string();
-            let mime_type = part
-                .content_type()
-                .map(|ct| {
-                    if let Some(sub) = ct.subtype() {
-                        format!("{}/{}", ct.ctype(), sub)
-                    } else {
-                        ct.ctype().to_string()
-                    }
-                })
-                .unwrap_or_else(|| "application/octet-stream".to_string());
-            let size = part.len();
-            let content_id = part.content_id().map(|s| s.to_string());
-            let is_inline = part
-                .content_disposition()
-                .map(|d| d.ctype() == "inline")
-                .unwrap_or(false);
-            let data = part.contents().to_vec();
-            AttachmentData {
-                meta: AttachmentMeta {
-                    filename,
-                    mime_type,
-                    size,
-                    content_id,
-                    is_inline,
-                },
-                data,
-            }
-        })
-        .collect();
+    // Attachments: collect metadata while the message is borrowed, then
+    // move each body out of the parsed parts instead of copying it.
+    let mut metas: Vec<(usize, AttachmentMeta)> = Vec::new();
+    let mut total_bytes = 0usize;
+    for (position, part) in message.attachments().enumerate() {
+        if metas.len() >= MAX_ATTACHMENT_PARTS {
+            tracing::warn!(
+                "Message has more than {MAX_ATTACHMENT_PARTS} attachment parts; ignoring the rest"
+            );
+            break;
+        }
+        let size = part.len();
+        if total_bytes.saturating_add(size) > MAX_TOTAL_ATTACHMENT_BYTES {
+            tracing::warn!(
+                "Skipping attachment part of {size} bytes: total attachment size would exceed {MAX_TOTAL_ATTACHMENT_BYTES} bytes"
+            );
+            continue;
+        }
+        total_bytes += size;
+        let filename = part.attachment_name().unwrap_or("unnamed").to_string();
+        let mime_type = part
+            .content_type()
+            .map(|ct| {
+                if let Some(sub) = ct.subtype() {
+                    format!("{}/{}", ct.ctype(), sub)
+                } else {
+                    ct.ctype().to_string()
+                }
+            })
+            .unwrap_or_else(|| "application/octet-stream".to_string());
+        let content_id = part.content_id().map(|s| s.to_string());
+        let is_inline = part
+            .content_disposition()
+            .map(|d| d.ctype() == "inline")
+            .unwrap_or(false);
+        let Some(&part_index) = message.attachments.get(position) else {
+            continue;
+        };
+        metas.push((
+            part_index,
+            AttachmentMeta {
+                filename,
+                mime_type,
+                size,
+                content_id,
+                is_inline,
+            },
+        ));
+    }
+    let mut attachments = Vec::with_capacity(metas.len());
+    for (part_index, meta) in metas {
+        let Some(part) = message.parts.get_mut(part_index) else {
+            continue;
+        };
+        let body = std::mem::take(&mut part.body);
+        attachments.push(AttachmentData {
+            meta,
+            data: part_body_into_bytes(body),
+        });
+    }
 
     let has_attachments = !attachments.is_empty();
 
@@ -189,6 +234,41 @@ pub fn parse_raw_email(raw: &[u8]) -> Result<ParsedMessage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unencoded_eml_attachment_keeps_only_the_nested_message() {
+        let raw = b"From: Outer <outer@example.com>\r\n\
+                    To: Bob <bob@example.com>\r\n\
+                    Subject: Outer subject\r\n\
+                    MIME-Version: 1.0\r\n\
+                    Content-Type: multipart/mixed; boundary=\"b1\"\r\n\
+                    \r\n\
+                    --b1\r\n\
+                    Content-Type: text/plain\r\n\
+                    \r\n\
+                    See attached.\r\n\
+                    --b1\r\n\
+                    Content-Type: message/rfc822\r\n\
+                    Content-Disposition: attachment; filename=\"inner.eml\"\r\n\
+                    \r\n\
+                    From: Inner <inner@example.com>\r\n\
+                    Subject: Inner subject\r\n\
+                    \r\n\
+                    Inner body\r\n\
+                    --b1--\r\n";
+
+        let parsed = parse_raw_email(raw).unwrap();
+        let eml = parsed
+            .attachments
+            .iter()
+            .find(|a| a.meta.mime_type.contains("rfc822") || a.meta.filename.ends_with(".eml"))
+            .expect("the nested message is an attachment");
+        let text = String::from_utf8_lossy(&eml.data);
+        assert!(text.starts_with("From: Inner"), "{text}");
+        assert!(text.contains("Inner body"), "{text}");
+        assert!(!text.contains("Outer subject"), "{text}");
+        assert_eq!(eml.meta.size, eml.data.len());
+    }
 
     #[test]
     fn test_parse_simple_email() {
@@ -377,5 +457,41 @@ mod tests {
         let result = pebble_core::strip_html_for_snippet(html);
         assert!(!result.contains("margin"));
         assert!(result.contains("Hello World"));
+    }
+
+    fn multipart_with_attachments(count: usize) -> Vec<u8> {
+        let mut raw = String::from(
+            "From: a@example.com\r\nSubject: files\r\nMIME-Version: 1.0\r\n\
+             Content-Type: multipart/mixed; boundary=\"b\"\r\n\r\n\
+             --b\r\nContent-Type: text/plain\r\n\r\nbody\r\n",
+        );
+        for index in 0..count {
+            raw.push_str(&format!(
+                "--b\r\nContent-Type: application/octet-stream\r\n\
+                 Content-Disposition: attachment; filename=\"f{index}.bin\"\r\n\
+                 Content-Transfer-Encoding: base64\r\n\r\naGVsbG8=\r\n"
+            ));
+        }
+        raw.push_str("--b--\r\n");
+        raw.into_bytes()
+    }
+
+    #[test]
+    fn attachments_are_decoded_and_moved_out_of_the_parse_tree() {
+        let parsed = parse_raw_email(&multipart_with_attachments(2)).unwrap();
+        assert!(parsed.has_attachments);
+        assert_eq!(parsed.attachments.len(), 2);
+        assert_eq!(parsed.attachments[0].meta.filename, "f0.bin");
+        assert_eq!(parsed.attachments[1].meta.filename, "f1.bin");
+        assert_eq!(parsed.attachments[0].data, b"hello");
+        assert_eq!(parsed.attachments[0].meta.size, 5);
+        assert_eq!(parsed.body_text.trim(), "body");
+    }
+
+    #[test]
+    fn attachment_part_count_is_capped() {
+        let parsed =
+            parse_raw_email(&multipart_with_attachments(MAX_ATTACHMENT_PARTS + 3)).unwrap();
+        assert_eq!(parsed.attachments.len(), MAX_ATTACHMENT_PARTS);
     }
 }

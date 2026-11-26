@@ -50,6 +50,8 @@ vi.mock("@tauri-apps/api/event", () => ({
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({
     invalidateQueries: mocks.invalidateQueries,
+    getQueryCache: () => ({ findAll: () => [] }),
+    setQueryData: vi.fn(),
   }),
 }));
 
@@ -88,10 +90,11 @@ describe("StatusBar realtime mail events", () => {
     mocks.mailState.activeAccountId = "account-1";
   });
 
-  it("invalidates message, thread, and account folder queries for new mail", async () => {
+  it("invalidates message, thread, and account folder queries for new mail after coalescing", async () => {
     render(<StatusBar />);
 
     await waitFor(() => expect(mocks.listeners.has("mail:new")).toBe(true));
+    vi.useFakeTimers();
 
     mocks.listeners.get("mail:new")?.({
       payload: {
@@ -105,11 +108,16 @@ describe("StatusBar realtime mail events", () => {
       },
     });
 
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["messages"] });
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["threads"] });
+    expect(mocks.invalidateQueries).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(500);
+    vi.useRealTimers();
+
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["messages"], predicate: expect.any(Function) });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["threads"], predicate: expect.any(Function) });
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folders", "account-1"] });
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts", "account-1"] });
     expect(mocks.invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ["folders"] });
+    expect(mocks.invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ["messages"] });
   });
 
   it("shows manual mode when backend reports background sync is stopped", () => {

@@ -1,6 +1,7 @@
 import { Reply, ReplyAll, Forward, Star, Archive, Trash2, LayoutGrid, RotateCcw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useKanbanStore } from "@/stores/kanban.store";
+import { invalidateKanbanQueries, useIsInKanban } from "@/hooks/queries/useKanbanCardsQuery";
+import { addKanbanCard } from "@/hooks/mutations/useKanbanMutations";
 import { useToastStore } from "@/stores/toast.store";
 import { useTranslation } from "react-i18next";
 import { useUpdateFlagsMutation } from "@/hooks/mutations/useUpdateFlagsMutation";
@@ -32,13 +33,15 @@ export default function MessageActionToolbar({
   const openCompose = useComposeStore((s) => s.openCompose);
   const queryClient = useQueryClient();
   const flagsMutation = useUpdateFlagsMutation();
-  const inKanban = useKanbanStore((s) => s.cardIdSet.has(message.id));
+  const inKanban = useIsInKanban(message.id);
   const [showKanbanPicker, setShowKanbanPicker] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   function invalidateMessageViews(includeUnreadCounts = false) {
     queryClient.invalidateQueries({ queryKey: ["messages"] });
     queryClient.invalidateQueries({ queryKey: ["threads"] });
+    // Deleted/moved messages drop off the board.
+    void invalidateKanbanQueries(queryClient);
     if (includeUnreadCounts) {
       queryClient.invalidateQueries({ queryKey: ["folder-unread-counts"] });
     }
@@ -60,7 +63,7 @@ export default function MessageActionToolbar({
   async function handleAddToKanban(column: "todo" | "waiting" | "done") {
     setShowKanbanPicker(false);
     try {
-      await useKanbanStore.getState().addCard(message.id, column);
+      await addKanbanCard(message.id, column, queryClient);
       useToastStore.getState().addToast({
         message: t("messageActions.kanbanSuccess", "Added to kanban board"),
         type: "success",

@@ -1,8 +1,9 @@
 use std::collections::HashSet;
 
-use ammonia::Builder;
+use ammonia::{Builder, UrlRelative};
 use pebble_core::{PrivacyMode, RenderedHtml, TrackerInfo};
 
+use crate::css::{sanitize_embedded_css, CssPolicy};
 use crate::tracker::{is_known_tracker, is_tracking_pixel};
 
 pub struct PrivacyGuard;
@@ -190,7 +191,10 @@ fn is_stylesheet_link_tag(tag: &str) -> bool {
 fn is_stylesheet_link_attrs(rel: &str, href: &str) -> bool {
     rel.split_ascii_whitespace()
         .any(|token| token == "stylesheet")
-        && (href.starts_with("https://") || href.starts_with("http://"))
+        && {
+            let href = href.trim().to_ascii_lowercase();
+            href.starts_with("https://") || href.starts_with("http://")
+        }
 }
 
 fn html_attr_value(tag: &str, name: &str) -> Option<String> {
@@ -498,69 +502,6 @@ fn is_safe_background_shorthand_value(value: &str) -> bool {
         || value.chars().all(|c| c.is_ascii_alphabetic())
 }
 
-fn is_remote_loading_css(value: &str) -> bool {
-    let lower = value.to_ascii_lowercase();
-    lower.contains("@import")
-        || lower.contains("url(")
-        || lower.contains("image-set(")
-        || lower.contains("-webkit-image-set(")
-        || lower.contains("cross-fade(")
-        || lower.contains("element(")
-        || lower.contains("paint(")
-        || lower.contains("expression(")
-        || lower.contains("javascript:")
-        || lower.contains("vbscript:")
-        || lower.contains("data:")
-        || lower.contains('\\')
-}
-
-fn sanitize_embedded_css(css: &str) -> String {
-    let without_imports = remove_css_imports(css);
-    remove_remote_loading_rules(&without_imports)
-}
-
-fn remove_css_imports(css: &str) -> String {
-    let mut output = String::new();
-    let mut remaining = css;
-    while let Some(import_start) = remaining.to_ascii_lowercase().find("@import") {
-        output.push_str(&remaining[..import_start]);
-        let after_import = &remaining[import_start..];
-        if let Some(statement_end) = after_import.find(';') {
-            remaining = &after_import[statement_end + 1..];
-        } else {
-            remaining = "";
-            break;
-        }
-    }
-    output.push_str(remaining);
-    output
-}
-
-fn remove_remote_loading_rules(css: &str) -> String {
-    let mut output = String::new();
-    let mut offset = 0;
-    while let Some(open_rel) = css[offset..].find('{') {
-        let open = offset + open_rel;
-        output.push_str(&css[offset..open]);
-        if let Some(close_rel) = css[open + 1..].find('}') {
-            let close = open + 1 + close_rel;
-            let body = &css[open + 1..close];
-            if !is_remote_loading_css(body) {
-                output.push('{');
-                output.push_str(body);
-                output.push('}');
-            }
-            offset = close + 1;
-        } else {
-            output.push_str(&css[open..]);
-            offset = css.len();
-            break;
-        }
-    }
-    output.push_str(&css[offset..]);
-    output
-}
-
 fn is_hex_color(value: &str) -> bool {
     let Some(hex) = value.strip_prefix('#') else {
         return false;
@@ -730,6 +671,10 @@ fn build_sanitizer(mode: &PrivacyMode) -> Builder<'static> {
             .collect::<HashSet<_>>(),
     );
 
+    // Relative and protocol-relative URLs (`//host/x`) would resolve against
+    // the app origin or silently load remote content; reject them outright.
+    builder.url_relative(UrlRelative::Deny);
+
     // Add rel="noopener noreferrer" to all links
     builder.link_rel(Some("noopener noreferrer"));
 
@@ -776,14 +721,21 @@ fn preprocess_stylesheet_links(html: &str, mode: &PrivacyMode) -> String {
 }
 
 fn preprocess_embedded_styles(html: &str, mode: &PrivacyMode) -> String {
-    if !allow_embedded_styles(mode) || allow_external_stylesheets(mode) {
+    if !allow_embedded_styles(mode) {
         return html.to_string();
     }
 
-    rewrite_style_tag_contents(html, sanitize_embedded_css)
+    // Privacy "Off" keeps remote loads but still blocks known trackers and
+    // overlay positioning; every other mode drops all remote loads.
+    let policy = if allow_external_stylesheets(mode) {
+        CssPolicy::BlockTrackers
+    } else {
+        CssPolicy::BlockRemote
+    };
+    rewrite_style_tag_contents(html, |css| sanitize_embedded_css(css, policy))
 }
 
-fn rewrite_style_tag_contents(html: &str, rewrite: fn(&str) -> String) -> String {
+fn rewrite_style_tag_contents(html: &str, rewrite: impl Fn(&str) -> String) -> String {
     let mut output = String::with_capacity(html.len());
     let mut offset = 0;
     while let Some(start_rel) = find_ascii_case_insensitive(&html[offset..], "<style") {
@@ -922,7 +874,8 @@ fn process_img_tag(
 
     // Known tracker domains are always blocked
     if let Some(src_val) = src {
-        if let Some(domain) = extract_domain_from_url(src_val) {
+        let normalized = normalize_url_attribute(src_val);
+        if let Some(domain) = extract_domain_from_url(&normalized) {
             if is_known_tracker(&domain) {
                 trackers_blocked.push(TrackerInfo {
                     domain,
@@ -932,39 +885,70 @@ fn process_img_tag(
             }
         }
 
-        // External images depend on privacy mode
-        let is_external = src_val.starts_with("http://") || src_val.starts_with("https://");
-        if is_external {
-            match mode {
-                PrivacyMode::Strict => {
-                    *images_blocked += 1;
-                    return ImgAction::BlockedPlaceholder;
-                }
-                PrivacyMode::LoadOnce | PrivacyMode::TrustSender(_) | PrivacyMode::Off => {
-                    return ImgAction::Keep;
-                }
-            }
+        // In strict mode everything that is not inline content is remote:
+        // `HTTPS://`, protocol-relative `//host/x`, entity-encoded schemes,
+        // relative paths, etc.
+        if matches!(mode, PrivacyMode::Strict)
+            && !normalized.is_empty()
+            && !is_inline_image_source(&normalized)
+        {
+            *images_blocked += 1;
+            return ImgAction::BlockedPlaceholder;
         }
     }
 
     ImgAction::Keep
 }
 
-/// Extract the domain from a URL, stripping protocol and path.
-fn extract_domain_from_url(url: &str) -> Option<String> {
-    let without_protocol = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))
-        .unwrap_or(url);
+/// Normalise a raw (possibly entity-encoded) URL attribute value the way a
+/// browser would before resolving it: decode HTML entities, strip leading and
+/// trailing C0 controls/spaces and drop embedded tabs/newlines.
+fn normalize_url_attribute(raw: &str) -> String {
+    let decoded = htmlescape::decode_html(raw).unwrap_or_else(|_| raw.to_string());
+    decoded
+        .trim_matches(|c: char| c <= ' ')
+        .chars()
+        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+        .collect()
+}
 
-    let domain = without_protocol
-        .split('/')
+/// `cid:` references and inline `data:image/*` payloads never hit the network.
+fn is_inline_image_source(normalized: &str) -> bool {
+    let lower = normalized.to_ascii_lowercase();
+    lower.starts_with("cid:") || lower.starts_with("data:image/")
+}
+
+/// Extract the lowercase host from an absolute or protocol-relative URL.
+fn extract_domain_from_url(url: &str) -> Option<String> {
+    let lower = url.to_ascii_lowercase().replace('\\', "/");
+    let after_scheme = if let Some(rest) = lower.strip_prefix("//") {
+        rest
+    } else {
+        let colon = lower.find(':')?;
+        let scheme = &lower[..colon];
+        if scheme.is_empty()
+            || !scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+        {
+            return None;
+        }
+        lower[colon + 1..].trim_start_matches('/')
+    };
+    let authority = after_scheme
+        .split(['/', '?', '#'])
         .next()
-        .unwrap_or(without_protocol);
-    if domain.is_empty() {
+        .unwrap_or(after_scheme);
+    let host_port = authority.rsplit('@').next().unwrap_or(authority);
+    let host = if host_port.starts_with('[') {
+        host_port.split(']').next().map(|h| format!("{h}]"))?
+    } else {
+        host_port.split(':').next().unwrap_or(host_port).to_string()
+    };
+    if host.is_empty() {
         None
     } else {
-        Some(domain.to_string())
+        Some(host)
     }
 }
 
@@ -1272,6 +1256,67 @@ mod tests {
         let result = guard.render_safe_html(html, &PrivacyMode::Strict);
         assert!(result.html.contains("blocked-image"));
         assert_eq!(result.images_blocked, 1);
+    }
+
+    #[test]
+    fn strict_mode_blocks_obfuscated_remote_image_sources() {
+        let guard = PrivacyGuard::new();
+        for src in [
+            "HTTPS://evil.example/a.png",
+            "HtTp://evil.example/a.png",
+            "//evil.example/a.png",
+            "  https://evil.example/a.png",
+            "&#104;ttps://evil.example/a.png",
+            "&#x68;&#x74;tps://evil.example/a.png",
+            "ht&#9;tps://evil.example/a.png",
+            "/relative/a.png",
+        ] {
+            let html = format!(r#"<p>x</p><img src="{src}" width="200" height="100">"#);
+            let result = guard.render_safe_html(&html, &PrivacyMode::Strict);
+            assert!(
+                !result.html.contains("<img"),
+                "img with src {src:?} survived: {}",
+                result.html
+            );
+            assert_eq!(result.images_blocked, 1, "src {src:?}");
+        }
+    }
+
+    #[test]
+    fn strict_mode_keeps_cid_images() {
+        let guard = PrivacyGuard::new();
+        let html = r#"<img src="CID:logo@example" width="200" height="100">"#;
+        let result = guard.render_safe_html(html, &PrivacyMode::Strict);
+        assert!(result.html.contains("<img"), "{}", result.html);
+        assert_eq!(result.images_blocked, 0);
+    }
+
+    #[test]
+    fn known_tracker_detection_is_case_insensitive() {
+        let guard = PrivacyGuard::new();
+        let html =
+            r#"<img src="HTTPS://User@X.List-Manage.com:443/open.gif" width="200" height="100">"#;
+        let result = guard.render_safe_html(html, &PrivacyMode::LoadOnce);
+        assert!(!result.html.contains("<img"), "{}", result.html);
+        assert_eq!(result.trackers_blocked.len(), 1);
+    }
+
+    #[test]
+    fn protocol_relative_urls_are_removed_in_every_mode() {
+        let guard = PrivacyGuard::new();
+        let html = r#"<img src="//evil.example/a.png" width="200" height="100"><a href="//evil.example/">x</a>"#;
+        let result = guard.render_safe_html(html, &PrivacyMode::LoadOnce);
+        assert!(!result.html.contains("evil.example"), "{}", result.html);
+    }
+
+    #[test]
+    fn load_once_strips_comment_smuggled_css_urls() {
+        let guard = PrivacyGuard::new();
+        let html = r#"<html><head><style>.x{/*}*/background:url(https://t.example/p)} .hero{color:red} .o{position:fixed}</style></head><body><p class="x hero">Body</p></body></html>"#;
+        let result = guard.render_safe_html(html, &PrivacyMode::LoadOnce);
+        assert!(!result.html.contains("t.example"), "{}", result.html);
+        assert!(!result.html.contains("fixed"), "{}", result.html);
+        assert!(result.html.contains(".hero{color:red}"), "{}", result.html);
     }
 
     #[test]

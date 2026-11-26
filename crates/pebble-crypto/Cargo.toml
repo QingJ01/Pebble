@@ -13,3 +13,7 @@ tracing = { workspace = true }
 ring = "0.17.14"
 serde = { workspace = true }
 zeroize = { version = "1", features = ["zeroize_derive"] }
+argon2 = { version = "0.5", default-features = false, features = ["alloc", "zeroize"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }

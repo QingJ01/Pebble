@@ -267,6 +267,10 @@ pub(crate) fn gmail_oauth_config() -> OAuthConfig {
             option_env!("GOOGLE_CLIENT_ID"),
             "GOOGLE_CLIENT_ID_PLACEHOLDER",
         ),
+        // Google "Desktop app" OAuth clients require the client secret in the
+        // token request even with PKCE. Google documents it as non-confidential
+        // for installed apps, so it is embedded at compile time; it must not be
+        // treated as a real secret anywhere else.
         client_secret: oauth_config_optional_value(
             "GOOGLE_CLIENT_SECRET",
             option_env!("GOOGLE_CLIENT_SECRET"),
@@ -290,10 +294,7 @@ pub(crate) fn outlook_oauth_config() -> OAuthConfig {
             option_env!("MICROSOFT_CLIENT_ID"),
             "MICROSOFT_CLIENT_ID_PLACEHOLDER",
         ),
-        client_secret: oauth_config_optional_value(
-            "MICROSOFT_CLIENT_SECRET",
-            option_env!("MICROSOFT_CLIENT_SECRET"),
-        ),
+        client_secret: outlook_client_secret(),
         auth_url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize".to_string(),
         token_url: "https://login.microsoftonline.com/common/oauth2/v2.0/token".to_string(),
         scopes: vec![
@@ -304,6 +305,23 @@ pub(crate) fn outlook_oauth_config() -> OAuthConfig {
         ],
         redirect_port: 0,
     }
+}
+
+/// Outlook uses a public (native) client registration with PKCE, so release
+/// builds never embed or read a Microsoft client secret. Debug builds may
+/// still pick one up from the environment/.env to test against confidential
+/// app registrations locally.
+#[cfg(debug_assertions)]
+fn outlook_client_secret() -> Option<String> {
+    oauth_config_optional_value(
+        "MICROSOFT_CLIENT_SECRET",
+        option_env!("MICROSOFT_CLIENT_SECRET"),
+    )
+}
+
+#[cfg(not(debug_assertions))]
+fn outlook_client_secret() -> Option<String> {
+    None
 }
 
 fn dotenv_lookup_from_str(contents: &str, key: &str) -> Option<String> {
@@ -331,6 +349,15 @@ fn dotenv_lookup_from_str(contents: &str, key: &str) -> Option<String> {
     None
 }
 
+/// `.env` files are a development convenience only. Release builds never read
+/// them at runtime, so a file planted in the working directory cannot swap
+/// the OAuth client configuration.
+#[cfg(not(debug_assertions))]
+fn dotenv_contents() -> Option<String> {
+    None
+}
+
+#[cfg(debug_assertions)]
 fn dotenv_contents() -> Option<String> {
     let mut candidates = Vec::new();
     if let Ok(current_dir) = std::env::current_dir() {
@@ -373,7 +400,13 @@ fn oauth_config_value_from_sources(
 }
 
 fn oauth_config_value(key: &str, compile_value: Option<&str>, placeholder: &str) -> String {
-    let env_value = std::env::var(key).ok();
+    // Runtime environment overrides are likewise limited to debug builds;
+    // release builds use the values fixed at compile time.
+    let env_value = if cfg!(debug_assertions) {
+        std::env::var(key).ok()
+    } else {
+        None
+    };
     let dotenv = dotenv_contents();
     oauth_config_value_from_sources(
         key,
@@ -404,7 +437,7 @@ fn token_exchange_error_message(provider: &str, error: &OAuthError) -> String {
             .to_ascii_lowercase()
             .contains("client_secret is missing")
     {
-        return "Token exchange failed: Microsoft rejected this app registration as a confidential client. Configure the Azure app registration as a public/native client with a localhost redirect URI, or set MICROSOFT_CLIENT_SECRET in .env and restart Pebble.".to_string();
+        return "Token exchange failed: Microsoft rejected this app registration as a confidential client. Configure the Azure app registration as a public/native client (\"Allow public client flows\") with a localhost redirect URI.".to_string();
     }
 
     if provider.eq_ignore_ascii_case("gmail")
@@ -845,7 +878,7 @@ pub async fn complete_oauth_flow(
 
     // Wait for the redirect callback with a 5-minute timeout
     let redirect = bound
-        .wait()
+        .wait(pkce_state.csrf_token.secret())
         .await
         .map_err(|e| PebbleError::OAuth(format!("OAuth redirect failed: {e}")))?;
 
@@ -1260,8 +1293,9 @@ MICROSOFT_CLIENT_SECRET='microsoft-secret'
     }
 
     #[test]
-    fn oauth_provider_configs_wire_compile_time_client_secrets() {
-        let source = include_str!("oauth.rs");
+    fn oauth_provider_configs_wire_client_secrets_only_where_required() {
+        // Normalise line endings: Windows checkouts may use CRLF.
+        let source = include_str!("oauth.rs").replace("\r\n", "\n");
         let gmail_start = source
             .find("pub(crate) fn gmail_oauth_config")
             .expect("gmail_oauth_config should exist");
@@ -1275,7 +1309,9 @@ MICROSOFT_CLIENT_SECRET='microsoft-secret'
         let outlook_section = &source[outlook_start..dotenv_start];
 
         assert!(gmail_section.contains(r#"option_env!("GOOGLE_CLIENT_SECRET")"#));
-        assert!(outlook_section.contains(r#"option_env!("MICROSOFT_CLIENT_SECRET")"#));
+        // The Microsoft secret is only wired up in debug builds.
+        assert!(outlook_section.contains("#[cfg(debug_assertions)]\nfn outlook_client_secret"));
+        assert!(outlook_section.contains("#[cfg(not(debug_assertions))]\nfn outlook_client_secret() -> Option<String> {\n    None\n}"));
     }
 
     #[test]

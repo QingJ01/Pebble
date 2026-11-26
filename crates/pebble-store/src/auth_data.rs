@@ -58,6 +58,18 @@ impl Store {
         })
     }
 
+    /// Ids of accounts that have encrypted auth data stored.
+    pub fn list_account_ids_with_auth_data(&self) -> Result<Vec<String>> {
+        self.with_read(|conn| {
+            let mut stmt =
+                conn.prepare("SELECT id FROM accounts WHERE auth_data IS NOT NULL ORDER BY id")?;
+            let ids = stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(ids)
+        })
+    }
+
     /// Clear auth data for an account.
     pub fn clear_auth_data(&self, account_id: &str) -> Result<()> {
         self.with_write(|conn| {

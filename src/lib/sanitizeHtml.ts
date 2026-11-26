@@ -105,12 +105,26 @@ function filterInlineStyles(html: string): string {
   return template.innerHTML;
 }
 
+/**
+ * Whether an email link may keep its href. Only absolute http(s) and mailto
+ * links can leave the email; in-document fragments are handled inside the
+ * reader. Relative and protocol-relative ("//host") hrefs would resolve against
+ * the app origin and navigate the main window, so they are dropped.
+ */
+export function isAllowedEmailLinkHref(href: string): boolean {
+  return /^https?:\/\/[^/\\]/i.test(href) || /^mailto:/i.test(href) || /^#/.test(href);
+}
+
 function normalizeLinkAttributes(html: string): string {
   const template = document.createElement("template");
   template.innerHTML = html;
   template.content.querySelectorAll<HTMLAnchorElement>("a[href]").forEach((anchor) => {
     const href = anchor.getAttribute("href")?.trim() ?? "";
-    if (/^(https?:|mailto:)/i.test(href)) {
+    if (!isAllowedEmailLinkHref(href)) {
+      anchor.removeAttribute("href");
+      anchor.removeAttribute("target");
+      anchor.removeAttribute("rel");
+    } else if (/^(https?:|mailto:)/i.test(href)) {
       anchor.setAttribute("target", "_blank");
       anchor.setAttribute("rel", "noopener noreferrer");
     } else {
@@ -157,8 +171,13 @@ function extractApprovedCssNodes(html: string): { cssNodes: string; htmlWithoutC
   template.innerHTML = html;
   const cssNodes: string[] = [];
 
-  template.content.querySelectorAll<HTMLStyleElement>("style").forEach((style) => {
-    cssNodes.push(`<style>${style.textContent ?? ""}</style>`);
+  template.content.querySelectorAll("style").forEach((style) => {
+    // `querySelectorAll("style")` also matches SVG/MathML-namespace <style>,
+    // whose children are parsed as markup. Only HTML raw-text style elements
+    // carry plain CSS; anything else is dropped (DOMPurify would drop it too).
+    if (style.namespaceURI === HTML_NAMESPACE && style.children.length === 0) {
+      cssNodes.push(`<style>${escapeCssText(style.textContent ?? "")}</style>`);
+    }
     style.remove();
   });
 
@@ -181,9 +200,37 @@ function extractApprovedCssNodes(html: string): { cssNodes: string; htmlWithoutC
   });
 
   return {
-    cssNodes: cssNodes.join(""),
+    cssNodes: verifyCssNodes(cssNodes.join("")),
     htmlWithoutCssNodes: template.innerHTML,
   };
+}
+
+const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
+
+/**
+ * CSS never needs a literal "<"; escaping it as a CSS hex escape keeps string
+ * values intact while making it impossible to close the <style> element.
+ */
+function escapeCssText(css: string): string {
+  return css.replace(/</g, "\\3c ");
+}
+
+/**
+ * The CSS nodes are concatenated outside DOMPurify, so re-parse them and make
+ * sure the result is nothing but top-level <style>/<link> elements with text.
+ */
+function verifyCssNodes(cssNodes: string): string {
+  if (!cssNodes) return "";
+  const template = document.createElement("template");
+  template.innerHTML = cssNodes;
+  const nodes = Array.from(template.content.childNodes);
+  const safe = nodes.every((node) => {
+    if (!(node instanceof Element) || node.namespaceURI !== HTML_NAMESPACE) return false;
+    const tag = node.localName;
+    if (tag === "link") return true;
+    return tag === "style" && node.children.length === 0;
+  });
+  return safe ? cssNodes : "";
 }
 
 /** Sanitize HTML to prevent XSS while preserving email formatting. */
@@ -212,6 +259,25 @@ export function sanitizeHtml(html: string): string {
   return cssNodes + normalizeLinkAttributes(filterStylesheetLinks(filterInlineStyles(sanitized)));
 }
 
+/** Class the compose view puts on its own reply-quote wrapper. */
+export const COMPOSE_QUOTE_CLASS = "compose-original-quote";
+
+const LAYOUT_ESCAPING_PROPERTIES = new Set([
+  "position", "inset", "top", "right", "bottom", "left", "z-index", "transform", "translate",
+]);
+
+function stripLayoutEscapingStyles(style: string): string {
+  return style
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .filter((part) => {
+      const name = part.split(":")[0].trim().toLowerCase();
+      return !LAYOUT_ESCAPING_PROPERTIES.has(name) && !name.startsWith("inset-");
+    })
+    .join("; ");
+}
+
 /**
  * Sanitize HTML before placing an untrusted message inside the compose UI.
  * Unlike the isolated message renderer, compose quotes live in the app's light DOM,
@@ -222,6 +288,22 @@ export function sanitizeComposeQuoteHtml(html: string): string {
   template.innerHTML = sanitizeHtml(html);
 
   template.content.querySelectorAll("style, link").forEach((element) => element.remove());
+  // Quotes render in the app's light DOM: app utility classes / ids must not
+  // apply, and positioning must not let the quote escape its container.
+  template.content.querySelectorAll<HTMLElement>("[class], [id]").forEach((element) => {
+    element.removeAttribute("id");
+    const isQuoteWrapper = element.localName === "blockquote"
+      && element.getAttribute("class") === COMPOSE_QUOTE_CLASS;
+    if (!isQuoteWrapper) element.removeAttribute("class");
+  });
+  template.content.querySelectorAll<HTMLElement>("[style]").forEach((element) => {
+    const filtered = stripLayoutEscapingStyles(element.getAttribute("style") ?? "");
+    if (filtered) {
+      element.setAttribute("style", filtered);
+    } else {
+      element.removeAttribute("style");
+    }
+  });
   template.content.querySelectorAll<HTMLElement>("[src], [srcset], [background], [poster]").forEach((element) => {
     element.removeAttribute("srcset");
     for (const attribute of ["src", "background", "poster"]) {

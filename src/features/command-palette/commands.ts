@@ -2,7 +2,7 @@ import type { Command } from "@/stores/command.store";
 import { useUIStore } from "@/stores/ui.store";
 import { useComposeStore } from "@/stores/compose.store";
 import { useMailStore } from "@/stores/mail.store";
-import { useKanbanStore } from "@/stores/kanban.store";
+import { addKanbanCard } from "@/hooks/mutations/useKanbanMutations";
 import { useToastStore } from "@/stores/toast.store";
 import { updateMessageFlags, archiveMessage } from "@/lib/api";
 import { queryClient } from "@/lib/query-client";
@@ -134,7 +134,7 @@ export function buildCommands(t: (key: string, defaultValue: string) => string):
         const id = useMailStore.getState().selectedMessageId;
         if (!id) return;
         try {
-          await useKanbanStore.getState().addCard(id, "todo");
+          await addKanbanCard(id, "todo", queryClient);
           useToastStore.getState().addToast({ message: t("messageActions.kanbanSuccess", "Added to kanban board"), type: "success" });
         } catch {
           useToastStore.getState().addToast({ message: t("messageActions.kanbanFailed", "Failed to add to kanban"), type: "error" });

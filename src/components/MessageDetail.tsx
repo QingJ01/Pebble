@@ -16,7 +16,9 @@ import MoveToButton from "./MoveToButton";
 import { useMessageLoader } from "@/hooks/useMessageLoader";
 import { useBilingualTranslation } from "@/hooks/useBilingualTranslation";
 import { defaultPrivacyMode } from "@/lib/privacyMode";
-import { useKanbanStore } from "@/stores/kanban.store";
+import { isMessageInKanban } from "@/hooks/queries/useKanbanCardsQuery";
+import { queryClient } from "@/lib/query-client";
+import { addKanbanCard, setKanbanContextNoteInCache } from "@/hooks/mutations/useKanbanMutations";
 import { useToastStore } from "@/stores/toast.store";
 import { useUIStore } from "@/stores/ui.store";
 import SelectionActionPopover from "./SelectionActionPopover";
@@ -141,11 +143,10 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
   async function handleAddSelectionToKanbanNote(text: string) {
     setShowSelectionActions(null);
     try {
-      const kanban = useKanbanStore.getState();
-      if (!kanban.cardIdSet.has(messageId)) {
-        await kanban.addCard(messageId, "todo");
+      if (!isMessageInKanban(messageId, queryClient)) {
+        await addKanbanCard(messageId, "todo", queryClient);
       }
-      await useKanbanStore.getState().setContextNote(messageId, text);
+      await setKanbanContextNoteInCache(queryClient, messageId, text);
       useUIStore.getState().setActiveView("kanban");
       useToastStore.getState().addToast({
         message: t("kanban.contextNoteAdded", "Added selected text to Kanban note"),

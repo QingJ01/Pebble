@@ -50,20 +50,23 @@ describe("Local mail archive browser", () => {
     await renderView();
     expect(screen.getByText(en.mailArchive.localOnly)).toBeTruthy();
     expect(screen.getByText(en.mailArchive.searchScope)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Subject A — sender@example.com/ }));
-    const message = await screen.findByRole("article", { name: "Archived message" });
+    fireEvent.click(await screen.findByRole("button", { name: /Subject A — sender@example.com/ }));
+    // Generous timeout: under a full parallel run this render can exceed the
+    // 1s findBy default and flake.
+    const message = await screen.findByRole("article", { name: "Archived message" }, { timeout: 5000 });
     expect(message.querySelector("img,script,iframe")).toBeNull();
     expect(within(message).getByText(/<img src=/)).toBeTruthy();
     expect(within(message).getByText(/Bcc: hidden@example.com/)).toBeTruthy();
     expect(within(message).getByText(`SHA256: ${"b".repeat(64)}`)).toBeTruthy();
     fireEvent.click(within(message).getByRole("button", { name: "Save attachment…" }));
     await waitFor(() => expect(mocks.saveArchiveAttachment).toHaveBeenCalledWith("archive", "message", 0));
-  });
+   // Whole-test budget above the 5s findBy wait on slow CI runners.
+  }, 15000);
 
 
   it("does not close a message opened before the initial search debounce would have fired", async () => {
     await renderView();
-    fireEvent.click(screen.getByRole("button", { name: /Subject A — sender@example.com/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Subject A — sender@example.com/ }));
     await screen.findByRole("article", { name: "Archived message" });
 
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -108,14 +111,14 @@ describe("Local mail archive browser", () => {
 
   it("performs local flags/moves, confirms deletion, and clears deleted message selection", async () => {
     await renderView();
-    fireEvent.click(screen.getByRole("button", { name: /Subject A — sender@example.com/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Subject A — sender@example.com/ }));
     await screen.findByRole("article", { name: "Archived message" });
     fireEvent.change(screen.getByLabelText("Move within this local archive"), { target: { value: "local-other" } });
     await waitFor(() => expect(mocks.updateArchiveMessage).toHaveBeenCalledWith("archive", "message", "local-other", false, false));
     await waitFor(() => expect(screen.queryByRole("article")).toBeNull());
     const browsePanel = screen.getByRole("group", { name: "Browse local archive" }) as HTMLFieldSetElement;
     await waitFor(() => expect(browsePanel.disabled).toBe(false));
-    fireEvent.click(screen.getByRole("button", { name: /Subject A — sender@example.com/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Subject A — sender@example.com/ }));
     await screen.findByRole("article", { name: "Archived message" });
     fireEvent.click(screen.getByRole("button", { name: "Delete archived message" }));
     await waitFor(() => expect(mocks.deleteArchiveMessage).toHaveBeenCalledWith("archive", "message"));

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, MessageSquare } from "lucide-react";
-import { useMailStore } from "@/stores/mail.store";
+import { isThreadSelected, useMailStore } from "@/stores/mail.store";
 import { useAccountsQuery, useFoldersForAccountsQuery, useThreadMessagesQuery, useThreadsQuery } from "@/hooks/queries";
 import { folderIdsForSelection } from "@/lib/folderAggregation";
 import ThreadMessageBubble from "@/components/ThreadMessageBubble";
@@ -10,6 +10,7 @@ import Spinner from "@/components/Spinner";
 export default function ThreadView() {
   const { t } = useTranslation();
   const selectedThreadId = useMailStore((s) => s.selectedThreadId);
+  const selectedThreadAccountId = useMailStore((s) => s.selectedThreadAccountId);
   const setSelectedThreadId = useMailStore((s) => s.setSelectedThreadId);
   const activeFolderId = useMailStore((s) => s.activeFolderId);
   const activeAccountId = useMailStore((s) => s.activeAccountId);
@@ -22,11 +23,15 @@ export default function ThreadView() {
   const selectedFolderIds = folderIdsForSelection(activeFolderId, folders);
   const queryFolderId = selectedFolderIds[0] ?? null;
   const queryFolderIds = selectedFolderIds.length > 1 ? selectedFolderIds : undefined;
-  const { data: threadMessages = [], isLoading } = useThreadMessagesQuery(selectedThreadId);
   const { data: threads = [] } = useThreadsQuery(queryFolderId, 50, 0, queryFolderIds);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const thread = threads.find((t) => t.thread_id === selectedThreadId);
+  // Selection is keyed by (account_id, thread_id): the selected row's account
+  // scopes the fetch so another account's thread with the same id is never
+  // mixed in.
+  const thread = threads.find((t) => isThreadSelected({ selectedThreadId, selectedThreadAccountId }, t));
+  const threadAccountId = selectedThreadAccountId ?? thread?.account_id ?? activeAccountId ?? null;
+  const { data: threadMessages = [], isLoading } = useThreadMessagesQuery(selectedThreadId, threadAccountId);
 
   useEffect(() => {
     if (scrollRef.current && threadMessages.length > 0) {

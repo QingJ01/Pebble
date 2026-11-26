@@ -49,23 +49,21 @@ fn observe_uid_state(
 /// Check if a mailbox has new messages by comparing highest UID.
 ///
 /// This is a lightweight fallback for servers that do not advertise the
-/// IDLE capability. It does a quick UID SEARCH ALL and compares the highest
-/// server UID against the last trusted local high-water mark.
+/// IDLE capability. It selects the mailbox, asks only for the UID of the
+/// newest message (`FETCH * (UID)`), and compares it against the last
+/// trusted local high-water mark. Listing every UID is avoided because it
+/// is proportional to mailbox size.
 pub async fn check_for_changes(
     provider: &super::imap::ImapProvider,
     mailbox: &str,
     last_exists: &mut Option<MailboxUidState>,
 ) -> Result<IdleEvent> {
-    let status = match provider.get_mailbox_status(mailbox).await {
-        Ok(status) => status,
-        Err(e) => return Ok(IdleEvent::Error(e.to_string())),
-    };
-    match provider.fetch_all_uids(mailbox).await {
-        Ok(uids) => Ok(observe_uid_state(
+    match provider.highest_uid(mailbox).await {
+        Ok((status, highest_uid)) => Ok(observe_uid_state(
             last_exists,
             MailboxUidState {
                 uidvalidity: status.uid_validity.map(u64::from),
-                highest_uid: uids.into_iter().max().unwrap_or(0),
+                highest_uid,
             },
         )),
         Err(e) => Ok(IdleEvent::Error(e.to_string())),

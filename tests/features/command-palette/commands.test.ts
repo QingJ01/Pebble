@@ -14,9 +14,6 @@ const mocks = vi.hoisted(() => ({
   composeState: {
     openCompose: vi.fn(),
   },
-  kanbanState: {
-    addCard: vi.fn(),
-  },
   toastState: {
     addToast: vi.fn(),
   },
@@ -44,12 +41,6 @@ vi.mock("@/stores/ui.store", () => ({
 vi.mock("@/stores/compose.store", () => ({
   useComposeStore: {
     getState: () => mocks.composeState,
-  },
-}));
-
-vi.mock("@/stores/kanban.store", () => ({
-  useKanbanStore: {
-    getState: () => mocks.kanbanState,
   },
 }));
 

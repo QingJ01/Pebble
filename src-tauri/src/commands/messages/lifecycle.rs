@@ -1,19 +1,17 @@
-use crate::commands::gmail_labels::gmail_move_label_delta;
 use crate::state::AppState;
-use pebble_core::traits::{FolderProvider, LabelProvider};
 use pebble_core::{FolderRole, Message, PebbleError, ProviderType};
 use tauri::State;
 use tracing::{info, warn};
 
-use super::provider_dispatch::{parse_imap_uid, ConnectedProvider};
-use super::{
-    classify_remote_delete_result, connect_gmail, connect_imap, connect_outlook,
-    find_folder_by_role, find_message_folder, imap_move_tracked, queue_pending_remote_op,
-    queue_pending_remote_op_for_local_commit, queued_remote_error, refresh_search_document,
-    remote_delete_is_already_absent, remote_mutation_allows_local_commit, remove_search_documents,
-    RemoteMutationOutcome,
+use super::provider_dispatch::{
+    archives_without_folder, delete_op, folder_change, move_is_local_only,
+    remote_ids_are_folder_scoped,
 };
-use serde_json::json;
+use super::{
+    apply_remote_or_queue, find_folder_by_role, find_message_folder, refresh_search_document,
+    remove_search_documents, RemoteMutationOutcome, RemoteSession,
+};
+use pebble_store::pending_ops::MailOp;
 
 /// Load a message and its account's provider type, surfacing a clear error
 /// if either is missing. Four lifecycle commands share this preamble.
@@ -33,35 +31,6 @@ fn resolve_message_context(
     Ok((msg, provider_type))
 }
 
-fn queue_permanent_delete_failure(
-    state: &AppState,
-    account_id: &str,
-    message_id: &str,
-    remote_id: &str,
-    trash_folder_id: &str,
-    trash_folder_remote_id: &str,
-    error: &str,
-) -> std::result::Result<(), PebbleError> {
-    let payload = json!({
-        "provider_account_id": account_id,
-        "remote_id": remote_id,
-        "op": "delete_permanent",
-        "payload": {
-            "source_folder_id": trash_folder_id,
-            "source_folder_remote_id": trash_folder_remote_id,
-            "permanent": true,
-        },
-    });
-    let op_id = state.store.insert_pending_mail_op(
-        account_id,
-        message_id,
-        "delete_permanent",
-        &payload.to_string(),
-    )?;
-    state.store.mark_pending_mail_op_failed(&op_id, error)?;
-    Ok(())
-}
-
 fn finalize_permanent_local_delete(
     state: &AppState,
     message_id: &str,
@@ -69,6 +38,10 @@ fn finalize_permanent_local_delete(
     let ids = [message_id.to_string()];
     state.store.hard_delete_messages(&ids)?;
     remove_search_documents(state, &ids)
+}
+
+fn is_local_folder(folder: &pebble_core::Folder) -> bool {
+    folder.remote_id.starts_with("__local_")
 }
 
 /// Returns "archived" or "unarchived" so the frontend can show the correct toast.
@@ -86,412 +59,32 @@ pub async fn archive_message(
             message_id
         );
         let inbox = find_folder_by_role(&state, &msg.account_id, FolderRole::Inbox)?;
+        let local_only = is_local_folder(&source_folder) || is_local_folder(&inbox);
+        let op = MailOp::Unarchive(folder_change(Some(&source_folder), Some(&inbox)));
+        apply_remote_or_queue(&state, &msg, &provider_type, op, local_only).await?;
 
-        let local_only = source_folder.remote_id.starts_with("__local_")
-            || inbox.remote_id.starts_with("__local_");
-        let outcome = if local_only {
-            RemoteMutationOutcome::LocalOnly
-        } else {
-            match provider_type {
-                ProviderType::Gmail => match connect_gmail(&state, &msg.account_id).await {
-                    Ok(provider) => match provider
-                        .modify_labels(&msg.remote_id, &["INBOX".to_string()], &[])
-                        .await
-                    {
-                        Ok(()) => RemoteMutationOutcome::Applied,
-                        Err(e) => {
-                            let error = e.to_string();
-                            let outcome = queue_pending_remote_op(
-                                &state,
-                                &msg,
-                                "unarchive",
-                                json!({
-                                    "source_folder_id": source_folder.id,
-                                    "target_folder_id": inbox.id,
-                                    "add_labels": ["INBOX"],
-                                    "remove_labels": [],
-                                }),
-                                &error,
-                            )?;
-                            if !remote_mutation_allows_local_commit(outcome) {
-                                return Err(queued_remote_error("unarchive", &error));
-                            }
-                            outcome
-                        }
-                    },
-                    Err(e) => {
-                        let error = e.to_string();
-                        let outcome = queue_pending_remote_op_for_local_commit(
-                            &state,
-                            &msg,
-                            "unarchive",
-                            json!({
-                                "source_folder_id": source_folder.id,
-                                "target_folder_id": inbox.id,
-                                "add_labels": ["INBOX"],
-                                "remove_labels": [],
-                            }),
-                            &error,
-                        )?;
-                        if !remote_mutation_allows_local_commit(outcome) {
-                            return Err(queued_remote_error("unarchive", &error));
-                        }
-                        outcome
-                    }
-                },
-                ProviderType::Outlook => match connect_outlook(&state, &msg.account_id).await {
-                    Ok(provider) => match provider
-                        .move_message(&msg.remote_id, &inbox.remote_id)
-                        .await
-                    {
-                        Ok(new_remote_id) => {
-                            state.store.update_remote_id(&msg.id, &new_remote_id)?;
-                            RemoteMutationOutcome::Applied
-                        }
-                        Err(e) => {
-                            let error = e.to_string();
-                            let outcome = queue_pending_remote_op(
-                                &state,
-                                &msg,
-                                "unarchive",
-                                json!({
-                                    "source_folder_id": source_folder.id,
-                                    "source_folder_remote_id": source_folder.remote_id,
-                                    "target_folder_id": inbox.id,
-                                    "target_folder_remote_id": inbox.remote_id,
-                                }),
-                                &error,
-                            )?;
-                            if !remote_mutation_allows_local_commit(outcome) {
-                                return Err(queued_remote_error("unarchive", &error));
-                            }
-                            outcome
-                        }
-                    },
-                    Err(e) => {
-                        let error = e.to_string();
-                        let outcome = queue_pending_remote_op_for_local_commit(
-                            &state,
-                            &msg,
-                            "unarchive",
-                            json!({
-                                "source_folder_id": source_folder.id,
-                                "source_folder_remote_id": source_folder.remote_id,
-                                "target_folder_id": inbox.id,
-                                "target_folder_remote_id": inbox.remote_id,
-                            }),
-                            &error,
-                        )?;
-                        if !remote_mutation_allows_local_commit(outcome) {
-                            return Err(queued_remote_error("unarchive", &error));
-                        }
-                        outcome
-                    }
-                },
-                ProviderType::Imap => {
-                    let uid: u32 = msg.remote_id.parse().map_err(|e| {
-                        PebbleError::Internal(format!("Invalid remote_id (not a UID): {e}"))
-                    })?;
-                    match connect_imap(&state, &msg.account_id).await {
-                        Ok(imap) => {
-                            let result = imap_move_tracked(
-                                &state,
-                                &imap,
-                                &msg,
-                                &source_folder.remote_id,
-                                uid,
-                                &inbox.remote_id,
-                            )
-                            .await;
-                            let _ = imap.disconnect().await;
-                            match result {
-                                Ok(()) => RemoteMutationOutcome::Applied,
-                                Err(e) => {
-                                    let error = e.to_string();
-                                    let outcome = queue_pending_remote_op(
-                                        &state,
-                                        &msg,
-                                        "unarchive",
-                                        json!({
-                                            "source_folder_id": source_folder.id,
-                                            "source_folder_remote_id": source_folder.remote_id,
-                                            "target_folder_id": inbox.id,
-                                            "target_folder_remote_id": inbox.remote_id,
-                                        }),
-                                        &error,
-                                    )?;
-                                    if !remote_mutation_allows_local_commit(outcome) {
-                                        return Err(queued_remote_error("unarchive", &error));
-                                    }
-                                    outcome
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            let error = e.to_string();
-                            let outcome = queue_pending_remote_op_for_local_commit(
-                                &state,
-                                &msg,
-                                "unarchive",
-                                json!({
-                                    "source_folder_id": source_folder.id,
-                                    "source_folder_remote_id": source_folder.remote_id,
-                                    "target_folder_id": inbox.id,
-                                    "target_folder_remote_id": inbox.remote_id,
-                                }),
-                                &error,
-                            )?;
-                            if !remote_mutation_allows_local_commit(outcome) {
-                                return Err(queued_remote_error("unarchive", &error));
-                            }
-                            outcome
-                        }
-                    }
-                }
-                ProviderType::Pop3 => RemoteMutationOutcome::LocalOnly,
-            }
-        };
-
-        if remote_mutation_allows_local_commit(outcome) {
-            state.store.move_message_to_folder(&message_id, &inbox.id)?;
-            refresh_search_document(&state, &message_id)?;
-            return Ok("unarchived".to_string());
-        }
-        return Err(PebbleError::Network(
-            "Remote unarchive was not applied".to_string(),
-        ));
+        state.store.move_message_to_folder(&message_id, &inbox.id)?;
+        refresh_search_document(&state, &message_id)?;
+        return Ok("unarchived".to_string());
     }
 
     // Try to find Archive folder; if not available, just soft-delete locally
     match find_folder_by_role(&state, &msg.account_id, FolderRole::Archive) {
         Ok(archive_folder) => {
-            let is_local = archive_folder.remote_id.starts_with("__local_");
-            let outcome = if is_local {
-                RemoteMutationOutcome::LocalOnly
-            } else {
-                match provider_type {
-                    ProviderType::Gmail => match connect_gmail(&state, &msg.account_id).await {
-                        Ok(provider) => match provider
-                            .modify_labels(&msg.remote_id, &[], &["INBOX".to_string()])
-                            .await
-                        {
-                            Ok(()) => RemoteMutationOutcome::Applied,
-                            Err(e) => {
-                                let error = e.to_string();
-                                let outcome = queue_pending_remote_op(
-                                    &state,
-                                    &msg,
-                                    "archive",
-                                    json!({
-                                        "source_folder_id": source_folder.id,
-                                        "target_folder_id": archive_folder.id,
-                                        "add_labels": [],
-                                        "remove_labels": ["INBOX"],
-                                    }),
-                                    &error,
-                                )?;
-                                if !remote_mutation_allows_local_commit(outcome) {
-                                    return Err(queued_remote_error("archive", &error));
-                                }
-                                outcome
-                            }
-                        },
-                        Err(e) => {
-                            let error = e.to_string();
-                            let outcome = queue_pending_remote_op_for_local_commit(
-                                &state,
-                                &msg,
-                                "archive",
-                                json!({
-                                    "source_folder_id": source_folder.id,
-                                    "target_folder_id": archive_folder.id,
-                                    "add_labels": [],
-                                    "remove_labels": ["INBOX"],
-                                }),
-                                &error,
-                            )?;
-                            if !remote_mutation_allows_local_commit(outcome) {
-                                return Err(queued_remote_error("archive", &error));
-                            }
-                            outcome
-                        }
-                    },
-                    ProviderType::Outlook => match connect_outlook(&state, &msg.account_id).await {
-                        Ok(provider) => match provider
-                            .move_message(&msg.remote_id, &archive_folder.remote_id)
-                            .await
-                        {
-                            Ok(new_remote_id) => {
-                                state.store.update_remote_id(&msg.id, &new_remote_id)?;
-                                RemoteMutationOutcome::Applied
-                            }
-                            Err(e) => {
-                                let error = e.to_string();
-                                let outcome = queue_pending_remote_op(
-                                    &state,
-                                    &msg,
-                                    "archive",
-                                    json!({
-                                        "source_folder_id": source_folder.id,
-                                        "source_folder_remote_id": source_folder.remote_id,
-                                        "target_folder_id": archive_folder.id,
-                                        "target_folder_remote_id": archive_folder.remote_id,
-                                    }),
-                                    &error,
-                                )?;
-                                if !remote_mutation_allows_local_commit(outcome) {
-                                    return Err(queued_remote_error("archive", &error));
-                                }
-                                outcome
-                            }
-                        },
-                        Err(e) => {
-                            let error = e.to_string();
-                            let outcome = queue_pending_remote_op_for_local_commit(
-                                &state,
-                                &msg,
-                                "archive",
-                                json!({
-                                    "source_folder_id": source_folder.id,
-                                    "source_folder_remote_id": source_folder.remote_id,
-                                    "target_folder_id": archive_folder.id,
-                                    "target_folder_remote_id": archive_folder.remote_id,
-                                }),
-                                &error,
-                            )?;
-                            if !remote_mutation_allows_local_commit(outcome) {
-                                return Err(queued_remote_error("archive", &error));
-                            }
-                            outcome
-                        }
-                    },
-                    ProviderType::Imap => {
-                        let uid: u32 = msg.remote_id.parse().map_err(|e| {
-                            PebbleError::Internal(format!("Invalid remote_id (not a UID): {e}"))
-                        })?;
-                        match connect_imap(&state, &msg.account_id).await {
-                            Ok(imap) => {
-                                let result = imap_move_tracked(
-                                    &state,
-                                    &imap,
-                                    &msg,
-                                    &source_folder.remote_id,
-                                    uid,
-                                    &archive_folder.remote_id,
-                                )
-                                .await;
-                                let _ = imap.disconnect().await;
-                                match result {
-                                    Ok(()) => RemoteMutationOutcome::Applied,
-                                    Err(e) => {
-                                        let error = e.to_string();
-                                        let outcome = queue_pending_remote_op(
-                                            &state,
-                                            &msg,
-                                            "archive",
-                                            json!({
-                                                "source_folder_id": source_folder.id,
-                                                "source_folder_remote_id": source_folder.remote_id,
-                                                "target_folder_id": archive_folder.id,
-                                                "target_folder_remote_id": archive_folder.remote_id,
-                                            }),
-                                            &error,
-                                        )?;
-                                        if !remote_mutation_allows_local_commit(outcome) {
-                                            return Err(queued_remote_error("archive", &error));
-                                        }
-                                        outcome
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                let error = e.to_string();
-                                let outcome = queue_pending_remote_op_for_local_commit(
-                                    &state,
-                                    &msg,
-                                    "archive",
-                                    json!({
-                                        "source_folder_id": source_folder.id,
-                                        "source_folder_remote_id": source_folder.remote_id,
-                                        "target_folder_id": archive_folder.id,
-                                        "target_folder_remote_id": archive_folder.remote_id,
-                                    }),
-                                    &error,
-                                )?;
-                                if !remote_mutation_allows_local_commit(outcome) {
-                                    return Err(queued_remote_error("archive", &error));
-                                }
-                                outcome
-                            }
-                        }
-                    }
-                    ProviderType::Pop3 => RemoteMutationOutcome::LocalOnly,
-                }
-            };
+            let op = MailOp::Archive(folder_change(Some(&source_folder), Some(&archive_folder)));
+            let local_only = is_local_folder(&archive_folder);
+            apply_remote_or_queue(&state, &msg, &provider_type, op, local_only).await?;
 
-            if remote_mutation_allows_local_commit(outcome) {
-                state
-                    .store
-                    .move_message_to_folder(&message_id, &archive_folder.id)?;
-                refresh_search_document(&state, &message_id)?;
-                Ok("archived".to_string())
-            } else {
-                Err(PebbleError::Network(
-                    "Remote archive was not applied".to_string(),
-                ))
-            }
+            state
+                .store
+                .move_message_to_folder(&message_id, &archive_folder.id)?;
+            refresh_search_document(&state, &message_id)?;
+            Ok("archived".to_string())
         }
         Err(_) => {
-            if matches!(provider_type, ProviderType::Gmail) {
-                let outcome = match connect_gmail(&state, &msg.account_id).await {
-                    Ok(provider) => match provider
-                        .modify_labels(&msg.remote_id, &[], &["INBOX".to_string()])
-                        .await
-                    {
-                        Ok(()) => RemoteMutationOutcome::Applied,
-                        Err(e) => {
-                            let error = e.to_string();
-                            let outcome = queue_pending_remote_op(
-                                &state,
-                                &msg,
-                                "archive",
-                                json!({
-                                    "source_folder_id": source_folder.id,
-                                    "add_labels": [],
-                                    "remove_labels": ["INBOX"],
-                                }),
-                                &error,
-                            )?;
-                            if !remote_mutation_allows_local_commit(outcome) {
-                                return Err(queued_remote_error("archive", &error));
-                            }
-                            outcome
-                        }
-                    },
-                    Err(e) => {
-                        let error = e.to_string();
-                        let outcome = queue_pending_remote_op_for_local_commit(
-                            &state,
-                            &msg,
-                            "archive",
-                            json!({
-                                "source_folder_id": source_folder.id,
-                                "add_labels": [],
-                                "remove_labels": ["INBOX"],
-                            }),
-                            &error,
-                        )?;
-                        if !remote_mutation_allows_local_commit(outcome) {
-                            return Err(queued_remote_error("archive", &error));
-                        }
-                        outcome
-                    }
-                };
-                if !remote_mutation_allows_local_commit(outcome) {
-                    return Err(PebbleError::Network(
-                        "Remote archive was not applied".to_string(),
-                    ));
-                }
+            if archives_without_folder(&provider_type) {
+                let op = MailOp::Archive(folder_change(Some(&source_folder), None));
+                apply_remote_or_queue(&state, &msg, &provider_type, op, false).await?;
             }
 
             info!(
@@ -520,246 +113,13 @@ pub async fn delete_message(
     let trash_folder = find_folder_by_role(&state, &msg.account_id, FolderRole::Trash).ok();
     let is_permanent = source_folder.role == Some(FolderRole::Trash);
 
-    let outcome = match provider_type {
-        ProviderType::Gmail => match connect_gmail(&state, &msg.account_id).await {
-            Ok(provider) => {
-                let result = if is_permanent {
-                    provider.delete_message_permanently(&msg.remote_id).await
-                } else {
-                    provider.trash_message(&msg.remote_id).await
-                };
-                match classify_remote_delete_result(result, is_permanent) {
-                    Ok(()) => RemoteMutationOutcome::Applied,
-                    Err(e) => {
-                        let error = e.to_string();
-                        let outcome = queue_pending_remote_op(
-                            &state,
-                            &msg,
-                            if is_permanent {
-                                "delete_permanent"
-                            } else {
-                                "delete"
-                            },
-                            json!({
-                                "source_folder_id": &source_folder.id,
-                                "source_folder_remote_id": &source_folder.remote_id,
-                                "trash_folder_id": trash_folder.as_ref().map(|f| f.id.as_str()),
-                                "permanent": is_permanent,
-                            }),
-                            &error,
-                        )?;
-                        if !remote_mutation_allows_local_commit(outcome) {
-                            return Err(queued_remote_error("delete", &error));
-                        }
-                        outcome
-                    }
-                }
-            }
-            Err(e) => {
-                let error = e.to_string();
-                let queue_remote_op = if is_permanent {
-                    queue_pending_remote_op
-                } else {
-                    queue_pending_remote_op_for_local_commit
-                };
-                let outcome = queue_remote_op(
-                    &state,
-                    &msg,
-                    if is_permanent {
-                        "delete_permanent"
-                    } else {
-                        "delete"
-                    },
-                    json!({
-                        "source_folder_id": &source_folder.id,
-                        "source_folder_remote_id": &source_folder.remote_id,
-                        "trash_folder_id": trash_folder.as_ref().map(|f| f.id.as_str()),
-                        "permanent": is_permanent,
-                    }),
-                    &error,
-                )?;
-                if !remote_mutation_allows_local_commit(outcome) {
-                    return Err(queued_remote_error("delete", &error));
-                }
-                outcome
-            }
-        },
-        ProviderType::Outlook => match connect_outlook(&state, &msg.account_id).await {
-            Ok(provider) => {
-                if is_permanent {
-                    match classify_remote_delete_result(
-                        provider.delete_message_permanently(&msg.remote_id).await,
-                        true,
-                    ) {
-                        Ok(()) => RemoteMutationOutcome::Applied,
-                        Err(e) => {
-                            let error = e.to_string();
-                            let outcome = queue_pending_remote_op(
-                                &state,
-                                &msg,
-                                "delete_permanent",
-                                json!({
-                                    "source_folder_id": &source_folder.id,
-                                    "source_folder_remote_id": &source_folder.remote_id,
-                                    "trash_folder_id": trash_folder.as_ref().map(|f| f.id.as_str()),
-                                    "permanent": is_permanent,
-                                }),
-                                &error,
-                            )?;
-                            if !remote_mutation_allows_local_commit(outcome) {
-                                return Err(queued_remote_error("delete", &error));
-                            }
-                            outcome
-                        }
-                    }
-                } else {
-                    match provider.trash_message(&msg.remote_id).await {
-                        Ok(new_remote_id) => {
-                            state.store.update_remote_id(&msg.id, &new_remote_id)?;
-                            RemoteMutationOutcome::Applied
-                        }
-                        Err(e) => {
-                            let error = e.to_string();
-                            let outcome = queue_pending_remote_op(
-                                &state,
-                                &msg,
-                                "delete",
-                                json!({
-                                    "source_folder_id": &source_folder.id,
-                                    "source_folder_remote_id": &source_folder.remote_id,
-                                    "trash_folder_id": trash_folder.as_ref().map(|f| f.id.as_str()),
-                                    "permanent": is_permanent,
-                                }),
-                                &error,
-                            )?;
-                            if !remote_mutation_allows_local_commit(outcome) {
-                                return Err(queued_remote_error("delete", &error));
-                            }
-                            outcome
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                let error = e.to_string();
-                let queue_remote_op = if is_permanent {
-                    queue_pending_remote_op
-                } else {
-                    queue_pending_remote_op_for_local_commit
-                };
-                let outcome = queue_remote_op(
-                    &state,
-                    &msg,
-                    if is_permanent {
-                        "delete_permanent"
-                    } else {
-                        "delete"
-                    },
-                    json!({
-                        "source_folder_id": &source_folder.id,
-                        "source_folder_remote_id": &source_folder.remote_id,
-                        "trash_folder_id": trash_folder.as_ref().map(|f| f.id.as_str()),
-                        "permanent": is_permanent,
-                    }),
-                    &error,
-                )?;
-                if !remote_mutation_allows_local_commit(outcome) {
-                    return Err(queued_remote_error("delete", &error));
-                }
-                outcome
-            }
-        },
-        ProviderType::Imap => {
-            let source_is_local = source_folder.remote_id.starts_with("__local_");
-            let target_trash_is_local = trash_folder
-                .as_ref()
-                .is_some_and(|folder| folder.remote_id.starts_with("__local_"));
-            let can_move_to_remote_trash = trash_folder
-                .as_ref()
-                .is_some_and(|folder| folder.id != source_folder.id && !target_trash_is_local);
-
-            if source_is_local || (!is_permanent && target_trash_is_local) {
-                RemoteMutationOutcome::LocalOnly
-            } else {
-                let uid = parse_imap_uid(&msg.remote_id)?;
-                match connect_imap(&state, &msg.account_id).await {
-                    Ok(imap) => {
-                        let result = if !is_permanent && can_move_to_remote_trash {
-                            let trash = trash_folder.as_ref().expect("checked above");
-                            imap.move_message(&source_folder.remote_id, uid, &trash.remote_id)
-                                .await
-                        } else {
-                            imap.delete_message(&source_folder.remote_id, uid).await
-                        };
-                        let _ = imap.disconnect().await;
-                        match classify_remote_delete_result(result, is_permanent) {
-                            Ok(()) => RemoteMutationOutcome::Applied,
-                            Err(e) => {
-                                let error = e.to_string();
-                                let outcome = queue_pending_remote_op(
-                                    &state,
-                                    &msg,
-                                    if is_permanent {
-                                        "delete_permanent"
-                                    } else {
-                                        "delete"
-                                    },
-                                    json!({
-                                        "source_folder_id": &source_folder.id,
-                                        "source_folder_remote_id": &source_folder.remote_id,
-                                        "trash_folder_id": trash_folder.as_ref().map(|f| f.id.as_str()),
-                                        "trash_folder_remote_id": trash_folder.as_ref().map(|f| f.remote_id.as_str()),
-                                        "permanent": is_permanent,
-                                    }),
-                                    &error,
-                                )?;
-                                if !remote_mutation_allows_local_commit(outcome) {
-                                    return Err(queued_remote_error("delete", &error));
-                                }
-                                outcome
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let error = e.to_string();
-                        let queue_remote_op = if is_permanent {
-                            queue_pending_remote_op
-                        } else {
-                            queue_pending_remote_op_for_local_commit
-                        };
-                        let outcome = queue_remote_op(
-                            &state,
-                            &msg,
-                            if is_permanent {
-                                "delete_permanent"
-                            } else {
-                                "delete"
-                            },
-                            json!({
-                                "source_folder_id": &source_folder.id,
-                                "source_folder_remote_id": &source_folder.remote_id,
-                                "trash_folder_id": trash_folder.as_ref().map(|f| f.id.as_str()),
-                                "trash_folder_remote_id": trash_folder.as_ref().map(|f| f.remote_id.as_str()),
-                                "permanent": is_permanent,
-                            }),
-                            &error,
-                        )?;
-                        if !remote_mutation_allows_local_commit(outcome) {
-                            return Err(queued_remote_error("delete", &error));
-                        }
-                        outcome
-                    }
-                }
-            }
-        }
-        ProviderType::Pop3 => RemoteMutationOutcome::LocalOnly,
-    };
-
-    if !remote_mutation_allows_local_commit(outcome) {
-        return Err(PebbleError::Network(
-            "Remote delete was not applied".to_string(),
-        ));
-    }
+    // A folder-scoped id cannot be addressed from a device-only folder, and
+    // a device-only trash keeps the deleted copy locally.
+    let local_only = remote_ids_are_folder_scoped(&provider_type)
+        && (is_local_folder(&source_folder)
+            || (!is_permanent && trash_folder.as_ref().is_some_and(is_local_folder)));
+    let op = delete_op(Some(&source_folder), trash_folder.as_ref(), is_permanent);
+    apply_remote_or_queue(&state, &msg, &provider_type, op, local_only).await?;
 
     if is_permanent {
         state
@@ -794,178 +154,12 @@ pub async fn restore_message(
 
     let source_folder = find_message_folder(&state, &message_id, &msg.account_id).ok();
 
-    let outcome = match provider_type {
-        ProviderType::Gmail => match connect_gmail(&state, &msg.account_id).await {
-            Ok(provider) => {
-                let result = if source_folder
-                    .as_ref()
-                    .is_some_and(|src| src.role == Some(FolderRole::Trash))
-                {
-                    provider.untrash_message(&msg.remote_id).await
-                } else {
-                    provider
-                        .modify_labels(&msg.remote_id, &["INBOX".to_string()], &[])
-                        .await
-                };
-                match result {
-                    Ok(()) => RemoteMutationOutcome::Applied,
-                    Err(e) => {
-                        let error = e.to_string();
-                        let outcome = queue_pending_remote_op(
-                            &state,
-                            &msg,
-                            "restore",
-                            json!({
-                                "source_folder_id": source_folder.as_ref().map(|f| f.id.as_str()),
-                                "source_folder_remote_id": source_folder.as_ref().map(|f| f.remote_id.as_str()),
-                                "target_folder_id": &inbox.id,
-                                "target_folder_remote_id": &inbox.remote_id,
-                            }),
-                            &error,
-                        )?;
-                        if !remote_mutation_allows_local_commit(outcome) {
-                            return Err(queued_remote_error("restore", &error));
-                        }
-                        outcome
-                    }
-                }
-            }
-            Err(e) => {
-                let error = e.to_string();
-                let outcome = queue_pending_remote_op_for_local_commit(
-                    &state,
-                    &msg,
-                    "restore",
-                    json!({
-                        "source_folder_id": source_folder.as_ref().map(|f| f.id.as_str()),
-                        "source_folder_remote_id": source_folder.as_ref().map(|f| f.remote_id.as_str()),
-                        "target_folder_id": &inbox.id,
-                        "target_folder_remote_id": &inbox.remote_id,
-                    }),
-                    &error,
-                )?;
-                if !remote_mutation_allows_local_commit(outcome) {
-                    return Err(queued_remote_error("restore", &error));
-                }
-                outcome
-            }
-        },
-        ProviderType::Outlook => match connect_outlook(&state, &msg.account_id).await {
-            Ok(provider) => match provider.restore_message(&msg.remote_id).await {
-                Ok(new_remote_id) => {
-                    state.store.update_remote_id(&msg.id, &new_remote_id)?;
-                    RemoteMutationOutcome::Applied
-                }
-                Err(e) => {
-                    let error = e.to_string();
-                    let outcome = queue_pending_remote_op(
-                        &state,
-                        &msg,
-                        "restore",
-                        json!({
-                            "source_folder_id": source_folder.as_ref().map(|f| f.id.as_str()),
-                            "source_folder_remote_id": source_folder.as_ref().map(|f| f.remote_id.as_str()),
-                            "target_folder_id": &inbox.id,
-                            "target_folder_remote_id": &inbox.remote_id,
-                        }),
-                        &error,
-                    )?;
-                    if !remote_mutation_allows_local_commit(outcome) {
-                        return Err(queued_remote_error("restore", &error));
-                    }
-                    outcome
-                }
-            },
-            Err(e) => {
-                let error = e.to_string();
-                let outcome = queue_pending_remote_op_for_local_commit(
-                    &state,
-                    &msg,
-                    "restore",
-                    json!({
-                        "source_folder_id": source_folder.as_ref().map(|f| f.id.as_str()),
-                        "source_folder_remote_id": source_folder.as_ref().map(|f| f.remote_id.as_str()),
-                        "target_folder_id": &inbox.id,
-                        "target_folder_remote_id": &inbox.remote_id,
-                    }),
-                    &error,
-                )?;
-                if !remote_mutation_allows_local_commit(outcome) {
-                    return Err(queued_remote_error("restore", &error));
-                }
-                outcome
-            }
-        },
-        ProviderType::Imap => {
-            let local_only = source_folder.as_ref().is_none_or(|src| {
-                src.id == inbox.id
-                    || src.remote_id.starts_with("__local_")
-                    || inbox.remote_id.starts_with("__local_")
-            });
-            if local_only {
-                RemoteMutationOutcome::LocalOnly
-            } else {
-                let source_folder = source_folder.as_ref().expect("checked above");
-                let uid = parse_imap_uid(&msg.remote_id)?;
-                match connect_imap(&state, &msg.account_id).await {
-                    Ok(imap) => {
-                        let result = imap
-                            .move_message(&source_folder.remote_id, uid, &inbox.remote_id)
-                            .await;
-                        let _ = imap.disconnect().await;
-                        match result {
-                            Ok(()) => RemoteMutationOutcome::Applied,
-                            Err(e) => {
-                                let error = e.to_string();
-                                let outcome = queue_pending_remote_op(
-                                    &state,
-                                    &msg,
-                                    "restore",
-                                    json!({
-                                        "source_folder_id": &source_folder.id,
-                                        "source_folder_remote_id": &source_folder.remote_id,
-                                        "target_folder_id": &inbox.id,
-                                        "target_folder_remote_id": &inbox.remote_id,
-                                    }),
-                                    &error,
-                                )?;
-                                if !remote_mutation_allows_local_commit(outcome) {
-                                    return Err(queued_remote_error("restore", &error));
-                                }
-                                outcome
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let error = e.to_string();
-                        let outcome = queue_pending_remote_op_for_local_commit(
-                            &state,
-                            &msg,
-                            "restore",
-                            json!({
-                                "source_folder_id": &source_folder.id,
-                                "source_folder_remote_id": &source_folder.remote_id,
-                                "target_folder_id": &inbox.id,
-                                "target_folder_remote_id": &inbox.remote_id,
-                            }),
-                            &error,
-                        )?;
-                        if !remote_mutation_allows_local_commit(outcome) {
-                            return Err(queued_remote_error("restore", &error));
-                        }
-                        outcome
-                    }
-                }
-            }
-        }
-        ProviderType::Pop3 => RemoteMutationOutcome::LocalOnly,
-    };
-
-    if !remote_mutation_allows_local_commit(outcome) {
-        return Err(PebbleError::Network(
-            "Remote restore was not applied".to_string(),
-        ));
-    }
+    let local_only = remote_ids_are_folder_scoped(&provider_type)
+        && source_folder.as_ref().is_none_or(|src| {
+            src.id == inbox.id || is_local_folder(src) || is_local_folder(&inbox)
+        });
+    let op = MailOp::Restore(folder_change(source_folder.as_ref(), Some(&inbox)));
+    apply_remote_or_queue(&state, &msg, &provider_type, op, local_only).await?;
 
     state.store.move_message_to_folder(&message_id, &inbox.id)?;
     refresh_search_document(&state, &message_id)?;
@@ -995,135 +189,9 @@ pub async fn move_to_folder(
             PebbleError::Internal(format!("Target folder not found: {target_folder_id}"))
         })?;
 
-    let is_local_move = source_folder.remote_id.starts_with("__local_")
-        || target_folder.remote_id.starts_with("__local_");
-
-    let base_payload = || {
-        json!({
-            "source_folder_id": source_folder.id.as_str(),
-            "source_folder_remote_id": source_folder.remote_id.as_str(),
-            "target_folder_id": target_folder.id.as_str(),
-            "target_folder_remote_id": target_folder.remote_id.as_str(),
-        })
-    };
-
-    let queue_move_failure =
-        |error: &str, payload: serde_json::Value| -> std::result::Result<(), PebbleError> {
-            queue_pending_remote_op(&state, &msg, "move_to_folder", payload, error)?;
-            Err(queued_remote_error("move_to_folder", error))
-        };
-    let queue_move_connection_failure =
-        |error: &str,
-         payload: serde_json::Value|
-         -> std::result::Result<RemoteMutationOutcome, PebbleError> {
-            queue_pending_remote_op_for_local_commit(&state, &msg, "move_to_folder", payload, error)
-        };
-
-    let outcome = match provider_type {
-        ProviderType::Pop3 => RemoteMutationOutcome::LocalOnly,
-        ProviderType::Outlook => {
-            if is_local_move {
-                RemoteMutationOutcome::LocalOnly
-            } else {
-                match connect_outlook(&state, &msg.account_id).await {
-                    Ok(provider) => match provider
-                        .move_message(&msg.remote_id, &target_folder.remote_id)
-                        .await
-                    {
-                        Ok(new_remote_id) => {
-                            state.store.update_remote_id(&msg.id, &new_remote_id)?;
-                            info!(
-                                "Moved Outlook message {} to folder {}",
-                                message_id, target_folder.name
-                            );
-                            RemoteMutationOutcome::Applied
-                        }
-                        Err(e) => {
-                            let error = e.to_string();
-                            return queue_move_failure(&error, base_payload());
-                        }
-                    },
-                    Err(e) => {
-                        let error = e.to_string();
-                        queue_move_connection_failure(&error, base_payload())?
-                    }
-                }
-            }
-        }
-        ProviderType::Imap => {
-            if is_local_move {
-                RemoteMutationOutcome::LocalOnly
-            } else if let Ok(uid) = msg.remote_id.parse::<u32>() {
-                match connect_imap(&state, &msg.account_id).await {
-                    Ok(imap) => {
-                        let result = imap
-                            .move_message(&source_folder.remote_id, uid, &target_folder.remote_id)
-                            .await;
-                        let _ = imap.disconnect().await;
-                        match result {
-                            Ok(()) => {
-                                info!(
-                                    "Moved IMAP message {} (UID {}) to folder {}",
-                                    message_id, uid, target_folder.name
-                                );
-                                RemoteMutationOutcome::Applied
-                            }
-                            Err(e) => {
-                                let error = e.to_string();
-                                return queue_move_failure(&error, base_payload());
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let error = e.to_string();
-                        queue_move_connection_failure(&error, base_payload())?
-                    }
-                }
-            } else {
-                let error = format!("Invalid IMAP UID: {}", msg.remote_id);
-                return queue_move_failure(&error, base_payload());
-            }
-        }
-        ProviderType::Gmail => {
-            if is_local_move && target_folder.role != Some(pebble_core::FolderRole::Spam) {
-                RemoteMutationOutcome::LocalOnly
-            } else {
-                let delta = gmail_move_label_delta(
-                    Some(&source_folder.remote_id),
-                    &target_folder.remote_id,
-                    target_folder.role.clone(),
-                );
-                let move_payload = || {
-                    let mut payload = base_payload();
-                    payload["add_labels"] = json!(delta.add_labels.clone());
-                    payload["remove_labels"] = json!(delta.remove_labels.clone());
-                    payload
-                };
-                match connect_gmail(&state, &msg.account_id).await {
-                    Ok(provider) => match provider
-                        .modify_labels(&msg.remote_id, &delta.add_labels, &delta.remove_labels)
-                        .await
-                    {
-                        Ok(()) => RemoteMutationOutcome::Applied,
-                        Err(e) => {
-                            let error = e.to_string();
-                            return queue_move_failure(&error, move_payload());
-                        }
-                    },
-                    Err(e) => {
-                        let error = e.to_string();
-                        queue_move_connection_failure(&error, move_payload())?
-                    }
-                }
-            }
-        }
-    };
-
-    if !remote_mutation_allows_local_commit(outcome) {
-        return Err(PebbleError::Network(
-            "Remote move_to_folder was not applied".to_string(),
-        ));
-    }
+    let local_only = move_is_local_only(&provider_type, &source_folder, target_folder);
+    let op = MailOp::MoveToFolder(folder_change(Some(&source_folder), Some(target_folder)));
+    apply_remote_or_queue(&state, &msg, &provider_type, op, local_only).await?;
 
     state
         .store
@@ -1148,12 +216,6 @@ pub async fn empty_trash(
         .map(|account| account.provider)
         .ok_or_else(|| PebbleError::Internal(format!("Account not found: {account_id}")))?;
 
-    let (conn, connect_error) =
-        match ConnectedProvider::connect(&state, &account_id, &provider_type).await {
-            Ok(conn) => (Some(conn), None),
-            Err(e) => (None, Some(e.to_string())),
-        };
-
     let mut total_deleted: u32 = 0;
     const PAGE_SIZE: u32 = 500;
 
@@ -1166,133 +228,47 @@ pub async fn empty_trash(
             .list_messages_by_folder(&trash.id, limit, offset)
     })?;
 
-    if trash.remote_id.starts_with("__local_") {
+    if is_local_folder(&trash) {
         let ids: Vec<String> = messages.iter().map(|message| message.id.clone()).collect();
         if !ids.is_empty() {
             state.store.hard_delete_messages(&ids)?;
             remove_search_documents(&state, &ids)?;
             total_deleted = ids.len() as u32;
         }
-    } else if let Some(ref conn) = conn {
-        match conn {
-            ConnectedProvider::Gmail(provider) => {
-                for msg in &messages {
-                    match provider.delete_message_permanently(&msg.remote_id).await {
-                        Ok(()) => {
-                            finalize_permanent_local_delete(&state, &msg.id)?;
-                            total_deleted += 1;
-                        }
-                        Err(e) if remote_delete_is_already_absent(&e) => {
-                            finalize_permanent_local_delete(&state, &msg.id)?;
-                            total_deleted += 1;
-                        }
-                        Err(e) => {
-                            let error = e.to_string();
-                            warn!("Gmail permanent delete failed for {}: {error}", msg.id);
-                            queue_permanent_delete_failure(
-                                &state,
-                                &account_id,
-                                &msg.id,
-                                &msg.remote_id,
-                                &trash.id,
-                                &trash.remote_id,
-                                &error,
-                            )?;
-                            break;
-                        }
-                    }
-                }
-            }
-            ConnectedProvider::Outlook(provider) => {
-                for msg in &messages {
-                    match provider.delete_message_permanently(&msg.remote_id).await {
-                        Ok(()) => {
-                            finalize_permanent_local_delete(&state, &msg.id)?;
-                            total_deleted += 1;
-                        }
-                        Err(e) if remote_delete_is_already_absent(&e) => {
-                            finalize_permanent_local_delete(&state, &msg.id)?;
-                            total_deleted += 1;
-                        }
-                        Err(e) => {
-                            let error = e.to_string();
-                            warn!("Outlook permanent delete failed for {}: {error}", msg.id);
-                            queue_permanent_delete_failure(
-                                &state,
-                                &account_id,
-                                &msg.id,
-                                &msg.remote_id,
-                                &trash.id,
-                                &trash.remote_id,
-                                &error,
-                            )?;
-                            break;
-                        }
-                    }
-                }
-            }
-            ConnectedProvider::Imap(imap) => {
-                for msg in &messages {
-                    if let Ok(uid) = parse_imap_uid(&msg.remote_id) {
-                        match imap.delete_message(&trash.remote_id, uid).await {
-                            Ok(()) => {
-                                finalize_permanent_local_delete(&state, &msg.id)?;
-                                total_deleted += 1;
-                            }
-                            Err(e) if remote_delete_is_already_absent(&e) => {
-                                finalize_permanent_local_delete(&state, &msg.id)?;
-                                total_deleted += 1;
-                            }
-                            Err(e) => {
-                                let error = e.to_string();
-                                warn!("IMAP permanent delete failed for {}: {error}", msg.id);
-                                queue_permanent_delete_failure(
-                                    &state,
-                                    &account_id,
-                                    &msg.id,
-                                    &msg.remote_id,
-                                    &trash.id,
-                                    &trash.remote_id,
-                                    &error,
-                                )?;
-                                break;
-                            }
-                        }
-                    } else {
-                        let error = format!("Invalid IMAP UID: {}", msg.remote_id);
-                        queue_permanent_delete_failure(
-                            &state,
-                            &account_id,
-                            &msg.id,
-                            &msg.remote_id,
-                            &trash.id,
-                            &trash.remote_id,
-                            &error,
-                        )?;
-                        break;
-                    }
-                }
-            }
-        }
     } else {
-        let error = connect_error
-            .as_deref()
-            .unwrap_or("Remote provider unavailable");
-        for msg in &messages {
-            queue_permanent_delete_failure(
-                &state,
-                &account_id,
-                &msg.id,
-                &msg.remote_id,
-                &trash.id,
-                &trash.remote_id,
-                error,
-            )?;
+        let session = RemoteSession::open(&state, &account_id, &provider_type).await;
+        let result = async {
+            for summary in &messages {
+                let Some(msg) = state.store.get_message(&summary.id)? else {
+                    continue;
+                };
+                let msg = &msg;
+                let op = delete_op(Some(&trash), None, true);
+                let applied = session.apply(&state, msg, op).await?;
+                match applied.outcome {
+                    RemoteMutationOutcome::Applied | RemoteMutationOutcome::LocalOnly => {
+                        finalize_permanent_local_delete(&state, &msg.id)?;
+                        total_deleted += 1;
+                    }
+                    RemoteMutationOutcome::Queued | RemoteMutationOutcome::QueuedLocalCommit => {
+                        // Offline: every message is queued. A failing server
+                        // stops the pass at the first failure.
+                        if session.is_connected() {
+                            warn!(
+                                "Permanent delete failed for {}: {}",
+                                msg.id,
+                                applied.error.as_deref().unwrap_or_default()
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
+            Ok::<(), PebbleError>(())
         }
-    }
-
-    if let Some(conn) = conn {
-        conn.disconnect().await;
+        .await;
+        session.close().await;
+        result?;
     }
 
     info!(
@@ -1324,6 +300,9 @@ fn collect_paginated<T>(
 #[cfg(test)]
 mod remote_mutation_tests {
     use super::*;
+    use crate::commands::messages::{
+        remote_delete_is_already_absent, remote_mutation_allows_local_commit,
+    };
 
     #[test]
     fn trash_snapshot_visits_every_page_without_reloading_failed_items() {
@@ -1371,9 +350,6 @@ mod remote_mutation_tests {
         ));
         assert!(!remote_mutation_allows_local_commit(
             RemoteMutationOutcome::Queued
-        ));
-        assert!(!remote_mutation_allows_local_commit(
-            RemoteMutationOutcome::Failed
         ));
     }
 }

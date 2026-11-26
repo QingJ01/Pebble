@@ -64,10 +64,19 @@ pub struct SyncState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_imap_folder_remote_ids: Option<Vec<String>>,
 
+    /// Version of the one-time legacy re-thread pass already applied to this
+    /// account's stored messages (IMAP/POP3); 0 = never.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub rethread_version: u32,
+
     /// Any fields we don't yet model — preserved verbatim on write so
     /// round-tripping through [`Store::update_sync_state`] never drops data.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+fn is_zero(value: &u32) -> bool {
+    *value == 0
 }
 
 pub fn validate_sync_range_days(days: Option<u32>) -> Result<()> {
@@ -377,9 +386,25 @@ impl Store {
         })
     }
 
+    /// Delete an account and everything keyed to it in one transaction.
+    ///
+    /// Most rows cascade from `accounts`, but `pending_mail_ops` and
+    /// `search_pending` are cleared explicitly so databases created before
+    /// those tables gained foreign keys do not keep orphaned work queued.
     pub fn delete_account(&self, id: &str) -> Result<()> {
         self.with_write(|conn| {
-            conn.execute("DELETE FROM accounts WHERE id = ?1", rusqlite::params![id])?;
+            let tx = conn.unchecked_transaction()?;
+            tx.execute(
+                "DELETE FROM search_pending
+                 WHERE message_id IN (SELECT id FROM messages WHERE account_id = ?1)",
+                rusqlite::params![id],
+            )?;
+            tx.execute(
+                "DELETE FROM pending_mail_ops WHERE account_id = ?1",
+                rusqlite::params![id],
+            )?;
+            tx.execute("DELETE FROM accounts WHERE id = ?1", rusqlite::params![id])?;
+            tx.commit()?;
             Ok(())
         })
     }

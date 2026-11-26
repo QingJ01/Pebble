@@ -5,7 +5,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { Markdown as MarkdownExtension } from "tiptap-markdown";
 import TurndownService from "turndown";
 import { getSignature } from "@/lib/signatures";
-import { sanitizeComposeQuoteHtml } from "@/lib/sanitizeHtml";
+import { COMPOSE_QUOTE_CLASS, sanitizeComposeQuoteHtml } from "@/lib/sanitizeHtml";
 import type { Message } from "@/lib/ipc-types";
 import type { TFunction } from "i18next";
 
@@ -134,7 +134,11 @@ export function buildReplyQuoteHtml({ composeReplyTo, t }: BuildReplyQuoteHtmlAr
     : `<p>${escapeHtml(composeReplyTo.body_text || "")}</p>`;
   const attribution = t("compose.quoteAttribution", { date: dateStr, sender });
 
-  return `<blockquote class="compose-original-quote"><p>${escapeHtml(attribution)}</p>${body}</blockquote>`;
+  // The quote is rendered with dangerouslySetInnerHTML in the app's light DOM,
+  // so the assembled markup goes through the compose sanitizer as a whole.
+  return sanitizeComposeQuoteHtml(
+    `<blockquote class="${COMPOSE_QUOTE_CLASS}"><p>${escapeHtml(attribution)}</p>${body}</blockquote>`,
+  );
 }
 
 export function appendReplyQuoteHtml(bodyHtml: string, quotedReplyHtml: string) {
@@ -142,6 +146,18 @@ export function appendReplyQuoteHtml(bodyHtml: string, quotedReplyHtml: string) 
   if (!quote) return bodyHtml;
   const body = bodyHtml.trim() || "<p><br></p>";
   return `${body}<br/><br/>${quote}`;
+}
+
+/**
+ * Initial HTML/Markdown source. A mailto body is untrusted plain text, so it is
+ * escaped into paragraphs rather than becoming raw HTML source.
+ */
+export function initialRawSource(
+  restoredDraft: { rawSource?: string } | null,
+  prefillBody: string | undefined,
+) {
+  if (restoredDraft?.rawSource !== undefined) return restoredDraft.rawSource;
+  return prefillBody ? plainTextToParagraphs(prefillBody) : "";
 }
 
 export function shouldApplyInitialEditorContent({
@@ -164,7 +180,7 @@ export function useComposeEditor({
   prefillBody,
 }: UseComposeEditorArgs) {
   const [editorMode, setEditorMode] = useState<EditorMode>(restoredDraft?.editorMode ?? "rich");
-  const [rawSource, setRawSource] = useState(restoredDraft?.rawSource ?? prefillBody ?? "");
+  const [rawSource, setRawSource] = useState(() => initialRawSource(restoredDraft, prefillBody));
   const [richTextHtml, setRichTextHtml] = useState("");
   const [htmlPreview, setHtmlPreview] = useState(false);
   const [signature, setSignature] = useState("");

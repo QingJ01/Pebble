@@ -162,7 +162,7 @@ describe("macOS release configuration", () => {
 
     expect(publishIndex).toBeGreaterThan(0);
     expect(releaseWorkflow).toContain("needs: [windows, linux, macos]");
-    expect(releaseWorkflow).toContain("actions/download-artifact@v4");
+    expect(releaseWorkflow).toMatch(/actions\/download-artifact@[0-9a-f]{40} # v4/);
     expect(releaseWorkflow).toContain("merge-multiple: true");
     expect(releaseWorkflow).toContain("appimages=(release-artifacts/*.AppImage)");
     expect(releaseWorkflow).toContain("debs=(release-artifacts/*.deb)");

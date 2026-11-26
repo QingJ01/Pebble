@@ -1,4 +1,4 @@
-import { useMailStore } from "@/stores/mail.store";
+import { isThreadSelected, useMailStore } from "@/stores/mail.store";
 import { useAccountsQuery, useMessagesQuery, useThreadsQuery, useFoldersForAccountsQuery, patchMessagesCache } from "@/hooks/queries";
 import { useUIStore } from "@/stores/ui.store";
 import { useToastStore } from "@/stores/toast.store";
@@ -30,7 +30,8 @@ export default function InboxView() {
   const threadView = useMailStore((s) => s.threadView);
   const toggleThreadView = useMailStore((s) => s.toggleThreadView);
   const selectedThreadId = useMailStore((s) => s.selectedThreadId);
-  const setSelectedThreadId = useMailStore((s) => s.setSelectedThreadId);
+  const selectedThreadAccountId = useMailStore((s) => s.selectedThreadAccountId);
+  const selectThread = useMailStore((s) => s.selectThread);
   const { data: accounts = [] } = useAccountsQuery();
   const folderAccountIds = useMemo(
     () => activeAccountId ? [activeAccountId] : accounts.map((account) => account.id),
@@ -182,7 +183,8 @@ export default function InboxView() {
               threads={threads}
               folderIds={selectedFolderIds}
               selectedThreadId={selectedThreadId}
-              onSelectThread={setSelectedThreadId}
+              selectedThreadAccountId={selectedThreadAccountId}
+              onSelectThread={selectThread}
               loading={loadingThreads}
             />
           ) : (
@@ -219,11 +221,12 @@ export default function InboxView() {
 }
 
 // Inline ThreadList component using virtualizer
-function ThreadList({ threads, folderIds, selectedThreadId, onSelectThread, loading }: {
-  threads: { thread_id: string; subject: string; snippet: string; last_date: number; message_count: number; unread_count: number; is_starred: boolean; participants: string[]; has_attachments: boolean }[];
+function ThreadList({ threads, folderIds, selectedThreadId, selectedThreadAccountId, onSelectThread, loading }: {
+  threads: ThreadSummary[];
   folderIds: string[];
   selectedThreadId: string | null;
-  onSelectThread: (id: string) => void;
+  selectedThreadAccountId: string | null;
+  onSelectThread: (thread: ThreadSummary) => void;
   loading: boolean;
 }) {
   const { t } = useTranslation();
@@ -240,11 +243,11 @@ function ThreadList({ threads, folderIds, selectedThreadId, onSelectThread, load
   // Scroll selected thread into view on keyboard navigation
   useEffect(() => {
     if (!selectedThreadId) return;
-    const idx = threads.findIndex((t) => t.thread_id === selectedThreadId);
+    const idx = threads.findIndex((t) => isThreadSelected({ selectedThreadId, selectedThreadAccountId }, t));
     if (idx >= 0) {
       virtualizer.scrollToIndex(idx, { align: "auto" });
     }
-  }, [selectedThreadId, threads, virtualizer]);
+  }, [selectedThreadId, selectedThreadAccountId, threads, virtualizer]);
 
   if (loading) {
     return <MessageListSkeleton />;
@@ -280,8 +283,8 @@ function ThreadList({ threads, folderIds, selectedThreadId, onSelectThread, load
             >
               <ThreadItem
                 thread={thread}
-                isSelected={thread.thread_id === selectedThreadId}
-                onClick={() => onSelectThread(thread.thread_id)}
+                isSelected={isThreadSelected({ selectedThreadId, selectedThreadAccountId }, thread)}
+                onClick={() => onSelectThread(thread)}
                 folderIds={folderIds}
               />
             </div>

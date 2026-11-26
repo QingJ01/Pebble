@@ -21,6 +21,9 @@ use pebble_core::{
 const GRAPH_API_BASE: &str = "https://graph.microsoft.com/v1.0/me";
 const GRAPH_MESSAGE_SELECT: &str = "id,subject,bodyPreview,body,from,toRecipients,ccRecipients,isRead,flag,isDraft,receivedDateTime,internetMessageId,conversationId,hasAttachments,categories";
 pub(crate) const MAX_GRAPH_CONTINUATION_PAGES: usize = 1_000;
+/// Messages per Graph delta page. Every page is persisted (and its
+/// continuation checkpointed) before the next is requested.
+pub(crate) const OUTLOOK_DELTA_PAGE_SIZE: u32 = 100;
 
 // ---------------------------------------------------------------------------
 // Microsoft Graph API response types (internal)
@@ -159,7 +162,7 @@ fn outlook_delta_bootstrap_url(folder_id: &str, sync_since: Option<i64>) -> Resu
     .map_err(|error| PebbleError::Network(format!("Build Outlook delta URL: {error}")))?;
     {
         let mut query = url.query_pairs_mut();
-        query.append_pair("$top", "50");
+        query.append_pair("$top", &OUTLOOK_DELTA_PAGE_SIZE.to_string());
         query.append_pair("$select", GRAPH_MESSAGE_SELECT);
         if let Some(since) = sync_since {
             let (year, month, day) = pebble_core::utc_date_from_unix_seconds(since);
@@ -1513,16 +1516,6 @@ impl DraftProvider for OutlookProvider {
             .map_err(|e| PebbleError::Network(format!("Failed to parse drafts list: {e}")))?;
 
         Ok(list.value.iter().map(graph_message_to_draft).collect())
-    }
-}
-
-impl MailProvider for OutlookProvider {
-    fn as_category_provider(&self) -> Option<&dyn CategoryProvider> {
-        Some(self)
-    }
-
-    fn as_draft_provider(&self) -> Option<&dyn DraftProvider> {
-        Some(self)
     }
 }
 

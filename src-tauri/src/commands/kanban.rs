@@ -91,7 +91,9 @@ pub(crate) async fn replace_kanban_context_notes_for_state(
     notes: HashMap<String, String>,
 ) -> Result<HashMap<String, String>, PebbleError> {
     let _guard = lock_secure_user_data_key(state, KANBAN_CONTEXT_NOTES_KEY).await;
-    replace_kanban_context_notes_unlocked(state, notes)
+    crate::commands::messages::query::run_blocking(|| {
+        replace_kanban_context_notes_unlocked(state, notes)
+    })
 }
 
 #[tauri::command]
@@ -109,7 +111,10 @@ pub async fn move_to_kanban(
         created_at: now,
         updated_at: now,
     };
-    state.store.upsert_kanban_card(&card)
+    let store = state.store.clone();
+    tokio::task::spawn_blocking(move || store.upsert_kanban_card(&card))
+        .await
+        .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))?
 }
 
 #[tauri::command]
@@ -117,7 +122,10 @@ pub async fn list_kanban_cards(
     state: State<'_, AppState>,
     column: Option<KanbanColumn>,
 ) -> std::result::Result<Vec<KanbanCard>, PebbleError> {
-    state.store.list_kanban_cards(column.as_ref())
+    let store = state.store.clone();
+    tokio::task::spawn_blocking(move || store.list_visible_kanban_cards(column.as_ref()))
+        .await
+        .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))?
 }
 
 #[tauri::command]
@@ -125,14 +133,17 @@ pub async fn remove_from_kanban(
     state: State<'_, AppState>,
     message_id: String,
 ) -> std::result::Result<(), PebbleError> {
-    state.store.delete_kanban_card(&message_id)
+    let store = state.store.clone();
+    tokio::task::spawn_blocking(move || store.delete_kanban_card(&message_id))
+        .await
+        .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))?
 }
 
 #[tauri::command]
 pub async fn list_kanban_context_notes(
     state: State<'_, AppState>,
 ) -> std::result::Result<HashMap<String, String>, PebbleError> {
-    load_kanban_context_notes_for_state(&state)
+    crate::commands::messages::query::run_blocking(|| load_kanban_context_notes_for_state(&state))
 }
 
 #[tauri::command]
@@ -150,14 +161,18 @@ async fn set_kanban_context_note_for_state(
     note: String,
 ) -> Result<HashMap<String, String>, PebbleError> {
     let _guard = lock_secure_user_data_key(state, KANBAN_CONTEXT_NOTES_KEY).await;
-    let mut notes = load_kanban_context_notes_for_state(state)?;
+    let mut notes = crate::commands::messages::query::run_blocking(|| {
+        load_kanban_context_notes_for_state(state)
+    })?;
     let message_id = message_id.trim().to_string();
     if message_id.trim().is_empty() || note.is_empty() {
         notes.remove(&message_id);
     } else {
         notes.insert(message_id, note);
     }
-    replace_kanban_context_notes_unlocked(state, notes)
+    crate::commands::messages::query::run_blocking(|| {
+        replace_kanban_context_notes_unlocked(state, notes)
+    })
 }
 
 #[tauri::command]

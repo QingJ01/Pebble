@@ -1,12 +1,10 @@
 pub mod gmail;
 pub mod imap_provider;
+pub mod mutations;
 pub mod outlook;
 pub mod pop3_provider;
 
-use std::sync::Arc;
-
-use pebble_core::traits::MailProvider;
-use pebble_core::{HttpProxyConfig, PebbleError, ProviderType, Result};
+use pebble_core::{HttpProxyConfig, PebbleError, Result};
 
 pub(crate) fn http_client_with_proxy(proxy: Option<&HttpProxyConfig>) -> Result<reqwest::Client> {
     let mut builder = reqwest::ClientBuilder::new().no_proxy();
@@ -19,60 +17,6 @@ pub(crate) fn http_client_with_proxy(proxy: Option<&HttpProxyConfig>) -> Result<
     builder
         .build()
         .map_err(|e| PebbleError::Network(format!("Failed to build HTTP client: {e}")))
-}
-
-fn proxy_from_credentials(credentials: &serde_json::Value) -> Result<Option<HttpProxyConfig>> {
-    credentials
-        .get("proxy")
-        .cloned()
-        .map(serde_json::from_value)
-        .transpose()
-        .map_err(|e| PebbleError::Auth(format!("Invalid OAuth proxy config: {e}")))
-}
-
-/// Create a trait-based mail provider from the given provider type and credentials.
-pub async fn create_provider(
-    provider_type: &ProviderType,
-    credentials: &serde_json::Value,
-    account_id: &str,
-) -> Result<Arc<dyn MailProvider>> {
-    match provider_type {
-        ProviderType::Imap => {
-            let imap_config: crate::imap::ImapConfig = serde_json::from_value(credentials.clone())
-                .map_err(|e| PebbleError::Auth(format!("Invalid IMAP config: {e}")))?;
-            let provider = imap_provider::ImapMailProvider::new(imap_config);
-            Ok(Arc::new(provider))
-        }
-        ProviderType::Pop3 => {
-            let pop3_config: crate::pop3::Pop3Config = serde_json::from_value(credentials.clone())
-                .map_err(|e| PebbleError::Auth(format!("Invalid POP3 config: {e}")))?;
-            let provider = pop3_provider::Pop3MailProvider::new(pop3_config);
-            Ok(Arc::new(provider))
-        }
-        ProviderType::Gmail => {
-            let token = credentials
-                .get("access_token")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| PebbleError::Auth("Missing access_token for Gmail".to_string()))?
-                .to_string();
-            let provider =
-                gmail::GmailProvider::new_with_proxy(token, proxy_from_credentials(credentials)?)?;
-            Ok(Arc::new(provider))
-        }
-        ProviderType::Outlook => {
-            let token = credentials
-                .get("access_token")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| PebbleError::Auth("Missing access_token for Outlook".to_string()))?
-                .to_string();
-            let provider = outlook::OutlookProvider::new_with_proxy(
-                token,
-                account_id.to_string(),
-                proxy_from_credentials(credentials)?,
-            )?;
-            Ok(Arc::new(provider))
-        }
-    }
 }
 
 #[cfg(test)]

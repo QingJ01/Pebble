@@ -8,7 +8,29 @@ on:
     branches:
       - master
 
+permissions:
+  contents: read
+
 jobs:
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Audit Rust dependencies for known vulnerabilities
+        run: cargo audit
+
   test:
     name: Test and Package (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -26,27 +48,26 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 9.12.3
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
+          toolchain: stable
           components: rustfmt, clippy
 
       - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
-
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
         run: |
@@ -80,6 +101,12 @@ jobs:
       - name: Run Rust tests
         run: cargo test --workspace --all-targets
 
+      # Fails when src/lib/generated/ipc.ts no longer matches the Rust IPC types
+      # (also covered by the workspace run above; kept explicit for a clear
+      # failure message). Regenerate: UPDATE_IPC_BINDINGS=1 cargo test -p pebble ipc_bindings
+      - name: Check generated IPC bindings
+        run: cargo test -p pebble --lib ipc_bindings
+
       - name: Run frontend tests
         run: pnpm test
 
@@ -91,7 +118,7 @@ jobs:
 
       - name: Upload Linux package artifacts
         if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pebble-linux-packages
           path: |

@@ -8,6 +8,19 @@ interface ShadowDomEmailProps {
   className?: string;
 }
 
+function scrollToEmailFragment(root: ShadowRoot, fragment: string) {
+  let id = fragment;
+  try {
+    id = decodeURIComponent(fragment);
+  } catch {
+    // Keep the raw fragment.
+  }
+  const target = Array.from(root.querySelectorAll<HTMLElement>("[id], a[name]")).find(
+    (element) => element.id === id || element.getAttribute("name") === id,
+  );
+  target?.scrollIntoView?.({ block: "start" });
+}
+
 export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
   const hostRef = useRef<HTMLDivElement>(null);
 
@@ -24,6 +37,13 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
         :host {
           all: initial;
           display: block;
+          /* Confine email CSS: position:fixed descendants resolve against this
+             box and are clipped to it instead of overlaying the app UI. */
+          position: relative;
+          contain: layout paint;
+          isolation: isolate;
+          transform: translateZ(0);
+          overflow: hidden;
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
           font-size: 14px;
           color: var(--color-text-primary);
@@ -34,6 +54,9 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
         a[href] { color: var(--color-email-link); }
         .pebble-email-content {
           box-sizing: border-box;
+          position: relative;
+          contain: layout paint;
+          isolation: isolate;
           display: var(--email-content-display);
           max-width: 100%;
           overflow-x: auto;
@@ -101,20 +124,28 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
       const target = event.target;
       if (!(target instanceof Element)) return;
 
-      const anchor = target.closest<HTMLAnchorElement>("a[href]");
-      const href = anchor?.getAttribute("href")?.trim();
+      const anchor = target.closest<HTMLAnchorElement>("a");
+      if (!anchor) return;
+
+      // Never let an email link navigate the app window: every anchor click is
+      // handled here, and only absolute http(s) and mailto links go anywhere.
+      event.preventDefault();
+      const href = anchor.getAttribute("href")?.trim();
       if (!href) return;
 
       if (/^mailto:/i.test(href)) {
-        event.preventDefault();
         void openMailtoUrl(href);
         return;
       }
 
-      if (/^https?:\/\//i.test(href)) {
-        event.preventDefault();
+      if (/^https?:\/\/[^/\\]/i.test(href)) {
         void invoke("open_external_url", { url: href })
           .catch((err) => console.warn("Failed to open email body link", err));
+        return;
+      }
+
+      if (href.startsWith("#") && href.length > 1) {
+        scrollToEmailFragment(shadow, href.slice(1));
       }
     };
 

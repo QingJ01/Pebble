@@ -12,100 +12,30 @@ use crate::commands::network::{
 };
 use crate::commands::oauth::ensure_account_oauth_auth;
 use crate::state::AppState;
-use pebble_core::{FolderRole, Message, PebbleError};
+use pebble_core::{FolderRole, PebbleError};
 use pebble_crypto::CryptoService;
 use pebble_mail::{GmailProvider, ImapConfig, ImapProvider, OutlookProvider, Pop3Config};
 use pebble_search::TantivySearch;
 use pebble_store::Store;
-use serde_json::json;
+
+pub(crate) use provider_dispatch::{
+    apply_remote_or_queue, connect_remote, execute_mail_op, queue_mail_op, RemoteSession,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum RemoteMutationOutcome {
+pub(crate) enum RemoteMutationOutcome {
+    /// The server acknowledged the change.
     Applied,
+    /// Queued after a remote failure; the local change must wait.
     Queued,
+    /// Queued while the provider was unreachable; committed locally now and
+    /// reverted if the op is abandoned.
     QueuedLocalCommit,
+    /// Nothing to do remotely.
     LocalOnly,
-    #[allow(dead_code)]
-    Failed,
 }
 
-/// An IMAP MOVE assigns a new UID. Keep it with the new folder so subsequent
-/// flag changes do not operate on an unrelated destination UID.
-pub(super) async fn imap_move_tracked(
-    state: &AppState,
-    imap: &ImapProvider,
-    message: &Message,
-    source_mailbox: &str,
-    uid: u32,
-    target_mailbox: &str,
-) -> Result<(), PebbleError> {
-    let header = message
-        .message_id_header
-        .as_deref()
-        .filter(|value| !value.trim().is_empty());
-    let target_uid = if let Some(header) = header {
-        if let Some(source_uid) = imap.find_uid_by_message_id(source_mailbox, header).await? {
-            imap.move_message_with_dedup(source_mailbox, source_uid, target_mailbox, Some(header))
-                .await?;
-            if source_uid != uid {
-                tracing::debug!("Resolved changed IMAP UID for {}", message.id);
-            }
-        }
-        // Also handles a retry after MOVE succeeded but local persistence failed.
-        imap.find_uid_by_message_id(target_mailbox, header)
-            .await?
-            .ok_or_else(|| {
-                PebbleError::Sync("Moved IMAP message was not found in the destination".into())
-            })?
-    } else {
-        let (_, source_raw) = imap
-            .fetch_messages_by_uids(source_mailbox, &[uid])
-            .await?
-            .pop()
-            .ok_or_else(|| PebbleError::Sync("Source IMAP message not found".into()))?;
-        let before: std::collections::HashSet<_> = imap
-            .fetch_all_uids(target_mailbox)
-            .await?
-            .into_iter()
-            .collect();
-        imap.move_message(source_mailbox, uid, target_mailbox)
-            .await?;
-        let added: Vec<_> = imap
-            .fetch_all_uids(target_mailbox)
-            .await?
-            .into_iter()
-            .filter(|uid| !before.contains(uid))
-            .collect();
-        let matching: Vec<_> = imap
-            .fetch_messages_by_uids(target_mailbox, &added)
-            .await?
-            .into_iter()
-            .filter(|(_, raw)| raw == &source_raw)
-            .map(|(uid, _)| uid)
-            .collect();
-        match matching.as_slice() {
-            [uid] => *uid,
-            _ => {
-                return Err(PebbleError::Sync(
-                    "Cannot uniquely resolve moved IMAP message".into(),
-                ))
-            }
-        }
-    };
-    let target_folder = state
-        .store
-        .list_folders(&message.account_id)?
-        .into_iter()
-        .find(|folder| folder.remote_id == target_mailbox)
-        .ok_or_else(|| PebbleError::Internal("IMAP target folder not found".into()))?;
-    state.store.move_message_to_folder_with_remote_id(
-        &message.id,
-        &target_folder.id,
-        &target_uid.to_string(),
-    )
-}
-
-pub(super) fn remote_mutation_allows_local_commit(outcome: RemoteMutationOutcome) -> bool {
+pub(crate) fn remote_mutation_allows_local_commit(outcome: RemoteMutationOutcome) -> bool {
     matches!(
         outcome,
         RemoteMutationOutcome::Applied
@@ -132,42 +62,7 @@ pub(super) fn classify_remote_delete_result(
     }
 }
 
-pub(super) fn queue_pending_remote_op(
-    state: &AppState,
-    message: &Message,
-    op_type: &str,
-    payload: serde_json::Value,
-    error: &str,
-) -> std::result::Result<RemoteMutationOutcome, PebbleError> {
-    let payload = json!({
-        "provider_account_id": message.account_id,
-        "remote_id": message.remote_id,
-        "op": op_type,
-        "payload": payload,
-    });
-    let op_id = state.store.insert_pending_mail_op(
-        &message.account_id,
-        &message.id,
-        op_type,
-        &payload.to_string(),
-    )?;
-    state.store.mark_pending_mail_op_failed(&op_id, error)?;
-    Ok(RemoteMutationOutcome::Queued)
-}
-
-pub(super) fn queue_pending_remote_op_for_local_commit(
-    state: &AppState,
-    message: &Message,
-    op_type: &str,
-    payload: serde_json::Value,
-    error: &str,
-) -> std::result::Result<RemoteMutationOutcome, PebbleError> {
-    let outcome = queue_pending_remote_op(state, message, op_type, payload, error)?;
-    debug_assert_eq!(outcome, RemoteMutationOutcome::Queued);
-    Ok(RemoteMutationOutcome::QueuedLocalCommit)
-}
-
-pub(super) fn queued_remote_error(op_type: &str, error: &str) -> PebbleError {
+pub(crate) fn queued_remote_error(op_type: &str, error: &str) -> PebbleError {
     PebbleError::Network(format!(
         "Remote {op_type} failed and was queued for retry: {error}"
     ))
@@ -203,6 +98,9 @@ pub(crate) fn refresh_search_document_with_store(
 ) -> std::result::Result<(), PebbleError> {
     let ids = vec![message_id.to_string()];
     store.add_search_pending(&ids, "index")?;
+    // Read-then-write must not interleave with a full rebuild, which could
+    // otherwise re-add a document this call removes.
+    let _guard = crate::commands::indexing::search_write_guard();
 
     match store.get_message(message_id)? {
         Some(message) if !message.is_deleted => {
@@ -223,7 +121,7 @@ pub(crate) fn refresh_search_document_with_store(
     Ok(())
 }
 
-pub(super) fn remove_search_documents(
+pub(crate) fn remove_search_documents(
     state: &AppState,
     message_ids: &[String],
 ) -> std::result::Result<(), PebbleError> {
@@ -231,6 +129,7 @@ pub(super) fn remove_search_documents(
         return Ok(());
     }
     state.store.add_search_pending(message_ids, "remove")?;
+    let _guard = crate::commands::indexing::search_write_guard();
     for message_id in message_ids {
         state.search.remove_message(message_id)?;
     }
@@ -251,6 +150,7 @@ pub(crate) fn refresh_search_documents(
         return Ok(());
     }
     state.store.add_search_pending(message_ids, "index")?;
+    let _guard = crate::commands::indexing::search_write_guard();
     for message_id in message_ids {
         match state.store.get_message(message_id)? {
             Some(message) if !message.is_deleted => {

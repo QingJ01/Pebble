@@ -1,7 +1,25 @@
 use crate::state::AppState;
 use pebble_core::{Message, MessageSummary, PebbleError};
+use pebble_store::messages::MessageCursor;
 use tauri::State;
 
+/// Run synchronous store work that borrows command state (and so cannot be
+/// moved into `spawn_blocking`) without stalling a Tokio worker: on the
+/// multi-threaded runtime the worker hands its other tasks off first via
+/// `block_in_place`; elsewhere (unit tests on a current-thread runtime) it
+/// simply runs inline.
+pub(crate) fn run_blocking<T>(f: impl FnOnce() -> T) -> T {
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(f)
+        }
+        _ => f(),
+    }
+}
+
+/// List a folder page newest-first. Pass `before` (the `(date, id)` of the
+/// last message already shown) for keyset pagination; `offset` is kept for
+/// older callers and applies after the cursor.
 #[tauri::command]
 pub async fn list_messages(
     state: State<'_, AppState>,
@@ -9,11 +27,15 @@ pub async fn list_messages(
     folder_ids: Option<Vec<String>>,
     limit: u32,
     offset: u32,
+    before: Option<MessageCursor>,
 ) -> std::result::Result<Vec<MessageSummary>, PebbleError> {
     let store = state.store.clone();
-    tokio::task::spawn_blocking(move || match folder_ids {
-        Some(ids) if !ids.is_empty() => store.list_messages_by_folders(&ids, limit, offset),
-        _ => store.list_messages_by_folder(&folder_id, limit, offset),
+    tokio::task::spawn_blocking(move || {
+        let folders = match folder_ids {
+            Some(ids) if !ids.is_empty() => ids,
+            _ => vec![folder_id],
+        };
+        store.list_messages_page(&folders, before.as_ref(), limit, offset)
     })
     .await
     .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))?

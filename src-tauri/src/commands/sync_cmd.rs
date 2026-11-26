@@ -13,11 +13,26 @@ use pebble_mail::{
 };
 use pebble_store::Store;
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, State};
 use tokio::sync::{mpsc, watch};
 use tracing::{info, warn};
+
+static NEXT_SYNC_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+fn next_sync_generation() -> u64 {
+    NEXT_SYNC_GENERATION.fetch_add(1, Ordering::Relaxed)
+}
+
+/// How long a stopping worker gets to finish its current step before abort.
+const GRACEFUL_SYNC_STOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Whether the slot reserved by `generation` is still ours to fill.
+fn reserved_slot_is_current(handle: Option<&SyncHandle>, generation: u64) -> bool {
+    handle.is_some_and(|handle| handle.generation == generation)
+}
 
 fn spawn_sync_start_placeholder(
     stop_rx: watch::Receiver<bool>,
@@ -131,6 +146,7 @@ async fn start_sync_inner(
     // Atomically check and reserve the slot to prevent two sync workers
     // for the same account from starting concurrently.
     // If an old task has finished, remove its stale entry so a new one can start.
+    let generation = next_sync_generation();
     {
         let mut handles = state.sync_handles.lock().await;
         if let Some(existing) = handles.get(&account_id) {
@@ -147,6 +163,7 @@ async fn start_sync_inner(
         handles.insert(
             account_id.clone(),
             SyncHandle {
+                generation,
                 stop_tx: placeholder_tx,
                 trigger_tx: placeholder_trigger_tx,
                 task: placeholder_task,
@@ -159,19 +176,13 @@ async fn start_sync_inner(
     let account = match state.store.get_account(&account_id) {
         Ok(Some(a)) => a,
         Ok(None) => {
-            let mut handles = state.sync_handles.lock().await;
-            if let Some(handle) = handles.remove(&account_id) {
-                handle.task.abort();
-            }
+            release_reserved_slot(state, &account_id, generation).await;
             return Err(PebbleError::Internal(format!(
                 "Account not found: {account_id}"
             )));
         }
         Err(e) => {
-            let mut handles = state.sync_handles.lock().await;
-            if let Some(handle) = handles.remove(&account_id) {
-                handle.task.abort();
-            }
+            release_reserved_slot(state, &account_id, generation).await;
             return Err(e);
         }
     };
@@ -248,29 +259,102 @@ async fn start_sync_inner(
     ) {
         Ok(task) => task,
         Err(e) => {
-            let mut handles = state.sync_handles.lock().await;
-            if let Some(handle) = handles.remove(&account_id) {
-                handle.task.abort();
-            }
+            release_reserved_slot(state, &account_id, generation).await;
             return Err(e);
         }
     };
 
-    // Replace the placeholder with the real sync handle.
-    {
-        let mut handles = state.sync_handles.lock().await;
-        if let Some(previous) = handles.insert(
-            account_id,
-            SyncHandle {
-                stop_tx,
-                trigger_tx,
-                task,
-            },
-        ) {
-            previous.task.abort();
+    // Replace the placeholder with the real sync handle, but only if the
+    // reservation is still ours and the account still exists. Otherwise the
+    // slot was stopped (e.g. `delete_account` ran while we were building the
+    // worker) and the new worker must not outlive that decision.
+    let mut handles = state.sync_handles.lock().await;
+    let account_exists = match state.store.get_account(&account_id) {
+        Ok(account) => account.is_some(),
+        Err(e) => {
+            warn!("Failed to re-check account {account_id} before starting sync: {e}");
+            false
         }
+    };
+    if !account_exists || !reserved_slot_is_current(handles.get(&account_id), generation) {
+        if reserved_slot_is_current(handles.get(&account_id), generation) {
+            if let Some(placeholder) = handles.remove(&account_id) {
+                placeholder.task.abort();
+            }
+        }
+        drop(handles);
+        let _ = stop_tx.send(true);
+        task.abort();
+        info!("Discarded sync worker for account {account_id}: its start was cancelled");
+        return if account_exists {
+            Ok(())
+        } else {
+            Err(PebbleError::Internal(format!(
+                "Account not found: {account_id}"
+            )))
+        };
+    }
+    if let Some(previous) = handles.insert(
+        account_id,
+        SyncHandle {
+            generation,
+            stop_tx,
+            trigger_tx,
+            task,
+        },
+    ) {
+        previous.task.abort();
     }
 
+    Ok(())
+}
+
+/// Drop the placeholder reserved by `generation`, leaving any newer handle alone.
+async fn release_reserved_slot(state: &AppState, account_id: &str, generation: u64) {
+    let mut handles = state.sync_handles.lock().await;
+    if reserved_slot_is_current(handles.get(account_id), generation) {
+        if let Some(handle) = handles.remove(account_id) {
+            handle.task.abort();
+        }
+    }
+}
+
+/// Ask an account's sync worker for an immediate pass, starting a one-shot
+/// worker if none is running and an app handle is available.
+pub(crate) async fn request_sync(
+    app: Option<&tauri::AppHandle>,
+    state: &AppState,
+    account_id: &str,
+    trigger: SyncTrigger,
+) -> std::result::Result<(), PebbleError> {
+    let should_start_one_shot = {
+        let mut handles = state.sync_handles.lock().await;
+        match handles.get(account_id) {
+            Some(handle) if handle.task.is_finished() => {
+                handles.remove(account_id);
+                true
+            }
+            Some(handle) => {
+                let send_failed = handle.trigger_tx.send(trigger).is_err();
+                if send_failed {
+                    warn!(
+                        "Sync trigger channel was already closed for account {}",
+                        account_id
+                    );
+                    handles.remove(account_id);
+                }
+                should_drop_trigger_handle(false, send_failed)
+            }
+            None => true,
+        }
+    };
+
+    if should_start_one_shot {
+        match app {
+            Some(app) => start_sync_inner(app, state, account_id.to_string(), Some(0)).await?,
+            None => tracing::debug!("No app handle to start a one-shot sync for {account_id}"),
+        }
+    }
     Ok(())
 }
 
@@ -428,6 +512,31 @@ impl RealtimePreferenceStartSummary {
 /// Extracted so that any `?` propagation (token decode, config parse, etc.)
 /// returns `Err` to the caller, which can then remove the placeholder entry
 /// from `sync_handles` before propagating the error.
+/// Forward re-threading notices as `mail:new`-shaped events so thread lists
+/// of the affected folders refresh (no notification, no rules).
+fn spawn_thread_refresh_forwarder(
+    app: &tauri::AppHandle,
+) -> mpsc::UnboundedSender<pebble_mail::ThreadRefresh> {
+    let (tx, mut rx) = mpsc::unbounded_channel::<pebble_mail::ThreadRefresh>();
+    let app = app.clone();
+    tokio::spawn(async move {
+        while let Some(refresh) = rx.recv().await {
+            let _ = app.emit(events::MAIL_NEW, thread_refresh_event_payload(&refresh));
+        }
+    });
+    tx
+}
+
+pub(crate) fn thread_refresh_event_payload(
+    refresh: &pebble_mail::ThreadRefresh,
+) -> serde_json::Value {
+    serde_json::json!({
+        "account_id": refresh.account_id,
+        "folder_ids": refresh.folder_ids,
+        "rethreaded_message_ids": refresh.message_ids,
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_sync_task(
     state: &AppState,
@@ -504,6 +613,7 @@ fn build_sync_task(
                 )
                 .with_error_tx(error_tx)
                 .with_message_tx(message_tx)
+                .with_thread_refresh_tx(spawn_thread_refresh_forwarder(&app_for_progress))
                 .with_progress_tx(progress_tx)
                 .with_token_refresher(refresher, expires_at);
                 worker.run(config, Some(trigger_rx)).await;
@@ -573,6 +683,7 @@ fn build_sync_task(
                 )
                 .with_error_tx(error_tx)
                 .with_message_tx(message_tx)
+                .with_thread_refresh_tx(spawn_thread_refresh_forwarder(&app_for_progress))
                 .with_progress_tx(progress_tx)
                 .with_token_refresher(refresher, expires_at);
                 worker.run(config, stop_rx, Some(trigger_rx)).await;
@@ -639,7 +750,8 @@ fn build_sync_task(
                 )
                 .with_error_tx(error_tx)
                 .with_message_tx(message_tx)
-                .with_progress_tx(progress_tx);
+                .with_progress_tx(progress_tx)
+                .with_thread_refresh_tx(spawn_thread_refresh_forwarder(&app_for_progress));
                 worker.run(config, Some(trigger_rx)).await;
                 let _ = app_for_progress.emit(
                     events::MAIL_SYNC_COMPLETE,
@@ -726,7 +838,8 @@ fn build_sync_task(
                 .with_error_tx(error_tx)
                 .with_message_tx(message_tx)
                 .with_progress_tx(progress_tx)
-                .with_runtime_status_tx(runtime_status_tx);
+                .with_runtime_status_tx(runtime_status_tx)
+                .with_thread_refresh_tx(spawn_thread_refresh_forwarder(&app_for_progress));
                 worker.run(config, Some(trigger_rx)).await;
                 let _ = app_for_progress.emit(
                     events::MAIL_SYNC_COMPLETE,
@@ -747,33 +860,13 @@ pub async fn trigger_sync(
     account_id: String,
     reason: String,
 ) -> std::result::Result<(), PebbleError> {
-    let trigger = SyncTrigger::from_reason(&reason);
-    let should_start_one_shot = {
-        let mut handles = state.sync_handles.lock().await;
-        match handles.get(&account_id) {
-            Some(handle) if handle.task.is_finished() => {
-                handles.remove(&account_id);
-                true
-            }
-            Some(handle) => {
-                let send_failed = handle.trigger_tx.send(trigger).is_err();
-                if send_failed {
-                    warn!(
-                        "Sync trigger channel was already closed for account {}",
-                        account_id
-                    );
-                    handles.remove(&account_id);
-                }
-                should_drop_trigger_handle(false, send_failed)
-            }
-            None => true,
-        }
-    };
-
-    if should_start_one_shot {
-        start_sync_inner(&app, &state, account_id, Some(0)).await?;
-    }
-    Ok(())
+    request_sync(
+        Some(&app),
+        &state,
+        &account_id,
+        SyncTrigger::from_reason(&reason),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -801,14 +894,32 @@ async fn stop_sync_inner(state: &AppState, account_id: &str) {
 }
 
 async fn stop_sync_and_await(state: &AppState, account_id: &str) {
+    stop_sync_gracefully(state, account_id, GRACEFUL_SYNC_STOP_TIMEOUT).await;
+}
+
+/// Signal the worker to stop and wait for it to wind down, aborting only if
+/// it does not finish within `timeout`. Returns `true` if a worker existed.
+pub(crate) async fn stop_sync_gracefully(
+    state: &AppState,
+    account_id: &str,
+    timeout: std::time::Duration,
+) -> bool {
     let handle = state.sync_handles.lock().await.remove(account_id);
-    if let Some(handle) = handle {
-        if !handle.task.is_finished() {
-            let _ = handle.stop_tx.send(true);
+    let Some(mut handle) = handle else {
+        return false;
+    };
+    if !handle.task.is_finished() {
+        let _ = handle.stop_tx.send(true);
+        if tokio::time::timeout(timeout, &mut handle.task)
+            .await
+            .is_err()
+        {
+            warn!("Sync worker for account {account_id} did not stop within {timeout:?}; aborting");
             handle.task.abort();
+            let _ = handle.task.await;
         }
-        let _ = handle.task.await;
     }
+    true
 }
 
 fn should_send_stop_signal_to_handle(task_finished: bool) -> bool {
@@ -905,6 +1016,20 @@ mod trigger_tests {
     use super::*;
 
     #[test]
+    fn thread_refresh_payload_matches_the_mail_new_refresh_contract() {
+        let payload = thread_refresh_event_payload(&pebble_mail::ThreadRefresh {
+            account_id: "account-1".to_string(),
+            folder_ids: vec!["inbox".to_string()],
+            message_ids: vec!["m1".to_string()],
+        });
+        // StatusBar's mail:new coalescer keys refreshes on these two fields.
+        assert_eq!(payload["account_id"], "account-1");
+        assert_eq!(payload["folder_ids"], serde_json::json!(["inbox"]));
+        // No subject/from: it must never look like a new message.
+        assert!(payload.get("subject").is_none());
+    }
+
+    #[test]
     fn coalesces_duplicate_realtime_triggers_for_same_account() {
         let mut state = TriggerCoalescer::default();
 
@@ -985,6 +1110,24 @@ mod trigger_tests {
         assert!(!handle.is_finished());
         assert!(trigger_tx.send(SyncTrigger::Manual).is_ok());
         handle.abort();
+    }
+
+    #[tokio::test]
+    async fn reserved_sync_slot_is_only_current_for_its_own_generation() {
+        let (stop_tx, stop_rx) = watch::channel(false);
+        let (trigger_tx, trigger_rx) = mpsc::unbounded_channel();
+        let handle = SyncHandle {
+            generation: 7,
+            stop_tx,
+            trigger_tx,
+            task: spawn_sync_start_placeholder(stop_rx, trigger_rx),
+        };
+        assert!(reserved_slot_is_current(Some(&handle), 7));
+        // A newer start (or a removed slot) means our reservation was cancelled.
+        assert!(!reserved_slot_is_current(Some(&handle), 6));
+        assert!(!reserved_slot_is_current(None, 7));
+        assert_ne!(next_sync_generation(), next_sync_generation());
+        handle.task.abort();
     }
 
     #[test]

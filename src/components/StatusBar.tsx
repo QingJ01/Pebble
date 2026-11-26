@@ -3,11 +3,12 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { listen } from "@tauri-apps/api/event";
 import { AlertCircle, AppWindow, Clock, RefreshCw } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type Query, type QueryClient } from "@tanstack/react-query";
 import { useUIStore, type RealtimeStatus } from "../stores/ui.store";
 import { useMailStore } from "@/stores/mail.store";
 import { stopSync } from "@/lib/api";
 import { useSyncMutation } from "@/hooks/mutations/useSyncMutation";
+import { invalidateKanbanQueries } from "@/hooks/queries/useKanbanCardsQuery";
 import {
   pendingMailOpsSummaryQueryKey,
   usePendingMailOpsSummary,
@@ -38,6 +39,107 @@ interface SyncProgressPayload {
 
 interface SyncCompletePayload {
   account_id?: string;
+}
+
+export const MAIL_NEW_DEBOUNCE_MS = 500;
+export const MAIL_NEW_MAX_WAIT_MS = 2_000;
+
+interface PendingMailNewBatch {
+  accountIds: Set<string>;
+  folderIds: Set<string>;
+  /** Some event carried no folder ids, so every list view must refresh. */
+  allFolders: boolean;
+}
+
+function mailListQueryTouchesFolders(query: Query, folderIds: Set<string>) {
+  // ["messages", folderId, folderIds?] and ["threads", folderId, folderIds?, limit, offset]
+  const [, folderId, aggregateFolderIds] = query.queryKey;
+  if (typeof folderId === "string" && folderIds.has(folderId)) return true;
+  return Array.isArray(aggregateFolderIds)
+    && aggregateFolderIds.some((id) => typeof id === "string" && folderIds.has(id));
+}
+
+/**
+ * Drop every loaded page but the first from inactive infinite message lists so
+ * their next mount does not refetch the whole scroll history. Active lists keep
+ * their pages so the visible scroll position stays stable.
+ */
+function trimInactiveMessagePages(queryClient: QueryClient, matches: (query: Query) => boolean) {
+  for (const query of queryClient.getQueryCache().findAll({ queryKey: ["messages"] })) {
+    if (!matches(query) || query.getObserversCount() > 0) continue;
+    const data = query.state.data as { pages?: unknown[]; pageParams?: unknown[] } | undefined;
+    if (!data?.pages || data.pages.length <= 1) continue;
+    queryClient.setQueryData(query.queryKey, {
+      ...data,
+      pages: data.pages.slice(0, 1),
+      pageParams: (data.pageParams ?? []).slice(0, 1),
+    });
+  }
+}
+
+export function flushMailNewBatch(queryClient: QueryClient, batch: PendingMailNewBatch) {
+  for (const accountId of batch.accountIds) {
+    queryClient.invalidateQueries({ queryKey: ["folders", accountId] });
+    queryClient.invalidateQueries({ queryKey: ["folder-unread-counts", accountId] });
+  }
+
+  const matches = batch.allFolders
+    ? () => true
+    : (query: Query) => mailListQueryTouchesFolders(query, batch.folderIds);
+  if (!batch.allFolders && batch.folderIds.size === 0) return;
+
+  trimInactiveMessagePages(queryClient, matches);
+  queryClient.invalidateQueries({ queryKey: ["messages"], predicate: matches });
+  queryClient.invalidateQueries({ queryKey: ["threads"], predicate: matches });
+}
+
+/**
+ * Coalesce bursts of `mail:new` events (e.g. a large initial sync) into one
+ * scoped invalidation: trailing debounce, but flush at least every max wait.
+ */
+export function createMailNewCoalescer(
+  queryClient: QueryClient,
+  { debounceMs = MAIL_NEW_DEBOUNCE_MS, maxWaitMs = MAIL_NEW_MAX_WAIT_MS } = {},
+) {
+  let batch: PendingMailNewBatch | null = null;
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let maxWaitTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function clearTimers() {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    if (maxWaitTimer) clearTimeout(maxWaitTimer);
+    debounceTimer = null;
+    maxWaitTimer = null;
+  }
+
+  function flush() {
+    clearTimers();
+    const pending = batch;
+    batch = null;
+    if (pending) flushMailNewBatch(queryClient, pending);
+  }
+
+  function push(payload: MailNewPayload | null | undefined) {
+    batch ??= { accountIds: new Set(), folderIds: new Set(), allFolders: false };
+    if (payload?.account_id) batch.accountIds.add(payload.account_id);
+    const folderIds = payload?.folder_ids?.filter((id) => typeof id === "string" && id) ?? [];
+    if (folderIds.length === 0) {
+      batch.allFolders = true;
+    } else {
+      folderIds.forEach((id) => batch!.folderIds.add(id));
+    }
+
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(flush, debounceMs);
+    maxWaitTimer ??= setTimeout(flush, maxWaitMs);
+  }
+
+  function cancel() {
+    clearTimers();
+    batch = null;
+  }
+
+  return { push, flush, cancel };
 }
 
 export default function StatusBar() {
@@ -84,6 +186,7 @@ export default function StatusBar() {
     queryClient.invalidateQueries({ queryKey: ["messages"] });
     queryClient.invalidateQueries({ queryKey: ["threads"] });
     queryClient.invalidateQueries({ queryKey: ["folder-unread-counts"] });
+    void invalidateKanbanQueries(queryClient);
   }
 
   function isActiveAccountEvent(accountId?: string | null) {
@@ -125,15 +228,15 @@ export default function StatusBar() {
 
   // Listen for new mail events: incremental data refresh
   useEffect(() => {
+    const coalescer = createMailNewCoalescer(queryClient);
     const unlisten = listen<MailNewPayload>("mail:new", (event) => {
-      queryClient.invalidateQueries({ queryKey: ["messages"] });
-      queryClient.invalidateQueries({ queryKey: ["threads"] });
-      if (event.payload.account_id) {
-        queryClient.invalidateQueries({ queryKey: ["folders", event.payload.account_id] });
-        queryClient.invalidateQueries({ queryKey: ["folder-unread-counts", event.payload.account_id] });
-      }
+      coalescer.push(event.payload);
     });
-    return () => { unlisten.then((fn) => fn()); };
+    return () => {
+      // Deliver what already arrived rather than dropping it on unmount.
+      coalescer.flush();
+      unlisten.then((fn) => fn());
+    };
   }, [queryClient]);
 
   useEffect(() => {
@@ -144,6 +247,8 @@ export default function StatusBar() {
       queryClient.invalidateQueries({ queryKey: ["folders"] });
       queryClient.invalidateQueries({ queryKey: ["messages"] });
       queryClient.invalidateQueries({ queryKey: ["threads"] });
+      // Reverted/abandoned ops can move or delete messages on the board.
+      void invalidateKanbanQueries(queryClient);
     });
     return () => { unlisten.then((fn) => fn()); };
   }, [activeAccountId, queryClient]);

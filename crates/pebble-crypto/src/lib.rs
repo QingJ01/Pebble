@@ -2,7 +2,8 @@ pub mod aes;
 pub mod keystore;
 pub mod passphrase;
 
-use pebble_core::Result;
+use pebble_core::{PebbleError, Result};
+use std::sync::atomic::{AtomicBool, Ordering};
 use zeroize::{Zeroize, Zeroizing};
 
 const CONTEXT_AAD_DOMAIN: &[u8] = b"pebble.crypto.context.v1\0";
@@ -10,20 +11,31 @@ const CONTEXT_AAD_DOMAIN: &[u8] = b"pebble.crypto.context.v1\0";
 /// Service that manages encryption/decryption using a DEK from the OS keystore.
 pub struct CryptoService {
     dek: Zeroizing<[u8; 32]>,
+    /// Whether `decrypt_for` still accepts legacy unversioned (AAD-less)
+    /// ciphertext. Cleared once the one-time startup migration has
+    /// re-encrypted every stored record.
+    legacy_ciphertext_allowed: AtomicBool,
 }
 
 impl CryptoService {
     /// Initialize by loading (or creating) the DEK from the OS credential store.
     pub fn init() -> Result<Self> {
         let dek = keystore::KeyStore::get_or_create_dek()?;
-        Ok(Self { dek })
+        Ok(Self::with_dek(dek))
+    }
+
+    fn with_dek(dek: Zeroizing<[u8; 32]>) -> Self {
+        Self {
+            dek,
+            legacy_ciphertext_allowed: AtomicBool::new(true),
+        }
     }
 
     /// Construct the service from an existing data-encryption key.
     pub fn from_key(mut dek: [u8; 32]) -> Self {
         let protected_dek = Zeroizing::new(dek);
         dek.zeroize();
-        Self { dek: protected_dek }
+        Self::with_dek(protected_dek)
     }
 
     /// Encrypt plaintext bytes.
@@ -49,8 +61,25 @@ impl CryptoService {
         record_id: &str,
         ciphertext: &[u8],
     ) -> Result<Vec<u8>> {
+        if aes::envelope_needs_migration(ciphertext) && !self.legacy_ciphertext_allowed() {
+            return Err(PebbleError::Auth(
+                "Rejected unversioned ciphertext: legacy records were already migrated".to_string(),
+            ));
+        }
         let aad = context_aad(purpose, record_id);
         Ok(aes::decrypt_enveloped(&self.dek, ciphertext, &aad)?.plaintext)
+    }
+
+    /// Stop accepting legacy unversioned ciphertext in `decrypt_for`.
+    /// Called once every stored legacy record has been re-encrypted.
+    pub fn reject_legacy_ciphertext(&self) {
+        self.legacy_ciphertext_allowed
+            .store(false, Ordering::SeqCst);
+    }
+
+    /// Whether `decrypt_for` still falls back to legacy unversioned ciphertext.
+    pub fn legacy_ciphertext_allowed(&self) -> bool {
+        self.legacy_ciphertext_allowed.load(Ordering::SeqCst)
     }
 
     /// Whether ciphertext is legacy and should be re-encrypted after a successful read.
@@ -75,9 +104,7 @@ mod tests {
     use super::*;
 
     fn test_crypto_service() -> CryptoService {
-        CryptoService {
-            dek: Zeroizing::new([7_u8; 32]),
-        }
+        CryptoService::with_dek(Zeroizing::new([7_u8; 32]))
     }
 
     #[test]
@@ -121,6 +148,29 @@ mod tests {
     }
 
     #[test]
+    fn legacy_ciphertext_is_rejected_once_migration_completed() {
+        let service = test_crypto_service();
+        let legacy = service.encrypt(b"legacy secret").unwrap();
+        let v1 = service
+            .encrypt_for("accounts.auth_data", "account-1", b"new secret")
+            .unwrap();
+        assert!(service.legacy_ciphertext_allowed());
+
+        service.reject_legacy_ciphertext();
+
+        assert!(!service.legacy_ciphertext_allowed());
+        assert!(service
+            .decrypt_for("accounts.auth_data", "account-1", &legacy)
+            .is_err());
+        assert_eq!(
+            service
+                .decrypt_for("accounts.auth_data", "account-1", &v1)
+                .unwrap(),
+            b"new secret"
+        );
+    }
+
+    #[test]
     fn passphrase_encrypted_blob_round_trips() {
         let plaintext = br#"{"accounts":[{"id":"a1","password":"secret"}]}"#;
 
@@ -136,7 +186,8 @@ mod tests {
 
     #[test]
     fn passphrase_encrypted_blob_rejects_wrong_passphrase() {
-        let encrypted = passphrase::encrypt_with_passphrase(b"secret", "right passphrase").unwrap();
+        let encrypted =
+            passphrase::encrypt_with_passphrase(b"secret", "right passphrase!").unwrap();
 
         let err = passphrase::decrypt_with_passphrase(&encrypted, "wrong passphrase")
             .unwrap_err()
@@ -157,24 +208,24 @@ mod tests {
     #[test]
     fn passphrase_encrypted_blob_rejects_unsupported_iterations_before_decrypting() {
         let mut encrypted =
-            passphrase::encrypt_with_passphrase(b"secret", "right passphrase").unwrap();
+            passphrase::encrypt_with_passphrase(b"secret", "right passphrase!").unwrap();
         encrypted.iterations = 1;
 
-        let err = passphrase::decrypt_with_passphrase(&encrypted, "right passphrase")
+        let err = passphrase::decrypt_with_passphrase(&encrypted, "right passphrase!")
             .unwrap_err()
             .to_string();
 
-        assert!(err.contains("Unsupported backup secret KDF iterations"));
+        assert!(err.contains("Unsupported backup secret KDF parameters"));
     }
 
     #[test]
     fn passphrase_encrypted_blob_rejects_non_ascii_hex_without_panicking() {
         let mut encrypted =
-            passphrase::encrypt_with_passphrase(b"secret", "right passphrase").unwrap();
+            passphrase::encrypt_with_passphrase(b"secret", "right passphrase!").unwrap();
         encrypted.salt_hex = "aéx".to_string();
 
         let result = std::panic::catch_unwind(|| {
-            passphrase::decrypt_with_passphrase(&encrypted, "right passphrase")
+            passphrase::decrypt_with_passphrase(&encrypted, "right passphrase!")
         });
 
         assert!(result.is_ok(), "invalid backup hex must not panic");

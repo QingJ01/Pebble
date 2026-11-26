@@ -56,6 +56,30 @@ impl Store {
         self.with_write(|conn| Self::upsert_kanban_card_with_conn(conn, card))
     }
 
+    /// Cards shown on the board: only those whose message still exists and
+    /// is not soft-deleted. The card row itself is kept, so restoring the
+    /// message brings its card back.
+    pub fn list_visible_kanban_cards(
+        &self,
+        column: Option<&KanbanColumn>,
+    ) -> Result<Vec<KanbanCard>> {
+        self.with_read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT k.message_id, k.column_name, k.position, k.created_at, k.updated_at
+                 FROM kanban_cards k
+                 JOIN messages m ON m.id = k.message_id AND m.is_deleted = 0
+                 WHERE ?1 IS NULL OR k.column_name = ?1
+                 ORDER BY k.position ASC",
+            )?;
+            let rows = stmt.query_map(params![column.map(column_to_str)], row_to_kanban_card)?;
+            let mut cards = Vec::new();
+            for row in rows {
+                cards.push(row?);
+            }
+            Ok(cards)
+        })
+    }
+
     pub fn list_kanban_cards(&self, column: Option<&KanbanColumn>) -> Result<Vec<KanbanCard>> {
         self.with_read(|conn| match column {
             Some(col) => {
@@ -242,6 +266,42 @@ mod tests {
             .unwrap();
         assert_eq!(cards.len(), 1);
         assert_eq!(cards[0].position, 5);
+    }
+
+    #[test]
+    fn soft_deleted_messages_are_hidden_from_the_board_until_restored() {
+        let (store, msg_id) = setup_store_with_message();
+        let now = pebble_core::now_timestamp();
+        store
+            .upsert_kanban_card(&KanbanCard {
+                message_id: msg_id.clone(),
+                column: KanbanColumn::Todo,
+                position: 0,
+                created_at: now,
+                updated_at: now,
+            })
+            .unwrap();
+        assert_eq!(store.list_visible_kanban_cards(None).unwrap().len(), 1);
+        assert_eq!(
+            store
+                .list_visible_kanban_cards(Some(&KanbanColumn::Todo))
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(store
+            .list_visible_kanban_cards(Some(&KanbanColumn::Done))
+            .unwrap()
+            .is_empty());
+
+        store.soft_delete_message(&msg_id).unwrap();
+        assert!(store.list_visible_kanban_cards(None).unwrap().is_empty());
+        // The raw list (used by backups) keeps the card.
+        assert_eq!(store.list_kanban_cards(None).unwrap().len(), 1);
+
+        let folder_id = store.get_message_folder_ids(&msg_id).unwrap().remove(0);
+        store.move_message_to_folder(&msg_id, &folder_id).unwrap();
+        assert_eq!(store.list_visible_kanban_cards(None).unwrap().len(), 1);
     }
 
     #[test]

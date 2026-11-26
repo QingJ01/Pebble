@@ -1,6 +1,6 @@
 import { useInfiniteQuery, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 import { listMessages } from "@/lib/api";
-import type { MessageSummary } from "@/lib/api";
+import type { MessageCursor, MessageSummary } from "@/lib/api";
 
 export const MESSAGES_PAGE_SIZE = 50;
 
@@ -8,8 +8,23 @@ export const messagesQueryKey = (folderId: string, folderIds?: string[]) =>
   ["messages", folderId, folderIds] as const;
 
 /**
+ * Cursor for the page after `pages`: the `(date, id)` of the oldest message
+ * loaded so far. Scans back past pages emptied by optimistic removals.
+ */
+export function nextMessagesCursor(pages: MessageSummary[][]): MessageCursor | null {
+  for (let i = pages.length - 1; i >= 0; i -= 1) {
+    const page = pages[i];
+    const last = page[page.length - 1];
+    if (last) return { date: last.date, id: last.id };
+  }
+  return null;
+}
+
+/**
  * Paginated message list backed by React Query's useInfiniteQuery.
- * Each page is a MessageSummary[] fetched by offset; `data` flattens them
+ * Pages are fetched with a keyset cursor (the last loaded message's
+ * `(date, id)`), so deep pages cost the same as the first and messages
+ * arriving at the top never shift later pages. `data` flattens the pages
  * so render code keeps the flat-array shape it already expects.
  */
 export function useMessagesQuery(
@@ -19,10 +34,10 @@ export function useMessagesQuery(
   const query = useInfiniteQuery({
     queryKey: messagesQueryKey(folderId ?? "", folderIds),
     queryFn: ({ pageParam }) =>
-      listMessages(folderId!, MESSAGES_PAGE_SIZE, pageParam as number, folderIds),
-    initialPageParam: 0,
+      listMessages(folderId!, MESSAGES_PAGE_SIZE, 0, folderIds, pageParam),
+    initialPageParam: null as MessageCursor | null,
     getNextPageParam: (lastPage, allPages) =>
-      lastPage.length < MESSAGES_PAGE_SIZE ? undefined : allPages.length * MESSAGES_PAGE_SIZE,
+      lastPage.length < MESSAGES_PAGE_SIZE ? undefined : nextMessagesCursor(allPages) ?? undefined,
     enabled: !!folderId,
     staleTime: 60_000,
   });
@@ -37,7 +52,7 @@ export function useMessagesQuery(
   };
 }
 
-export type MessagesInfiniteData = InfiniteData<MessageSummary[], number>;
+export type MessagesInfiniteData = InfiniteData<MessageSummary[], MessageCursor | null>;
 
 /**
  * Patch every cached ["messages", ...] infinite-query entry with a transform

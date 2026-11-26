@@ -10,6 +10,7 @@ members = [
     "crates/pebble-translate",
     "crates/pebble-crypto",
     "crates/pebble-oauth",
+    "crates/pebble-webdav",
 ]
 resolver = "2"
 
@@ -20,7 +21,7 @@ thiserror = "2.0"
 uuid = { version = "1", features = ["v4", "serde"] }
 tracing = "0.1"
 tokio = { version = "1", features = ["full"] }
-rusqlite = { version = "0.39", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
 tauri-build = { version = "2", features = [] }
 async-imap = { version = "0.10", default-features = false, features = ["runtime-tokio"] }
@@ -41,6 +42,7 @@ rand = "0.8"
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native-sync-persistent", "crypto-rust"] }
 hex = "0.4"
 semver = "1"
+ts-rs = { version = "12", default-features = false, features = ["serde-compat", "no-serde-warnings"] }
 
 [profile.release]
 opt-level = "s"
@@ -48,3 +50,10 @@ lto = true
 codegen-units = 1
 strip = true
 panic = "abort"
+
+# Argon2id (backup passphrase KDF) is unusably slow without optimisations.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3

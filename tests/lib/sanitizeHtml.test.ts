@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeHtml } from "../../src/lib/sanitizeHtml";
+import { sanitizeComposeQuoteHtml, sanitizeHtml } from "../../src/lib/sanitizeHtml";
 
 describe("sanitizeHtml", () => {
   it("preserves locally resolved PNG data URLs through both reader sanitization passes", () => {
@@ -143,5 +143,53 @@ describe("sanitizeHtml", () => {
     expect(sanitized).toContain('rel="noopener noreferrer"');
     expect(sanitized).not.toContain("_top");
     expect(sanitized).not.toContain('rel="opener"');
+  });
+
+  it("does not let SVG <style> children escape the sanitizer", () => {
+    const sanitized = sanitizeHtml(
+      '<svg><style><a>&lt;/style&gt;&lt;div style="position:fixed;inset:0"&gt;x&lt;/div&gt;</a></style></svg><p>ok</p>',
+    );
+
+    const template = document.createElement("template");
+    template.innerHTML = sanitized;
+    expect(template.content.querySelector("div")).toBeNull();
+    expect(template.content.querySelector("svg")).toBeNull();
+    expect(sanitized).not.toMatch(/<\/style\s*>\s*<div/i);
+    expect(template.content.querySelector("p")?.textContent).toBe("ok");
+  });
+
+  it("escapes '<' inside extracted CSS text", () => {
+    const sanitized = sanitizeHtml('<style>.a::after { content: "<b>"; }</style><p>ok</p>');
+
+    expect(sanitized).toContain('<style>.a::after { content: "\\3c b>"; }</style>');
+    expect(sanitized).not.toContain("<b>");
+  });
+
+  it("drops relative and protocol-relative link hrefs", () => {
+    const sanitized = sanitizeHtml(
+      '<a href="//evil.example">a</a><a href="/app/settings">b</a><a href="next.html">c</a><a href="https://ok.example/">d</a><a href="#top">e</a>',
+    );
+    const template = document.createElement("template");
+    template.innerHTML = sanitized;
+    const hrefs = Array.from(template.content.querySelectorAll("a")).map((a) => a.getAttribute("href"));
+
+    expect(hrefs).toEqual([null, null, null, "https://ok.example/", "#top"]);
+  });
+});
+
+describe("sanitizeComposeQuoteHtml", () => {
+  it("neutralises positioning, z-index and app classes in light-DOM quotes", () => {
+    const quote = sanitizeComposeQuoteHtml(
+      '<svg><style><a>&lt;/style&gt;&lt;div style="position:fixed;inset:0;z-index:99999"&gt;x&lt;/div&gt;</a></style></svg>' +
+        '<div class="fixed inset-0 z-50" id="root" style="position: sticky; top: 0; z-index: 2147483647; color: red">q</div>',
+    );
+    const template = document.createElement("template");
+    template.innerHTML = quote;
+
+    expect(quote).not.toMatch(/position|z-index|inset/i);
+    expect(template.content.querySelector("[class]")).toBeNull();
+    expect(template.content.querySelector("[id]")).toBeNull();
+    expect(template.content.querySelector("style")).toBeNull();
+    expect(quote).toContain("color: red");
   });
 });

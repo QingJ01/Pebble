@@ -276,6 +276,8 @@ fn validate_account_color(color: Option<&str>) -> std::result::Result<(), Pebble
 
 #[allow(dead_code)]
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(optional_fields = nullable))]
 pub struct AddAccountRequest {
     #[serde(default)]
     pub account_label: Option<String>,
@@ -293,8 +295,10 @@ pub struct AddAccountRequest {
     pub imap_security: ConnectionSecurity,
     pub smtp_security: ConnectionSecurity,
     #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<bool>", optional))]
     pub accept_invalid_certs: bool,
     #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<bool>", optional))]
     pub allow_plaintext: bool,
     #[serde(default)]
     pub proxy_host: Option<String>,
@@ -936,21 +940,25 @@ pub async fn list_accounts(
     state.store.list_accounts()
 }
 
+/// How long account deletion waits for the sync worker to wind down.
+const DELETE_ACCOUNT_SYNC_STOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 #[tauri::command]
 pub async fn delete_account(
     state: State<'_, AppState>,
     account_id: String,
 ) -> std::result::Result<(), PebbleError> {
-    // 1. Stop sync if running
-    {
-        let mut handles = state.sync_handles.lock().await;
-        if let Some(handle) = handles.remove(&account_id) {
-            let _ = handle.stop_tx.send(true);
-            handle.task.abort();
-        }
-    }
+    // 1. Stop sync gracefully: signal, wait briefly, abort only as a fallback.
+    //    A start that races with this sees its reservation gone and discards
+    //    its worker (see `start_sync_inner`).
+    crate::commands::sync_cmd::stop_sync_gracefully(
+        &state,
+        &account_id,
+        DELETE_ACCOUNT_SYNC_STOP_TIMEOUT,
+    )
+    .await;
 
-    // 2. Collect message IDs for attachment cleanup (before DB delete)
+    // 2. Collect message IDs for attachment cleanup (before DB delete).
     let message_ids = match state.store.list_message_ids_by_account(&account_id) {
         Ok(ids) => ids,
         Err(e) => {
@@ -961,15 +969,18 @@ pub async fn delete_account(
         }
     };
 
-    // 3. Remove all documents from search index
+    // 3. Delete DB rows first, in one transaction (account row, its cascades,
+    //    queued pending ops and search work). If this fails nothing else has
+    //    been touched, so the account stays fully usable.
+    state.store.delete_account(&account_id)?;
+
+    // 4. Remove all documents from the search index. A failure here only
+    //    leaves stale hits for rows that no longer exist.
     if let Err(e) = state.search.delete_by_account(&account_id) {
         tracing::warn!("Failed to clean search index for account {account_id}: {e}");
     }
 
-    // 4. Delete account from DB (CASCADE handles related rows)
-    state.store.delete_account(&account_id)?;
-
-    // 5. Clean up attachment files on disk
+    // 5. Clean up attachment files on disk.
     let attachments_dir = state.attachments_dir.clone();
     let account_id_for_log = account_id.clone();
     if let Err(e) = tokio::task::spawn_blocking(move || {
@@ -987,12 +998,42 @@ pub async fn delete_account(
         tracing::warn!("Attachment cleanup task failed for account {account_id_for_log}: {e}");
     }
 
+    // 6. Drop per-account in-memory secrets/locks. Credentials live in the
+    //    account row and were removed with it in step 3.
+    forget_account_locks(&state, &account_id).await;
+
     Ok(())
+}
+
+async fn forget_account_locks(state: &AppState, account_id: &str) {
+    state.oauth_account_locks.lock().await.remove(account_id);
+    state
+        .secure_user_data_locks
+        .lock()
+        .await
+        .retain(|key, _| !lock_key_belongs_to_account(key, account_id));
+}
+
+/// Secure user data locks are keyed by data key; per-account keys either equal
+/// the account id or are namespaced with it (`<id>:...` / `...:<id>`).
+fn lock_key_belongs_to_account(key: &str, account_id: &str) -> bool {
+    key == account_id
+        || key.starts_with(&format!("{account_id}:"))
+        || key.ends_with(&format!(":{account_id}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn account_lock_keys_match_only_that_account() {
+        assert!(lock_key_belongs_to_account("acct-1", "acct-1"));
+        assert!(lock_key_belongs_to_account("acct-1:oauth", "acct-1"));
+        assert!(lock_key_belongs_to_account("signature:acct-1", "acct-1"));
+        assert!(!lock_key_belongs_to_account("acct-10", "acct-1"));
+        assert!(!lock_key_belongs_to_account("email_templates", "acct-1"));
+    }
 
     #[test]
     fn resolve_username_defaults_empty_to_email() {

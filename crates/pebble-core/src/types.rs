@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct Account {
     /// A local label, never used in outbound mail headers.
     #[serde(default)]
@@ -43,7 +44,7 @@ pub struct OAuthMailboxIdentity {
     pub display_name: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderType {
     Imap,
@@ -52,7 +53,7 @@ pub enum ProviderType {
     Outlook,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 pub struct HttpProxyConfig {
     pub host: String,
     pub port: u16,
@@ -75,7 +76,7 @@ impl HttpProxyConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct Folder {
     pub id: String,
     pub account_id: String,
@@ -89,7 +90,7 @@ pub struct Folder {
     pub sort_order: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum FolderType {
     Folder,
@@ -97,7 +98,7 @@ pub enum FolderType {
     Category,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum FolderRole {
     Inbox,
@@ -108,7 +109,7 @@ pub enum FolderRole {
     Spam,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct Message {
     pub id: String,
     pub account_id: String,
@@ -139,7 +140,7 @@ pub struct Message {
 }
 
 /// Lightweight message data for list views (excludes body_text and body_html_raw).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct MessageSummary {
     pub id: String,
     pub account_id: String,
@@ -167,13 +168,13 @@ pub struct MessageSummary {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct EmailAddress {
     pub name: Option<String>,
     pub address: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct Attachment {
     pub id: String,
     pub message_id: String,
@@ -194,7 +195,7 @@ pub struct UserLabel {
     pub rule_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum KanbanColumn {
     Todo,
@@ -202,7 +203,7 @@ pub enum KanbanColumn {
     Done,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct KanbanCard {
     pub message_id: String,
     pub column: KanbanColumn,
@@ -211,7 +212,7 @@ pub struct KanbanCard {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct SnoozedMessage {
     pub message_id: String,
     pub snoozed_at: i64,
@@ -219,7 +220,7 @@ pub struct SnoozedMessage {
     pub return_to: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct TrustedSender {
     pub account_id: String,
     pub email: String,
@@ -227,14 +228,14 @@ pub struct TrustedSender {
     pub created_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum TrustType {
     Images,
     All,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct Rule {
     pub id: String,
     pub name: String,
@@ -246,7 +247,7 @@ pub struct Rule {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub enum PrivacyMode {
     Strict,
     TrustSender(String),
@@ -254,14 +255,14 @@ pub enum PrivacyMode {
     Off,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct RenderedHtml {
     pub html: String,
     pub trackers_blocked: Vec<TrackerInfo>,
     pub images_blocked: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct TrackerInfo {
     pub domain: String,
     pub tracker_type: String,
@@ -276,7 +277,7 @@ pub struct ProviderCapabilities {
     pub has_threads: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct TranslateConfig {
     pub id: String,
     pub provider_type: String,
@@ -286,9 +287,12 @@ pub struct TranslateConfig {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct ThreadSummary {
     pub thread_id: String,
+    /// Owning account; thread ids alone are not unique across accounts.
+    #[serde(default)]
+    pub account_id: String,
     pub subject: String,
     pub snippet: String,
     pub last_date: i64,
@@ -299,13 +303,13 @@ pub struct ThreadSummary {
     pub has_attachments: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct KnownContact {
     pub name: Option<String>,
     pub address: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum ContactEmailLabel {
     Work,
@@ -313,7 +317,7 @@ pub enum ContactEmailLabel {
     Other,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 pub struct ContactEmail {
     pub id: String,
     pub address: String,
@@ -321,7 +325,7 @@ pub struct ContactEmail {
     pub is_primary: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 pub struct Contact {
     pub id: String,
     pub display_name: String,
@@ -332,7 +336,8 @@ pub struct Contact {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(optional_fields = nullable)]
 pub struct ContactEmailInput {
     pub id: Option<String>,
     pub address: String,
@@ -340,7 +345,8 @@ pub struct ContactEmailInput {
     pub is_primary: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(optional_fields = nullable)]
 pub struct ContactInput {
     pub id: Option<String>,
     pub display_name: String,
@@ -349,14 +355,14 @@ pub struct ContactInput {
     pub emails: Vec<ContactEmailInput>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum ContactSuggestionSource {
     Saved,
     Recent,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 pub struct ContactSuggestion {
     pub contact_id: Option<String>,
     pub name: Option<String>,
@@ -366,7 +372,7 @@ pub struct ContactSuggestion {
     pub last_interaction_at: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, TS)]
 pub struct VcardImportResult {
     pub created: usize,
     pub merged: usize,

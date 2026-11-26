@@ -7,7 +7,13 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use pebble_core::{now_timestamp, EmailAddress, PebbleError, Result};
 use pebble_store::{scheduled_sends::ScheduledSend, Store};
 use serde::{Deserialize, Serialize};
-use std::{io::Read, path::Path, sync::Mutex, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    io::Read,
+    path::Path,
+    sync::{Mutex, MutexGuard},
+    time::Duration,
+};
 use tauri::{Emitter, Manager, State};
 
 const PURPOSE: &str = "scheduled_sends.payload";
@@ -170,6 +176,23 @@ enum ExitGate {
 pub struct SendControlRuntime {
     gate: Mutex<ExitGate>,
     cleanup: tokio::sync::Mutex<()>,
+    /// Jobs this process is dispatching right now. Never recovered as stuck.
+    in_flight: Mutex<HashSet<String>>,
+    /// Jobs whose transport finished but whose outcome failed to persist:
+    /// id -> (revision to finish, accepted). Retried before stuck recovery so
+    /// an accepted send is recorded as sent instead of needing attention.
+    unpersisted: Mutex<HashMap<String, (i64, bool)>>,
+}
+
+/// A `dispatching` job untouched for this long, and not in flight here, is
+/// treated as stuck and moved to review.
+const STUCK_DISPATCH_SECS: i64 = 120;
+const FINISH_ATTEMPTS: u32 = 3;
+
+/// Recover the guard even if a panicking thread poisoned it; every guarded
+/// value here is a plain state flag/collection that stays consistent.
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 fn conflict() -> PebbleError {
@@ -367,7 +390,7 @@ fn queue_snapshot(
     let account_id = snapshot.account_id.clone();
     validate_source_drafts(state, &mut snapshot)?;
     let payload = seal(state, &id, snapshot)?;
-    let gate = runtime.gate.lock().unwrap();
+    let gate = lock(&runtime.gate);
     ensure_running(&gate)?;
     if let Some(existing) = state.store.get_scheduled_send(&id)? {
         // A lost IPC reply must never create another delivery, even if the user edited meanwhile.
@@ -418,7 +441,7 @@ pub async fn restore_controlled_send(
     id: String,
     revision: i64,
 ) -> Result<SendSnapshot> {
-    let gate = runtime.gate.lock().unwrap();
+    let gate = lock(&runtime.gate);
     ensure_running(&gate)?;
     let job = state.store.get_scheduled_send(&id)?.ok_or_else(conflict)?;
     if job.revision != revision {
@@ -448,7 +471,7 @@ pub async fn reschedule_controlled_send(
     revision: i64,
     due_at: i64,
 ) -> Result<()> {
-    let gate = runtime.gate.lock().unwrap();
+    let gate = lock(&runtime.gate);
     ensure_running(&gate)?;
     if !state
         .store
@@ -529,16 +552,104 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<SendDispatchOutcome>>,
 {
-    let claimed = {
-        let gate = runtime.gate.lock().unwrap();
-        *gate == ExitGate::Running && store.claim_scheduled_send(&job.id, job.revision, now)?
-    };
-    if !claimed {
+    // Registered before the claim so stuck recovery can never observe this
+    // job as `dispatching` without also seeing it in flight.
+    // A job already in flight in this process belongs to another worker.
+    if !lock(&runtime.in_flight).insert(job.id.clone()) {
         return Ok(false);
     }
-    let sent = matches!(send().await, Ok(SendDispatchOutcome::Accepted));
-    store.finish_scheduled_send(&job.id, job.revision + 1, sent, now_timestamp())?;
-    Ok(true)
+    let claimed = {
+        let gate = lock(&runtime.gate);
+        if *gate == ExitGate::Running {
+            store.claim_scheduled_send(&job.id, job.revision, now)
+        } else {
+            Ok(false)
+        }
+    };
+    match claimed {
+        Ok(true) => {}
+        other => {
+            lock(&runtime.in_flight).remove(&job.id);
+            return other;
+        }
+    }
+    let outcome = send().await;
+    if let Err(e) = &outcome {
+        tracing::warn!("Scheduled send {} failed and needs review: {e}", job.id);
+    }
+    let sent = matches!(outcome, Ok(SendDispatchOutcome::Accepted));
+    let result = finish_with_retry(store, &job.id, job.revision + 1, sent).await;
+    let result = match result {
+        Ok(true) => Ok(true),
+        Ok(false) => {
+            tracing::warn!(
+                "Scheduled send {} changed state while dispatching; outcome not recorded",
+                job.id
+            );
+            Ok(true)
+        }
+        Err(e) => {
+            tracing::error!(
+                "Failed to record outcome (accepted={sent}) for scheduled send {}: {e}",
+                job.id
+            );
+            lock(&runtime.unpersisted).insert(job.id.clone(), (job.revision + 1, sent));
+            Err(e)
+        }
+    };
+    lock(&runtime.in_flight).remove(&job.id);
+    result
+}
+
+async fn finish_with_retry(store: &Store, id: &str, revision: i64, sent: bool) -> Result<bool> {
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        match store.finish_scheduled_send(id, revision, sent, now_timestamp()) {
+            Ok(done) => return Ok(done),
+            Err(e) if attempt >= FINISH_ATTEMPTS => return Err(e),
+            Err(e) => {
+                tracing::warn!("Retrying outcome write for scheduled send {id}: {e}");
+                tokio::time::sleep(Duration::from_millis(100 * u64::from(attempt))).await;
+            }
+        }
+    }
+}
+
+/// Persist outcomes that failed to write earlier, then move any other job
+/// stuck in `dispatching` to review. Returns true if anything changed.
+fn recover_stuck_dispatches(store: &Store, runtime: &SendControlRuntime, now: i64) -> bool {
+    let mut changed = false;
+    let pending: Vec<_> = lock(&runtime.unpersisted)
+        .iter()
+        .map(|(id, outcome)| (id.clone(), *outcome))
+        .collect();
+    for (id, (revision, sent)) in pending {
+        match store.finish_scheduled_send(&id, revision, sent, now) {
+            Ok(finished) => {
+                changed |= finished;
+                lock(&runtime.unpersisted).remove(&id);
+            }
+            Err(e) => tracing::warn!("Still unable to record outcome for scheduled send {id}: {e}"),
+        }
+    }
+    let exclude: Vec<String> = lock(&runtime.in_flight)
+        .iter()
+        .chain(lock(&runtime.unpersisted).keys())
+        .cloned()
+        .collect();
+    match store.recover_stuck_dispatching_sends(now - STUCK_DISPATCH_SECS, now, &exclude) {
+        Ok(recovered) => {
+            for id in &recovered {
+                tracing::warn!(
+                    "Scheduled send {id} was stuck dispatching; moved to review (may already have been sent)"
+                );
+            }
+            changed |= !recovered.is_empty();
+        }
+        Err(e) => tracing::warn!("Failed to recover stuck scheduled sends: {e}"),
+    }
+    changed
 }
 
 /// Call exactly once, after AppState is managed and before showing the main window.
@@ -553,23 +664,38 @@ pub fn setup(app: &tauri::AppHandle) -> Result<()> {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let mut next_cleanup = tokio::time::Instant::now();
+        let mut last_due_error: Option<String> = None;
         loop {
             tokio::time::sleep(Duration::from_millis(250)).await;
             let state = app.state::<AppState>();
             let runtime = app.state::<SendControlRuntime>();
             let jobs = match state.store.due_scheduled_sends(now_timestamp()) {
-                Ok(jobs) => jobs,
-                Err(_) => continue,
+                Ok(jobs) => {
+                    last_due_error = None;
+                    jobs
+                }
+                Err(e) => {
+                    // Polled every 250ms: log each distinct error once.
+                    let message = e.to_string();
+                    if last_due_error.as_deref() != Some(message.as_str()) {
+                        tracing::warn!("Failed to load due scheduled sends: {message}");
+                        last_due_error = Some(message);
+                    }
+                    continue;
+                }
             };
             for job in jobs
                 .into_iter()
                 .filter(|j| j.state == "pending" && j.due_at <= now_timestamp())
             {
                 // Any failure (including preflight/storage errors) needs an explicit decision.
-                let _ = process_job(&state.store, &runtime, &job, now_timestamp(), || {
+                if let Err(e) = process_job(&state.store, &runtime, &job, now_timestamp(), || {
                     deliver(&app, &state, &job)
                 })
-                .await;
+                .await
+                {
+                    tracing::warn!("Scheduled send {} could not be processed: {e}", job.id);
+                }
                 let _ = app.emit(CHANGED, ());
                 let _ = app.emit(crate::events::MAIL_PENDING_OPS_CHANGED, ());
                 next_cleanup = tokio::time::Instant::now();
@@ -577,6 +703,9 @@ pub fn setup(app: &tauri::AppHandle) -> Result<()> {
             // Only draft cleanup is retried, never transport. This also covers a crash after acceptance.
             if tokio::time::Instant::now() >= next_cleanup {
                 next_cleanup = tokio::time::Instant::now() + Duration::from_secs(15);
+                if recover_stuck_dispatches(&state.store, &runtime, now_timestamp()) {
+                    let _ = app.emit(CHANGED, ());
+                }
                 if let Ok(jobs) = state.store.list_scheduled_sends() {
                     for job in jobs.into_iter().filter(|job| job.state == "sent") {
                         let _ = cleanup_delivered_sources(&state, &runtime, &job, |removed| {
@@ -612,7 +741,7 @@ pub fn prevent_exit(app: &tauri::AppHandle) -> bool {
     };
     let state = app.state::<AppState>();
     let prevented = guard_exit(
-        &mut runtime.gate.lock().unwrap(),
+        &mut lock(&runtime.gate),
         state.store.scheduled_send_exit_count(),
     );
     if prevented {
@@ -627,7 +756,7 @@ pub fn prevent_exit(app: &tauri::AppHandle) -> bool {
 
 #[tauri::command]
 pub async fn send_control_exit_pending(runtime: State<'_, SendControlRuntime>) -> Result<bool> {
-    Ok(*runtime.gate.lock().unwrap() == ExitGate::Prompting)
+    Ok(*lock(&runtime.gate) == ExitGate::Prompting)
 }
 
 #[tauri::command]
@@ -637,7 +766,7 @@ pub async fn resolve_send_control_exit(
     confirm: bool,
 ) -> Result<()> {
     {
-        let mut gate = runtime.gate.lock().unwrap();
+        let mut gate = lock(&runtime.gate);
         if *gate != ExitGate::Prompting {
             return Err(PebbleError::Validation("No exit request pending".into()));
         }
@@ -1030,6 +1159,58 @@ mod tests {
         assert!(first.unwrap());
         assert!(!second.unwrap());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn stuck_dispatch_moves_to_review_unless_in_flight_or_outcome_known() {
+        let (state, root) = fixture();
+        let runtime = SendControlRuntime::default();
+        let with_id = |id: &str| ScheduledSend {
+            id: id.into(),
+            ..job(&state)
+        };
+        let stuck = with_id("stuck");
+        let running = with_id("running");
+        let accepted = with_id("accepted");
+        for job in [&stuck, &running, &accepted] {
+            state.store.insert_scheduled_send(job, 100).unwrap();
+            assert!(state
+                .store
+                .claim_scheduled_send(&job.id, job.revision, 200)
+                .unwrap());
+        }
+        lock(&runtime.in_flight).insert(running.id.clone());
+        // Transport accepted this one but the outcome write failed earlier.
+        lock(&runtime.unpersisted).insert(accepted.id.clone(), (accepted.revision + 1, true));
+
+        // Too recent to be considered stuck.
+        assert!(recover_stuck_dispatches(&state.store, &runtime, 201));
+        let get = |id: &str| state.store.get_scheduled_send(id).unwrap().unwrap().state;
+        assert_eq!(get(&accepted.id), "sent");
+        assert_eq!(get(&stuck.id), "dispatching");
+
+        assert!(recover_stuck_dispatches(
+            &state.store,
+            &runtime,
+            200 + STUCK_DISPATCH_SECS
+        ));
+        assert_eq!(get(&stuck.id), "review");
+        assert_eq!(get(&running.id), "dispatching");
+        assert!(lock(&runtime.unpersisted).is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn poisoned_gate_is_recovered_instead_of_panicking() {
+        let runtime = std::sync::Arc::new(SendControlRuntime::default());
+        let poisoner = std::sync::Arc::clone(&runtime);
+        let _ = std::thread::spawn(move || {
+            let _guard = poisoner.gate.lock().unwrap();
+            panic!("poison the gate");
+        })
+        .join();
+        assert!(runtime.gate.is_poisoned());
+        assert_eq!(*lock(&runtime.gate), ExitGate::Running);
     }
 
     #[tokio::test]

@@ -24,4 +24,7 @@ pub use provider::imap_provider::ImapMailProvider;
 pub use provider::outlook::{should_hide_outlook_folder, OutlookProvider};
 pub use provider::pop3_provider::Pop3MailProvider;
 pub use realtime_policy::{RealtimeContext, RealtimePollPolicy, RealtimeRuntimeState, SyncTrigger};
-pub use sync::{StoredMessage, SyncConfig, SyncError, SyncProgress, SyncRuntimeStatus, SyncWorker};
+pub use sync::{
+    StoredMessage, SyncConfig, SyncError, SyncProgress, SyncRuntimeStatus, SyncWorker,
+    ThreadRefresh,
+};

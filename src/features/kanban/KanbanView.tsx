@@ -1,10 +1,18 @@
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { DndContext, DragEndEvent, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
-import type { KanbanColumnType, Message } from "@/lib/api";
-import { getMessagesBatch, moveToKanban } from "@/lib/api";
-import { useKanbanStore } from "@/stores/kanban.store";
+import type { KanbanCard, KanbanColumnType, Message } from "@/lib/api";
+import { getMessagesBatch } from "@/lib/api";
+import { useKanbanContextNotesQuery, type KanbanContextNotes } from "@/hooks/queries/useKanbanContextNotesQuery";
+import { useKanbanCardsQuery } from "@/hooks/queries/useKanbanCardsQuery";
+import {
+  addKanbanCard,
+  useMoveKanbanCardMutation,
+  useRemoveKanbanCardMutation,
+  useReorderKanbanColumnMutation,
+} from "@/hooks/mutations/useKanbanMutations";
 import { useToastStore } from "@/stores/toast.store";
 import { useUIStore } from "@/stores/ui.store";
 import { useMailStore } from "@/stores/mail.store";
@@ -17,19 +25,26 @@ const COLUMN_IDS: { id: KanbanColumnType; titleKey: string }[] = [
   { id: "done", titleKey: "kanban.done" },
 ];
 
+const NO_CARDS: KanbanCard[] = [];
+const NO_NOTES: KanbanContextNotes = {};
+
 export default function KanbanView() {
   const { t } = useTranslation();
-  const { cards, contextNotes, loading, fetchCards, moveCard, removeCard } = useKanbanStore();
+  // Always refetch when the board opens: cards can go stale while messages
+  // are deleted or moved elsewhere in the app.
+  const { data: cards = NO_CARDS, isPending } = useKanbanCardsQuery({ refetchOnMount: "always" });
+  // Notes are optional: a failed load leaves the board usable without them.
+  const { data: contextNotes = NO_NOTES } = useKanbanContextNotesQuery({ refetchOnMount: "always" });
+  const queryClient = useQueryClient();
+  const moveCard = useMoveKanbanCardMutation();
+  const reorderColumn = useReorderKanbanColumnMutation();
+  const removeCard = useRemoveKanbanCardMutation();
   const [messages, setMessages] = useState<Map<string, Message>>(new Map());
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
-
-  useEffect(() => {
-    fetchCards();
-  }, [fetchCards]);
 
   // Load message details for all cards (batch)
   useEffect(() => {
@@ -84,32 +99,36 @@ export default function KanbanView() {
       const newIndex = columnIds.indexOf(overId);
       if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
         const reordered = arrayMove(columnIds, oldIndex, newIndex);
-        useKanbanStore.getState().reorderInColumn(targetColumn, reordered);
+        reorderColumn.mutate({ column: targetColumn, orderedIds: reordered });
       }
     } else {
       // Cross-column move
       const targetCards = cards.filter((c) => c.column === targetColumn);
-      moveCard(activeId, targetColumn, targetCards.length);
+      moveCard.mutate({ messageId: activeId, column: targetColumn, position: targetCards.length });
     }
   }
 
   async function handleRemove(messageId: string) {
     const card = cards.find((c) => c.message_id === messageId);
     const oldColumn = card?.column ?? "todo";
-    await removeCard(messageId);
+    try {
+      await removeCard.mutateAsync({ messageId });
+    } catch {
+      return; // rolled back; the card is still on the board
+    }
     useToastStore.getState().addToast({
       message: t("kanban.removedFromBoard", "Card removed from board"),
       type: "info",
       action: {
         label: t("kanban.undoRemove", "Undo"),
         onClick: () => {
-          moveToKanban(messageId, oldColumn).then(() => fetchCards());
+          addKanbanCard(messageId, oldColumn, queryClient).catch(() => {});
         },
       },
     });
   }
 
-  if (loading && cards.length === 0) {
+  if (isPending) {
     return <KanbanSkeleton />;
   }
 

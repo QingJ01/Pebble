@@ -7,6 +7,7 @@ use tauri::AppHandle;
 pub const MAX_BACKGROUND_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct ImportedBackgroundImage {
     pub path: String,
     pub filename: String,

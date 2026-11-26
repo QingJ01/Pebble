@@ -1,6 +1,8 @@
 mod account_colors;
 mod commands;
 mod events;
+#[cfg(test)]
+mod ipc_bindings;
 mod profile;
 mod realtime;
 mod send_controls;
@@ -298,6 +300,41 @@ fn should_prefer_wayland(
             || (is_appimage && gdk_backend == Some(std::ffi::OsStr::new("x11"))))
 }
 
+/// Whether a top-level webview navigation stays on the app's own origin.
+///
+/// Email content is rendered in a sandbox, but a link or script that manages
+/// to navigate the main webview away from the bundled frontend would give a
+/// remote page access to the IPC bridge, so every other origin is cancelled.
+fn is_allowed_app_navigation(url: &tauri::Url) -> bool {
+    let host = url.host_str().unwrap_or_default();
+    match url.scheme() {
+        "tauri" => host == "localhost",
+        "http" | "https" if host == "tauri.localhost" => true,
+        "http" if cfg!(debug_assertions) => {
+            // Vite dev server (`build.devUrl`).
+            matches!(host, "127.0.0.1" | "localhost") && url.port() == Some(1420)
+        }
+        _ => false,
+    }
+}
+
+fn navigation_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri::plugin::Builder::new("navigation-guard")
+        .on_navigation(|webview, url| {
+            let allowed = is_allowed_app_navigation(url);
+            if !allowed {
+                tracing::warn!(
+                    webview = webview.label(),
+                    scheme = url.scheme(),
+                    host = url.host_str().unwrap_or_default(),
+                    "blocked webview navigation away from the app origin"
+                );
+            }
+            allowed
+        })
+        .build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Prefer native Wayland when a Wayland compositor is available.
@@ -337,6 +374,7 @@ pub fn run() {
     }
 
     builder
+        .plugin(navigation_guard())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
@@ -392,8 +430,15 @@ pub fn run() {
                 .allow_directory(&backgrounds_dir, true)?;
             let log_dir = commands::diagnostics::app_log_dir(&app_data);
             std::fs::create_dir_all(&log_dir)?;
-            let file_appender =
-                tracing_appender::rolling::never(&log_dir, commands::diagnostics::LOG_FILE_NAME);
+            // Rotate daily and keep a bounded number of files so logs cannot
+            // grow without limit.
+            let file_appender = tracing_appender::rolling::Builder::new()
+                .rotation(tracing_appender::rolling::Rotation::DAILY)
+                .filename_prefix(commands::diagnostics::LOG_FILE_PREFIX)
+                .filename_suffix(commands::diagnostics::LOG_FILE_SUFFIX)
+                .max_log_files(commands::diagnostics::LOG_MAX_FILES)
+                .build(&log_dir)
+                .map_err(|e| format!("Failed to initialise log file: {e}"))?;
             let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
             let env_filter =
                 tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
@@ -442,12 +487,9 @@ pub fn run() {
                 "database opened and migrations complete",
             );
 
-            match store.quick_check() {
-                Ok(result) if result == "ok" => tracing::info!("Database integrity check passed"),
-                Ok(result) => tracing::warn!("Database integrity check warning: {}", result),
-                Err(e) => tracing::warn!("Database integrity check failed: {}", e),
-            }
-            log_startup_phase(startup_start, &mut startup_phase, "database quick check complete");
+            // `PRAGMA quick_check` reads the whole file; it runs in the
+            // background after startup (see below) instead of delaying the
+            // first window.
 
             let index_path = get_index_path(&app_data)?;
             tracing::info!("Search index path: {}", index_path.display());
@@ -496,6 +538,33 @@ pub fn run() {
                 snooze_stop_rx,
             ));
 
+            // Legacy (AAD-less) ciphertext: once a previous run re-encrypted
+            // everything, reject it immediately; otherwise migrate in the
+            // background (idempotent, compare-and-swap per record).
+            if commands::encrypted_store::legacy_ciphertext_migration_done(
+                &state.crypto,
+                &state.store,
+            ) {
+                state.crypto.reject_legacy_ciphertext();
+            } else {
+                let crypto_for_migration = state.crypto.clone();
+                let store_for_migration = state.store.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    match commands::encrypted_store::migrate_legacy_ciphertexts(
+                        &crypto_for_migration,
+                        &store_for_migration,
+                    ) {
+                        Ok(outcome) => tracing::info!(
+                            migrated = outcome.migrated,
+                            failed = outcome.failed,
+                            completed = outcome.completed,
+                            "Legacy ciphertext migration finished"
+                        ),
+                        Err(error) => tracing::warn!("Legacy ciphertext migration failed: {error}"),
+                    }
+                });
+            }
+
             // Decide whether to rebuild the search index, and do it in the
             // background so startup never waits on the DB count query. The
             // task itself performs the consistency check (comparing the
@@ -504,7 +573,7 @@ pub fn run() {
             let store_for_reindex = state.store.clone();
             let search_for_reindex = state.search.clone();
             let app_for_reindex = app_handle.clone();
-            let reindex_handle = tauri::async_runtime::spawn_blocking(move || {
+            tauri::async_runtime::spawn_blocking(move || {
                 // 1. Process any pending search ops left over from a previous crash.
                 match commands::indexing::recover_pending_search_operations(
                     &store_for_reindex,
@@ -556,31 +625,36 @@ pub fn run() {
                 }
             });
 
-            // Start the long-lived workers only after the background reindex
-            // finishes. do_reindex calls clear_index() then rebuilds from a DB
-            // snapshot; running sync workers concurrently could index a freshly
-            // stored message whose document is then wiped and missed by the
-            // snapshot, leaving it permanently unsearchable. On a normal launch
-            // the reindex task only does the cheap pending-recovery + count
-            // check (no rebuild), so this ordering adds latency only on
-            // schema-upgrade launches.
-            let app_for_workers = app_handle.clone();
+            // Long-lived workers start immediately: do_reindex is safe to run
+            // concurrently with the live indexer (it walks a rowid cursor and
+            // serialises each read+index batch with the indexer through
+            // `indexing::search_write_guard`), so a schema-upgrade rebuild no
+            // longer delays sync.
+            let app_for_sync = app_handle.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = reindex_handle.await {
-                    tracing::error!("Background reindex task join failed: {e}");
+                commands::sync_cmd::resume_all_syncs(app_for_sync).await;
+            });
+            let app_for_pending_ops = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                commands::pending_mail_ops::run_pending_mail_ops_worker(app_for_pending_ops).await;
+            });
+            let app_for_backup = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                commands::cloud_sync::run_auto_backup_worker(app_for_backup).await;
+            });
+
+            // Background integrity check, once the UI and sync are up.
+            let store_for_check = state.store.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                match tokio::task::spawn_blocking(move || store_for_check.quick_check()).await {
+                    Ok(Ok(result)) if result == "ok" => {
+                        tracing::info!("Database integrity check passed")
+                    }
+                    Ok(Ok(result)) => tracing::warn!("Database integrity check warning: {}", result),
+                    Ok(Err(e)) => tracing::warn!("Database integrity check failed: {}", e),
+                    Err(e) => tracing::warn!("Database integrity check task failed: {}", e),
                 }
-                let app_for_sync = app_for_workers.clone();
-                tauri::async_runtime::spawn(async move {
-                    commands::sync_cmd::resume_all_syncs(app_for_sync).await;
-                });
-                let app_for_pending_ops = app_for_workers.clone();
-                tauri::async_runtime::spawn(async move {
-                    commands::pending_mail_ops::run_pending_mail_ops_worker(app_for_pending_ops)
-                        .await;
-                });
-                tauri::async_runtime::spawn(async move {
-                    commands::cloud_sync::run_auto_backup_worker(app_for_workers).await;
-                });
             });
             log_startup_phase(startup_start, &mut startup_phase, "background workers scheduled");
             tracing::info!(
@@ -798,5 +872,30 @@ mod startup_timing_tests {
         assert!(!should_prefer_wayland(display, x11, false));
         assert!(should_prefer_wayland(display, x11, true));
         assert!(!should_prefer_wayland(display, wayland, true));
+    }
+}
+
+#[cfg(test)]
+mod navigation_guard_tests {
+    use super::is_allowed_app_navigation;
+
+    fn allowed(url: &str) -> bool {
+        is_allowed_app_navigation(&tauri::Url::parse(url).unwrap())
+    }
+
+    #[test]
+    fn allows_only_the_app_origin() {
+        assert!(allowed("tauri://localhost/index.html"));
+        assert!(allowed("http://tauri.localhost/"));
+        assert!(allowed("https://tauri.localhost/settings"));
+        assert!(allowed("http://127.0.0.1:1420/"));
+
+        assert!(!allowed("https://evil.example/"));
+        assert!(!allowed("http://tauri.localhost.evil.example/"));
+        assert!(!allowed("tauri://evil/"));
+        assert!(!allowed("http://127.0.0.1:8080/"));
+        assert!(!allowed("file:///etc/passwd"));
+        assert!(!allowed("javascript:alert(1)"));
+        assert!(!allowed("data:text/html,hi"));
     }
 }

@@ -23,6 +23,8 @@ import { extractErrorMessage as errorMessage } from "@/lib/extractErrorMessage";
 import { profileLocalStorage } from "@/lib/profileStorage";
 
 const LAST_BACKUP_KEY = "pebble-cloud-sync-last-backup";
+/** Must match `MIN_PASSPHRASE_CHARS` in pebble-crypto. */
+const MIN_SECRET_PASSPHRASE_CHARS = 12;
 
 type RestoreRequest =
   | { source: "webdav"; preview: BackupPreview }
@@ -58,6 +60,13 @@ export default function CloudSyncTab() {
   const [password, setPassword] = useState("");
   const [includeSecrets, setIncludeSecrets] = useState(false);
   const [secretPassphrase, setSecretPassphrase] = useState("");
+  // The backend never returns saved secrets, only whether they exist. A blank
+  // field then means "keep the saved value".
+  const [hasStoredPassword, setHasStoredPassword] = useState(false);
+  // The saved WebDAV password is only reused for the server it was saved for.
+  const [storedServer, setStoredServer] = useState<{ url: string; username: string } | null>(null);
+  const [hasStoredPassphrase, setHasStoredPassphrase] = useState(false);
+  const [storedPassphraseIsWeak, setStoredPassphraseIsWeak] = useState(false);
 
   const [statusMsg, setStatusMsg] = useState("");
   const [statusType, setStatusType] = useState<"success" | "error" | "">("");
@@ -79,17 +88,39 @@ export default function CloudSyncTab() {
       if (config) {
         setUrl(config.url);
         setUsername(config.username);
-        setPassword(config.password);
+        setHasStoredPassword(config.has_password);
+        setStoredServer({ url: config.url, username: config.username });
         setAutoEnabled(config.enabled);
         setAutoInterval(config.interval_minutes);
-        if (config.secret_passphrase) {
+        if (config.has_secret_passphrase) {
           setIncludeSecrets(true);
-          setSecretPassphrase(config.secret_passphrase);
+          setHasStoredPassphrase(true);
+          setStoredPassphraseIsWeak(Boolean(config.secret_passphrase_is_weak));
         }
       }
       setAutoLoaded(true);
     }).catch(() => setAutoLoaded(true));
   }, []);
+
+  const storedPasswordApplies =
+    hasStoredPassword &&
+    storedServer !== null &&
+    storedServer.url === url &&
+    storedServer.username === username;
+  const hasPassword = Boolean(password) || storedPasswordApplies;
+  const hasPassphrase = Boolean(secretPassphrase.trim()) || hasStoredPassphrase;
+
+  function passphraseTooShort() {
+    const entered = secretPassphrase.trim();
+    return entered.length > 0 && [...entered].length < MIN_SECRET_PASSPHRASE_CHARS;
+  }
+
+  function passphraseTooShortMessage() {
+    return t(
+      "cloudSync.secretPassphraseTooShort",
+      "The backup encryption password must be at least 12 characters.",
+    );
+  }
 
   async function handleSaveAutoBackupConfig() {
     setStatusMsg("");
@@ -97,7 +128,7 @@ export default function CloudSyncTab() {
 
     if (
       autoEnabled &&
-      (!url.trim() || !username.trim() || !password)
+      (!url.trim() || !username.trim() || !hasPassword)
     ) {
       setStatusMsg(
         t(
@@ -109,13 +140,19 @@ export default function CloudSyncTab() {
       return;
     }
 
-    if (includeSecrets && !secretPassphrase.trim()) {
+    if (includeSecrets && !hasPassphrase) {
       setStatusMsg(
         t(
           "cloudSync.autoBackupSecretPassphraseRequired",
           "Enter an encryption password before including secrets.",
         ),
       );
+      setStatusType("error");
+      return;
+    }
+
+    if (includeSecrets && passphraseTooShort()) {
+      setStatusMsg(passphraseTooShortMessage());
       setStatusType("error");
       return;
     }
@@ -130,6 +167,16 @@ export default function CloudSyncTab() {
         interval_minutes: autoInterval,
         enabled: autoEnabled,
       });
+      setHasStoredPassword(Boolean(password) || storedPasswordApplies);
+      setStoredServer({ url, username });
+      if (includeSecrets && secretPassphrase.trim()) {
+        setHasStoredPassphrase(true);
+        setStoredPassphraseIsWeak(false);
+      }
+      if (!includeSecrets) {
+        setHasStoredPassphrase(false);
+        setStoredPassphraseIsWeak(false);
+      }
       setStatusMsg(
         t(
           "cloudSync.autoBackupConfigSaved",
@@ -171,14 +218,7 @@ export default function CloudSyncTab() {
     setBacking(true);
     setStatusMsg("");
     try {
-      if (includeSecrets && !secretPassphrase.trim()) {
-        throw new Error(
-          t(
-            "cloudSync.secretPassphraseRequired",
-            "Enter a backup encryption password to include account passwords, OAuth tokens, and API keys.",
-          ),
-        );
-      }
+      requireSecretPassphrase();
       await backupToWebdav(
         url,
         username,
@@ -210,14 +250,20 @@ export default function CloudSyncTab() {
     setPendingFileImport(null);
   }, [pendingFileImport, restoreRequest, secretPassphrase]);
 
+  /** Validates the passphrase used to create a new backup. */
   function requireSecretPassphrase() {
-    if (!includeSecrets || secretPassphrase.trim()) return;
-    throw new Error(
-      t(
-        "cloudSync.secretPassphraseRequired",
-        "Enter a backup encryption password to include account passwords, OAuth tokens, and API keys.",
-      ),
-    );
+    if (!includeSecrets) return;
+    if (!hasPassphrase) {
+      throw new Error(
+        t(
+          "cloudSync.secretPassphraseRequired",
+          "Enter a backup encryption password to include account passwords, OAuth tokens, and API keys.",
+        ),
+      );
+    }
+    if (passphraseTooShort()) {
+      throw new Error(passphraseTooShortMessage());
+    }
   }
 
   function downloadBackupJson(data: string) {
@@ -239,7 +285,7 @@ export default function CloudSyncTab() {
     setStatusMsg("");
     try {
       const preview = await previewWebdavBackup(url, username, password);
-      if (preview.has_encrypted_secrets && !secretPassphrase.trim()) {
+      if (preview.has_encrypted_secrets && !hasPassphrase) {
         setStatusMsg(
           t(
             "cloudSync.restoreSecretPassphraseRequired",
@@ -287,7 +333,7 @@ export default function CloudSyncTab() {
       const data = await file.text();
       const preview = await previewBackupFile(data);
       const request: RestoreRequest = { source: "file", preview, data };
-      if (preview.has_encrypted_secrets && !secretPassphrase.trim()) {
+      if (preview.has_encrypted_secrets && !hasPassphrase) {
         setPendingFileImport(request);
         setStatusMsg(
           t(
@@ -487,7 +533,11 @@ export default function CloudSyncTab() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           disabled={savingAutoConfig}
-          placeholder={t("cloudSync.password")}
+          placeholder={
+            storedPasswordApplies
+              ? t("cloudSync.savedSecretPlaceholder", "Saved — leave blank to keep")
+              : t("cloudSync.password")
+          }
           autoComplete="current-password"
         />
       </div>
@@ -528,9 +578,24 @@ export default function CloudSyncTab() {
           value={secretPassphrase}
           onChange={(e) => setSecretPassphrase(e.target.value)}
           disabled={savingAutoConfig}
-          placeholder={t("cloudSync.secretPassphrasePlaceholder", "Required for backing up or restoring secrets")}
+          placeholder={
+            hasStoredPassphrase
+              ? t("cloudSync.savedSecretPlaceholder", "Saved — leave blank to keep")
+              : t("cloudSync.secretPassphrasePlaceholder", "Required for backing up or restoring secrets")
+          }
           autoComplete="new-password"
         />
+        {includeSecrets && storedPassphraseIsWeak && !secretPassphrase && (
+          <p
+            role="note"
+            style={{ margin: "6px 0 0", fontSize: "12px", color: "var(--color-warning, #e67e22)" }}
+          >
+            {t(
+              "cloudSync.weakPassphraseHint",
+              "Your saved backup encryption password is shorter than 12 characters. Backups still work, but please set a stronger password.",
+            )}
+          </p>
+        )}
       </div>
 
       {/* Action buttons */}
@@ -668,7 +733,7 @@ export default function CloudSyncTab() {
                 disabled={
                   savingAutoConfig ||
                   (!autoEnabled &&
-                    (!url.trim() || !username.trim() || !password))
+                    (!url.trim() || !username.trim() || !hasPassword))
                 }
               />
               {t("cloudSync.autoBackupEnable", "Enable automatic WebDAV backup")}
