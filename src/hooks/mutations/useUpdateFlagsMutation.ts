@@ -6,6 +6,15 @@ import {
   snapshotMessagesCache,
   restoreMessagesCache,
 } from "@/hooks/queries";
+import { toastError } from "@/stores/toast.store";
+
+/** i18n key describing which flag update failed (used by toastError). */
+export function flagFailureKey(params: { isRead?: boolean; isStarred?: boolean }): string {
+  if (params.isStarred !== undefined) {
+    return params.isStarred ? "messageActions.starFailed" : "messageActions.unstarFailed";
+  }
+  return "messageActions.updateReadFailed";
+}
 
 interface UpdateFlagsParams {
   messageId: string;
@@ -64,7 +73,8 @@ export function useUpdateFlagsMutation() {
 
       return { previousMessage, previousLists };
     },
-    onError: (_err, params, context) => {
+    onError: (err, params, context) => {
+      toastError(err, flagFailureKey(params));
       if (context?.previousMessage) {
         queryClient.setQueryData(
           ["message", params.messageId],

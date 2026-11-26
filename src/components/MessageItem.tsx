@@ -1,22 +1,33 @@
-import { memo, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { memo } from "react";
 import MoveToButton from "./MoveToButton";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Star, Paperclip, Archive, LayoutGrid, ShieldAlert, RotateCcw, Mail, MailOpen } from "lucide-react";
+import {
+  Star, StarOff, Paperclip, Archive, LayoutGrid, ShieldAlert, RotateCcw, Mail, MailOpen,
+  Reply, ReplyAll, Forward, Trash2,
+} from "lucide-react";
 import type { EmailAddress, Folder, Label, MessageSummary } from "@/lib/api";
-import { updateMessageFlags, archiveMessage, moveToFolder } from "@/lib/api";
+import { getMessage, restoreMessage, updateMessageFlags } from "@/lib/api";
 import { useIsInKanban } from "@/hooks/queries/useKanbanCardsQuery";
 import { addKanbanCard } from "@/hooks/mutations/useKanbanMutations";
-import { useToastStore } from "@/stores/toast.store";
-import { useClickOutside } from "@/hooks/useClickOutside";
+import { runMailAction, trashConfirmCopy, type MailActionKind } from "@/hooks/mutations/mailActions";
+import { toastError, useToastStore } from "@/stores/toast.store";
+import { useMailStore } from "@/stores/mail.store";
+import { useComposeStore } from "@/stores/compose.store";
+import { useConfirmStore } from "@/stores/confirm.store";
 import { patchMessagesCache, restoreMessagesCache, snapshotMessagesCache } from "@/hooks/queries";
+import IconButton from "./ui/IconButton";
+import ContextMenu, { useContextMenuState, type ContextMenuItem } from "./ContextMenu";
+import "./mail-list.css";
 
 interface Props {
   message: MessageSummary;
   labels?: Label[];
   isSelected: boolean;
-  onClick: () => void;
+  /** Row click. Receives the mouse event so lists can handle ⌘/Ctrl/Shift-click. */
+  onClick: (event?: React.MouseEvent) => void;
+  /** Enter on the row. Defaults to onClick. */
+  onOpen?: () => void;
   onToggleStar?: (messageId: string, newStarred: boolean) => void;
   batchMode?: boolean;
   batchSelected?: boolean;
@@ -25,9 +36,13 @@ interface Props {
   folderRole?: Folder["role"];
   accountColor?: string;
   accountLabel?: string;
+  /** Roving tabindex: 0 for the list's active row, -1 for the others. */
+  tabIndex?: number;
+  /** The row received focus (lists use it to move their roving tab stop). */
+  onRowFocus?: (messageId: string) => void;
 }
 
-function formatDate(timestamp: number): string {
+function formatDate(timestamp: number, locale: string | undefined): string {
   const date = new Date(timestamp * 1000);
   const now = new Date();
   const isToday =
@@ -36,10 +51,10 @@ function formatDate(timestamp: number): string {
     date.getDate() === now.getDate();
 
   if (isToday) {
-    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return date.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
   }
 
-  return date.toLocaleDateString([], { month: "short", day: "numeric" });
+  return date.toLocaleDateString(locale, { month: "short", day: "numeric" });
 }
 
 function addressLabel(address: EmailAddress): string {
@@ -50,31 +65,26 @@ function recipientLabel(addresses: EmailAddress[]): string {
   return addresses.map(addressLabel).filter(Boolean).join(", ");
 }
 
-function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, batchMode, batchSelected, onToggleBatchSelect, spamFolderId, folderRole, accountColor, accountLabel }: Props) {
-  const { t } = useTranslation();
+const MAX_INLINE_LABELS = 2;
+
+function MessageItem({
+  message, labels = [], isSelected, onClick, onOpen, onToggleStar, batchMode, batchSelected,
+  onToggleBatchSelect, spamFolderId, folderRole, accountColor, accountLabel, tabIndex = 0, onRowFocus,
+}: Props) {
+  const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
-  const [showActions, setShowActions] = useState(false);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
-  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const menu = useContextMenuState();
   const inKanban = useIsInKanban(message.id);
-  const archiveActionLabel = folderRole === "archive"
+  const isArchiveFolder = folderRole === "archive";
+  const archiveActionLabel = isArchiveFolder
     ? t("messageActions.unarchive", "Unarchive")
     : t("messageActions.archive", "Archive");
-  const ArchiveActionIcon = folderRole === "archive" ? RotateCcw : Archive;
+  const ArchiveActionIcon = isArchiveFolder ? RotateCcw : Archive;
   const primaryContact = folderRole === "sent" && message.to_list.length > 0
     ? recipientLabel(message.to_list)
     : message.from_name || message.from_address;
-
-  useClickOutside(contextMenuRef, Boolean(contextMenu), () => setContextMenu(null));
-
-  useEffect(() => {
-    if (!contextMenu) return;
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setContextMenu(null);
-    }
-    document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [contextMenu]);
+  const subject = message.subject || t("inbox.noSubject");
+  const starLabel = message.is_starred ? t("messageActions.unstar") : t("messageActions.star");
 
   function invalidateMessageViews(includeUnreadCounts = false) {
     queryClient.invalidateQueries({ queryKey: ["messages"] });
@@ -85,71 +95,148 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
     }
   }
 
-  function handleContextMenu(event: React.MouseEvent) {
-    event.preventDefault();
-    event.stopPropagation();
-    setContextMenu({ x: event.clientX, y: event.clientY });
+  function closeIfSelected() {
+    if (useMailStore.getState().selectedMessageId === message.id) {
+      useMailStore.getState().setSelectedMessage(null);
+    }
+  }
+
+  function runAction(kind: MailActionKind) {
+    void runMailAction(queryClient, kind, [message], {
+      spamFolderId,
+      onRemoved: closeIfSelected,
+      confirm: (plan) => useConfirmStore.getState().confirm({ ...trashConfirmCopy(plan), destructive: true }),
+    });
   }
 
   async function handleToggleRead() {
     const nextReadState = !message.is_read;
-    setContextMenu(null);
     try {
       await updateMessageFlags(message.id, nextReadState);
       invalidateMessageViews(true);
-    } catch {
-      useToastStore.getState().addToast({
-        message: t("messageActions.updateReadFailed", "Failed to update read state"),
-        type: "error",
-      });
+    } catch (error) {
+      toastError(error, "messageActions.updateReadFailed");
     }
   }
 
-  const contextMenuLeft = contextMenu ? Math.min(contextMenu.x, window.innerWidth - 190) : 0;
-  const contextMenuTop = contextMenu ? Math.min(contextMenu.y, window.innerHeight - 64) : 0;
-  const readToggleLabel = message.is_read
-    ? t("messageActions.markUnread", "Mark as unread")
-    : t("messageActions.markRead", "Mark as read");
-  const ReadToggleIcon = message.is_read ? Mail : MailOpen;
+  function handleToggleStar() {
+    const nextStarred = !message.is_starred;
+    const previousLists = snapshotMessagesCache(queryClient);
+    onToggleStar?.(message.id, nextStarred);
+    updateMessageFlags(message.id, undefined, nextStarred)
+      .then(() => {
+        invalidateMessageViews();
+        queryClient.invalidateQueries({ queryKey: ["message", message.id] });
+      })
+      .catch((error) => {
+        restoreMessagesCache(queryClient, previousLists);
+        onToggleStar?.(message.id, message.is_starred);
+        invalidateMessageViews();
+        queryClient.invalidateQueries({ queryKey: ["message", message.id] });
+        toastError(error, message.is_starred ? "messageActions.unstarFailed" : "messageActions.starFailed");
+      });
+  }
+
+  function handleAddToKanban() {
+    addKanbanCard(message.id, "todo", queryClient)
+      .then(() => {
+        useToastStore.getState().addToast({ message: t("messageActions.kanbanSuccess", "Added to kanban board"), type: "success" });
+      })
+      .catch((error) => toastError(error, "messageActions.kanbanFailed"));
+  }
+
+  async function handleRestore() {
+    const previousLists = snapshotMessagesCache(queryClient);
+    patchMessagesCache(queryClient, (page) => page.filter((m) => m.id !== message.id));
+    try {
+      await restoreMessage(message.id);
+      closeIfSelected();
+      invalidateMessageViews(true);
+      useToastStore.getState().addToast({ message: t("messageActions.restoreSuccess", "Message restored to inbox"), type: "success" });
+    } catch (error) {
+      restoreMessagesCache(queryClient, previousLists);
+      toastError(error, "messageActions.restoreFailed");
+    }
+  }
+
+  function openCompose(mode: "reply" | "reply-all" | "forward") {
+    getMessage(message.id)
+      .then((full) => {
+        if (full) useComposeStore.getState().openCompose(mode, full);
+      })
+      .catch((error) => toastError(error, "common.messageLoadFailed"));
+  }
+
+  const menuItems: ContextMenuItem[] = [
+    { id: "reply", label: t("messageActions.reply", "Reply"), icon: <Reply size={14} />, onSelect: () => openCompose("reply") },
+    { id: "reply-all", label: t("messageActions.replyAll", "Reply All"), icon: <ReplyAll size={14} />, onSelect: () => openCompose("reply-all") },
+    { id: "forward", label: t("messageActions.forward", "Forward"), icon: <Forward size={14} />, onSelect: () => openCompose("forward") },
+    {
+      id: "read",
+      label: message.is_read ? t("messageActions.markUnread", "Mark as unread") : t("messageActions.markRead", "Mark as read"),
+      icon: message.is_read ? <Mail size={14} /> : <MailOpen size={14} />,
+      onSelect: () => void handleToggleRead(),
+      separatorBefore: true,
+    },
+    {
+      id: "star",
+      label: starLabel,
+      icon: message.is_starred ? <StarOff size={14} /> : <Star size={14} />,
+      onSelect: handleToggleStar,
+    },
+    { id: "kanban", label: t("messageActions.addToKanban", "Add to Kanban"), icon: <LayoutGrid size={14} />, onSelect: handleAddToKanban },
+    ...(folderRole === "trash"
+      ? [{ id: "restore", label: t("messageActions.restore", "Restore"), icon: <RotateCcw size={14} />, onSelect: () => void handleRestore(), separatorBefore: true }]
+      : [{ id: "archive", label: archiveActionLabel, icon: <ArchiveActionIcon size={14} />, onSelect: () => runAction("archive"), separatorBefore: true }]),
+    ...(spamFolderId
+      ? [{ id: "spam", label: t("messageActions.reportSpam", "Report spam"), icon: <ShieldAlert size={14} />, onSelect: () => runAction("spam") }]
+      : []),
+    {
+      id: "delete",
+      label: folderRole === "trash" ? t("messageActions.deletePermanently", "Delete permanently") : t("messageActions.delete", "Delete"),
+      icon: <Trash2 size={14} />,
+      onSelect: () => runAction("trash"),
+      danger: true,
+    },
+  ];
+
+  const inlineLabels = labels.slice(0, MAX_INLINE_LABELS);
+  const hiddenLabelCount = labels.length - inlineLabels.length;
 
   return (
     <div
       className={`message-list-row${message.is_read ? "" : " message-list-row--unread"}`}
-      onClick={onClick}
-      onContextMenu={handleContextMenu}
-      tabIndex={0}
+      onClick={(event) => onClick(event)}
+      onContextMenu={menu.openFromMouse}
+      tabIndex={tabIndex}
       role="option"
       aria-selected={isSelected}
+      data-row-id={message.id}
+      onFocus={(event) => {
+        if (event.target === event.currentTarget) onRowFocus?.(message.id);
+      }}
       style={{
         position: "relative",
         color: "var(--color-text-primary)",
         cursor: "pointer",
-        padding: "10px 14px",
+        padding: "9px 14px",
         borderBottom: "1px solid var(--color-border)",
         height: "76px",
         boxSizing: "border-box",
         overflow: "hidden",
-        transition: "background-color 0.12s ease",
-      }}
-      onMouseEnter={() => {
-        setShowActions(true);
-      }}
-      onMouseLeave={() => {
-        setShowActions(false);
-      }}
-      onFocus={() => {
-        setShowActions(true);
-      }}
-      onBlur={(e) => {
-        // Only hide if focus leaves this element entirely (not moving to a child)
-        if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-          setShowActions(false);
-        }
+        transition: "background-color var(--dur-fast) var(--ease-out)",
       }}
       onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
+        // Keys pressed on the row's own buttons/checkbox belong to them.
+        if (e.target !== e.currentTarget) return;
+        if (menu.handleTriggerKeyDown(e)) return;
+        if (e.key === "Enter") {
           e.preventDefault();
-          onClick();
+          (onOpen ?? onClick)();
+        } else if (e.key === " ") {
+          e.preventDefault();
+          if (batchMode && onToggleBatchSelect) onToggleBatchSelect(message.id);
+          else onClick();
         }
       }}
     >
@@ -168,11 +255,12 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
           }}
         />
       )}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2px" }}>
+      <div className="mail-row__line">
         {batchMode && (
           <input
             type="checkbox"
             checked={batchSelected}
+            tabIndex={-1}
             aria-label={t("batch.selectMessage", "Select message")}
             className="batch-checkbox message-row-checkbox"
             onChange={(e) => {
@@ -182,306 +270,105 @@ function MessageItem({ message, labels = [], isSelected, onClick, onToggleStar, 
             onClick={(e) => e.stopPropagation()}
           />
         )}
-        <span
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "6px",
-            fontSize: "13px",
-            fontWeight: "600",
-            overflow: "hidden",
-            whiteSpace: "nowrap",
-            flex: 1,
-            marginRight: "8px",
-            minWidth: 0,
-          }}
-        >
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+        <span className="mail-row__primary">
+          <span className="mail-row__ellipsis" title={primaryContact}>
             {primaryContact}
           </span>
           {!message.is_read && (
-            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--color-accent)", flexShrink: 0 }} />
+            <span
+              className="mail-row__unread-dot"
+              role="img"
+              aria-label={t("messageActions.unreadIndicator", "Unread")}
+            />
           )}
         </span>
-        <div style={{ display: "flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
-          {inKanban && (
-            <LayoutGrid size={13} color="var(--color-accent)" />
-          )}
-          {message.is_starred && (
-            <Star size={13} fill="#f59e0b" color="#f59e0b" />
-          )}
-          {message.has_attachments && (
-            <Paperclip size={13} color="var(--color-text-secondary)" />
-          )}
-          <span
-            style={{
-              fontSize: "11px",
-              color: "var(--color-text-secondary)",
-              fontWeight: "normal",
-            }}
-          >
-            {formatDate(message.date)}
-          </span>
-        </div>
-      </div>
-      <div
-        style={{
-          fontSize: "12.5px",
-          fontWeight: message.is_read ? "400" : "600",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          marginBottom: "2px",
-        }}
-      >
-        {message.subject || t("inbox.noSubject")}
-      </div>
-      <div
-        style={{
-          fontSize: "12px",
-          color: "var(--color-text-secondary)",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          fontWeight: "normal",
-        }}
-      >
-        {message.snippet}
-        {labels.length > 0 && labels.map((l) => (
-          <span
-            key={l.id}
-            style={{
-              display: "inline-block",
-              fontSize: "10px",
-              padding: "0 5px",
-              borderRadius: "3px",
-              backgroundColor: l.color + "22",
-              color: l.color,
-              border: `1px solid ${l.color}44`,
-              marginLeft: "6px",
-              verticalAlign: "middle",
-              lineHeight: "16px",
-              fontWeight: 500,
-            }}
-          >
-            {l.name}
-          </span>
-        ))}
-      </div>
-      {showActions && (
-        <div
-          onClick={(e) => e.stopPropagation()}
-          style={{
-            position: "absolute",
-            right: "8px",
-            top: "50%",
-            transform: "translateY(-50%)",
-            display: "flex",
-            alignItems: "center",
-            gap: "2px",
-            backgroundColor: "var(--color-bg)",
-            border: "1px solid var(--color-border)",
-            borderRadius: "6px",
-            padding: "2px",
-            boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
-          }}
-        >
-          <MoveToButton messages={[message]} />
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              const previousLists = snapshotMessagesCache(queryClient);
-              patchMessagesCache(queryClient, (page) => page.filter((m) => m.id !== message.id));
-              archiveMessage(message.id)
-                .then((result) => {
-                  if (result === "skipped") {
-                    restoreMessagesCache(queryClient, previousLists);
-                    return;
-                  }
-                  invalidateMessageViews(true);
-                  const msg = result === "unarchived"
-                    ? t("messageActions.unarchiveSuccess", "Message moved to inbox")
-                    : t("messageActions.archiveSuccess", "Message archived");
-                  useToastStore.getState().addToast({ message: msg, type: "success" });
-                })
-                .catch(() => {
-                  restoreMessagesCache(queryClient, previousLists);
-                  queryClient.invalidateQueries({ queryKey: ["messages"] });
-                  const msg = folderRole === "archive"
-                    ? t("messageActions.unarchiveFailed", "Failed to unarchive")
-                    : t("messageActions.archiveFailed", "Failed to archive");
-                  useToastStore.getState().addToast({ message: msg, type: "error" });
-                });
-            }}
-            aria-label={archiveActionLabel}
-            title={archiveActionLabel}
-            style={{
-              padding: "4px",
-              border: "none",
-              background: "transparent",
-              borderRadius: "4px",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              color: "var(--color-text-secondary)",
-            }}
-          >
-            <ArchiveActionIcon size={14} />
-          </button>
-          {spamFolderId && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                const previousLists = snapshotMessagesCache(queryClient);
-                patchMessagesCache(queryClient, (page) => page.filter((m) => m.id !== message.id));
-                moveToFolder(message.id, spamFolderId)
-                  .then(() => {
-                    invalidateMessageViews(true);
-                    useToastStore.getState().addToast({ message: t("messageActions.spamSuccess", "Marked as spam"), type: "success" });
-                  })
-                  .catch(() => {
-                    restoreMessagesCache(queryClient, previousLists);
-                    queryClient.invalidateQueries({ queryKey: ["messages"] });
-                    useToastStore.getState().addToast({ message: t("messageActions.spamFailed", "Failed to mark as spam"), type: "error" });
-                  });
-              }}
-              aria-label={t("messageActions.reportSpam", "Report spam")}
-              title={t("messageActions.reportSpam", "Report spam")}
+        <div className="mail-row__meta">
+          {inlineLabels.map((l) => (
+            <span
+              key={l.id}
+              className="mail-row__label"
+              title={l.name}
               style={{
-                padding: "4px",
-                border: "none",
-                background: "transparent",
-                borderRadius: "4px",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                color: "var(--color-text-secondary)",
+                backgroundColor: l.color + "22",
+                color: l.color,
+                border: `1px solid ${l.color}44`,
               }}
             >
-              <ShieldAlert size={14} />
-            </button>
+              {l.name}
+            </span>
+          ))}
+          {hiddenLabelCount > 0 && (
+            <span className="mail-row__date" title={labels.slice(MAX_INLINE_LABELS).map((l) => l.name).join(", ")}>
+              +{hiddenLabelCount}
+            </span>
           )}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              addKanbanCard(message.id, "todo", queryClient)
-                .then(() => {
-                  useToastStore.getState().addToast({ message: t("messageActions.kanbanSuccess", "Added to kanban board"), type: "success" });
-                })
-                .catch(() => {
-                  useToastStore.getState().addToast({ message: t("messageActions.kanbanFailed", "Failed to add to kanban"), type: "error" });
-                });
-            }}
-            aria-label={t("messageActions.addToKanban")}
-            title={t("messageActions.addToKanban")}
-            style={{
-              padding: "4px",
-              border: "none",
-              background: "transparent",
-              borderRadius: "4px",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              color: "var(--color-text-secondary)",
-            }}
-          >
-            <LayoutGrid size={14} />
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              const nextStarred = !message.is_starred;
-              const previousLists = snapshotMessagesCache(queryClient);
-              onToggleStar?.(message.id, nextStarred);
-              updateMessageFlags(message.id, undefined, nextStarred)
-                .then(() => {
-                  invalidateMessageViews();
-                  queryClient.invalidateQueries({ queryKey: ["starred-messages"] });
-                  queryClient.invalidateQueries({ queryKey: ["message", message.id] });
-                })
-                .catch(() => {
-                  restoreMessagesCache(queryClient, previousLists);
-                  onToggleStar?.(message.id, message.is_starred);
-                  invalidateMessageViews();
-                  queryClient.invalidateQueries({ queryKey: ["starred-messages"] });
-                  queryClient.invalidateQueries({ queryKey: ["message", message.id] });
-                  const failureMessage = message.is_starred
-                    ? t("messageActions.unstarFailed", "Failed to unstar message")
-                    : t("messageActions.starFailed", "Failed to star message");
-                  useToastStore.getState().addToast({ message: failureMessage, type: "error" });
-                });
-            }}
-            aria-label={message.is_starred ? t("messageActions.unstar") : t("messageActions.star")}
-            aria-pressed={message.is_starred}
-            title={message.is_starred ? t("messageActions.unstar") : t("messageActions.star")}
-            style={{
-              padding: "4px",
-              border: "none",
-              background: "transparent",
-              borderRadius: "4px",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              color: message.is_starred ? "#f59e0b" : "var(--color-text-secondary)",
-            }}
-          >
-            <Star
-              size={14}
-              fill={message.is_starred ? "#f59e0b" : "none"}
-              color={message.is_starred ? "#f59e0b" : "currentColor"}
-            />
-          </button>
+          {inKanban && (
+            <LayoutGrid size={13} color="var(--color-accent-text)" aria-hidden="true" />
+          )}
+          {message.is_starred && (
+            <Star size={13} fill="var(--color-warning)" color="var(--color-warning)" aria-hidden="true" />
+          )}
+          {message.has_attachments && (
+            <Paperclip size={13} color="var(--color-text-secondary)" aria-hidden="true" />
+          )}
+          <span className="mail-row__date">
+            {formatDate(message.date, i18n?.language)}
+          </span>
         </div>
-      )}
-      {contextMenu && createPortal(
-        <div
-          ref={contextMenuRef}
-          role="menu"
-          aria-label={t("messageActions.contextMenu", "Message actions")}
-          style={{
-            position: "fixed",
-            left: contextMenuLeft,
-            top: contextMenuTop,
-            minWidth: "170px",
-            padding: "4px",
-            borderRadius: "8px",
-            border: "1px solid var(--color-border)",
-            backgroundColor: "var(--color-popover-bg)",
-            boxShadow: "var(--shadow-popover)",
-            zIndex: "var(--z-menu)",
+      </div>
+      <div className="mail-row__subject mail-row__ellipsis" title={subject}>
+        {subject}
+      </div>
+      <div className="mail-row__snippet mail-row__ellipsis">
+        {message.snippet}
+      </div>
+      <div className="message-row-actions" onClick={(e) => e.stopPropagation()}>
+        <MoveToButton messages={[message]} />
+        <IconButton
+          label={archiveActionLabel}
+          icon={<ArchiveActionIcon size={14} />}
+          onClick={(e) => {
+            e.stopPropagation();
+            runAction("archive");
           }}
-          onClick={(event) => event.stopPropagation()}
-          onKeyDown={(event) => {
-            event.stopPropagation();
-            if (event.key === "Escape") setContextMenu(null);
-          }}
-          onContextMenu={(event) => event.preventDefault()}
-        >
-          <button
-            type="button"
-            role="menuitem"
-            autoFocus
-            onClick={() => void handleToggleRead()}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              width: "100%",
-              padding: "7px 9px",
-              border: "none",
-              borderRadius: "6px",
-              backgroundColor: "transparent",
-              color: "var(--color-text-primary)",
-              cursor: "pointer",
-              fontSize: "12.5px",
-              textAlign: "left",
+        />
+        {spamFolderId && (
+          <IconButton
+            label={t("messageActions.reportSpam", "Report spam")}
+            icon={<ShieldAlert size={14} />}
+            onClick={(e) => {
+              e.stopPropagation();
+              runAction("spam");
             }}
-          >
-            <ReadToggleIcon size={14} />
-            <span>{readToggleLabel}</span>
-          </button>
-        </div>,
-        document.body,
+          />
+        )}
+        <IconButton
+          label={t("messageActions.addToKanban")}
+          icon={<LayoutGrid size={14} />}
+          onClick={(e) => {
+            e.stopPropagation();
+            handleAddToKanban();
+          }}
+        />
+        <IconButton
+          label={starLabel}
+          className="message-row-actions__star"
+          pressed={message.is_starred}
+          icon={<Star size={14} fill={message.is_starred ? "currentColor" : "none"} />}
+          onClick={(e) => {
+            e.stopPropagation();
+            handleToggleStar();
+          }}
+        />
+      </div>
+      {menu.position && (
+        <ContextMenu
+          label={t("messageActions.contextMenu", "Message actions")}
+          position={menu.position}
+          items={menuItems}
+          onClose={menu.close}
+          restoreFocusTo={menu.trigger}
+        />
       )}
     </div>
   );

@@ -76,3 +76,58 @@ export const useShortcutStore = create<ShortcutState>((set, get) => ({
 }));
 
 export { DEFAULT_BINDINGS };
+
+/** Keyboard event → stored binding format ("Ctrl" = Ctrl or ⌘). */
+export function eventToKeyString(e: KeyboardEvent): string {
+  const parts: string[] = [];
+  if (e.ctrlKey || e.metaKey) parts.push("Ctrl");
+  if (e.shiftKey) parts.push("Shift");
+  if (e.altKey) parts.push("Alt");
+  const key = e.key.length === 1 ? e.key.toUpperCase() : e.key;
+  if (!["Control", "Meta", "Shift", "Alt"].includes(e.key)) {
+    parts.push(key);
+  }
+  return parts.join("+");
+}
+
+/**
+ * Bindings are stored platform-neutrally: "Ctrl" means the primary modifier
+ * (⌘ on macOS, Ctrl elsewhere). Use formatShortcut() for anything shown to users.
+ */
+export function isMacPlatform(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
+  const platform = nav.userAgentData?.platform || nav.platform || nav.userAgent || "";
+  return /mac|iphone|ipad|ipod/i.test(platform);
+}
+
+const MAC_SYMBOLS: Record<string, string> = {
+  Ctrl: "⌘",
+  Shift: "⇧",
+  Alt: "⌥",
+  Enter: "↩",
+  Escape: "Esc",
+  ArrowUp: "↑",
+  ArrowDown: "↓",
+  ArrowLeft: "←",
+  ArrowRight: "→",
+  Backspace: "⌫",
+  Delete: "⌦",
+};
+
+const OTHER_NAMES: Record<string, string> = {
+  Escape: "Esc",
+  ArrowUp: "↑",
+  ArrowDown: "↓",
+  ArrowLeft: "←",
+  ArrowRight: "→",
+};
+
+/** "Ctrl+Shift+K" → "⌘⇧K" on macOS, "Ctrl+Shift+K" elsewhere. */
+export function formatShortcut(keys: string | undefined | null, mac: boolean = isMacPlatform()): string {
+  if (!keys) return "";
+  // Split on "+" but keep a literal "+" key ("Ctrl++").
+  const parts = keys.split(/\+(?!$)/).filter(Boolean);
+  if (mac) return parts.map((part) => MAC_SYMBOLS[part] ?? part).join("");
+  return parts.map((part) => OTHER_NAMES[part] ?? part).join("+");
+}

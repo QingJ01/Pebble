@@ -1,7 +1,7 @@
 import { isThreadSelected, useMailStore } from "@/stores/mail.store";
 import { useAccountsQuery, useMessagesQuery, useThreadsQuery, useFoldersForAccountsQuery, patchMessagesCache } from "@/hooks/queries";
 import { useUIStore } from "@/stores/ui.store";
-import { useToastStore } from "@/stores/toast.store";
+import { toastError, useToastStore } from "@/stores/toast.store";
 import MessageList from "@/components/MessageList";
 import MessageDetail from "@/components/MessageDetail";
 import ThreadView from "./ThreadView";
@@ -14,6 +14,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { List, MessageSquare, Mail, Trash2, Inbox, CheckSquare } from "lucide-react";
 import { MessageListSkeleton } from "@/components/Skeleton";
+import Button from "@/components/ui/Button";
+import { eventToKeyString, useShortcutStore } from "@/stores/shortcut.store";
 import { emptyTrash } from "@/lib/api";
 import { folderIdsForSelection, roleForSelection } from "@/lib/folderAggregation";
 import type { ThreadSummary } from "@/lib/api";
@@ -89,16 +91,9 @@ export default function InboxView() {
         <p style={{ fontSize: "13px", margin: 0 }}>
           {t("inbox.addAccountHint", "Add an email account to get started")}
         </p>
-        <button
-          onClick={() => setActiveView("settings")}
-          style={{
-            marginTop: "8px", padding: "8px 20px", borderRadius: "6px",
-            border: "none", backgroundColor: "var(--color-accent)", color: "#fff",
-            fontSize: "13px", fontWeight: 600, cursor: "pointer",
-          }}
-        >
+        <Button variant="primary" onClick={() => setActiveView("settings")} style={{ marginTop: "8px" }}>
           {t("settings.addAccount", "Add Account")}
-        </button>
+        </Button>
       </div>
     );
   }
@@ -111,22 +106,20 @@ export default function InboxView() {
         </div>
         {isTrashFolder && messages.length > 0 && (
           <>
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<Trash2 size={14} />}
               onClick={() => setShowTrashConfirm(true)}
-              style={{
-                background: "none", border: "1px solid var(--color-border)", cursor: "pointer",
-                padding: "4px 10px", borderRadius: "4px", color: "var(--color-text-secondary)",
-                display: "flex", alignItems: "center", gap: "4px", fontSize: "12px", marginRight: "4px",
-              }}
-              title={t("messageActions.emptyTrash", "Empty Trash")}
+              style={{ marginRight: "4px" }}
             >
-              <Trash2 size={14} />
               {t("messageActions.emptyTrash", "Empty Trash")}
-            </button>
+            </Button>
             {showTrashConfirm && (
               <ConfirmDialog
                 title={t("messageActions.emptyTrash", "Empty Trash")}
                 message={t("messageActions.emptyTrashConfirm", "Permanently delete all messages in Trash?")}
+                confirmLabel={t("messageActions.deletePermanently", "Delete permanently")}
                 destructive
                 onCancel={() => setShowTrashConfirm(false)}
                 onConfirm={async () => {
@@ -137,8 +130,8 @@ export default function InboxView() {
                     const count = counts.reduce((sum, current) => sum + current, 0);
                     queryClient.invalidateQueries({ queryKey: ["messages"] });
                     addToast({ message: t("messageActions.emptyTrashSuccess", { count }), type: "success" });
-                  } catch {
-                    addToast({ message: t("messageActions.emptyTrashFailed"), type: "error" });
+                  } catch (error) {
+                    toastError(error, "messageActions.emptyTrashFailed");
                   }
                 }}
               />
@@ -182,6 +175,7 @@ export default function InboxView() {
             <ThreadList
               threads={threads}
               folderIds={selectedFolderIds}
+              folderRole={activeFolderRole}
               selectedThreadId={selectedThreadId}
               selectedThreadAccountId={selectedThreadAccountId}
               onSelectThread={selectThread}
@@ -221,9 +215,10 @@ export default function InboxView() {
 }
 
 // Inline ThreadList component using virtualizer
-function ThreadList({ threads, folderIds, selectedThreadId, selectedThreadAccountId, onSelectThread, loading }: {
+function ThreadList({ threads, folderIds, folderRole, selectedThreadId, selectedThreadAccountId, onSelectThread, loading }: {
   threads: ThreadSummary[];
   folderIds: string[];
+  folderRole?: ReturnType<typeof roleForSelection>;
   selectedThreadId: string | null;
   selectedThreadAccountId: string | null;
   onSelectThread: (thread: ThreadSummary) => void;
@@ -239,15 +234,46 @@ function ThreadList({ threads, folderIds, selectedThreadId, selectedThreadAccoun
     measureElement: (el) => el.getBoundingClientRect().height,
     overscan: 5,
   });
+  const rowKey = (thread: ThreadSummary) => `${thread.account_id}:${thread.thread_id}`;
+  const selectedIndex = threads.findIndex((thread) => isThreadSelected({ selectedThreadId, selectedThreadAccountId }, thread));
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  const activeIndex = (() => {
+    const byActive = activeKey ? threads.findIndex((thread) => rowKey(thread) === activeKey) : -1;
+    if (byActive >= 0) return byActive;
+    return selectedIndex >= 0 ? selectedIndex : 0;
+  })();
 
-  // Scroll selected thread into view on keyboard navigation
+  const focusRow = useCallback((index: number) => {
+    const thread = threads[index];
+    if (!thread) return;
+    virtualizer.scrollToIndex(index, { align: "auto" });
+    const key = rowKey(thread);
+    const tryFocus = (attempt: number) => {
+      const row = Array.from(parentRef.current?.querySelectorAll<HTMLElement>("[data-row-id]") ?? [])
+        .find((el) => el.dataset.rowId === key);
+      if (row) row.focus({ preventScroll: true });
+      else if (attempt < 3) requestAnimationFrame(() => tryFocus(attempt + 1));
+    };
+    tryFocus(0);
+  }, [threads, virtualizer]);
+
+  // Scroll to the selected thread only when the selection changes, not on
+  // every refetch of the thread list.
+  const selectedKey = selectedThreadId ? `${selectedThreadAccountId ?? ""}:${selectedThreadId}` : null;
+  const scrolledForRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!selectedThreadId) return;
-    const idx = threads.findIndex((t) => isThreadSelected({ selectedThreadId, selectedThreadAccountId }, t));
-    if (idx >= 0) {
-      virtualizer.scrollToIndex(idx, { align: "auto" });
+    if (!selectedKey) {
+      scrolledForRef.current = null;
+      return;
     }
-  }, [selectedThreadId, selectedThreadAccountId, threads, virtualizer]);
+    if (scrolledForRef.current === selectedKey || selectedIndex < 0) return;
+    scrolledForRef.current = selectedKey;
+    setActiveKey(rowKey(threads[selectedIndex]));
+    virtualizer.scrollToIndex(selectedIndex, { align: "auto" });
+    if (parentRef.current?.contains(document.activeElement) && document.activeElement !== parentRef.current) {
+      focusRow(selectedIndex);
+    }
+  }, [selectedKey, selectedIndex, threads, virtualizer, focusRow]);
 
   if (loading) {
     return <MessageListSkeleton />;
@@ -255,27 +281,67 @@ function ThreadList({ threads, folderIds, selectedThreadId, selectedThreadAccoun
 
   if (threads.length === 0) {
     return (
-      <div className="fade-in" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--color-text-secondary)", fontSize: "14px", gap: "8px" }}>
+      <div className="fade-in" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--color-text-secondary)", fontSize: "var(--font-md)", gap: "8px" }}>
         <Inbox size={32} strokeWidth={1.2} />
         {t("common.noThreads")}
       </div>
     );
   }
 
+  function moveTo(index: number) {
+    const clamped = Math.max(0, Math.min(threads.length - 1, index));
+    const thread = threads[clamped];
+    setActiveKey(rowKey(thread));
+    scrolledForRef.current = `${thread.account_id ?? ""}:${thread.thread_id}`;
+    onSelectThread(thread);
+    focusRow(clamped);
+  }
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.defaultPrevented || event.altKey) return;
+    const target = event.target as HTMLElement;
+    if (target !== event.currentTarget && target.getAttribute("role") !== "option") return;
+    const bindings = useShortcutStore.getState().bindings;
+    const keyString = eventToKeyString(event.nativeEvent).toLowerCase();
+    let next: number | null = null;
+    if (event.key === "ArrowDown" || keyString === bindings["next-message"]?.toLowerCase()) next = activeIndex + 1;
+    else if (event.key === "ArrowUp" || keyString === bindings["prev-message"]?.toLowerCase()) next = activeIndex - 1;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = threads.length - 1;
+    if (next === null) return;
+    event.preventDefault();
+    moveTo(next);
+  }
+
+  const virtualItems = virtualizer.getVirtualItems();
+  const activeRowRendered = virtualItems.some((item) => item.index === activeIndex);
+
   return (
-    <div ref={parentRef} className="scroll-region thread-list-scroll" style={{ height: "100%", overflow: "auto" }}>
+    <div
+      ref={parentRef}
+      className="scroll-region thread-list-scroll"
+      style={{ height: "100%", overflow: "auto", outline: "none" }}
+      role="listbox"
+      aria-label={t("inbox.threadList", "Threads")}
+      data-shortcut-scope="list"
+      tabIndex={activeRowRendered ? -1 : 0}
+      onKeyDown={handleKeyDown}
+      onFocus={(event) => {
+        if (event.target === event.currentTarget) focusRow(activeIndex);
+      }}
+    >
       <div
-        role="listbox"
-        aria-label={t("inbox.threadList", "Threads")}
+        role="presentation"
         style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative" }}
       >
-        {virtualizer.getVirtualItems().map((virtualItem) => {
+        {virtualItems.map((virtualItem) => {
           const thread = threads[virtualItem.index];
           return (
             <div
               key={virtualItem.key}
               ref={virtualizer.measureElement}
               data-index={virtualItem.index}
+              role="presentation"
               style={{
                 position: "absolute", top: 0, left: 0, width: "100%",
                 transform: `translateY(${virtualItem.start}px)`,
@@ -284,8 +350,15 @@ function ThreadList({ threads, folderIds, selectedThreadId, selectedThreadAccoun
               <ThreadItem
                 thread={thread}
                 isSelected={isThreadSelected({ selectedThreadId, selectedThreadAccountId }, thread)}
-                onClick={() => onSelectThread(thread)}
+                onClick={() => {
+                  setActiveKey(rowKey(thread));
+                  scrolledForRef.current = `${thread.account_id ?? ""}:${thread.thread_id}`;
+                  onSelectThread(thread);
+                }}
                 folderIds={folderIds}
+                folderRole={folderRole}
+                tabIndex={virtualItem.index === activeIndex ? 0 : -1}
+                onRowFocus={(focused) => setActiveKey(rowKey(focused))}
               />
             </div>
           );

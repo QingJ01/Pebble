@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 import { useCommandStore } from "@/stores/command.store";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
 import OverlayPortal from "@/components/ui/OverlayPortal";
+import { formatShortcut, useShortcutStore } from "@/stores/shortcut.store";
+import { COMMAND_SHORTCUT_ACTIONS } from "./commands";
 
 export default function CommandPalette() {
   const { t } = useTranslation();
@@ -11,6 +13,8 @@ export default function CommandPalette() {
   const inputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const bindings = useShortcutStore((s) => s.bindings);
 
   useOverlayLayer({ open: isOpen, modal: true, onEscape: close, containerRef: dialogRef });
 
@@ -34,6 +38,13 @@ export default function CommandPalette() {
   useEffect(() => {
     setSelectedIndex(0);
   }, [query]);
+
+  // Keep the keyboard-selected command visible.
+  useEffect(() => {
+    if (!isOpen) return;
+    const option = listRef.current?.querySelector<HTMLElement>(`[data-index="${selectedIndex}"]`);
+    option?.scrollIntoView?.({ block: "nearest" });
+  }, [selectedIndex, isOpen]);
 
   // Focus trap: keep Tab cycling within the dialog
   const handleTabTrap = useCallback((e: React.KeyboardEvent) => {
@@ -138,11 +149,12 @@ export default function CommandPalette() {
             border: "none",
             borderBottom: "1px solid var(--color-border)",
             backgroundColor: "transparent",
-            fontSize: "15px",
+            fontSize: "var(--font-md)",
             color: "var(--color-text-primary)",
           }}
         />
         <div
+          ref={listRef}
           id="command-listbox"
           className="scroll-region command-list-scroll"
           role="listbox"
@@ -154,23 +166,29 @@ export default function CommandPalette() {
               key={cmd.id}
               id={`cmd-${cmd.id}`}
               role="option"
+              data-index={i}
               aria-selected={i === selectedIndex}
               onClick={() => execute(cmd.id)}
+              // Pointer movement (not mere hover while the list scrolls under a
+              // still pointer) moves the single highlight.
+              onMouseMove={() => { if (i !== selectedIndex) setSelectedIndex(i); }}
               style={{
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
                 padding: "10px 16px",
                 cursor: "pointer",
-                backgroundColor: i === selectedIndex ? "var(--color-bg-hover, rgba(0,0,0,0.05))" : "transparent",
+                backgroundColor: i === selectedIndex ? "var(--color-bg-hover)" : "transparent",
                 color: "var(--color-text-primary)",
+                userSelect: "none",
+                WebkitUserSelect: "none",
               }}
             >
               <div>
-                <span style={{ fontSize: "14px" }}>{cmd.name}</span>
+                <span style={{ fontSize: "var(--font-md)" }}>{cmd.name}</span>
                 <span
                   style={{
-                    fontSize: "11px",
+                    fontSize: "var(--font-xs)",
                     color: "var(--color-text-secondary)",
                     marginLeft: "8px",
                   }}
@@ -178,19 +196,25 @@ export default function CommandPalette() {
                   {cmd.category}
                 </span>
               </div>
-              {cmd.shortcut && (
-                <span
-                  style={{
-                    fontSize: "12px",
-                    color: "var(--color-text-secondary)",
-                    backgroundColor: "var(--color-bg-secondary, rgba(0,0,0,0.06))",
-                    padding: "2px 6px",
-                    borderRadius: "4px",
-                  }}
-                >
-                  {cmd.shortcut}
-                </span>
-              )}
+              {(() => {
+                const action = COMMAND_SHORTCUT_ACTIONS[cmd.id];
+                const keys = action ? bindings[action] : cmd.shortcut;
+                if (!keys) return null;
+                return (
+                  <kbd
+                    style={{
+                      fontFamily: "inherit",
+                      fontSize: "var(--font-sm)",
+                      color: "var(--color-text-secondary)",
+                      backgroundColor: "var(--color-bg-secondary)",
+                      padding: "2px 6px",
+                      borderRadius: "var(--radius-sm)",
+                    }}
+                  >
+                    {formatShortcut(keys)}
+                  </kbd>
+                );
+              })()}
             </div>
           ))}
           {filteredCommands.length === 0 && (
@@ -199,7 +223,7 @@ export default function CommandPalette() {
                 padding: "24px 16px",
                 textAlign: "center",
                 color: "var(--color-text-secondary)",
-                fontSize: "13px",
+                fontSize: "var(--font-base)",
               }}
             >
               {t("commandPalette.noResults")}

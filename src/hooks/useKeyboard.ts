@@ -1,30 +1,49 @@
 import { useEffect, useRef } from "react";
-import { useShortcutStore } from "@/stores/shortcut.store";
+import { eventToKeyString, useShortcutStore } from "@/stores/shortcut.store";
 import { useCommandStore } from "@/stores/command.store";
 import { useUIStore } from "@/stores/ui.store";
 import { useComposeStore } from "@/stores/compose.store";
 import { isThreadSelected, useMailStore } from "@/stores/mail.store";
-import { useToastStore } from "@/stores/toast.store";
-import { updateMessageFlags, archiveMessage, getMessage } from "@/lib/api";
+import { toastError } from "@/stores/toast.store";
+import { updateMessageFlags, getMessage } from "@/lib/api";
 import { queryClient } from "@/lib/query-client";
 import type { MessageSummary, ThreadSummary } from "@/lib/api";
-import { patchMessagesCache, readFirstCachedMessages } from "@/hooks/queries";
-import i18n from "@/lib/i18n";
+import { findCachedMessage, patchMessagesCache, readFirstCachedMessages } from "@/hooks/queries";
+import { runMailAction } from "@/hooks/mutations/mailActions";
 import { hasModalOverlay, hasOverlay } from "@/lib/overlayStack";
 
-function eventToKeyString(e: KeyboardEvent): string {
-  const parts: string[] = [];
-  if (e.ctrlKey || e.metaKey) parts.push("Ctrl");
-  if (e.shiftKey) parts.push("Shift");
-  if (e.altKey) parts.push("Alt");
-  const key = e.key.length === 1 ? e.key.toUpperCase() : e.key;
-  if (!["Control", "Meta", "Shift", "Alt"].includes(e.key)) {
-    parts.push(key);
-  }
-  return parts.join("+");
+export { eventToKeyString };
+
+const TEXT_ENTRY_SELECTOR =
+  'input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="textbox"], [role="combobox"], [role="spinbutton"]';
+const INTERACTIVE_SELECTOR = [
+  "button", "a[href]", "summary", "[role='button']", "[role='link']", "[role='menuitem']",
+  "[role='menuitemcheckbox']", "[role='menuitemradio']", "[role='option']", "[role='tab']",
+  "[role='checkbox']", "[role='switch']", "[role='radio']", "[role='slider']", "[role='treeitem']",
+].join(", ");
+/** Containers whose rows keep letter shortcuts (J/K/S/E…) while focused. */
+const SHORTCUT_SCOPE_SELECTOR = "[data-shortcut-scope]";
+
+function isTextEntry(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.isContentEditable || Boolean(target.closest(TEXT_ENTRY_SELECTOR));
 }
 
-export { eventToKeyString };
+/**
+ * Single-key shortcuts (no Ctrl/⌘/Alt) only run when focus is on the page
+ * itself or on a mail-list row; on buttons, links, menus, tabs and other
+ * controls the key belongs to that control (Enter/Space activate it).
+ */
+function allowsPlainShortcut(target: EventTarget | null, key: string): boolean {
+  if (key === "Escape") return true;
+  if (!(target instanceof Element)) return true;
+  const control = target.closest(INTERACTIVE_SELECTOR);
+  if (!control) return true;
+  if (control.closest(SHORTCUT_SCOPE_SELECTOR) && control.getAttribute("role") === "option") {
+    return key !== "Enter" && key !== " ";
+  }
+  return false;
+}
 
 /** Read the first matching cached messages from React Query */
 function getCachedMessages(): MessageSummary[] {
@@ -38,6 +57,31 @@ function getCachedThreads(): ThreadSummary[] {
     if (data && data.length > 0) return data;
   }
   return [];
+}
+
+async function archiveSelected(messageId: string) {
+  let target: { id: string; account_id: string; is_draft?: boolean; remote_id?: string } | undefined =
+    findCachedMessage(queryClient, (m) => m.id === messageId);
+  if (!target) {
+    try {
+      target = (await getMessage(messageId)) ?? undefined;
+    } catch {
+      target = undefined;
+    }
+  }
+  if (!target) return;
+  await runMailAction(queryClient, "archive", [target], {
+    onRemoved: () => {
+      if (useMailStore.getState().selectedMessageId === messageId) {
+        useMailStore.getState().setSelectedMessage(null);
+      }
+    },
+    onFailed: () => {
+      if (useMailStore.getState().selectedMessageId === null) {
+        useMailStore.getState().setSelectedMessage(messageId);
+      }
+    },
+  });
 }
 
 export function useKeyboard() {
@@ -74,9 +118,10 @@ export function useKeyboard() {
       // Don't interfere with shortcut recording
       if (useShortcutStore.getState().recording) return;
 
-      const target = e.target as HTMLElement;
-      const isInput =
-        target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
+      // A focused widget already handled this key (list navigation, menus…).
+      if (e.defaultPrevented) return;
+
+      const isInput = isTextEntry(e.target);
       const keyString = eventToKeyString(e);
 
       const actionId = keyToActionRef.current.get(keyString.toLowerCase());
@@ -90,8 +135,10 @@ export function useKeyboard() {
         return;
       }
 
-      // Skip single-key shortcuts when in inputs
+      // Skip shortcuts while typing
       if (isInput) return;
+      const hasPrimaryModifier = e.ctrlKey || e.metaKey || e.altKey;
+      if (!hasPrimaryModifier && !allowsPlainShortcut(e.target, e.key)) return;
 
       e.preventDefault();
 
@@ -126,14 +173,18 @@ export function useKeyboard() {
                 ),
               );
               updateMessageFlags(selectedMessageId, undefined, newStarred)
-                .then(() => queryClient.invalidateQueries({ queryKey: ["messages"] }))
-                .catch(() => {
+                .then(() => {
+                  queryClient.invalidateQueries({ queryKey: ["messages"] });
+                  queryClient.invalidateQueries({ queryKey: ["starred-messages"] });
+                })
+                .catch((error) => {
                   // Rollback on error
                   patchMessagesCache(queryClient, (page) =>
                     page.map((m) =>
                       m.id === selectedMessageId ? { ...m, is_starred: !newStarred } : m,
                     ),
                   );
+                  toastError(error, newStarred ? "messageActions.starFailed" : "messageActions.unstarFailed");
                 });
             }
           }
@@ -142,25 +193,7 @@ export function useKeyboard() {
         case "archive-message": {
           const { selectedMessageId } = useMailStore.getState();
           if (selectedMessageId) {
-            // Optimistic removal from React Query cache
-            patchMessagesCache(queryClient, (page) =>
-              page.filter((m) => m.id !== selectedMessageId),
-            );
-            useMailStore.getState().setSelectedMessage(null);
-            archiveMessage(selectedMessageId)
-              .then((result) => {
-                if (result === "skipped") return;
-                queryClient.invalidateQueries({ queryKey: ["messages"] });
-                queryClient.invalidateQueries({ queryKey: ["threads"] });
-                queryClient.invalidateQueries({ queryKey: ["folder-unread-counts"] });
-                const msg = result === "unarchived" ? i18n.t("messageActions.unarchiveSuccess", "Message moved to inbox") : i18n.t("messageActions.archiveSuccess", "Message archived");
-                useToastStore.getState().addToast({ message: msg, type: "success" });
-              })
-              .catch(() => {
-                queryClient.invalidateQueries({ queryKey: ["messages"] });
-                useMailStore.getState().setSelectedMessage(selectedMessageId);
-                useToastStore.getState().addToast({ message: i18n.t("messageActions.archiveFailed", "Failed to archive"), type: "error" });
-              });
+            void archiveSelected(selectedMessageId);
           }
           break;
         }
