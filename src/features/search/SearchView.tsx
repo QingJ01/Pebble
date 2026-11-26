@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTranslation } from "react-i18next";
@@ -12,6 +12,7 @@ import MessageDetail from "@/components/MessageDetail";
 import Button from "@/components/ui/Button";
 import Spinner from "@/components/Spinner";
 import PaneSplitter, { usePaneWidth } from "@/components/PaneSplitter";
+import { useRovingList } from "@/hooks/useRovingList";
 import { LOADING_INDICATOR_DELAY_MS } from "@/hooks/useDelayedVisible";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
 
@@ -63,6 +64,17 @@ export default function SearchView() {
     estimateSize: () => 76,
     measureElement: (el) => el.getBoundingClientRect().height,
     overscan: 5,
+  });
+
+  const resultIds = useMemo(() => results.map((hit) => hit.message_id), [results]);
+  const virtualItems = virtualizer.getVirtualItems();
+  const roving = useRovingList({
+    ids: resultIds,
+    selectedId,
+    onSelect: setSelectedId,
+    containerRef: resultsParentRef,
+    scrollToIndex: (index) => virtualizer.scrollToIndex(index, { align: "auto" }),
+    renderedIds: virtualItems.map((item) => resultIds[item.index]).filter(Boolean),
   });
 
   const doSearch = useCallback(() => {
@@ -241,15 +253,17 @@ export default function SearchView() {
             <div
               role="listbox"
               aria-label={t("search.results", "Search results")}
-              style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}
+              {...roving.containerProps}
+              style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative", outline: "none" }}
             >
-              {virtualizer.getVirtualItems().map((virtualItem) => {
+              {virtualItems.map((virtualItem) => {
                 const hit = results[virtualItem.index];
                 return (
                   <div
                     key={hit.message_id}
                     ref={virtualizer.measureElement}
                     data-index={virtualItem.index}
+                    role="presentation"
                     style={{
                       position: "absolute",
                       top: 0,
@@ -261,8 +275,13 @@ export default function SearchView() {
                     <SearchResultItem
                       hit={hit}
                       isSelected={hit.message_id === selectedId}
-                      onClick={() => setSelectedId(hit.message_id)}
+                      onClick={() => {
+                        roving.setActiveId(hit.message_id);
+                        setSelectedId(hit.message_id);
+                      }}
                       query={query}
+                      tabIndex={roving.tabIndexFor(hit.message_id)}
+                      onRowFocus={roving.setActiveId}
                     />
                   </div>
                 );

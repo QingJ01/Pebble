@@ -11,6 +11,7 @@ import Button from "@/components/ui/Button";
 import { MessageListSkeleton } from "@/components/Skeleton";
 import PaneSplitter, { usePaneWidth } from "@/components/PaneSplitter";
 import { LOADING_INDICATOR_DELAY_MS } from "@/hooks/useDelayedVisible";
+import { useRovingList } from "@/hooks/useRovingList";
 
 const EMPTY_REMOVED_IDS = new Set<string>();
 
@@ -55,6 +56,17 @@ export default function StarredView() {
   function handleOpen(messageId: string) {
     setSelectedId(messageId);
   }
+
+  const visibleIds = useMemo(() => visibleMessages.map((m) => m.id), [visibleMessages]);
+  const virtualItems = virtualizer.getVirtualItems();
+  const roving = useRovingList({
+    ids: visibleIds,
+    selectedId: scopedSelectedId,
+    onSelect: setSelectedId,
+    containerRef: parentRef,
+    scrollToIndex: (index) => virtualizer.scrollToIndex(index, { align: "auto" }),
+    renderedIds: virtualItems.map((item) => visibleIds[item.index]).filter(Boolean),
+  });
 
   const handleLoadMore = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) fetchNextPage();
@@ -138,15 +150,23 @@ export default function StarredView() {
           </span>
         </div>
 
-        <div ref={parentRef} className="scroll-region starred-list-scroll" style={{ flex: 1, overflow: "auto" }}>
-          <div style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
-            {virtualizer.getVirtualItems().map((virtualItem) => {
+        <div
+          ref={parentRef}
+          className="scroll-region starred-list-scroll"
+          role="listbox"
+          aria-label={t("starred.title", "Starred Messages")}
+          {...roving.containerProps}
+          style={{ flex: 1, overflow: "auto", outline: "none" }}
+        >
+          <div role="presentation" style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
+            {virtualItems.map((virtualItem) => {
               const msg = visibleMessages[virtualItem.index];
               return (
                 <div
                   key={msg.id}
                   ref={virtualizer.measureElement}
                   data-index={virtualItem.index}
+                  role="presentation"
                   style={{
                     position: "absolute",
                     top: 0,
@@ -158,8 +178,14 @@ export default function StarredView() {
                   <MessageItem
                     message={msg}
                     isSelected={msg.id === scopedSelectedId}
-                    onClick={() => handleOpen(msg.id)}
+                    onClick={() => {
+                      roving.setActiveId(msg.id);
+                      handleOpen(msg.id);
+                    }}
+                    onOpen={() => handleOpen(msg.id)}
                     onToggleStar={handleToggleStar}
+                    tabIndex={roving.tabIndexFor(msg.id)}
+                    onRowFocus={roving.setActiveId}
                   />
                 </div>
               );
