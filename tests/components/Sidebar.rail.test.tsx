@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Sidebar from "../../src/components/Sidebar";
 import { useComposeStore } from "../../src/stores/compose.store";
 import { useMailStore } from "../../src/stores/mail.store";
@@ -225,5 +225,33 @@ describe("Collapsed sidebar rail", () => {
 
     expect(useMailStore.getState().activeAccountId).toBeNull();
     expect(useMailStore.getState().activeFolderId).toBe("all:inbox");
+  });
+  describe("narrow window with the sidebar expanded", () => {
+    beforeEach(() => {
+      vi.stubGlobal("matchMedia", (query: string) => ({
+        matches: true, media: query, addEventListener: () => {}, removeEventListener: () => {},
+      }));
+      useUIStore.setState({ sidebarNarrowExpanded: true });
+    });
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      useUIStore.setState({ sidebarNarrowExpanded: false });
+    });
+
+    it("floats the full sidebar over the content and closes on an outside click", () => {
+      const { container } = render(<Sidebar />);
+      const drawer = container.querySelector(".sidebar-drawer");
+      expect(drawer).not.toBeNull();
+      expect(drawer!.querySelector(".app-sidebar--rail")).toBeNull();
+
+      fireEvent.mouseDown(container.querySelector(".sidebar-drawer-backdrop")!);
+      expect(useUIStore.getState().sidebarNarrowExpanded).toBe(false);
+    });
+
+    it("closes after navigating to another folder", () => {
+      render(<Sidebar />);
+      act(() => { useMailStore.setState({ activeFolderId: "a1-sent" }); });
+      expect(useUIStore.getState().sidebarNarrowExpanded).toBe(false);
+    });
   });
 });

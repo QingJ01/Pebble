@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MessageDetail from "../../src/components/MessageDetail";
 import type { Message } from "../../src/lib/api";
@@ -110,5 +110,18 @@ describe("MessageDetail loading (D3)", () => {
     expect(container?.getAttribute("aria-busy")).toBe("true");
     expect(screen.getByText("First subject")).toBeTruthy();
     expect(skeleton()).toBeNull();
+  });
+
+  it("keeps Back usable while stale but blocks actions on the previous message", () => {
+    const onBack = vi.fn();
+    loaderState.current = { message: baseMessage, loading: true, isStale: true };
+    render(<MessageDetail messageId="m2" onBack={onBack} />);
+
+    const back = screen.getByRole("button", { name: "Back" });
+    expect(back.closest("[inert]")).toBeNull();
+    fireEvent.click(back);
+    expect(onBack).toHaveBeenCalled();
+    expect(screen.getByText("actions").closest("[inert]")).not.toBeNull();
+    expect(screen.getByText("First subject").closest("[inert]")).not.toBeNull();
   });
 });

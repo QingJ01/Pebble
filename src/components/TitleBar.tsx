@@ -21,10 +21,11 @@ export default function TitleBar() {
   return (
     <div
       data-tauri-drag-region
-      className="titlebar flex items-center justify-between h-9 select-none"
+      className={`titlebar flex items-center justify-between h-9 select-none${isMac ? " titlebar--mac" : ""}`}
     >
-      {/* Brand block under the native titlebar; the macOS traffic lights sit at
-          the top-left corner via trafficLightPosition in tauri.conf.json. */}
+      {/* Brand block. On macOS the window uses the overlay title bar, so the
+          native traffic lights sit over the top-left corner: titlebar--mac
+          reserves that space (see shell.css). */}
       <div data-tauri-drag-region className="flex items-center gap-2 px-3">
         <img
           data-tauri-drag-region

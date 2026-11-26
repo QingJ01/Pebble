@@ -422,7 +422,7 @@ impl Store {
                 .collect();
             let sql = format!(
                 "SELECT m.account_id, mf.thread_key, m.id, m.subject, m.snippet, m.date,
-                        m.is_read, m.is_starred, m.from_address, m.has_attachments
+                        m.is_read, m.is_starred, m.from_address, m.has_attachments, m.from_name
                  FROM message_folders mf
                  JOIN messages m ON m.id = mf.message_id
                  WHERE mf.folder_id IN ({})
@@ -472,9 +472,21 @@ impl Store {
                 }
                 acc.starred |= is_starred;
                 acc.has_attachments |= has_attachments;
-                let from_address = from_address.trim().to_string();
-                if !from_address.is_empty() && !acc.participants.contains(&from_address) {
-                    acc.participants.push(from_address);
+                // Participants are shown as names (like the message list),
+                // falling back to the address; one entry per address.
+                let from_name: String = row.get::<_, Option<String>>(10)?.unwrap_or_default();
+                let from_address = from_address.trim();
+                if !from_address.is_empty()
+                    && acc
+                        .participant_addresses
+                        .insert(from_address.to_ascii_lowercase())
+                {
+                    let name = from_name.trim();
+                    acc.participants.push(if name.is_empty() {
+                        from_address.to_string()
+                    } else {
+                        name.to_string()
+                    });
                 }
             }
 

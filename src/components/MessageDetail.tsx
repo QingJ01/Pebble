@@ -230,7 +230,6 @@ export default function MessageDetail({ messageId, onBack, onReopen, folderRole 
     <div
       className={isStale ? "message-detail-container message-detail--stale" : "message-detail-container"}
       aria-busy={isStale || undefined}
-      inert={isStale || undefined}
     >
       {/* Toolbar row: back · message actions · snooze / bilingual (all 32px) */}
       <div className="reader-toolbar">
@@ -240,6 +239,9 @@ export default function MessageDetail({ messageId, onBack, onReopen, folderRole 
           icon={<ArrowLeft size={16} />}
           onClick={onBack}
         />
+        {/* While the next message loads, only Back stays usable: the other
+            actions would act on the previous (stale) message. */}
+        <div className="contents" inert={isStale || undefined}>
         <span className="toolbar-separator" aria-hidden="true" />
         <MessageActionToolbar
           message={message}
@@ -276,7 +278,10 @@ export default function MessageDetail({ messageId, onBack, onReopen, folderRole 
             onClick={handleBilingualToggle}
           />
         </div>
+        </div>
       </div>
+
+      <div className="contents" inert={isStale || undefined}>
 
       {/* Header: subject, draft resume, sender card — on the content edge */}
       <div className="reader-header">
@@ -369,6 +374,7 @@ export default function MessageDetail({ messageId, onBack, onReopen, folderRole 
           onClose={() => setShowSelectionActions(null)}
         />
       )}
+      </div>
     </div>
   );
 }

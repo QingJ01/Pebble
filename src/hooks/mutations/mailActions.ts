@@ -489,12 +489,12 @@ export interface RunOptions extends ExecuteOptions {
   confirm?: (plan: MailActionPlan) => Promise<boolean>;
 }
 
-/** Plan, confirm if needed, then execute. */
 // Message ids with an action still being planned or run. Archive toggles on the
 // backend (an archived message goes back to the inbox), so a second E press or
 // palette Archive while the first is in flight must not act on it again.
 const actionsInFlight = new Set<string>();
 
+/** Plan, confirm if needed, then execute. */
 export async function runMailAction(
   client: QueryClient,
   kind: MailActionKind,

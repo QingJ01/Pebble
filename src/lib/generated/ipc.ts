@@ -136,7 +136,11 @@ export type ThreadSummary = { thread_id: string,
 /**
  * Owning account; thread ids alone are not unique across accounts.
  */
-account_id: string, subject: string, snippet: string, last_date: number, message_count: number, unread_count: number, is_starred: boolean, participants: Array<string>, has_attachments: boolean, };
+account_id: string, subject: string, snippet: string, last_date: number, message_count: number, unread_count: number, is_starred: boolean, 
+/**
+ * Distinct senders, oldest first: display name, else address.
+ */
+participants: Array<string>, has_attachments: boolean, };
 
 export type TrackerInfo = { domain: string, tracker_type: string, };
 

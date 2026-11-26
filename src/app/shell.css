@@ -7,6 +7,10 @@
   border-bottom: 1px solid var(--color-border);
   background-color: var(--color-chrome-bg);
 }
+/* macOS overlay title bar: keep the brand clear of the traffic lights
+   (three 12px buttons from x=8 with 8px gaps ≈ 68px, plus breathing room). */
+.titlebar--mac { padding-left: 72px; }
+
 .titlebar__brand {
   color: var(--color-text-primary);
   font-size: var(--font-md);
@@ -175,6 +179,32 @@
    (account badges, or the classic account switcher + its folders) / divider /
    fixed bottom group (tools). Every entry is a 32px square centred in the
    rail; dividers get the same 8px above and below. */
+/* Narrow window, sidebar expanded: a rail-wide strip stays in the layout and
+   the full sidebar floats over the content (below menus, --z-menu). */
+.sidebar-drawer-host {
+  position: relative;
+  width: 48px;
+  height: 100%;
+  flex-shrink: 0;
+  border-right: 1px solid var(--color-border);
+  background-color: var(--color-chrome-bg);
+}
+.sidebar-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-menu) - 2);
+  background: color-mix(in srgb, var(--color-text-primary) 12%, transparent);
+}
+.sidebar-drawer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: calc(var(--z-menu) - 1);
+  display: flex;
+  box-shadow: var(--shadow-popover);
+}
+
 .app-sidebar--rail {
   width: 48px;
   flex-shrink: 0;

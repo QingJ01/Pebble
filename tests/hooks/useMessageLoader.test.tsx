@@ -186,4 +186,19 @@ describe("useMessageLoader", () => {
     release!();
     await waitFor(() => expect(result.current.rendered?.html).toContain("message-1 Strict"));
   });
+  it("shows not-found instead of the previous message when the next one no longer exists", async () => {
+    vi.mocked(getMessageWithHtml).mockImplementation((id) =>
+      Promise.resolve(id === "gone" ? null : [makeMessage({ id }), makeRendered()]),
+    );
+    const { result, rerender } = renderHook(
+      ({ id }) => useMessageLoader(id, "Strict"),
+      { initialProps: { id: "message-1" } },
+    );
+    await waitFor(() => expect(result.current.message?.id).toBe("message-1"));
+
+    rerender({ id: "gone" });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.message).toBeNull();
+    expect(result.current.isStale).toBe(false);
+  });
 });

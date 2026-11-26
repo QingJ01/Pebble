@@ -236,7 +236,11 @@
 
 /* Hover / keyboard-focus quick actions replace the date + icons: a light
    bordered strip of 28px icon buttons on the first line. */
+/* Hover actions sit on the first line only: 24px buttons + 1px border = 26px
+   at y 4–30, centred on the 20px sender line (y 8–28). The first line makes
+   room for them, so they never cover the sender, subject or snippet text. */
 .message-row-actions {
+  --row-action-size: 24px;
   position: absolute;
   right: var(--space-2);
   top: var(--space-1);
@@ -248,6 +252,13 @@
   background-color: var(--color-surface-raised);
 }
 
+.message-row-actions .icon-btn {
+  width: var(--row-action-size);
+  height: var(--row-action-size);
+  min-width: var(--row-action-size);
+  min-height: var(--row-action-size);
+}
+
 .message-list-row:hover .message-row-actions,
 .message-list-row:focus-within .message-row-actions {
   display: flex;
@@ -255,7 +266,13 @@
 
 .message-list-row:hover .mail-row__meta,
 .message-list-row:focus-within .mail-row__meta {
-  visibility: hidden;
+  display: none;
+}
+
+/* 5 actions × 24 + border 2 + gap 8 from the sender text. */
+.message-list-row:hover > .mail-row__line,
+.message-list-row:focus-within > .mail-row__line {
+  padding-right: calc(5 * var(--row-action-size, 24px) + 10px);
 }
 
 .icon-btn.message-row-actions__star[aria-pressed="true"] {

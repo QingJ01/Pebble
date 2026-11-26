@@ -147,7 +147,16 @@ export function useMessageLoader(messageId: string | null, privacyMode: PrivacyM
     async function load() {
       try {
         const entry = await fetchEntry(messageId!, initialPrivacyMode);
-        if (cancelled || !entry) return;
+        if (cancelled) return;
+        if (!entry) {
+          // The message is gone (deleted, moved by sync): show "not found"
+          // instead of leaving the previous message on screen as stale.
+          cache.delete(messageId!);
+          setMessageState(null);
+          setRendered(null);
+          renderedKeyRef.current = null;
+          return;
+        }
         setMessageState(entry.message);
         // A privacy re-render may already have replaced the cached HTML.
         if (!cachedRenderUsable || renderedKeyRef.current === initialRenderKey) {
