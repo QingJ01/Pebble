@@ -10,6 +10,7 @@ import { toastError } from "@/stores/toast.store";
 import Button from "@/components/ui/Button";
 import Spinner from "@/components/Spinner";
 import { LOADING_INDICATOR_DELAY_MS } from "@/hooks/useDelayedVisible";
+import "@/components/mail-list.css";
 
 interface SnoozedEntry {
   snooze: SnoozedMessage;
@@ -72,16 +73,13 @@ export default function SnoozedView() {
 
   if (error) {
     return (
-      <div className="fade-in" style={{
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        height: "100%", gap: "12px", color: "var(--color-text-secondary)",
-      }}>
+      <div className="fade-in mail-empty-state">
         <Clock size={40} strokeWidth={1.2} />
-        <p role="alert" style={{ color: "var(--color-danger)", fontSize: "var(--font-md)", margin: 0 }}>
+        <p role="alert" className="mail-empty-state__error">
           {t("snoozed.loadError", "Failed to load snoozed messages")}
         </p>
-        <p style={{ fontSize: "var(--font-base)", margin: 0 }}>{error}</p>
-        <Button onClick={() => void loadSnoozed()} style={{ marginTop: "4px" }}>
+        <p className="mail-empty-state__detail">{error}</p>
+        <Button onClick={() => void loadSnoozed()}>
           {t("common.retry", "Retry")}
         </Button>
       </div>
@@ -90,32 +88,19 @@ export default function SnoozedView() {
 
   if (entries.length === 0) {
     return (
-      <div className="fade-in" style={{
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        height: "100%", gap: "12px", color: "var(--color-text-secondary)",
-      }}>
+      <div className="fade-in mail-empty-state">
         <Clock size={40} strokeWidth={1.2} />
-        <p style={{ fontSize: "var(--font-md)", margin: 0 }}>{t("snoozed.empty", "No snoozed messages")}</p>
+        <p>{t("snoozed.empty", "No snoozed messages")}</p>
       </div>
     );
   }
 
   return (
     <div className="fade-in" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{
-        padding: "12px 16px", borderBottom: "1px solid var(--color-border)",
-        fontSize: "var(--font-md)", fontWeight: 600, color: "var(--color-text-primary)",
-        display: "flex", alignItems: "center", gap: "8px",
-      }}>
-        <Clock size={16} aria-hidden="true" />
+      <div className="pane-header">
+        <Clock size={16} aria-hidden="true" className="pane-header__icon" />
         {t("snoozed.title", "Snoozed Messages")}
-        <span style={{
-          fontSize: "var(--font-sm)", fontWeight: 400, color: "var(--color-text-secondary)",
-          backgroundColor: "var(--color-bg-secondary)",
-          padding: "2px 8px", borderRadius: "var(--radius-full)",
-        }}>
-          {entries.length}
-        </span>
+        <span className="pane-header__count">{entries.length}</span>
       </div>
 
       <div className="scroll-region snoozed-list-scroll" style={{ flex: 1, overflowY: "auto" }}>
@@ -124,15 +109,7 @@ export default function SnoozedView() {
             key={entry.snooze.message_id}
             role="button"
             tabIndex={0}
-            className="list-row-hover"
-            style={{
-              padding: "12px 16px",
-              borderBottom: "1px solid var(--color-border)",
-              display: "flex",
-              alignItems: "center",
-              gap: "12px",
-              cursor: "pointer",
-            }}
+            className="list-row snoozed-row"
             onClick={() => handleOpen(entry.snooze.message_id)}
             onKeyDown={(e) => {
               if (e.target !== e.currentTarget) return;
@@ -142,17 +119,14 @@ export default function SnoozedView() {
               }
             }}
           >
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{
-                fontSize: "var(--font-base)", fontWeight: 500, color: "var(--color-text-primary)",
-                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-              }}>
+            <div className="snoozed-row__text">
+              <div className="snoozed-row__subject">
                 {entry.message?.subject || entry.snooze.message_id}
               </div>
-              <div style={{ fontSize: "var(--font-sm)", color: "var(--color-text-secondary)", marginTop: "2px" }}>
+              <div className="snoozed-row__from">
                 {entry.message?.from_address || ""}
               </div>
-              <div style={{ fontSize: "var(--font-xs)", color: "var(--color-text-secondary)", marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
+              <div className="snoozed-row__wake">
                 <Clock size={12} aria-hidden="true" />
                 {t("snoozed.wakeAt", "Wake at")} {formatSnoozeTime(entry.snooze.unsnoozed_at)}
               </div>
@@ -160,7 +134,7 @@ export default function SnoozedView() {
 
             <Button
               size="sm"
-              icon={<Bell size={13} />}
+              icon={<Bell size={14} />}
               onClick={(e) => {
                 e.stopPropagation();
                 void handleUnsnooze(entry.snooze.message_id);

@@ -13,10 +13,10 @@ describe("background image CSS", () => {
     expect(css).not.toMatch(/\.app-shell--with-background\s+\.app-main-scroll\s*\{[^}]*backdrop-filter/i);
     expect(css).toMatch(/@media \(prefers-reduced-transparency: reduce\)/);
     expect(css).toMatch(
-      /\.app-shell--with-background\s+\.search-toolbar\s*\{[^}]*color-mix\(in srgb,\s*var\(--color-bg\)\s*12%,\s*transparent\)/i,
+      /\.app-shell--with-background\s+\.search-toolbar\s*\{[^}]*color-mix\(in srgb,\s*var\(--color-canvas\)\s*12%,\s*transparent\)/i,
     );
     expect(css).toMatch(
-      /\.app-shell--with-background\s+\.inbox-toolbar-row\s*\{[^}]*color-mix\(in srgb,\s*var\(--color-bg\)\s*12%,\s*transparent\)/i,
+      /\.app-shell--with-background\s+\.inbox-toolbar-row\s*\{[^}]*color-mix\(in srgb,\s*var\(--color-canvas\)\s*12%,\s*transparent\)/i,
     );
   });
 });

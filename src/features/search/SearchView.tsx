@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { MAIL_ROW_HEIGHT } from "@/components/mailRowMetrics";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTranslation } from "react-i18next";
@@ -10,6 +11,8 @@ import SearchFilters from "./SearchFilters";
 import SearchResultItem from "./SearchResultItem";
 import MessageDetail from "@/components/MessageDetail";
 import Button from "@/components/ui/Button";
+import IconButton from "@/components/ui/IconButton";
+import "@/components/mail-list.css";
 import Spinner from "@/components/Spinner";
 import PaneSplitter, { usePaneWidth } from "@/components/PaneSplitter";
 import { useRovingList } from "@/hooks/useRovingList";
@@ -61,7 +64,7 @@ export default function SearchView() {
   const virtualizer = useVirtualizer({
     count: results.length,
     getScrollElement: () => resultsParentRef.current,
-    estimateSize: () => 76,
+    estimateSize: () => MAIL_ROW_HEIGHT,
     measureElement: (el) => el.getBoundingClientRect().height,
     overscan: 5,
   });
@@ -141,24 +144,17 @@ export default function SearchView() {
             className="search-input"
           />
         </div>
-        <button
-          type="submit"
-          className="search-toolbar-button search-toolbar-button--primary"
-        >
-          <Search size={14} aria-hidden="true" />
+        <Button type="submit" icon={<Search size={14} />}>
           {t("search.searchButton")}
-        </button>
-        <button
-          type="button"
+        </Button>
+        <IconButton
+          size="md"
+          label={t("search.filters")}
+          icon={<SlidersHorizontal size={16} />}
+          aria-expanded={showFilters}
+          className={showFilters || filtersActive ? "is-active" : undefined}
           onClick={() => setShowFilters(!showFilters)}
-          title={t("search.filters")}
-          aria-label={t("search.filters")}
-          className={`search-toolbar-button search-toolbar-icon-button ${
-            showFilters || hasActiveFilters(filters) ? "is-active" : ""
-          }`}
-        >
-          <SlidersHorizontal size={16} />
-        </button>
+        />
       </form>
 
       {/* Filters panel */}
@@ -190,61 +186,27 @@ export default function SearchView() {
           )}
 
           {!loading && queryError && (
-            <div
-              className="fade-in"
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: "40px",
-                color: "var(--color-text-secondary)",
-                fontSize: "14px",
-                gap: "8px",
-              }}
-            >
-              <p role="alert" style={{ color: "var(--color-danger)", margin: 0 }}>
+            <div className="fade-in mail-empty-state">
+              <p role="alert" className="mail-empty-state__error">
                 {t("search.error", "Search failed")}
               </p>
-              <p style={{ fontSize: "var(--font-base)", margin: 0 }}>{extractErrorMessage(queryError)}</p>
-              <Button onClick={() => refetch()} style={{ marginTop: "8px" }}>
+              <p className="mail-empty-state__detail">{extractErrorMessage(queryError)}</p>
+              <Button onClick={() => refetch()}>
                 {t("common.retry", "Retry")}
               </Button>
             </div>
           )}
 
           {!loading && !queryError && hasSearched && results.length === 0 && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: "40px",
-                color: "var(--color-text-secondary)",
-                fontSize: "14px",
-                gap: "8px",
-              }}
-            >
+            <div className="mail-empty-state">
               <Search size={28} strokeWidth={1.2} />
               {t("search.noResults")}
             </div>
           )}
 
           {!loading && !hasSearched && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: "60px 20px",
-                color: "var(--color-text-tertiary)",
-                fontSize: "14px",
-                gap: "8px",
-              }}
-            >
-              <Search size={32} />
+            <div className="mail-empty-state mail-empty-state--muted">
+              <Search size={32} strokeWidth={1.2} />
               <span>{t("search.title")}</span>
             </div>
           )}

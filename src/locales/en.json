@@ -511,7 +511,8 @@
     "folder": "Folder",
     "allFolders": "All folders",
     "error": "Search failed",
-    "results": "Search results"
+    "results": "Search results",
+    "clearQuery": "Clear search"
   },
   "shortcuts": {
     "compose": "Compose",

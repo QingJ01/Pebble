@@ -42,8 +42,11 @@ describe("focus-visible CSS", () => {
   });
 
   it("makes unread message and thread rows visually distinct in dark mode", () => {
-    const css = readFileSync(join(process.cwd(), "src", "styles", "index.css"), "utf8");
+    // Row states live with the rows (mail-list.css): unread rows share the
+    // same hover fill as read rows; the unread dot + weight carry the state.
+    const css = readFileSync(join(process.cwd(), "src", "components", "mail-list.css"), "utf8");
 
-    expect(css).toMatch(/\.message-list-row--unread\[aria-selected="false"\]:hover/i);
+    expect(css).toMatch(/\.message-list-row\[aria-selected="false"\]:hover/i);
+    expect(css).toMatch(/\.message-list-row--unread \.mail-row__primary,[^{]*\{[^}]*font-weight:\s*var\(--weight-semibold\)/i);
   });
 });

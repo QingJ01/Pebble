@@ -540,58 +540,18 @@ option {
 .skeleton {
   background: linear-gradient(
     90deg,
-    var(--color-bg-secondary) 25%,
-    var(--color-bg-hover) 50%,
-    var(--color-bg-secondary) 75%
+    var(--color-fill-selected) 25%,
+    var(--color-fill-hover) 50%,
+    var(--color-fill-selected) 75%
   );
   background-size: 800px 100%;
   animation: shimmer 1.5s infinite linear;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .spinner {
   animation: spin 0.8s linear infinite;
   color: var(--color-text-secondary);
-}
-
-.message-detail-container {
-  background-color: var(--color-bg);
-}
-
-.app-shell--with-background .message-detail-container {
-  background-color: transparent;
-}
-
-.message-list-row,
-.thread-list-row {
-  background: transparent;
-  /* Fills stop at the divider so a selected row never hides its hairline. */
-  background-clip: padding-box;
-}
-
-.message-list-row[aria-selected="true"],
-.thread-list-row[aria-selected="true"] {
-  background: var(--color-fill-selected);
-  background-clip: padding-box;
-}
-
-.message-list-row[aria-selected="false"]:hover,
-.message-list-row[aria-selected="false"]:focus,
-.thread-list-row[aria-selected="false"]:hover,
-.thread-list-row[aria-selected="false"]:focus {
-  background: var(--color-bg-hover);
-}
-
-.message-list-row--unread[aria-selected="false"]:hover,
-.message-list-row--unread[aria-selected="false"]:focus,
-.thread-list-row--unread[aria-selected="false"]:hover,
-.thread-list-row--unread[aria-selected="false"]:focus {
-  background: var(--color-bg-hover);
-}
-
-.app-shell--with-background .message-list-row[aria-selected="true"],
-.app-shell--with-background .thread-list-row[aria-selected="true"] {
-  background: color-mix(in srgb, var(--color-fill-selected) 60%, transparent);
 }
 
 /* Respect reduced-motion preferences (WCAG 2.1 AA — SC 2.3.3) */
@@ -1011,15 +971,19 @@ textarea:focus-visible {
   }
 }
 
-/* ─── Search Controls ───────────────────────────────────── */
+/* ─── Search Controls / inbox top bar ──────────────────────
+   Top bars are pane headers: 52px (36px search shell or 32px controls
+   + 2 × --space-2), padding 0 --space-3, one divider below. */
 
 .search-toolbar {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  min-height: calc(var(--control-lg) + 2 * var(--space-2));
+  box-sizing: border-box;
+  padding: 0 var(--space-3);
   border-bottom: 1px solid var(--color-border);
-  background: color-mix(in srgb, var(--color-bg) 94%, var(--color-bg-secondary));
+  background: var(--color-canvas);
 }
 
 .search-input-shell {
@@ -1034,7 +998,10 @@ textarea:focus-visible {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-control-bg);
-  transition: border-color 0.14s ease, box-shadow 0.14s ease, background-color 0.14s ease;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
 }
 
 .search-input-shell:hover {
@@ -1048,17 +1015,17 @@ textarea:focus-visible {
 
 .search-input-shell svg {
   flex-shrink: 0;
-  color: var(--color-text-secondary);
+  color: var(--color-text-tertiary);
 }
 
 .app-shell--with-background .search-toolbar {
   border-bottom-color: color-mix(in srgb, var(--color-border) 60%, transparent);
-  background: color-mix(in srgb, var(--color-bg) 12%, transparent);
+  background: color-mix(in srgb, var(--color-canvas) 12%, transparent);
 }
 
 .app-shell--with-background .search-input-shell {
   border-color: color-mix(in srgb, var(--color-border) 50%, transparent);
-  background: color-mix(in srgb, var(--color-bg) 18%, transparent);
+  background: color-mix(in srgb, var(--color-canvas) 18%, transparent);
 }
 
 .search-input {
@@ -1070,7 +1037,7 @@ textarea:focus-visible {
   color: var(--color-text-primary);
   font: inherit;
   font-size: var(--font-base);
-  line-height: 20px;
+  line-height: var(--leading-normal);
 }
 
 .search-input:focus-visible {
@@ -1081,18 +1048,27 @@ textarea:focus-visible {
   color: var(--color-text-tertiary);
 }
 
+/* Filters toggle shows "on" while the panel is open or filters apply. */
+.search-toolbar .icon-btn.is-active {
+  background: var(--color-fill-selected);
+  color: var(--color-text-primary);
+}
+
 .inbox-toolbar-row {
   display: flex;
   align-items: center;
+  gap: var(--space-2);
   flex: 0 0 auto;
+  min-height: calc(var(--control-lg) + 2 * var(--space-2));
+  box-sizing: border-box;
+  padding: 0 var(--space-3);
   border-bottom: 1px solid var(--color-border);
-  background: color-mix(in srgb, var(--color-bg) 96%, var(--color-bg-secondary));
+  background: var(--color-canvas);
 }
 
 .app-shell--with-background .inbox-toolbar-row {
   border-bottom-color: color-mix(in srgb, var(--color-border) 60%, transparent);
-  background: color-mix(in srgb, var(--color-bg) 12%, transparent);
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--color-border) 50%, transparent);
+  background: color-mix(in srgb, var(--color-canvas) 12%, transparent);
 }
 
 .inbox-toolbar-search {
@@ -1100,123 +1076,20 @@ textarea:focus-visible {
   min-width: 0;
 }
 
-.inbox-toolbar-search .search-toolbar {
+/* The inbox row already is the bar: the embedded search form adds nothing. */
+.inbox-toolbar-search .search-toolbar,
+.app-shell--with-background .inbox-toolbar-search .search-toolbar {
+  min-height: 0;
+  padding: 0;
   border-bottom: 0;
   background: transparent;
-}
-
-.app-shell--with-background .inbox-toolbar-search .search-toolbar {
-  background: transparent;
   backdrop-filter: none;
-}
-
-/* Legacy private buttons below are aligned to the shared scale (= .icon-btn--md
-   ghost / .btn--md ghost). Prefer <IconButton>/<Button> in markup. */
-.inbox-toolbar-button {
-  position: relative;
-  z-index: 1;
-  width: var(--control-md);
-  height: var(--control-md);
-  flex: 0 0 var(--control-md);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  font: inherit;
-  line-height: 1;
-  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
-}
-
-.inbox-toolbar-button:hover {
-  background: var(--color-fill-hover);
-  color: var(--color-text-primary);
-}
-
-.inbox-toolbar-button:active {
-  background: var(--color-fill-pressed);
-}
-
-.inbox-toolbar-button[aria-pressed="true"] {
-  background: var(--color-fill-selected);
-  color: var(--color-text-primary);
-}
-
-.inbox-toolbar-button--end {
-  margin-right: var(--space-2);
-}
-
-.search-toolbar-button {
-  height: var(--control-md);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  padding: 0 var(--space-3);
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--font-base);
-  font-weight: var(--weight-medium);
-  line-height: 1;
-  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
-}
-
-.search-toolbar-button:hover {
-  background: var(--color-fill-hover);
-  color: var(--color-text-primary);
-}
-
-.search-toolbar-button:active {
-  background: var(--color-fill-pressed);
-}
-
-.search-toolbar-button.is-active {
-  background: var(--color-fill-selected);
-  color: var(--color-text-primary);
-}
-
-.search-toolbar-button--primary {
-  color: var(--color-accent-text);
-}
-
-.search-toolbar-icon-button {
-  width: var(--control-md);
-  padding: 0;
-}
-
-.batch-select-control {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  margin-right: auto;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  font-size: 12px;
-  line-height: 1;
-}
-
-.batch-select-control span {
-  white-space: nowrap;
 }
 
 /* .batch-checkbox is the legacy name of the shared .checkbox (Primitives). */
 .batch-checkbox {
   -webkit-appearance: none;
   appearance: none;
-}
-
-.message-row-checkbox {
-  margin-right: 10px;
 }
 
 .search-filters-panel {
@@ -1228,7 +1101,7 @@ textarea:focus-visible {
 .search-filters-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  gap: var(--space-3);
   align-items: end;
 }
 
@@ -1236,99 +1109,21 @@ textarea:focus-visible {
   min-width: 0;
 }
 
-.search-filter-label {
-  display: block;
-  margin-bottom: var(--space-1);
-  color: var(--color-text-secondary);
-  font-size: var(--font-sm);
-  font-weight: var(--weight-medium);
-  line-height: var(--leading-tight);
+.search-filters-grid .field + .field {
+  margin-top: 0;
 }
 
-/* Same spec as .input/.select (Primitives); kept for existing markup. */
-.search-filter-control {
-  width: 100%;
-  height: var(--control-md);
-  box-sizing: border-box;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background-color: var(--color-control-bg);
-  color: var(--color-text-primary);
-  font: inherit;
-  font-size: var(--font-base);
-  line-height: 20px;
-  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
-}
-
-.search-filter-control:hover {
-  border-color: var(--color-border-strong);
-}
-
-.search-filter-control:focus-visible {
-  outline: 0;
-  border-color: var(--color-focus-ring);
-  box-shadow: var(--shadow-focus);
-}
-
+/* The has-attachment toggle sits in the grid like a 32px control. */
 .search-filter-toggle {
-  height: var(--control-md);
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
-  box-sizing: border-box;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-control-bg);
-  color: var(--color-text-primary);
-  cursor: pointer;
-  font-size: var(--font-base);
-  line-height: 1;
-  transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
-}
-
-.search-filter-toggle:hover {
-  border-color: var(--color-border-strong);
-}
-
-.search-filter-toggle:focus-within {
-  border-color: var(--color-focus-ring);
-  box-shadow: var(--shadow-focus);
-}
-
-.search-filter-checkbox {
-  width: 14px;
-  height: 14px;
-  margin: 0;
-  accent-color: var(--color-control-checked);
+  min-height: var(--control-md);
 }
 
 .search-filters-actions {
   display: flex;
   justify-content: flex-end;
   margin-top: var(--space-3);
-}
-
-/* = .btn--sm.btn--secondary */
-.search-filters-clear {
-  height: var(--control-sm);
-  padding: 0 var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
-  color: var(--color-text-primary);
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--font-sm);
-  font-weight: var(--weight-medium);
-  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
-}
-
-.search-filters-clear:hover {
-  border-color: var(--color-border-strong);
-  background: linear-gradient(var(--color-fill-hover), var(--color-fill-hover)), var(--color-surface-raised);
 }
 
 @media (max-width: 1100px) {
@@ -1338,8 +1133,10 @@ textarea:focus-visible {
 }
 
 @media (max-width: 720px) {
-  .search-toolbar {
+  .search-toolbar,
+  .inbox-toolbar-row {
     flex-wrap: wrap;
+    padding-block: var(--space-2);
   }
 
   .search-input-shell {
@@ -1348,10 +1145,6 @@ textarea:focus-visible {
 
   .search-filters-grid {
     grid-template-columns: 1fr;
-  }
-
-  .search-filter-toggle {
-    width: 100%;
   }
 }
 
@@ -1828,14 +1621,13 @@ textarea:focus-visible {
 .message-participants {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  margin: 3px 0;
+  gap: var(--space-1);
 }
 
 .message-participants-groups {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--space-1);
   min-width: 0;
 }
 
@@ -1846,18 +1638,18 @@ textarea:focus-visible {
   max-height: 160px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding-right: 6px;
+  padding-right: var(--space-2);
   scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: var(--color-scrollbar-thumb) transparent;
 }
 
 .message-participants-groups--scroll::-webkit-scrollbar {
-  width: 6px;
+  width: var(--space-2);
 }
 
 .message-participants-groups--scroll::-webkit-scrollbar-thumb {
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background-color: var(--color-scrollbar-thumb);
 }
 
@@ -1869,24 +1661,27 @@ textarea:focus-visible {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--color-text-secondary);
+  gap: var(--space-1);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-sm);
 }
 
 .participant-label {
   flex-shrink: 0;
 }
 
+/* Recipient = .chip--md spec (24px, radius-sm, bordered, raised fill). */
 .participant-chip {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-1);
   max-width: 280px;
-  padding: 1px 3px 1px 8px;
+  height: 24px;
+  box-sizing: border-box;
+  padding: 0 var(--space-1) 0 var(--space-2);
   border: 1px solid var(--color-border);
-  border-radius: 999px;
-  background: var(--color-bg);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
 }
 
 .participant-chip .participant-name {
@@ -1898,11 +1693,11 @@ textarea:focus-visible {
 }
 
 .participant-chip .contact-address-action {
-  width: 18px;
-  height: 18px;
+  width: var(--space-5);
+  height: var(--space-5);
   border: none;
   background: transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .participant-chip .contact-address-action:hover:not(:disabled) {
@@ -1912,82 +1707,127 @@ textarea:focus-visible {
 }
 
 .participant-toggle {
-  padding: 0 2px;
-  border: none;
-  background: none;
-  font: inherit;
-  font-size: 12px;
-  color: var(--color-accent-text);
-  cursor: pointer;
+  min-height: 0;
+  padding: 0 var(--space-1);
 }
 
-.participant-toggle:hover {
-  text-decoration: underline;
+/* ─── Attachments (AttachmentList) — sits on the reader content edge ─── */
+.attachment-section {
+  flex-shrink: 0;
+  padding: var(--space-3) var(--reader-gutter, var(--space-4));
+  border-top: 1px solid var(--color-divider);
+  background-color: var(--color-canvas);
+}
+
+.attachment-section__status {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+}
+
+.attachment-list-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.attachment-list-title {
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.attachment-list-count {
+  color: var(--color-text-tertiary);
+  font-weight: var(--weight-regular);
+  font-variant-numeric: tabular-nums;
 }
 
 .attachment-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-2);
 }
 
 .attachment-card {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 7px 10px;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: var(--color-bg);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-raised);
+  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
 
 .attachment-card:hover {
-  border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
-  background: var(--color-bg-hover);
+  border-color: var(--color-border-strong);
+  background: linear-gradient(var(--color-fill-hover), var(--color-fill-hover)), var(--color-surface-raised);
 }
 
 .attachment-icon-tile {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: var(--control-md);
+  height: var(--control-md);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+  flex-shrink: 0;
+}
+
+.attachment-card__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.attachment-card__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
   flex-shrink: 0;
 }
 
 .attachment-name {
-  font-size: 13px;
-  color: var(--color-text-primary);
   overflow: hidden;
+  color: var(--color-text-primary);
+  font-size: var(--font-base);
+  line-height: var(--leading-normal);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* Filename opens the preview: text colour, underline on hover (not accent). */
+.btn.attachment-open-preview {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  color: inherit;
+  font-weight: var(--weight-regular);
+  line-height: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+}
+
 .attachment-meta {
-  font-size: 11px;
-  color: var(--color-text-secondary);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-xs);
+  font-variant-numeric: tabular-nums;
 }
 
-.attachment-download {
-  display: flex;
-  align-items: center;
-  padding: 4px;
-  border: none;
-  border-radius: 6px;
-  background: none;
-  color: var(--color-text-secondary);
-  cursor: pointer;
+.attachment-progress {
+  min-width: var(--control-sm);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
-.attachment-download:hover:not(:disabled) {
-  background: var(--color-bg);
-  color: var(--color-accent);
-}
-
-.attachment-download:disabled {
-  cursor: default;
-  opacity: 0.6;
+.attachment-download__done {
+  color: var(--color-success);
 }
 
 .contact-primary-button,

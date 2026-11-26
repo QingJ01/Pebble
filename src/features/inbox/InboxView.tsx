@@ -1,4 +1,5 @@
 import { isThreadSelected, useMailStore } from "@/stores/mail.store";
+import { MAIL_ROW_HEIGHT } from "@/components/mailRowMetrics";
 import { useAccountsQuery, useMessagesQuery, useThreadsQuery, useFoldersForAccountsQuery, patchMessagesCache } from "@/hooks/queries";
 import { useUIStore } from "@/stores/ui.store";
 import { toastError, useToastStore } from "@/stores/toast.store";
@@ -16,6 +17,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { List, MessageSquare, Mail, Trash2, Inbox, CheckSquare } from "lucide-react";
 import { MessageListSkeleton } from "@/components/Skeleton";
 import Button from "@/components/ui/Button";
+import IconButton from "@/components/ui/IconButton";
+import "@/components/mail-list.css";
 import { eventToKeyString, useShortcutStore } from "@/stores/shortcut.store";
 import { emptyTrash } from "@/lib/api";
 import { folderIdsForSelection, roleForSelection } from "@/lib/folderAggregation";
@@ -35,6 +38,7 @@ export default function InboxView() {
   const selectedThreadId = useMailStore((s) => s.selectedThreadId);
   const selectedThreadAccountId = useMailStore((s) => s.selectedThreadAccountId);
   const selectThread = useMailStore((s) => s.selectThread);
+  const batchMode = useMailStore((s) => s.batchMode);
   const { data: accounts = [] } = useAccountsQuery();
   const folderAccountIds = useMemo(
     () => activeAccountId ? [activeAccountId] : accounts.map((account) => account.id),
@@ -82,18 +86,15 @@ export default function InboxView() {
   // No accounts or no folder selected — show welcome / setup prompt
   if (accounts.length === 0 || !activeFolderId) {
     return (
-      <div className="fade-in" style={{
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        height: "100%", gap: "16px", color: "var(--color-text-secondary)",
-      }}>
+      <div className="fade-in mail-empty-state mail-empty-state--welcome">
         <Mail size={48} strokeWidth={1.2} />
-        <p style={{ fontSize: "16px", fontWeight: 500, color: "var(--color-text-primary)", margin: 0 }}>
+        <p className="mail-empty-state__title">
           {t("inbox.welcome", "Welcome to Pebble")}
         </p>
-        <p style={{ fontSize: "13px", margin: 0 }}>
+        <p className="mail-empty-state__detail">
           {t("inbox.addAccountHint", "Add an email account to get started")}
         </p>
-        <Button variant="primary" onClick={() => setActiveView("settings")} style={{ marginTop: "8px" }}>
+        <Button variant="primary" onClick={() => setActiveView("settings")}>
           {t("settings.addAccount", "Add Account")}
         </Button>
       </div>
@@ -109,11 +110,9 @@ export default function InboxView() {
         {isTrashFolder && messages.length > 0 && (
           <>
             <Button
-              variant="secondary"
-              size="sm"
+              variant="danger-ghost"
               icon={<Trash2 size={14} />}
               onClick={() => setShowTrashConfirm(true)}
-              style={{ marginRight: "4px" }}
             >
               {t("messageActions.emptyTrash", "Empty Trash")}
             </Button>
@@ -143,25 +142,20 @@ export default function InboxView() {
           </>
         )}
         {!threadView && (
-          <button
-            type="button"
+          <IconButton
+            size="md"
+            label={t("batch.toggle", "Batch select")}
+            icon={<CheckSquare size={16} />}
+            pressed={batchMode}
             onClick={() => useMailStore.getState().toggleBatchMode()}
-            aria-label={t("batch.toggle", "Batch select")}
-            className="inbox-toolbar-button"
-            title={t("batch.toggle", "Batch select")}
-          >
-            <CheckSquare size={16} />
-          </button>
+          />
         )}
-        <button
-          type="button"
+        <IconButton
+          size="md"
+          label={threadView ? t("inbox.messageView") : t("inbox.threadView")}
+          icon={threadView ? <List size={16} /> : <MessageSquare size={16} />}
           onClick={toggleThreadView}
-          aria-label={threadView ? t("inbox.messageView") : t("inbox.threadView")}
-          className="inbox-toolbar-button inbox-toolbar-button--end"
-          title={threadView ? t("inbox.messageView") : t("inbox.threadView")}
-        >
-          {threadView ? <List size={16} /> : <MessageSquare size={16} />}
-        </button>
+        />
       </div>
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {/* List panel */}
@@ -246,7 +240,7 @@ function ThreadList({ threads, folderIds, folderRole, selectedThreadId, selected
   const virtualizer = useVirtualizer({
     count: threads.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 76,
+    estimateSize: () => MAIL_ROW_HEIGHT,
     getItemKey: (index) => threads[index]?.thread_id ?? index,
     measureElement: (el) => el.getBoundingClientRect().height,
     overscan: 5,
@@ -298,7 +292,7 @@ function ThreadList({ threads, folderIds, folderRole, selectedThreadId, selected
 
   if (threads.length === 0) {
     return (
-      <div className="fade-in" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--color-text-secondary)", fontSize: "var(--font-md)", gap: "8px" }}>
+      <div className="fade-in mail-empty-state">
         <Inbox size={32} strokeWidth={1.2} />
         {t("common.noThreads")}
       </div>

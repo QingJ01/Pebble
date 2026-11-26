@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MAIL_ROW_HEIGHT } from "@/components/mailRowMetrics";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTranslation } from "react-i18next";
 import { Star } from "lucide-react";
@@ -12,6 +13,7 @@ import { MessageListSkeleton } from "@/components/Skeleton";
 import PaneSplitter, { usePaneWidth } from "@/components/PaneSplitter";
 import { LOADING_INDICATOR_DELAY_MS } from "@/hooks/useDelayedVisible";
 import { useRovingList } from "@/hooks/useRovingList";
+import "@/components/mail-list.css";
 
 const EMPTY_REMOVED_IDS = new Set<string>();
 
@@ -48,7 +50,7 @@ export default function StarredView() {
   const virtualizer = useVirtualizer({
     count: visibleMessages.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 76,
+    estimateSize: () => MAIL_ROW_HEIGHT,
     measureElement: (el) => el.getBoundingClientRect().height,
     overscan: 5,
   });
@@ -91,16 +93,13 @@ export default function StarredView() {
 
   if (error && messages.length === 0) {
     return (
-      <div className="fade-in" style={{
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        height: "100%", gap: "12px", color: "var(--color-text-secondary)",
-      }}>
+      <div className="fade-in mail-empty-state">
         <Star size={40} strokeWidth={1.2} />
-        <p role="alert" style={{ color: "var(--color-danger)", fontSize: "var(--font-md)", margin: 0 }}>
+        <p role="alert" className="mail-empty-state__error">
           {t("starred.loadError", "Failed to load starred messages")}
         </p>
-        <p style={{ fontSize: "var(--font-base)", margin: 0 }}>{extractErrorMessage(error)}</p>
-        <Button onClick={() => refetch()} style={{ marginTop: "4px" }}>
+        <p className="mail-empty-state__detail">{extractErrorMessage(error)}</p>
+        <Button onClick={() => refetch()}>
           {t("common.retry", "Retry")}
         </Button>
       </div>
@@ -113,12 +112,9 @@ export default function StarredView() {
 
   if (visibleMessages.length === 0 && !hasNextPage) {
     return (
-      <div className="fade-in" style={{
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        height: "100%", gap: "12px", color: "var(--color-text-secondary)",
-      }}>
+      <div className="fade-in mail-empty-state">
         <Star size={40} strokeWidth={1.2} />
-        <p style={{ fontSize: "var(--font-md)", margin: 0 }}>{t("starred.empty", "No starred messages")}</p>
+        <p>{t("starred.empty", "No starred messages")}</p>
       </div>
     );
   }
@@ -134,20 +130,10 @@ export default function StarredView() {
         flexDirection: "column",
         overflow: "hidden",
       }}>
-        <div style={{
-          padding: "12px 16px", borderBottom: "1px solid var(--color-border)",
-          fontSize: "var(--font-md)", fontWeight: 600, color: "var(--color-text-primary)",
-          display: "flex", alignItems: "center", gap: "8px",
-        }}>
-          <Star size={16} aria-hidden="true" />
+        <div className="pane-header">
+          <Star size={16} aria-hidden="true" className="pane-header__icon" />
           {t("starred.title", "Starred Messages")}
-          <span style={{
-            fontSize: "var(--font-sm)", fontWeight: 400, color: "var(--color-text-secondary)",
-            backgroundColor: "var(--color-bg-secondary)",
-            padding: "2px 8px", borderRadius: "var(--radius-full)",
-          }}>
-            {totalCount}
-          </span>
+          <span className="pane-header__count">{totalCount}</span>
         </div>
 
         <div
@@ -194,13 +180,8 @@ export default function StarredView() {
         </div>
 
         {hasNextPage && (
-          <div style={{
-            borderTop: "1px solid var(--color-border)",
-            padding: "10px 16px",
-            display: "flex",
-            justifyContent: "center",
-          }}>
-            <Button onClick={handleLoadMore} loading={isFetchingNextPage}>
+          <div className="mail-list-load-more mail-list-load-more--bar">
+            <Button size="sm" onClick={handleLoadMore} loading={isFetchingNextPage}>
               {t("common.loadMore", "Load More")}
             </Button>
           </div>

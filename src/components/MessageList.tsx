@@ -1,4 +1,5 @@
 import { useRef, useMemo, useState, useEffect, useCallback } from "react";
+import { MAIL_ROW_HEIGHT } from "./mailRowMetrics";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
@@ -119,7 +120,7 @@ export default function MessageList({
   const virtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 76,
+    estimateSize: () => MAIL_ROW_HEIGHT,
     getItemKey: (index) => messages[index]?.id ?? index,
     measureElement: (el) => el.getBoundingClientRect().height,
     overscan: 5,
@@ -265,19 +266,7 @@ export default function MessageList({
 
   if (messages.length === 0) {
     return (
-      <div
-        className="fade-in"
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          height: "100%",
-          color: "var(--color-text-secondary)",
-          fontSize: "var(--font-md)",
-          gap: "8px",
-        }}
-      >
+      <div className="fade-in mail-empty-state">
         <Inbox size={32} strokeWidth={1.2} />
         {t("common.noMessages")}
       </div>

@@ -1,9 +1,119 @@
-/* Message / thread list rows (MessageItem, ThreadItem, MessageList). */
+/* ─── Mail lists (MessageItem, ThreadItem, MessageList, search results,
+   starred, snoozed) ────────────────────────────────────────────────────
+   Pane header height = 52 (36 search shell / 32 buttons + 2 × 8), shared by
+   the inbox search row, list headers (starred/snoozed) and the reader
+   toolbar row so their dividers line up side by side.
+   Mail rows follow .list-row: padding 8 / 12, divider, hover / pressed /
+   selected fills; fixed 72px height (MAIL_ROW_HEIGHT) for the virtualizers. */
 
+:root {
+  --pane-header-height: calc(var(--control-lg) + 2 * var(--space-2));
+  --mail-row-height: 72px;
+}
+
+.pane-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--pane-header-height);
+  box-sizing: border-box;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-md);
+  font-weight: var(--weight-semibold);
+}
+
+.pane-header__icon {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
+.pane-header__count {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-regular);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Empty / error states centred in a list or view. */
+.mail-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  height: 100%;
+  padding: var(--space-8) var(--space-5);
+  box-sizing: border-box;
+  color: var(--color-text-secondary);
+  font-size: var(--font-md);
+  text-align: center;
+}
+
+.mail-empty-state p {
+  margin: 0;
+}
+
+.mail-empty-state__detail {
+  font-size: var(--font-base);
+}
+
+.mail-empty-state__error {
+  color: var(--color-danger);
+}
+
+/* ─── Rows ───────────────────────────────────────────────────────────── */
 .message-list-row,
-.thread-list-row {
+.thread-list-row,
+.search-result-row {
+  position: relative;
+  box-sizing: border-box;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-divider);
+  background: transparent;
+  /* Fills stop at the divider so a selected row never hides its hairline. */
+  background-clip: padding-box;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  overflow: hidden;
   user-select: none;
   -webkit-user-select: none;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
+.message-list-row,
+.thread-list-row,
+.search-result-row {
+  height: var(--mail-row-height);
+}
+
+.message-list-row[aria-selected="false"]:hover,
+.message-list-row[aria-selected="false"]:focus,
+.thread-list-row[aria-selected="false"]:hover,
+.thread-list-row[aria-selected="false"]:focus,
+.search-result-row[aria-selected="false"]:hover,
+.search-result-row[aria-selected="false"]:focus {
+  background-color: var(--color-fill-hover);
+}
+
+.message-list-row:active,
+.thread-list-row:active,
+.search-result-row:active {
+  background-color: var(--color-fill-pressed);
+}
+
+.message-list-row[aria-selected="true"],
+.thread-list-row[aria-selected="true"],
+.search-result-row[aria-selected="true"] {
+  background-color: var(--color-fill-selected);
+}
+
+.app-shell--with-background .message-list-row[aria-selected="true"],
+.app-shell--with-background .thread-list-row[aria-selected="true"],
+.app-shell--with-background .search-result-row[aria-selected="true"] {
+  background-color: color-mix(in srgb, var(--color-fill-selected) 60%, transparent);
 }
 
 .mail-row__line {
@@ -15,20 +125,20 @@
 .mail-row__primary {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   flex: 1;
   min-width: 0;
-  margin-right: 8px;
+  margin-right: var(--space-2);
   overflow: hidden;
   white-space: nowrap;
   font-size: var(--font-base);
-  line-height: 18px;
-  font-weight: 400;
+  line-height: 20px;
+  font-weight: var(--weight-regular);
 }
 
 .message-list-row--unread .mail-row__primary,
 .thread-list-row--unread .mail-row__primary {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .mail-row__ellipsis {
@@ -38,9 +148,16 @@
   min-width: 0;
 }
 
+.mail-row__count {
+  margin-left: var(--space-1);
+  color: var(--color-text-tertiary);
+  font-weight: var(--weight-regular);
+  font-variant-numeric: tabular-nums;
+}
+
 .mail-row__unread-dot {
-  width: 7px;
-  height: 7px;
+  width: var(--space-2);
+  height: var(--space-2);
   border-radius: var(--radius-full);
   background: var(--color-accent);
   flex-shrink: 0;
@@ -49,72 +166,86 @@
 .mail-row__meta {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   flex-shrink: 0;
   max-width: 55%;
-  color: var(--color-text-secondary);
+  color: var(--color-text-tertiary);
 }
 
 .mail-row__date {
   font-size: var(--font-xs);
-  line-height: 18px;
+  line-height: 20px;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
+/* Labels are .chip; the dot carries the label's own colour. */
+.mail-row__meta > svg {
+  flex-shrink: 0;
+}
+
 .mail-row__label {
-  display: inline-block;
+  min-width: 0;
   max-width: 88px;
+  flex-shrink: 1;
+}
+
+.mail-row__label-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--font-xs);
-  line-height: 16px;
-  padding: 0 5px;
-  border-radius: var(--radius-sm);
-  font-weight: 500;
+}
+
+.mail-row__label-dot {
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
 }
 
 .mail-row__subject {
   font-size: var(--font-base);
   line-height: 18px;
-  font-weight: 400;
-  margin-top: 2px;
+  font-weight: var(--weight-regular);
 }
 
 .message-list-row--unread .mail-row__subject,
-.thread-list-row--unread .mail-row__subject {
-  font-weight: 600;
+.thread-list-row--unread .mail-row__subject,
+.search-result-row .mail-row__subject {
+  font-weight: var(--weight-semibold);
 }
 
 .mail-row__snippet {
   font-size: var(--font-sm);
   line-height: 17px;
-  margin-top: 1px;
   color: var(--color-text-secondary);
 }
 
-/* Selected rows sit on --color-fill-selected: lift secondary text for contrast. */
-.message-list-row[aria-selected="true"] .mail-row__snippet,
+/* Selected rows sit on --color-fill-selected: tertiary meta would drop below
+   4.5:1 there, so meta uses the secondary level. */
 .message-list-row[aria-selected="true"] .mail-row__meta,
-.thread-list-row[aria-selected="true"] .mail-row__snippet,
-.thread-list-row[aria-selected="true"] .mail-row__meta {
-  color: color-mix(in srgb, var(--color-text-primary) 78%, transparent);
+.thread-list-row[aria-selected="true"] .mail-row__meta,
+.thread-list-row[aria-selected="true"] .mail-row__count,
+.search-result-row[aria-selected="true"] .mail-row__meta {
+  color: var(--color-text-secondary);
 }
 
-/* Hover / keyboard-focus quick actions replace the date + icons. */
+.message-row-checkbox {
+  margin-right: var(--space-2);
+}
+
+/* Hover / keyboard-focus quick actions replace the date + icons: a light
+   bordered strip of 28px icon buttons on the first line. */
 .message-row-actions {
   position: absolute;
-  right: 8px;
-  top: 5px;
+  right: var(--space-2);
+  top: var(--space-1);
   display: none;
   align-items: center;
-  gap: 2px;
-  padding: 1px;
+  gap: 0;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background-color: var(--color-surface-raised);
-  box-shadow: var(--shadow-raised);
 }
 
 .message-list-row:hover .message-row-actions,
@@ -132,50 +263,145 @@
   background: transparent;
 }
 
+/* Snoozed list rows (.list-row from the primitives). */
+.snoozed-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.snoozed-row__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.snoozed-row__subject {
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-size: var(--font-base);
+  font-weight: var(--weight-medium);
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.snoozed-row__from {
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.snoozed-row__wake {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-xs);
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Toolbars ───────────────────────────────────────────────────────── */
+/* Reader action toolbar (MessageActionToolbar) — lives in .reader-toolbar. */
+.message-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--space-1);
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
 /* Batch toolbar */
 .batch-toolbar {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
   border-bottom: 1px solid var(--color-border);
-  background-color: var(--color-bg);
+  background-color: var(--color-canvas);
   flex-shrink: 0;
   user-select: none;
   -webkit-user-select: none;
 }
 
+.batch-select-control {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  margin-right: auto;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-sm);
+  line-height: 1;
+}
+
+.batch-select-control span {
+  white-space: nowrap;
+}
+
 .toolbar-separator {
   width: 1px;
-  height: 18px;
-  margin: 0 6px;
+  height: var(--space-5);
+  margin: 0 var(--space-1);
   background-color: var(--color-border);
   flex-shrink: 0;
 }
 
 .mail-list-load-more {
-  padding: 12px;
-  text-align: center;
+  display: flex;
+  justify-content: center;
+  padding: var(--space-3);
 }
 
-/* Search results (SearchResultItem) */
-.search-result-row {
-  background: transparent;
-  transition: background-color var(--dur-fast) var(--ease-out);
+.mail-list-load-more--bar {
+  border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
 }
 
-.search-result-row[aria-selected="true"] {
-  background: var(--color-fill-selected);
-}
-
-.search-result-row[aria-selected="false"]:hover,
-.search-result-row[aria-selected="false"]:focus {
-  background: var(--color-bg-hover);
-}
-
+/* Search-match highlight (SearchResultItem) */
 .search-result-row__mark {
   background: var(--color-highlight);
   color: var(--color-on-highlight);
-  border-radius: 2px;
-  padding: 0 1px;
+  border-radius: var(--radius-sm);
+}
+
+.mail-empty-state__title {
+  color: var(--color-text-primary);
+  font-size: var(--font-lg);
+  font-weight: var(--weight-medium);
+}
+
+.mail-empty-state--welcome {
+  gap: var(--space-4);
+}
+
+.mail-empty-state--muted {
+  color: var(--color-text-tertiary);
+}
+
+/* Skeleton rows (Skeleton.tsx) use the row box; bars sit on the text lines. */
+.skeleton-row {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-around;
+  cursor: default;
+}
+
+.skeleton-row__line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.skeleton-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
 }

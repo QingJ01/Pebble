@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Search, SlidersHorizontal, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useUIStore } from "@/stores/ui.store";
+import IconButton from "./ui/IconButton";
 
 interface Props {
   onSearch: (query: string) => void;
@@ -30,7 +31,7 @@ export default function SearchBar({ onSearch, onClear }: Props) {
   return (
     <form onSubmit={handleSubmit} className="search-toolbar">
       <div className="search-input-shell">
-        <Search size={15} aria-hidden="true" />
+        <Search size={16} aria-hidden="true" />
         <input
           type="text"
           value={value}
@@ -41,24 +42,19 @@ export default function SearchBar({ onSearch, onClear }: Props) {
         />
       </div>
       {value && (
-        <button
-          type="button"
+        <IconButton
+          size="md"
+          label={t("search.clearQuery", "Clear search")}
+          icon={<X size={16} />}
           onClick={handleClear}
-          aria-label={t("search.clearFilters", "Clear filters")}
-          className="search-toolbar-button search-toolbar-icon-button"
-        >
-          <X size={14} />
-        </button>
+        />
       )}
-      <button
-        type="button"
+      <IconButton
+        size="md"
+        label={t("search.advanced", "Advanced search")}
+        icon={<SlidersHorizontal size={16} />}
         onClick={() => setActiveView("search")}
-        title={t("search.advanced", "Advanced search")}
-        aria-label={t("search.advanced", "Advanced search")}
-        className="inbox-toolbar-button"
-      >
-        <SlidersHorizontal size={14} />
-      </button>
+      />
     </form>
   );
 }

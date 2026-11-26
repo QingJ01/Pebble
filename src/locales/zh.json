@@ -506,7 +506,8 @@
     "folder": "文件夹",
     "allFolders": "所有文件夹",
     "error": "搜索失败",
-    "results": "搜索结果"
+    "results": "搜索结果",
+    "clearQuery": "清除搜索"
   },
   "shortcuts": {
     "compose": "撰写",

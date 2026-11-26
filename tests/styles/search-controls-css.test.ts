@@ -11,10 +11,10 @@ describe("search controls CSS", () => {
     expect(css).toMatch(/\.search-input-shell\s*\{[^}]*transition\s*:[^;]*box-shadow/i);
     expect(css).toMatch(/\.search-input-shell:focus-within\s*\{[^}]*border-color\s*:\s*var\(--color-focus-ring\)/i);
     expect(css).toMatch(
-      /\.app-shell--with-background\s+\.search-input-shell\s*\{[^}]*color-mix\(in srgb,\s*var\(--color-bg\)\s*18%,\s*transparent\)/i,
+      /\.app-shell--with-background\s+\.search-input-shell\s*\{[^}]*color-mix\(in srgb,\s*var\(--color-canvas\)\s*18%,\s*transparent\)/i,
     );
     expect(css).toMatch(
-      /\.app-shell--with-background\s+\.search-toolbar\s*\{[^}]*color-mix\(in srgb,\s*var\(--color-bg\)\s*12%,\s*transparent\)/i,
+      /\.app-shell--with-background\s+\.search-toolbar\s*\{[^}]*color-mix\(in srgb,\s*var\(--color-canvas\)\s*12%,\s*transparent\)/i,
     );
   });
 });
