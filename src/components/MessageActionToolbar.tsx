@@ -197,7 +197,6 @@ export default function MessageActionToolbar({
         padding: narrow ? "4px 8px" : "4px 16px 4px 48px",
         position: "relative",
         minWidth: 0,
-        overflow: "hidden",
         userSelect: "none",
         WebkitUserSelect: "none",
       }}
