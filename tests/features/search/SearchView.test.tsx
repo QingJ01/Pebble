@@ -5,6 +5,14 @@ import SearchView from "../../../src/features/search/SearchView";
 import { useUIStore } from "../../../src/stores/ui.store";
 
 let searchResults: SearchHit[] = [];
+const accounts = [
+  { id: "acct-1", email: "one@example.com", display_name: "One", color: "#0ea5e9", account_label: null },
+  { id: "acct-2", email: "two@example.com", display_name: "Two", color: "#ec4899", account_label: "Work" },
+];
+
+vi.mock("../../../src/hooks/queries", () => ({
+  useAccountsQuery: () => ({ data: accounts }),
+}));
 
 vi.mock("react-i18next", () => ({
   initReactI18next: {
@@ -52,8 +60,8 @@ vi.mock("../../../src/features/search/SearchFilters", () => ({
 }));
 
 vi.mock("../../../src/features/search/SearchResultItem", () => ({
-  default: ({ hit, isSelected }: { hit: SearchHit; isSelected: boolean }) => (
-    <div role="option" aria-selected={isSelected}>
+  default: ({ hit, isSelected, account }: { hit: SearchHit; isSelected: boolean; account?: { id: string } }) => (
+    <div role="option" aria-selected={isSelected} data-account-id={account?.id ?? ""}>
       {hit.subject}
     </div>
   ),
@@ -95,5 +103,19 @@ describe("SearchView", () => {
 
     const listbox = screen.getByRole("listbox", { name: "Search results" });
     expect(within(listbox).getByRole("option", { name: "Invoice total" })).toBeTruthy();
+  });
+
+  it("badges results by account only when they come from more than one account", () => {
+    const hit = (id: string, accountId: string): SearchHit => ({
+      message_id: id, score: 1, subject: id, snippet: "", account_id: accountId,
+    });
+    searchResults = [hit("a", "acct-1"), hit("b", "acct-1")];
+    const { unmount } = render(<SearchView />);
+    expect(screen.getAllByRole("option").map((o) => o.getAttribute("data-account-id"))).toEqual(["", ""]);
+    unmount();
+
+    searchResults = [hit("a", "acct-1"), hit("b", "acct-2")];
+    render(<SearchView />);
+    expect(screen.getAllByRole("option").map((o) => o.getAttribute("data-account-id"))).toEqual(["acct-1", "acct-2"]);
   });
 });

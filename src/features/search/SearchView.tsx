@@ -16,6 +16,7 @@ import "@/components/mail-list.css";
 import Spinner from "@/components/Spinner";
 import PaneSplitter, { usePaneWidth } from "@/components/PaneSplitter";
 import { useRovingList } from "@/hooks/useRovingList";
+import { useAccountBadges } from "@/hooks/useAccountBadges";
 import { LOADING_INDICATOR_DELAY_MS } from "@/hooks/useDelayedVisible";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
 
@@ -70,6 +71,8 @@ export default function SearchView() {
   });
 
   const resultIds = useMemo(() => results.map((hit) => hit.message_id), [results]);
+  const resultAccountIds = useMemo(() => results.map((hit) => hit.account_id), [results]);
+  const badgeAccounts = useAccountBadges(resultAccountIds);
   const virtualItems = virtualizer.getVirtualItems();
   const roving = useRovingList({
     ids: resultIds,
@@ -244,6 +247,7 @@ export default function SearchView() {
                       query={query}
                       tabIndex={roving.tabIndexFor(hit.message_id)}
                       onRowFocus={roving.setActiveId}
+                      account={hit.account_id ? badgeAccounts?.get(hit.account_id) : undefined}
                     />
                   </div>
                 );

@@ -15,7 +15,7 @@ import { eventToKeyString, useShortcutStore } from "@/stores/shortcut.store";
 import { toastError, useToastStore } from "@/stores/toast.store";
 import { useConfirmStore } from "@/stores/confirm.store";
 import { roleForSelection } from "@/lib/folderAggregation";
-import { assignAccountColors, getAccountColor, getAccountLabel } from "@/lib/accountColors";
+import { useAccountBadges } from "@/hooks/useAccountBadges";
 import MessageItem from "./MessageItem";
 import MoveToButton from "./MoveToButton";
 import IconButton from "./ui/IconButton";
@@ -48,6 +48,11 @@ interface Props {
   onLoadMore?: () => void;
   hasNextPage?: boolean;
   isFetchingNextPage?: boolean;
+  /**
+   * The list is meant to span several accounts (the unfiltered unified inbox),
+   * so rows carry an account badge even when one page holds a single account.
+   */
+  spansAccounts?: boolean;
 }
 
 type FlagAction = "markRead" | "markUnread" | "star" | "unstar";
@@ -66,6 +71,7 @@ export default function MessageList({
   onLoadMore,
   hasNextPage = false,
   isFetchingNextPage = false,
+  spansAccounts = false,
 }: Props) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -82,12 +88,8 @@ export default function MessageList({
   const activeAccountId = useMailStore((s) => s.activeAccountId);
   const activeFolderId = useMailStore((s) => s.activeFolderId);
   const { data: accounts = [] } = useAccountsQuery();
-  const accountsById = useMemo(
-    () => new Map(accounts.map((account) => [account.id, account])),
-    [accounts],
-  );
-  const accountColorsById = useMemo(() => assignAccountColors(accounts), [accounts]);
-  const showAccountColorMarkers = !activeAccountId && accounts.length > 1;
+  const rowAccountIds = useMemo(() => messages.map((m) => m.account_id), [messages]);
+  const badgeAccounts = useAccountBadges(rowAccountIds, spansAccounts && !activeAccountId);
   const folderAccountIds = useMemo(
     () => activeAccountId ? [activeAccountId] : accounts.map((account) => account.id),
     [accounts, activeAccountId],
@@ -386,7 +388,6 @@ export default function MessageList({
         >
           {virtualItems.map((virtualItem) => {
             const message = messages[virtualItem.index];
-            const account = accountsById.get(message.account_id);
             return (
               <div
                 key={virtualItem.key}
@@ -419,12 +420,7 @@ export default function MessageList({
                   folderRole={activeFolderRole}
                   tabIndex={message.id === effectiveActiveId ? 0 : -1}
                   onRowFocus={setActiveId}
-                  accountColor={
-                    showAccountColorMarkers
-                      ? accountColorsById.get(message.account_id) ?? getAccountColor(account, message.account_id)
-                      : undefined
-                  }
-                  accountLabel={showAccountColorMarkers ? getAccountLabel(account, message.account_id) : undefined}
+                  account={badgeAccounts?.get(message.account_id)}
                 />
               </div>
             );

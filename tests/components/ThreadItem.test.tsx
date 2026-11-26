@@ -48,6 +48,31 @@ describe("ThreadItem", () => {
     useToastStore.setState({ toasts: [] });
   });
 
+  it("shows an account badge before the date when given an account", () => {
+    render(
+      <ThreadItem
+        thread={makeThread({ account_id: "personal" })}
+        isSelected={false}
+        onClick={vi.fn()}
+        folderIds={["folder-1"]}
+        account={{ id: "personal", email: "me@example.com", display_name: "Me", color: "#8b5cf6", account_label: null }}
+      />,
+    );
+
+    const badge = screen.getByRole("img", { name: "me@example.com" });
+    expect(badge.getAttribute("title")).toBe("me@example.com");
+    expect(badge.textContent).toBe("M");
+    expect(badge.nextElementSibling?.className).toContain("mail-row__date");
+  });
+
+  it("shows no account badge by default", () => {
+    const { container } = render(
+      <ThreadItem thread={makeThread()} isSelected={false} onClick={vi.fn()} folderIds={["folder-1"]} />,
+    );
+
+    expect(container.querySelector(".account-badge")).toBeNull();
+  });
+
   it("marks unread rows with a row class", () => {
     render(
       <ThreadItem

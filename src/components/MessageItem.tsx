@@ -19,6 +19,8 @@ import { patchMessagesCache, restoreMessagesCache, snapshotMessagesCache } from 
 import IconButton from "./ui/IconButton";
 import ContextMenu, { useContextMenuState, type ContextMenuItem } from "./ContextMenu";
 import { formatListDate } from "@/lib/formatDate";
+import type { BadgeAccount } from "@/hooks/useAccountBadges";
+import MailRowAccountBadge from "./MailRowAccountBadge";
 import "./mail-list.css";
 
 interface Props {
@@ -35,8 +37,8 @@ interface Props {
   onToggleBatchSelect?: (messageId: string) => void;
   spamFolderId?: string;
   folderRole?: Folder["role"];
-  accountColor?: string;
-  accountLabel?: string;
+  /** Account to badge the row with (lists spanning several accounts only). */
+  account?: BadgeAccount;
   /** Roving tabindex: 0 for the list's active row, -1 for the others. */
   tabIndex?: number;
   /** The row received focus (lists use it to move their roving tab stop). */
@@ -55,7 +57,7 @@ const MAX_INLINE_LABELS = 2;
 
 function MessageItem({
   message, labels = [], isSelected, onClick, onOpen, onToggleStar, batchMode, batchSelected,
-  onToggleBatchSelect, spamFolderId, folderRole, accountColor, accountLabel, tabIndex = 0, onRowFocus,
+  onToggleBatchSelect, spamFolderId, folderRole, account, tabIndex = 0, onRowFocus,
 }: Props) {
   const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
@@ -223,21 +225,6 @@ function MessageItem({
         }
       }}
     >
-      {accountColor && (
-        <span
-          aria-label={accountLabel}
-          title={accountLabel}
-          style={{
-            position: "absolute",
-            left: 0,
-            top: "10px",
-            bottom: "10px",
-            width: "3px",
-            borderRadius: "0 3px 3px 0",
-            backgroundColor: accountColor,
-          }}
-        />
-      )}
       <div className="mail-row__line">
         {batchMode && (
           <input
@@ -286,6 +273,7 @@ function MessageItem({
           {message.has_attachments && (
             <Paperclip size={13} aria-hidden="true" />
           )}
+          {account && <MailRowAccountBadge account={account} />}
           <span className="mail-row__date">
             {formatListDate(message.date, i18n?.language)}
           </span>

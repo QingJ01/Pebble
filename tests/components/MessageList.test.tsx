@@ -101,13 +101,12 @@ vi.mock("../../src/components/MessageItem", async () => {
   default: (props: {
     message: MessageSummary;
     folderRole?: string | null;
-    accountColor?: string;
-    accountLabel?: string;
+    account?: { id: string; email: string; color: string | null };
     tabIndex?: number;
     isSelected?: boolean;
     onClick: (event?: unknown) => void;
   }) => {
-    const { message, folderRole, accountColor, accountLabel } = props;
+    const { message, folderRole, account } = props;
     mocks.itemProps[message.id] = props as unknown as Record<string, unknown>;
     const [initialMessageId] = useState(message.id);
     return (
@@ -120,8 +119,8 @@ vi.mock("../../src/components/MessageItem", async () => {
         data-testid={`message-${message.id}`}
         data-initial-message-id={initialMessageId}
         data-folder-role={folderRole ?? ""}
-        data-account-color={accountColor ?? ""}
-        data-account-label={accountLabel ?? ""}
+        data-account-color={account?.color ?? ""}
+        data-account-id={account?.id ?? ""}
       >
         {message.subject}
       </div>
@@ -299,13 +298,15 @@ describe("MessageList", () => {
     expect(listbox.className).toContain("message-list-scroll");
   });
 
-  it("passes account color metadata to message items", () => {
-    const message = { ...makeMessage("m-1"), account_id: "account-2" };
+  it("badges rows by account when the list holds mail from several accounts", () => {
     useMailStore.setState({ activeAccountId: null });
 
     render(
       <MessageList
-        messages={[message]}
+        messages={[
+          { ...makeMessage("m-1"), account_id: "account-2" },
+          { ...makeMessage("m-2"), account_id: "account-1" },
+        ]}
         selectedMessageId={null}
         onSelectMessage={vi.fn()}
         loading={false}
@@ -313,29 +314,59 @@ describe("MessageList", () => {
     );
 
     const row = screen.getByTestId("message-m-1");
-
+    expect(row.getAttribute("data-account-id")).toBe("account-2");
     expect(row.getAttribute("data-account-color")).toBe("#3b82f6");
-    expect(row.getAttribute("data-account-label")).toBe("Two <two@example.com>");
   });
 
-  it("does not pass account color metadata when a single account is selected", () => {
-    const message = { ...makeMessage("m-1"), account_id: "account-1" };
+  it("badges a one-account page when the list spans accounts (unfiltered unified inbox)", () => {
+    useMailStore.setState({ activeAccountId: null });
 
     render(
       <MessageList
-        messages={[message]}
+        messages={[{ ...makeMessage("m-1"), account_id: "account-2" }]}
+        selectedMessageId={null}
+        onSelectMessage={vi.fn()}
+        loading={false}
+        spansAccounts
+      />,
+    );
+
+    expect(screen.getByTestId("message-m-1").getAttribute("data-account-id")).toBe("account-2");
+  });
+
+  it("does not badge rows when the list holds a single account", () => {
+    useMailStore.setState({ activeAccountId: null });
+
+    render(
+      <MessageList
+        messages={[
+          { ...makeMessage("m-1"), account_id: "account-1" },
+          { ...makeMessage("m-2"), account_id: "account-1" },
+        ]}
         selectedMessageId={null}
         onSelectMessage={vi.fn()}
         loading={false}
       />,
     );
 
-    const row = screen.getByTestId("message-m-1");
-
-    expect(row.getAttribute("data-account-color")).toBe("");
+    expect(screen.getByTestId("message-m-1").getAttribute("data-account-id")).toBe("");
   });
 
-  it("does not pass account color metadata when there is only one account", () => {
+  it("does not badge rows when a single account is selected, even if told the list spans accounts", () => {
+    render(
+      <MessageList
+        messages={[{ ...makeMessage("m-1"), account_id: "account-1" }]}
+        selectedMessageId={null}
+        onSelectMessage={vi.fn()}
+        loading={false}
+        spansAccounts
+      />,
+    );
+
+    expect(screen.getByTestId("message-m-1").getAttribute("data-account-id")).toBe("");
+  });
+
+  it("does not badge rows when there is only one account", () => {
     mocks.accounts = [
       {
         id: "account-1",
@@ -344,40 +375,21 @@ describe("MessageList", () => {
         color: "#22c55e",
       },
     ];
-
-    render(
-      <MessageList
-        messages={[makeMessage("m-1")]}
-        selectedMessageId={null}
-        onSelectMessage={vi.fn()}
-        loading={false}
-      />,
-    );
-
-    const row = screen.getByTestId("message-m-1");
-
-    expect(row.getAttribute("data-account-color")).toBe("");
-  });
-
-  it("derives a stable account color when the account has no saved color", () => {
-    const message = { ...makeMessage("m-1"), account_id: "missing-account" };
     useMailStore.setState({ activeAccountId: null });
 
     render(
       <MessageList
-        messages={[message]}
+        messages={[makeMessage("m-1"), { ...makeMessage("m-2"), account_id: "missing" }]}
         selectedMessageId={null}
         onSelectMessage={vi.fn()}
         loading={false}
       />,
     );
 
-    const color = screen.getByTestId("message-m-1").getAttribute("data-account-color");
-
-    expect(color).toMatch(/^#[0-9a-f]{6}$/);
+    expect(screen.getByTestId("message-m-1").getAttribute("data-account-id")).toBe("");
   });
 
-  it("uses different default colors for known accounts without saved colors", () => {
+  it("gives accounts without a saved colour distinct badge colours", () => {
     useMailStore.setState({ activeAccountId: null });
 
     render(

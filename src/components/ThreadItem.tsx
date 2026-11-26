@@ -17,6 +17,8 @@ import {
 import ContextMenu, { useContextMenuState, type ContextMenuItem } from "./ContextMenu";
 import { MoveToDialog, type MoveMessage } from "./MoveToButton";
 import { formatListDate } from "@/lib/formatDate";
+import type { BadgeAccount } from "@/hooks/useAccountBadges";
+import MailRowAccountBadge from "./MailRowAccountBadge";
 import "./mail-list.css";
 
 interface Props {
@@ -28,9 +30,11 @@ interface Props {
   /** Roving tabindex: 0 for the list's active row, -1 for the others. */
   tabIndex?: number;
   onRowFocus?: (thread: ThreadSummary) => void;
+  /** Account to badge the row with (lists spanning several accounts only). */
+  account?: BadgeAccount;
 }
 
-function ThreadItem({ thread, isSelected, onClick, folderIds, folderRole, tabIndex = 0, onRowFocus }: Props) {
+function ThreadItem({ thread, isSelected, onClick, folderIds, folderRole, tabIndex = 0, onRowFocus, account }: Props) {
   const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
   const menu = useContextMenuState();
@@ -222,6 +226,7 @@ function ThreadItem({ thread, isSelected, onClick, folderIds, folderRole, tabInd
         <div className="mail-row__meta">
           {thread.is_starred && <Star size={13} fill="var(--color-warning)" color="var(--color-warning)" aria-hidden="true" />}
           {thread.has_attachments && <Paperclip size={13} aria-hidden="true" />}
+          {account && <MailRowAccountBadge account={account} />}
           <span className="mail-row__date">
             {formatListDate(thread.last_date, i18n?.language)}
           </span>
