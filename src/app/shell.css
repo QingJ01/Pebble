@@ -1,0 +1,196 @@
+/* App-shell chrome: title bar, sidebar, status bar, FAB, banners, splitter.
+   Uses the design tokens from src/styles/index.css; hover/active are CSS only. */
+
+/* ─── Title bar window controls ─── */
+.titlebar-btn {
+  height: 36px;
+  width: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.titlebar-btn:hover { background: var(--color-bg-hover); }
+.titlebar-btn:active { background: var(--color-bg-active); }
+.titlebar-btn--close:hover,
+.titlebar-btn--close:active { background: var(--color-danger-solid); color: var(--color-on-danger); }
+
+/* ─── Sidebar ─── */
+.app-sidebar {
+  user-select: none;
+  -webkit-user-select: none;
+}
+.sidebar-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-base);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.sidebar-btn--indent { padding-left: 26px; }
+.sidebar-btn--rail { justify-content: center; padding: 7px; }
+.sidebar-btn:hover:not(:disabled) { background: var(--color-sidebar-hover); }
+.sidebar-btn:active:not(:disabled) { background: var(--color-bg-active); }
+.sidebar-btn.is-active,
+.sidebar-btn.is-active:hover { background: var(--color-sidebar-active); }
+.sidebar-btn:disabled { opacity: .45; cursor: default; }
+.sidebar-btn__icon { display: inline-flex; flex-shrink: 0; }
+.sidebar-btn__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-btn__badge {
+  min-width: 18px;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  color: var(--color-accent-text);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.sidebar-btn__dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+}
+.sidebar-group-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-height: 28px;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  letter-spacing: .3px;
+  text-align: left;
+  cursor: pointer;
+}
+.sidebar-group-header:hover { background: var(--color-sidebar-hover); }
+.sidebar-group-header:active { background: var(--color-bg-active); }
+
+/* ─── Status bar ─── */
+.status-bar {
+  height: 30px;
+  flex-shrink: 0;
+  padding: 0 4px 0 12px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.status-bar__spin { animation: spin 1s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .status-bar__spin { animation: none; }
+}
+
+/* ─── Compose FAB ─── */
+.compose-fab {
+  position: fixed;
+  right: 24px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--color-accent-strong);
+  color: var(--color-on-accent);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .2);
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+}
+.compose-fab:hover {
+  background: var(--color-accent-strong-hover);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .28);
+  transform: scale(1.06);
+}
+.compose-fab:active {
+  background: var(--color-accent-strong-active);
+  transform: scale(.97);
+}
+@media (prefers-reduced-motion: reduce) {
+  .compose-fab, .compose-fab:hover, .compose-fab:active { transform: none; }
+}
+
+/* ─── Offline banner (fixed slot above the content row) ─── */
+.offline-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 6px 16px;
+  background: var(--color-danger-bg);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-danger) 24%, transparent);
+  color: var(--color-danger);
+  font-size: var(--font-sm);
+}
+
+/* ─── View loading fallback (shown only after a short delay) ─── */
+.view-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 100%;
+  color: var(--color-text-secondary);
+  font-size: var(--font-base);
+}
+
+/* ─── List / reader splitter ─── */
+.pane-splitter {
+  flex: 0 0 auto;
+  width: 6px;
+  margin: 0 -3px;
+  position: relative;
+  z-index: 2;
+  cursor: col-resize;
+  background: transparent;
+  border: none;
+  padding: 0;
+  touch-action: none;
+}
+.pane-splitter::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: transparent;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.pane-splitter:hover::after,
+.pane-splitter:focus-visible::after,
+.pane-splitter[data-dragging="true"]::after { width: 2px; background: var(--color-accent); }
+
+/* Clickable list rows outside the main message list */
+.list-row-hover { transition: background-color var(--dur-fast) var(--ease-out); }
+.list-row-hover:hover { background-color: var(--color-bg-hover); }
+.list-row-hover:active { background-color: var(--color-bg-active); }

@@ -1,5 +1,11 @@
 {
   "mailArchive": {
+    "jobFailed": "本地邮件库任务失败",
+    "importFinished": "导入完成：已导入 {{imported}} 封，失败 {{failed}} 封",
+    "exportFinished": "导出完成：已导出 {{imported}} 封，失败 {{failed}} 封",
+    "progressCounts": "正在处理…已处理 {{processed}} 封 · 成功 {{imported}} · 重复 {{duplicates}} · 失败 {{failed}}",
+    "keepsRunning": "你可以离开此页面，任务会在后台继续，完成后会通知你。",
+    "deletePermanently": "永久删除",
     "title": "本地邮件归档",
     "localOnly": "导入的邮件仅保存在此设备，与服务器邮箱分开存储。阅读、标记、移动、删除均不会连接邮件服务商。不支持将归档邮件移动到远程邮箱。删除原账户后归档仍会保留。",
     "searchScope": "此处仅搜索所选本地归档文件夹，包括发件人、收件人、主题与纯文本正文。常规邮箱搜索不包含归档邮件。",

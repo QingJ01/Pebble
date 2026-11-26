@@ -1,19 +1,56 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
+import i18next from "i18next";
 import { useAccountsQuery, useFoldersQuery } from "@/hooks/queries";
 import { useMailStore } from "@/stores/mail.store";
 import { useConfirmStore } from "@/stores/confirm.store";
 import * as api from "@/lib/mail-archive-api";
+import { extractErrorMessage } from "@/lib/extractErrorMessage";
+import { useToastStore } from "@/stores/toast.store";
+import Button from "@/components/ui/Button";
+import { ensureArchiveProgressListener, useArchiveJobStore, type ArchiveReportKind } from "./archiveJob.store";
 import "./mail-archive.css";
 
 const ROOT = ["mail-archive"] as const;
 function errorText(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === "object" && error && "message" in error) return String(error.message);
-  return String(error);
+  return extractErrorMessage(error);
 }
+
+/**
+ * Run one archive action. State is kept in useArchiveJobStore (not component
+ * state) so a running import/export survives leaving the page.
+ */
+async function performArchiveAction(action: () => Promise<void>) {
+  const store = useArchiveJobStore.getState();
+  if (store.busy) return;
+  store.set({ busy: true, error: "" });
+  try {
+    await action();
+  } catch (cause) {
+    useArchiveJobStore.getState().set({ error: errorText(cause) });
+    if (!useArchiveJobStore.getState().viewMounted) {
+      useToastStore.getState().addToast({ type: "error", message: i18next.t("mailArchive.jobFailed", "Local mail library task failed"), detail: errorText(cause) });
+    }
+  } finally {
+    useArchiveJobStore.getState().set({ busy: false, jobId: null });
+  }
+}
+
+function reportFinished(kind: ArchiveReportKind, report: ArchiveReport) {
+  const state = useArchiveJobStore.getState();
+  state.set({ report, reportKind: kind });
+  if (!state.viewMounted && kind !== "preview") {
+    useToastStore.getState().addToast({
+      type: report.failed > 0 ? "warning" : "success",
+      message: i18next.t(kind === "export" ? "mailArchive.exportFinished" : "mailArchive.importFinished", {
+        processed: report.processed, imported: report.imported, failed: report.failed,
+      }),
+    });
+  }
+}
+
+type ArchiveReport = api.ArchiveReport;
 
 export default function MailArchiveView() {
   const { t } = useTranslation();
@@ -35,15 +72,18 @@ export default function MailArchiveView() {
   const [selected, setSelected] = useState<string[]>([]);
   const [messageId, setMessageId] = useState("");
   const [selection, setSelection] = useState<api.ArchiveSelection | null>(null);
-  const [preview, setPreview] = useState<api.ArchiveReport | null>(null);
-  const [report, setReport] = useState<api.ArchiveReport | null>(null);
-  const [reportKind, setReportKind] = useState<"preview" | "import" | "export">("import");
+  const preview = useArchiveJobStore((s) => s.preview);
+  const report = useArchiveJobStore((s) => s.report);
+  const reportKind = useArchiveJobStore((s) => s.reportKind);
+  const error = useArchiveJobStore((s) => s.error);
+  const busy = useArchiveJobStore((s) => s.busy);
+  const progress = useArchiveJobStore((s) => s.progress);
+  const jobId = useArchiveJobStore((s) => s.jobId);
+  const setJob = useArchiveJobStore((s) => s.set);
+  const setPreview = (value: api.ArchiveReport | null) => setJob({ preview: value });
+  const setReport = (value: api.ArchiveReport | null) => setJob({ report: value });
+  const setError = (value: string) => setJob({ error: value });
   const [format, setFormat] = useState<api.ArchiveExportFormat>("eml");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState<api.ArchiveProgress | null>(null);
-  const job = useRef<string | null>(null);
-  const locked = useRef(false);
   const messages = useQuery({ queryKey: [...ROOT, archiveId, folderId, search, offset], queryFn: () => api.listArchiveMessages(archiveId, folderId, search, offset), enabled: !!archiveId && !!folderId });
   const detail = useQuery({ queryKey: [...ROOT, archiveId, "message", messageId], queryFn: () => api.readArchiveMessage(archiveId, messageId), enabled: !!messageId && !!archiveId });
 
@@ -56,34 +96,32 @@ export default function MailArchiveView() {
     const timer = setTimeout(() => { setSearch(query); setOffset(0); setSelected([]); setMessageId(""); }, 250);
     return () => clearTimeout(timer);
   }, [query]);
+  // Jobs keep running when this page unmounts (switching tabs or views no
+  // longer silently aborts an import); completion is reported by toast.
   useEffect(() => {
-    const registration = listen<api.ArchiveProgress>("mail-archive:progress", ({ payload }) => { if (payload.job_id === job.current) setProgress(payload); });
-    return () => { void registration.then((unlisten) => unlisten()).catch(() => {}); if (job.current) void api.cancelArchiveJob(job.current).catch(() => {}); };
-  }, []);
+    ensureArchiveProgressListener();
+    setJob({ viewMounted: true });
+    return () => setJob({ viewMounted: false });
+  }, [setJob]);
 
-  async function perform(action: () => Promise<void>) {
-    if (locked.current) return;
-    locked.current = true; setBusy(true); setError("");
-    try { await action(); } catch (cause) { setError(errorText(cause)); }
-    finally { locked.current = false; setBusy(false); job.current = null; }
-  }
+  const perform = performArchiveAction;
   function clearBrowser() { setSelected([]); setMessageId(""); setOffset(0); }
   async function refresh() { await client.invalidateQueries({ queryKey: ROOT }); }
   async function runImport(isPreview: boolean) {
     if (!selection || !archiveId || !folderId) return;
     await perform(async () => {
       if (!isPreview && !await useConfirmStore.getState().confirm({ title: t("mailArchive.importTitle"), message: t("mailArchive.confirmImport") })) return;
-      const id = crypto.randomUUID(); job.current = id; setProgress(null);
+      const id = crypto.randomUUID(); setJob({ jobId: id, progress: null });
       const result = await api.importMailArchive(id, selection.id, archiveId, folderId, isPreview);
-      setReport(result); setReportKind(isPreview ? "preview" : "import");
+      reportFinished(isPreview ? "preview" : "import", result);
       if (isPreview) setPreview(result); else { setPreview(null); await refresh(); }
     });
   }
   async function runExport(source: api.ArchiveExportSource) {
     await perform(async () => {
-      const id = crypto.randomUUID(); job.current = id; setProgress(null);
+      const id = crypto.randomUUID(); setJob({ jobId: id, progress: null });
       const result = await api.exportMailArchive(id, source, format);
-      if (result) { setReport(result); setReportKind("export"); }
+      if (result) reportFinished("export", result);
     });
   }
   async function edit(folder: string, read: boolean, starred: boolean) {
@@ -125,7 +163,13 @@ export default function MailArchiveView() {
         <button disabled={!preview || !preview.imported || preview.cancelled} onClick={() => void runImport(false)}>{t("mailArchive.importAction")}</button></div>
     </fieldset>
     {(error || archives.error || folders.error || messages.error || detail.error) && <p role="alert">{error || errorText(archives.error || folders.error || messages.error || detail.error)}</p>}
-    {busy && <div role="status"><p>{t("mailArchive.working")}{progress && ` ${progress.processed}`}</p>{job.current && <button onClick={() => void api.cancelArchiveJob(job.current!).catch((cause) => setError(errorText(cause)))}>{t("mailArchive.cancel")}</button>}</div>}
+    {busy && <div role="status" className="mail-archive-progress">
+      <p>{progress
+        ? t("mailArchive.progressCounts", { processed: progress.processed, imported: progress.imported, duplicates: progress.duplicates, failed: progress.failed })
+        : t("mailArchive.working")}</p>
+      {jobId && <p className="mail-archive-note">{t("mailArchive.keepsRunning", "You can leave this page; the task keeps running and you'll be notified when it finishes.")}</p>}
+      {jobId && <Button size="sm" onClick={() => void api.cancelArchiveJob(jobId).catch((cause) => setError(errorText(cause)))}>{t("mailArchive.cancel")}</Button>}
+    </div>}
     {report && <section role="status" aria-label={t("mailArchive.summary")}>
       <h3>{t(`mailArchive.result.${reportKind}`)}</h3>
       <p>{t("mailArchive.resultCounts", { processed: report.processed, imported: report.imported, duplicates: report.duplicates, failed: report.failed })}</p>
@@ -155,7 +199,7 @@ export default function MailArchiveView() {
         <p>{new Date(detail.data.metadata.date * 1000).toLocaleString()}</p>
         <div className="mail-archive-row"><button onClick={() => void edit(detail.data!.folder_id, !detail.data!.is_read, detail.data!.is_starred)}>{t(detail.data.is_read ? "mailArchive.markUnread" : "mailArchive.markRead")}</button><button onClick={() => void edit(detail.data!.folder_id, detail.data!.is_read, !detail.data!.is_starred)}>{t(detail.data.is_starred ? "mailArchive.unstar" : "mailArchive.star")}</button>
           <label>{t("mailArchive.move")}<select value={detail.data.folder_id} onChange={(e) => void edit(e.target.value, detail.data!.is_read, detail.data!.is_starred)}>{folders.data?.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label>
-          <button onClick={() => void perform(async () => { if (await useConfirmStore.getState().confirm({ title: t("mailArchive.delete"), message: t("mailArchive.deleteWarning"), destructive: true })) { await api.deleteArchiveMessage(archiveId, detail.data!.id); clearBrowser(); await refresh(); } })}>{t("mailArchive.delete")}</button>
+          <button onClick={() => void perform(async () => { if (await useConfirmStore.getState().confirm({ title: t("mailArchive.delete"), message: t("mailArchive.deleteWarning"), confirmLabel: t("mailArchive.deletePermanently", "Delete permanently"), destructive: true })) { await api.deleteArchiveMessage(archiveId, detail.data!.id); clearBrowser(); await refresh(); } })}>{t("mailArchive.delete")}</button>
         </div>
         <p className="mail-archive-note">{t("mailArchive.safePreview")}</p>
         <pre>{detail.data.metadata.body_text || t("mailArchive.noPlainBody")}</pre>

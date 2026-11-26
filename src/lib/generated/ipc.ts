@@ -84,6 +84,32 @@ export type Message = { id: string, account_id: string, remote_id: string, messa
 
 export type MessageSummary = { id: string, account_id: string, remote_id: string, message_id_header: string | null, in_reply_to: string | null, references_header: string | null, thread_id: string | null, subject: string, snippet: string, from_address: string, from_name: string, to_list: Array<EmailAddress>, cc_list: Array<EmailAddress>, bcc_list: Array<EmailAddress>, has_attachments: boolean, is_read: boolean, is_starred: boolean, is_draft: boolean, date: number, remote_version: string | null, is_deleted: boolean, deleted_at: number | null, created_at: number, updated_at: number, };
 
+export type NotificationLabels = { 
+/**
+ * Title of a new-mail notification.
+ */
+new_mail_title: string, 
+/**
+ * Body used when a message has neither sender nor subject.
+ */
+new_message_fallback: string, 
+/**
+ * Summary body for a burst of mail; `{n}` = count, `{latest}` = newest message.
+ */
+new_mail_summary: string, 
+/**
+ * Label of the "open" action button.
+ */
+open_action: string, 
+/**
+ * Title of a snooze-reminder notification.
+ */
+snoozed_title: string, test_title: string, test_body: string, 
+/**
+ * Tray tooltip while unread new mail is waiting.
+ */
+tray_attention_tooltip: string, };
+
 export type NotificationStatus = { enabled: boolean, attention_active: boolean, platform: string, app_id: string | null, };
 
 export type PendingMailOp = { id: string, account_id: string, message_id: string, op_type: string, status: "pending" | "in_progress" | "failed" | "done", attempts: number, last_error: string | null, created_at: number, updated_at: number, next_retry_at: number | null, };

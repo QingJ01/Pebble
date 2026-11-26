@@ -2,11 +2,11 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ResumeDraftButton from "../../src/components/ResumeDraftButton";
 
-const mocks = vi.hoisted(() => ({ getDraft: vi.fn(), openDraft: vi.fn(), addToast: vi.fn() }));
+const mocks = vi.hoisted(() => ({ getDraft: vi.fn(), openDraft: vi.fn(), addToast: vi.fn(), toastError: vi.fn() }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (_key: string, fallback: string) => fallback }) }));
 vi.mock("../../src/lib/api", () => ({ getDraft: mocks.getDraft }));
 vi.mock("../../src/stores/compose.store", () => ({ useComposeStore: { getState: () => ({ openDraft: mocks.openDraft }) } }));
-vi.mock("../../src/stores/toast.store", () => ({ useToastStore: { getState: () => ({ addToast: mocks.addToast }) } }));
+vi.mock("../../src/stores/toast.store", () => ({ useToastStore: { getState: () => ({ addToast: mocks.addToast }) }, toastError: mocks.toastError }));
 
 describe("ResumeDraftButton", () => {
   beforeEach(() => { vi.resetAllMocks(); });
@@ -30,7 +30,7 @@ describe("ResumeDraftButton", () => {
     mocks.getDraft.mockRejectedValue(new Error("Missing attachment"));
     render(<ResumeDraftButton messageId="draft" />);
     fireEvent.click(screen.getByRole("button", { name: "Resume draft" }));
-    await waitFor(() => expect(mocks.addToast).toHaveBeenCalled());
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(expect.any(Error), "compose.resumeDraftFailed"));
     expect(mocks.openDraft).not.toHaveBeenCalled();
   });
   it("explains why inline drafts cannot be edited without opening a destructive compose session", async () => {

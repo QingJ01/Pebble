@@ -210,9 +210,22 @@ html, body, #root {
   backdrop-filter: blur(18px);
 }
 
+/* The main scroll area repaints on every scroll, so it gets no backdrop blur:
+   a near-opaque fill keeps text legible without the per-frame blur cost. */
 .app-shell--with-background .app-main-scroll {
-  background-color: color-mix(in srgb, var(--color-main-bg) 68%, transparent);
-  backdrop-filter: blur(16px) saturate(1.02);
+  background-color: color-mix(in srgb, var(--color-main-bg) 92%, transparent);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .app-shell--with-background > [data-tauri-drag-region],
+  .app-shell--with-background .app-shell-content > aside,
+  .app-shell--with-background > footer {
+    backdrop-filter: none;
+  }
+  .app-shell--with-background > [data-tauri-drag-region] { background-color: var(--color-titlebar-bg) !important; }
+  .app-shell--with-background .app-shell-content > aside { background-color: var(--color-sidebar-bg) !important; }
+  .app-shell--with-background > footer { background-color: var(--color-statusbar-bg) !important; }
+  .app-shell--with-background .app-main-scroll { background-color: var(--color-main-bg); }
 }
 
 .app-shell--with-background .settings-panel-scroll {
@@ -576,7 +589,7 @@ textarea:focus-visible {
 .compose-mode-button.is-active {
   border-color: color-mix(in srgb, var(--color-accent) 24%, transparent);
   background: color-mix(in srgb, var(--color-accent) 12%, transparent);
-  color: var(--color-accent);
+  color: var(--color-accent-text);
 }
 
 .compose-mode-tabs {

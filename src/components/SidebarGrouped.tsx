@@ -19,6 +19,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import SidebarButton from "./SidebarButton";
 import { useUIStore } from "../stores/ui.store";
 import { isComposeDirty, useComposeStore } from "../stores/compose.store";
 import { useMailStore } from "../stores/mail.store";
@@ -62,11 +63,10 @@ function readCollapsedAccountIds(): Set<string> {
   }
 }
 
-export default function SidebarGrouped() {
+export default function SidebarGrouped({ collapsed: sidebarCollapsed }: { collapsed: boolean }) {
   const { t } = useTranslation();
   const activeView = useUIStore((s) => s.activeView);
   const setActiveView = useUIStore((s) => s.setActiveView);
-  const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
   const activeFolderId = useMailStore((s) => s.activeFolderId);
   const activeAccountId = useMailStore((s) => s.activeAccountId);
   const setActiveAccountId = useMailStore((s) => s.setActiveAccountId);
@@ -137,43 +137,10 @@ export default function SidebarGrouped() {
 
   const isOverviewActive = activeView === "inbox" && !activeAccountId;
 
-  const buttonBase: React.CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-    borderRadius: "6px",
-    padding: sidebarCollapsed ? "7px" : "6px 10px",
-    width: "100%",
-    border: "none",
-    cursor: "pointer",
-    fontSize: "13px",
-    textAlign: "left",
-    justifyContent: sidebarCollapsed ? "center" : "flex-start",
-  };
-  const childButtonBase: React.CSSProperties = sidebarCollapsed
-    ? buttonBase
-    : { ...buttonBase, paddingLeft: "26px" };
-
-  const groupHeaderBase: React.CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    gap: "5px",
-    borderRadius: "6px",
-    padding: "7px 8px",
-    marginTop: "4px",
-    width: "100%",
-    border: "none",
-    backgroundColor: "transparent",
-    cursor: "pointer",
-    fontSize: "11px",
-    fontWeight: 600,
-    color: "var(--color-text-secondary)",
-    letterSpacing: "0.3px",
-    textAlign: "left",
-  };
 
   return (
     <aside
+      className="app-sidebar"
       aria-label={t("sidebar.navigation", "Sidebar")}
       onContextMenu={handleSidebarContextMenu}
       style={{
@@ -181,7 +148,6 @@ export default function SidebarGrouped() {
         flexShrink: 0,
         backgroundColor: "var(--color-sidebar-bg)",
         borderRight: "1px solid var(--color-border)",
-        transition: "width 150ms ease",
         display: "flex",
         flexDirection: "column",
         height: "100%",
@@ -195,7 +161,6 @@ export default function SidebarGrouped() {
           label={t("search.title", "Search")}
           isActive={activeView === "search"}
           collapsed={sidebarCollapsed}
-          style={buttonBase}
           onClick={() => safeSetActiveView("search")}
         />
       </nav>
@@ -204,7 +169,7 @@ export default function SidebarGrouped() {
       {!sidebarCollapsed && (
         <div style={{
           padding: "12px 10px 4px 10px",
-          fontSize: "11px",
+          fontSize: "var(--font-xs)",
           fontWeight: 600,
           color: "var(--color-text-secondary)",
           textTransform: "uppercase",
@@ -235,7 +200,6 @@ export default function SidebarGrouped() {
               badge={showUnread ? unreadCountForFolder(allAccountsFolderId("inbox"), folders, unreadCounts) : undefined}
               isActive={isOverviewActive}
               collapsed={sidebarCollapsed}
-              style={buttonBase}
               onClick={() => handleFolderSelect(null, allAccountsFolderId("inbox"))}
             />
             <SidebarButton
@@ -243,7 +207,6 @@ export default function SidebarGrouped() {
               label={t("sidebar.starred", "Starred")}
               isActive={activeView === "starred"}
               collapsed={sidebarCollapsed}
-              style={buttonBase}
               onClick={() => safeSetActiveView("starred")}
             />
             {accounts.map((account) => {
@@ -266,13 +229,11 @@ export default function SidebarGrouped() {
                       type="button"
                       aria-expanded={!groupCollapsed}
                       title={accountName}
-                      style={groupHeaderBase}
+                      className="sidebar-group-header"
                       onClick={() => toggleAccountGroup(account.id)}
-                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--color-sidebar-hover)"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
                     >
-                      {groupCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                      {groupCollapsed ? <ChevronRight size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+                      <span className="sidebar-btn__label">
                         {accountName}
                       </span>
                     </button>
@@ -289,13 +250,13 @@ export default function SidebarGrouped() {
                             badge={showUnread ? unreadCountForFolder(folder.id, accountFolders, unreadCounts) : undefined}
                             isActive={activeView === "inbox" && activeAccountId === account.id && activeFolderId === folder.id}
                             collapsed={sidebarCollapsed}
-                            style={childButtonBase}
+                            indent
                             onClick={() => handleFolderSelect(account.id, folder.id)}
                           />
                         );
                       })
                     : !sidebarCollapsed && foldersFetched && (
-                        <div style={{ padding: "4px 8px", fontSize: "12px", color: "var(--color-text-secondary)" }}>
+                        <div style={{ padding: "4px 8px", fontSize: "var(--font-sm)", color: "var(--color-text-secondary)" }}>
                           {t("sidebar.noFolders", "No folders yet")}
                         </div>
                       ))}
@@ -330,7 +291,6 @@ export default function SidebarGrouped() {
           label={t("sidebar.contacts", "Contacts")}
           isActive={activeView === "contacts"}
           collapsed={sidebarCollapsed}
-          style={buttonBase}
           onClick={() => safeSetActiveView("contacts")}
         />
         <SidebarButton
@@ -338,7 +298,6 @@ export default function SidebarGrouped() {
           label={t("sidebar.snoozed", "Snoozed")}
           isActive={activeView === "snoozed"}
           collapsed={sidebarCollapsed}
-          style={buttonBase}
           onClick={() => safeSetActiveView("snoozed")}
         />
         <SidebarButton
@@ -346,7 +305,6 @@ export default function SidebarGrouped() {
           label={t("sidebar.kanban", "Kanban")}
           isActive={activeView === "kanban"}
           collapsed={sidebarCollapsed}
-          style={buttonBase}
           onClick={() => safeSetActiveView("kanban")}
         />
         <SidebarButton
@@ -354,72 +312,10 @@ export default function SidebarGrouped() {
           label={t("sidebar.settings", "Settings")}
           isActive={activeView === "settings"}
           collapsed={sidebarCollapsed}
-          style={buttonBase}
           onClick={() => safeSetActiveView("settings")}
         />
       </nav>
       {folderManagementOverlay}
     </aside>
-  );
-}
-
-// Reusable sidebar button to avoid repetitive hover logic
-function SidebarButton({
-  icon, label, badge, isActive, collapsed, style, disabled, onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  badge?: number;
-  isActive: boolean;
-  collapsed: boolean;
-  style: React.CSSProperties;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={collapsed ? label : undefined}
-      aria-current={isActive ? "page" : undefined}
-      title={collapsed ? label : undefined}
-      disabled={disabled}
-      style={{
-        ...style,
-        backgroundColor: isActive
-          ? "var(--color-sidebar-active)"
-          : style.backgroundColor ?? "transparent",
-        color: style.color ?? "var(--color-text-primary)",
-        opacity: disabled ? 0.45 : 1,
-        cursor: disabled ? "default" : "pointer",
-        transition: "background-color 0.15s ease, opacity 0.15s ease",
-      }}
-      onMouseEnter={(e) => {
-        if (!isActive && !style.backgroundColor)
-          e.currentTarget.style.backgroundColor = "var(--color-sidebar-hover)";
-      }}
-      onMouseLeave={(e) => {
-        if (!isActive && !style.backgroundColor)
-          e.currentTarget.style.backgroundColor = "transparent";
-      }}
-    >
-      {icon}
-      {!collapsed && (
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-          {label}
-        </span>
-      )}
-      {!collapsed && badge != null && badge > 0 && (
-        <span style={{
-          fontSize: "11px",
-          fontWeight: 600,
-          color: "var(--color-accent)",
-          minWidth: "18px",
-          textAlign: "right",
-        }}>
-          {badge}
-        </span>
-      )}
-    </button>
   );
 }

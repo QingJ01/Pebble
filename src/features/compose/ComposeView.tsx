@@ -1,5 +1,8 @@
 import { senderIdentityLabel } from "@/lib/accountIdentity";
 import { useState, useEffect, useRef } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import Button from "@/components/ui/Button";
+import IconButton from "@/components/ui/IconButton";
 import { EditorContent } from "@tiptap/react";
 import {
   ArrowLeft, Send, X, AlertCircle, Clock,
@@ -37,6 +40,11 @@ import ScheduleTimeInput from "./ScheduleTimeInput";
 import { useSendControlsStore } from "@/stores/send-controls.store";
 import "./send-controls.css";
 import { threadMessagesQueryKey } from "@/hooks/queries/useThreadMessagesQuery";
+
+function modEnterLabel() {
+  const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent);
+  return isMac ? "⌘↩" : "Ctrl+Enter";
+}
 
 export default function ComposeView() {
   const composeMode = useComposeStore((s) => s.composeMode);
@@ -348,12 +356,6 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
   }
 
   useEffect(() => {
-    if (!sendError) return;
-    const timer = setTimeout(() => setSendError(null), 5000);
-    return () => clearTimeout(timer);
-  }, [sendError]);
-
-  useEffect(() => {
     useSendControlsStore.setState({ composeUndoId: pendingSend?.id ?? null });
     return () => useSendControlsStore.setState({ composeUndoId: null });
   }, [pendingSend?.id]);
@@ -637,29 +639,68 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
           ? t("compose.forward", "Forward")
           : t("compose.newMessage", "New Message");
   const hasToRecipient = to.some(Boolean) || isValidEmailAddress(toInputValue);
-  const sendDisabled = sendInProgress
-    || sendMutation.isPending
-    || pendingAttachmentStagingCount > 0
-    || !fromAccountId
-    || !hasToRecipient;
-  const headerActionStyle: React.CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    gap: "6px",
-    padding: "7px 16px",
-    backgroundColor: sendInProgress || sendMutation.isPending ? "var(--color-text-secondary)" : "var(--color-accent, #2563eb)",
-    color: "#fff",
-    border: "none",
-    borderRadius: "6px",
-    cursor: sendDisabled ? "default" : "pointer",
-    opacity: hasToRecipient ? 1 : 0.5,
-    fontSize: "13px",
-    fontWeight: 500,
-  };
+  const isSending = sendInProgress || sendMutation.isPending;
+  const sendDisabledReason = isSending
+    ? null
+    : !fromAccountId
+      ? t("compose.sendDisabledNoAccount", "Add an account to send mail")
+      : pendingAttachmentStagingCount > 0
+        ? t("compose.sendDisabledUploading", "Attachments are still uploading")
+        : !hasToRecipient
+          ? t("compose.sendDisabledNoRecipient", "Add a recipient")
+          : null;
+  const sendDisabled = isSending || sendDisabledReason !== null;
+
+  // ─── Initial focus: "To" for a new message, the body for reply/forward ──────
+  const initialFocusDoneRef = useRef(false);
+  useEffect(() => {
+    if (initialFocusDoneRef.current || !editorReady) return;
+    initialFocusDoneRef.current = true;
+    const frame = requestAnimationFrame(() => {
+      // Respect focus the user already placed inside the form, and any open dialog.
+      const active = document.activeElement;
+      if (active && active !== document.body && active.closest("[data-compose-root], [role=dialog], [role=alertdialog]")) return;
+      const wantsRecipient = !composeMode || composeMode === "new";
+      if (wantsRecipient && to.filter(Boolean).length === 0) {
+        document.getElementById("compose-to-input")?.focus();
+        return;
+      }
+      if (wantsRecipient && !subjectRef.current.trim()) {
+        document.getElementById("compose-subject")?.focus();
+        return;
+      }
+      if (editorMode === "rich" && editor) {
+        editor.commands.focus?.("start");
+      } else {
+        textareaRef.current?.focus();
+        textareaRef.current?.setSelectionRange(0, 0);
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+    // Runs once, as soon as the editor is ready.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorReady]);
+
+  function handleComposeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+    if (event.nativeEvent.isComposing) return;
+    // Mod-Enter sends from anywhere in the form, including inside the editor
+    // (capture phase so ProseMirror's own Mod-Enter binding never sees it).
+    event.preventDefault();
+    event.stopPropagation();
+    if (showComposeLeaveConfirm) return;
+    if (sendDisabled) {
+      if (sendDisabledReason) setSendError(sendDisabledReason);
+      return;
+    }
+    void handleSend();
+  }
 
   return (
     <div
+      data-compose-root=""
       aria-busy={sendInProgress}
+      onKeyDownCapture={handleComposeKeyDown}
       style={{
         display: "flex",
         flexDirection: "column",
@@ -668,13 +709,13 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
     >
       {pendingSend && <div className="send-controls-banner" role="status">
         <span>{secondsLeft > 0 ? t("sendControls.countdown", { count: secondsLeft }) : t("sendControls.undoWaiting")}</span>
-        <button disabled={undoBusy} onClick={() => void handleUndo()}>{t("sendControls.undo")}</button>
+        <Button size="sm" variant="primary" loading={undoBusy} onClick={() => void handleUndo()}>{t("sendControls.undo")}</Button>
         <small>{t("sendControls.undoHint")}</small>
         {sendError && <p role="alert">{sendError}</p>}
       </div>}
       {queueReplyUnknown && <div role="alert" className="send-controls-banner">
         {t("sendControls.queueReplyUnknown")}
-        <button onClick={() => void resolveQueueReply()}>{t("sendControls.refresh")}</button>
+        <Button size="sm" onClick={() => void resolveQueueReply()}>{t("sendControls.refresh")}</Button>
       </div>}
       <div inert={sendInProgress} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
       {/* Header */}
@@ -687,50 +728,58 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={closeCompose}
-            style={composeStyles.backBtn}
-            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--color-bg-hover, rgba(0,0,0,0.04))"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
+            icon={<ArrowLeft size={14} />}
           >
-            <ArrowLeft size={16} />
             {t("compose.back", "Back")}
-          </button>
-          <span style={{ fontWeight: 600, fontSize: "15px", color: "var(--color-text-primary)" }}>
+          </Button>
+          <h2 style={{ margin: 0, fontWeight: "var(--font-weight-title)", fontSize: "var(--font-md)", color: "var(--color-text-primary)" }}>
             {title}
-          </span>
+          </h2>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <button
-            type="button"
+          {sendDisabledReason && (
+            <span id="compose-send-disabled-reason" className="compose-send-hint">
+              {sendDisabledReason}
+            </span>
+          )}
+          <Button
+            variant="secondary"
             aria-expanded={showSchedule}
             onClick={() => setShowSchedule((value) => !value)}
             disabled={sendDisabled}
-            style={headerActionStyle}
+            aria-describedby={sendDisabledReason ? "compose-send-disabled-reason" : undefined}
+            title={sendDisabledReason ?? undefined}
+            icon={<Clock size={14} />}
           >
-            <Clock size={14} />
             {t("sendControls.schedule")}
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="primary"
             onClick={() => void handleSend()}
-            disabled={sendDisabled}
-            style={headerActionStyle}
+            disabled={sendDisabled && !isSending}
+            loading={isSending}
+            aria-describedby={sendDisabledReason ? "compose-send-disabled-reason" : undefined}
+            aria-keyshortcuts="Meta+Enter Control+Enter"
+            title={sendDisabledReason ?? t("compose.sendShortcutHint", "Send ({{keys}})", { keys: modEnterLabel() })}
+            icon={<Send size={14} />}
           >
-            <Send size={14} />
-            {sendInProgress || sendMutation.isPending ? t("compose.sending", "Sending...") : t("compose.send", "Send")}
-          </button>
+            {isSending ? t("compose.sending", "Sending...") : t("compose.send", "Send")}
+          </Button>
         </div>
       </div>
 
       {showSchedule && (
         <div className="send-controls-options">
           <ScheduleTimeInput value={scheduleValue} onChange={setScheduleValue} />
-          <button disabled={sendDisabled || scheduledInstant(scheduleValue) === null} onClick={() => {
+          <Button size="sm" variant="primary" disabled={sendDisabled || scheduledInstant(scheduleValue) === null} onClick={() => {
             const instant = scheduledInstant(scheduleValue);
             if (instant === null) { setSendError(t("sendControls.invalidTime")); return; }
             void handleSend(instant);
-          }}>{t("sendControls.schedule")}</button>
+          }}>{t("sendControls.schedule")}</Button>
           <small>{t("sendControls.policy")}</small>
         </div>
       )}
@@ -739,21 +788,20 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
       {sendError && (
         <div role="alert" aria-live="assertive" style={{
           display: "flex", alignItems: "center", gap: "8px",
-          padding: "8px 20px",
-          backgroundColor: "var(--color-error-bg, #fef2f2)",
-          color: "var(--color-error, #dc2626)",
-          fontSize: "13px",
+          padding: "4px 12px 4px 20px",
+          backgroundColor: "var(--color-danger-bg)",
+          color: "var(--color-danger)",
+          fontSize: "var(--font-base)",
           borderBottom: "1px solid var(--color-border)",
         }}>
-          <AlertCircle size={14} />
+          <AlertCircle size={14} aria-hidden="true" />
           <span style={{ flex: 1 }}>{sendError}</span>
-          <button
+          <IconButton
+            label={t("common.dismiss", "Dismiss")}
+            icon={<X size={14} />}
             onClick={() => setSendError(null)}
-            aria-label={t("common.close", "Close")}
-            style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", display: "flex" }}
-          >
-            <X size={14} />
-          </button>
+            style={{ color: "inherit" }}
+          />
         </div>
       )}
 
@@ -806,11 +854,11 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
               accountId={fromAccountId}
               inputValue={toInputValue}
               onInputValueChange={setToInputValue}
-              placeholder="recipient@example.com"
+              placeholder={t("compose.toPlaceholder", "Name or email address")}
             />
             <div style={{ display: "flex", gap: "4px", padding: "0 8px", flexShrink: 0 }}>
-              {!showCc && <button onClick={() => setShowCc(true)} style={composeStyles.toggleBtn}>{t("compose.cc", "Cc")}</button>}
-              {!showBcc && <button onClick={() => setShowBcc(true)} style={composeStyles.toggleBtn}>{t("compose.bcc", "Bcc")}</button>}
+              {!showCc && <Button variant="ghost" size="sm" onClick={() => setShowCc(true)}>{t("compose.cc", "Cc")}</Button>}
+              {!showBcc && <Button variant="ghost" size="sm" onClick={() => setShowBcc(true)}>{t("compose.bcc", "Bcc")}</Button>}
             </div>
           </div>
 
@@ -916,20 +964,21 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
                   </button>
                   {showTemplates && (
                     <div className="scroll-region compose-template-scroll" style={{
-                      position: "absolute", top: "100%", left: 0, zIndex: 100,
-                      backgroundColor: "var(--color-bg)", border: "1px solid var(--color-border)",
-                      borderRadius: "8px", boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                      position: "absolute", top: "100%", left: 0, zIndex: "var(--z-menu)",
+                      backgroundColor: "var(--color-popover-bg)", border: "1px solid var(--color-border)",
+                      borderRadius: "var(--radius-lg)", boxShadow: "var(--shadow-popover)",
                       minWidth: "220px", maxHeight: "300px", overflowY: "auto",
                     }}>
                       <div style={{ padding: "8px", borderBottom: "1px solid var(--color-border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span id="compose-templates-label" style={{ fontSize: "12px", fontWeight: 600 }}>{t("compose.templates", "Templates")}</span>
-                        <button
-                          type="button"
+                        <span id="compose-templates-label" style={{ fontSize: "var(--font-sm)", fontWeight: 600 }}>{t("compose.templates", "Templates")}</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onClick={() => { setShowSaveTemplate(true); setShowTemplates(false); }}
-                          style={{ fontSize: "11px", border: "none", background: "none", cursor: "pointer", color: "var(--color-accent)" }}
+                          style={{ color: "var(--color-accent-text)" }}
                         >
                           {t("compose.saveAsTemplate", "Save current")}
-                        </button>
+                        </Button>
                       </div>
                       {templates.length === 0 ? (
                         <div style={{ padding: "16px", textAlign: "center", fontSize: "12px", color: "var(--color-text-secondary)" }}>
@@ -972,26 +1021,29 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
                                   <div style={{ fontWeight: 500 }}>{tpl.name}</div>
                                   <div style={{ color: "var(--color-text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tpl.subject}</div>
                                 </div>
-                                <button
-                                  type="button"
+                                <IconButton
+                                  variant="danger"
+                                  onKeyDown={(e) => e.stopPropagation()}
                                   onClick={async (e) => {
                                     e.stopPropagation();
                                     const confirmed = await useConfirmStore.getState().confirm({
                                       title: t("compose.deleteTemplate", "Delete template"),
-                                      message: t("compose.deleteTemplate", "Delete template") + ` "${tpl.name}"?`,
+                                      message: t("compose.deleteTemplateConfirm", "Delete template \"{{name}}\"?", { name: tpl.name }),
+                                      confirmLabel: t("common.delete", "Delete"),
                                       destructive: true,
                                     });
                                     if (confirmed) {
-                                      await deleteTemplate(tpl.id);
+                                      try {
+                                        await deleteTemplate(tpl.id);
+                                      } catch (err) {
+                                        toastError(err);
+                                      }
                                       void refreshTemplates();
                                     }
                                   }}
-                                  aria-label={t("compose.deleteTemplate", "Delete template")}
-                                  title={t("compose.deleteTemplate", "Delete template")}
-                                  style={{ border: "none", background: "none", cursor: "pointer", color: "var(--color-text-secondary)", padding: "2px" }}
-                                >
-                                  <Trash2 size={12} />
-                                </button>
+                                  label={t("compose.deleteTemplateNamed", "Delete template {{name}}", { name: tpl.name })}
+                                  icon={<Trash2 size={14} />}
+                                />
                               </li>
                             );
                           })}
@@ -1015,6 +1067,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
                   <button
                     type="button"
                     onClick={() => setHtmlPreview((v) => !v)}
+                    aria-pressed={htmlPreview}
                     title={htmlPreview ? t("compose.mode.hidePreview", "Hide preview") : t("compose.mode.showPreview", "Show preview")}
                     className={`compose-toolbar-text-button${htmlPreview ? " is-active" : ""}`}
                   >
@@ -1039,23 +1092,19 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
               {attachments.map((att, i) => (
                 <div key={i} style={{
                   display: "flex", alignItems: "center", gap: "4px",
-                  padding: "4px 8px", borderRadius: "4px",
-                  backgroundColor: "var(--color-bg-hover)", fontSize: "12px",
+                  padding: "2px 2px 2px 8px", borderRadius: "var(--radius-sm)",
+                  backgroundColor: "var(--color-bg-hover)", fontSize: "var(--font-sm)",
                 }}>
                   <FileText size={12} />
                   <span style={{ maxWidth: "150px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{att.name}</span>
                   <span style={{ color: "var(--color-text-secondary)", fontSize: "11px" }}>
                     {att.size < 1024 * 1024 ? `${(att.size / 1024).toFixed(0)} KB` : `${(att.size / (1024 * 1024)).toFixed(1)} MB`}
                   </span>
-                  <button
-                    type="button"
+                  <IconButton
                     onClick={() => removeAttachment(att)}
-                    aria-label={t("compose.removeAttachment", "Remove attachment {{name}}", { name: att.name })}
-                    title={t("compose.removeAttachment", "Remove attachment {{name}}", { name: att.name })}
-                    style={{ border: "none", background: "none", cursor: "pointer", padding: "0 2px", color: "var(--color-text-secondary)" }}
-                  >
-                    <X size={12} />
-                  </button>
+                    label={t("compose.removeAttachment", "Remove attachment {{name}}", { name: att.name })}
+                    icon={<X size={12} />}
+                  />
                 </div>
               ))}
             </div>
@@ -1069,8 +1118,8 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
                 placeholder={t("compose.templateName", "Template name")}
                 autoFocus
                 style={{
-                  flex: 1, padding: "6px 8px", fontSize: "12px",
-                  border: "1px solid var(--color-border)", borderRadius: "4px",
+                  flex: 1, padding: "6px 8px", fontSize: "var(--font-sm)",
+                  border: "1px solid var(--color-border)", borderRadius: "var(--radius-md)",
                   backgroundColor: "var(--color-bg)", color: "var(--color-text-primary)",
                 }}
                 onKeyDown={(e) => {
@@ -1080,31 +1129,20 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
                   if (e.key === "Escape") setShowSaveTemplate(false);
                 }}
               />
-              <button
-                type="button"
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={!templateName.trim()}
                 onClick={() => {
                   if (!templateName.trim()) return;
                   void handleSaveTemplate();
                 }}
-                style={{
-                  padding: "5px 12px", fontSize: "12px", border: "none",
-                  borderRadius: "4px", backgroundColor: "var(--color-accent)",
-                  color: "#fff", cursor: "pointer",
-                }}
               >
                 {t("common.save")}
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowSaveTemplate(false)}
-                style={{
-                  padding: "5px 8px", fontSize: "12px", border: "1px solid var(--color-border)",
-                  borderRadius: "4px", backgroundColor: "transparent",
-                  color: "var(--color-text-secondary)", cursor: "pointer",
-                }}
-              >
+              </Button>
+              <Button size="sm" onClick={() => setShowSaveTemplate(false)}>
                 {t("common.cancel")}
-              </button>
+              </Button>
             </div>
           )}
 

@@ -1,4 +1,18 @@
 {
+  "notifications": {
+    "newMailTitle": "Pebble - New mail",
+    "newMessageFallback": "New message",
+    "newMailSummary": "{{n}} new messages — latest: {{latest}}",
+    "open": "Open",
+    "snoozedTitle": "Pebble - Snoozed message",
+    "testTitle": "Pebble - Test notification",
+    "testBody": "Desktop notifications are working.",
+    "trayAttention": "Pebble - New mail"
+  },
+  "layout": {
+    "resizeList": "Resize list",
+    "resizeListHint": "Drag to resize; double-click to reset"
+  },
   "syncRange": {
     "label": "Sync range",
     "all": "All mail",
@@ -13,6 +27,7 @@
     "loadError": "Could not load the sync range. Close and reopen this dialog to retry."
   },
   "common": {
+    "dismiss": "Dismiss",
     "loading": "Loading...",
     "noMessages": "No messages",
     "noThreads": "No threads",
@@ -101,6 +116,14 @@
     "threadList": "Threads"
   },
   "compose": {
+    "sendDisabledNoAccount": "Add an account to send mail",
+    "sendDisabledUploading": "Attachments are still uploading",
+    "sendDisabledNoRecipient": "Add a recipient",
+    "sendShortcutHint": "Send ({{keys}})",
+    "toPlaceholder": "Name or email address",
+    "deleteTemplateConfirm": "Delete template “{{name}}”?",
+    "deleteTemplateNamed": "Delete template {{name}}",
+    "resumeDraftFailed": "Couldn't open this draft. Try again.",
     "newMessage": "New Message",
     "reply": "Reply",
     "forward": "Forward",
@@ -396,6 +419,12 @@
     "reportIssue": "Report an Issue"
   },
   "status": {
+    "stopSyncFailed": "Couldn't stop syncing. Try again.",
+    "syncingInitial": "Initial sync…",
+    "syncingWithCount_one": "{{status}} {{count}} new message",
+    "syncingWithCount_other": "{{status}} {{count}} new messages",
+    "dismissError": "Dismiss error",
+    "notificationsOn": "Notifications on",
     "ready": "Ready",
     "syncing": "Syncing...",
     "syncError": "Sync error",
@@ -444,6 +473,9 @@
     "allFolders": "All folders"
   },
   "shortcuts": {
+    "compose": "Compose",
+    "composeSend": "Send message (in compose)",
+    "fixedBinding": "This shortcut can't be changed",
     "title": "Keyboard Shortcuts",
     "general": "General",
     "navigation": "Navigation",

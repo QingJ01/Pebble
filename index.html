@@ -34,18 +34,16 @@
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
         user-select: none;
         overflow: hidden;
-        transition: opacity .5s ease-out;
+        transition: opacity .2s cubic-bezier(.4, 0, 1, 1);
       }
+      /* Follow the app theme applied below (falls back to the OS scheme). */
+      html[data-theme="light"] #splash { background: #f8f7f5; }
+      html[data-theme="light"] #splash .app-name { color: #333; }
+      html[data-theme="light"] #splash .loading-bar { background: rgba(0,0,0,.08); }
       @media (prefers-color-scheme: light) {
-        #splash {
-          background: #f5f5f5;
-        }
-        #splash .app-name {
-          color: #333;
-        }
-        #splash .loading-bar {
-          background: rgba(0,0,0,.08);
-        }
+        html:not([data-theme]) #splash { background: #f8f7f5; }
+        html:not([data-theme]) #splash .app-name { color: #333; }
+        html:not([data-theme]) #splash .loading-bar { background: rgba(0,0,0,.08); }
       }
       #splash.fade-out {
         opacity: 0;
@@ -102,6 +100,15 @@
       @keyframes splash-slide {
         0%   { transform: translateX(-100%); }
         100% { transform: translateX(350%); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #splash { transition: none; }
+        #splash .pebble-outline { animation: none; stroke-dashoffset: 0; }
+        #splash .pebble-fill { animation: none; fill-opacity: 1; }
+        #splash .app-name,
+        #splash .loading-bar { animation: none; opacity: 1; }
+        #splash .loading-bar::after { animation: none; transform: translateX(75%); }
+        #splash svg ellipse { animation: none !important; opacity: 1 !important; }
       }
     </style>
     <script>

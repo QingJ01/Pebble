@@ -1,3 +1,5 @@
+import { useDelayedVisible } from "@/hooks/useDelayedVisible";
+
 interface SkeletonProps {
   width?: string;
   height?: string;
@@ -43,7 +45,9 @@ export function MessageSkeleton() {
 }
 
 /** Multiple message skeletons stacked. */
-export function MessageListSkeleton({ count = 6 }: { count?: number }) {
+export function MessageListSkeleton({ count = 6, delayMs = 0 }: { count?: number; delayMs?: number }) {
+  const visible = useDelayedVisible(delayMs);
+  if (!visible) return <div role="status" aria-busy="true" />;
   return (
     <div role="status" aria-live="polite" className="fade-in">
       {Array.from({ length: count }, (_, i) => (

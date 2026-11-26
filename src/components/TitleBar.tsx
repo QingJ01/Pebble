@@ -45,8 +45,9 @@ export default function TitleBar() {
       {!isMac && (
         <div className="flex items-center">
           <button
+            type="button"
             onClick={() => appWindow.minimize()}
-            className="h-9 w-11 inline-flex items-center justify-center hover:bg-black/5"
+            className="titlebar-btn"
             aria-label={t("titleBar.minimize")}
           >
             <svg width="10" height="1" viewBox="0 0 10 1">
@@ -54,8 +55,9 @@ export default function TitleBar() {
             </svg>
           </button>
           <button
+            type="button"
             onClick={() => appWindow.toggleMaximize()}
-            className="h-9 w-11 inline-flex items-center justify-center hover:bg-black/5"
+            className="titlebar-btn"
             aria-label={t("titleBar.maximize")}
           >
             <svg width="10" height="10" viewBox="0 0 10 10">
@@ -71,8 +73,9 @@ export default function TitleBar() {
             </svg>
           </button>
           <button
+            type="button"
             onClick={() => void handleCloseWindow()}
-            className="h-9 w-11 inline-flex items-center justify-center hover:bg-red-500 hover:text-white"
+            className="titlebar-btn titlebar-btn--close"
             aria-label={t("titleBar.close")}
           >
             <svg width="10" height="10" viewBox="0 0 10 10">

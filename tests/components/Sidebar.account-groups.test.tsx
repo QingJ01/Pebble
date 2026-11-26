@@ -230,6 +230,38 @@ describe("Sidebar account groups", () => {
     });
   });
 
+  it("collapses to the icon rail automatically in a narrow window", () => {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query.includes("max-width"),
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })) as unknown as typeof window.matchMedia;
+    try {
+      render(<Sidebar />);
+      expect(useUIStore.getState().sidebarCollapsed).toBe(false);
+      // Rail mode: labels move into accessible names/tooltips, headers disappear.
+      expect(screen.queryByRole("button", { name: "user@example.com" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Settings" }).getAttribute("title")).toBe("Settings");
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+
+  it("adds a tooltip only to truncated folder names", () => {
+    render(<Sidebar />);
+    const button = screen.getByRole("button", { name: "Settings" });
+    const label = button.querySelector(".sidebar-btn__label") as HTMLElement;
+    Object.defineProperty(label, "scrollWidth", { configurable: true, value: 300 });
+    Object.defineProperty(label, "clientWidth", { configurable: true, value: 120 });
+    fireEvent.mouseEnter(button);
+    expect(button.getAttribute("title")).toBe("Settings");
+    Object.defineProperty(label, "scrollWidth", { configurable: true, value: 100 });
+    fireEvent.mouseEnter(button);
+    expect(button.getAttribute("title")).toBeNull();
+  });
+
   it("collapses an account group via its header and persists the state", async () => {
     render(<Sidebar />);
 

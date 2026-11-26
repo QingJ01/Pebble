@@ -1,4 +1,18 @@
 {
+  "notifications": {
+    "newMailTitle": "Pebble - 新邮件",
+    "newMessageFallback": "新邮件",
+    "newMailSummary": "{{n}} 封新邮件，最新：{{latest}}",
+    "open": "打开",
+    "snoozedTitle": "Pebble - 稍后提醒",
+    "testTitle": "Pebble - 测试通知",
+    "testBody": "桌面通知工作正常。",
+    "trayAttention": "Pebble - 有新邮件"
+  },
+  "layout": {
+    "resizeList": "调整列表宽度",
+    "resizeListHint": "拖动调整宽度，双击恢复默认"
+  },
   "syncRange": {
     "label": "同步时间范围",
     "all": "全部邮件",
@@ -13,6 +27,7 @@
     "loadError": "无法加载同步范围，请关闭并重新打开此窗口重试。"
   },
   "common": {
+    "dismiss": "关闭",
     "loading": "加载中...",
     "noMessages": "暂无邮件",
     "noThreads": "暂无会话",
@@ -101,6 +116,14 @@
     "threadList": "会话列表"
   },
   "compose": {
+    "sendDisabledNoAccount": "请先添加账户再发送",
+    "sendDisabledUploading": "附件上传中",
+    "sendDisabledNoRecipient": "请填写收件人",
+    "sendShortcutHint": "发送（{{keys}}）",
+    "toPlaceholder": "输入姓名或邮箱地址",
+    "deleteTemplateConfirm": "删除模板「{{name}}」？",
+    "deleteTemplateNamed": "删除模板「{{name}}」",
+    "resumeDraftFailed": "无法打开这封草稿，请重试。",
     "newMessage": "新邮件",
     "reply": "回复",
     "forward": "转发",
@@ -396,6 +419,12 @@
     "reportIssue": "反馈问题"
   },
   "status": {
+    "stopSyncFailed": "无法停止同步，请重试。",
+    "syncingInitial": "首次同步中…",
+    "syncingWithCount_one": "{{status}}（已收到 {{count}} 封）",
+    "syncingWithCount_other": "{{status}}（已收到 {{count}} 封）",
+    "dismissError": "关闭错误提示",
+    "notificationsOn": "桌面通知已开启",
     "ready": "就绪",
     "syncing": "同步中...",
     "syncError": "同步错误",
@@ -444,6 +473,9 @@
     "allFolders": "所有文件夹"
   },
   "shortcuts": {
+    "compose": "撰写",
+    "composeSend": "发送邮件（撰写时）",
+    "fixedBinding": "此快捷键不可修改",
     "title": "键盘快捷键",
     "general": "通用",
     "navigation": "导航",

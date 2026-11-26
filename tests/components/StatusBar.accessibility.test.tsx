@@ -129,9 +129,20 @@ describe("StatusBar accessibility", () => {
     render(<StatusBar />);
 
     const alert = screen.getByRole("alert");
-    expect(alert.textContent).toContain("IMAP connection failed");
+    // Localized, actionable text; the raw backend message stays on hover.
+    expect(alert.textContent).not.toContain("IMAP connection failed");
+    expect(alert.getAttribute("title")).toContain("IMAP connection failed");
     expect(alert.getAttribute("aria-live")).toBe("assertive");
     expect(alert.getAttribute("aria-atomic")).toBe("true");
+  });
+
+  it("keeps a mail error until it is dismissed", () => {
+    mocks.uiState.lastMailError = "Network error: connection reset";
+
+    render(<StatusBar />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss error" }));
+    expect(mocks.uiState.setLastMailError).toHaveBeenCalledWith(null);
   });
 
   it("announces realtime connection health politely", () => {

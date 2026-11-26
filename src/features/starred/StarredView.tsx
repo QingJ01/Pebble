@@ -7,6 +7,10 @@ import { useMailStore } from "@/stores/mail.store";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import MessageItem from "@/components/MessageItem";
 import MessageDetail from "@/components/MessageDetail";
+import Button from "@/components/ui/Button";
+import { MessageListSkeleton } from "@/components/Skeleton";
+import PaneSplitter, { usePaneWidth } from "@/components/PaneSplitter";
+import { LOADING_INDICATOR_DELAY_MS } from "@/hooks/useDelayedVisible";
 
 const EMPTY_REMOVED_IDS = new Set<string>();
 
@@ -39,6 +43,7 @@ export default function StarredView() {
   }, [messages, scopedRemovedIds]);
 
   const parentRef = useRef<HTMLDivElement>(null);
+  const listPane = usePaneWidth("pebble-starred-list-width", 340, 260, 560);
   const virtualizer = useVirtualizer({
     count: visibleMessages.length,
     getScrollElement: () => parentRef.current,
@@ -79,36 +84,19 @@ export default function StarredView() {
         height: "100%", gap: "12px", color: "var(--color-text-secondary)",
       }}>
         <Star size={40} strokeWidth={1.2} />
-        <p style={{ color: "var(--color-error, #e53e3e)", fontSize: "14px", margin: 0 }}>
+        <p role="alert" style={{ color: "var(--color-danger)", fontSize: "var(--font-md)", margin: 0 }}>
           {t("starred.loadError", "Failed to load starred messages")}
         </p>
-        <p style={{ fontSize: "13px", margin: 0 }}>{extractErrorMessage(error)}</p>
-        <button
-          onClick={() => refetch()}
-          style={{
-            marginTop: "4px",
-            padding: "6px 16px",
-            borderRadius: "4px",
-            border: "1px solid var(--color-border)",
-            backgroundColor: "transparent",
-            color: "var(--color-accent)",
-            fontSize: "13px",
-            cursor: "pointer",
-          }}
-        >
+        <p style={{ fontSize: "var(--font-base)", margin: 0 }}>{extractErrorMessage(error)}</p>
+        <Button onClick={() => refetch()} style={{ marginTop: "4px" }}>
           {t("common.retry", "Retry")}
-        </button>
+        </Button>
       </div>
     );
   }
 
   if (loading) {
-    return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--color-text-secondary)" }}>
-        <Star size={20} className="spinner" style={{ marginRight: "8px" }} />
-        {t("common.loading", "Loading...")}
-      </div>
-    );
+    return <MessageListSkeleton delayMs={LOADING_INDICATOR_DELAY_MS} />;
   }
 
   if (visibleMessages.length === 0 && !hasNextPage) {
@@ -118,32 +106,33 @@ export default function StarredView() {
         height: "100%", gap: "12px", color: "var(--color-text-secondary)",
       }}>
         <Star size={40} strokeWidth={1.2} />
-        <p style={{ fontSize: "14px", margin: 0 }}>{t("starred.empty", "No starred messages")}</p>
+        <p style={{ fontSize: "var(--font-md)", margin: 0 }}>{t("starred.empty", "No starred messages")}</p>
       </div>
     );
   }
 
   return (
     <div className="fade-in" style={{ display: "flex", height: "100%" }}>
-      <div style={{
-        width: scopedSelectedId ? "340px" : "100%",
+      <div id="starred-list-pane" style={{
+        width: scopedSelectedId ? `${listPane.width}px` : "100%",
+        maxWidth: "55%",
+        flexShrink: 0,
         borderRight: scopedSelectedId ? "1px solid var(--color-border)" : "none",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
-        transition: "width 0.15s ease",
       }}>
         <div style={{
           padding: "12px 16px", borderBottom: "1px solid var(--color-border)",
-          fontSize: "14px", fontWeight: 600, color: "var(--color-text-primary)",
+          fontSize: "var(--font-md)", fontWeight: 600, color: "var(--color-text-primary)",
           display: "flex", alignItems: "center", gap: "8px",
         }}>
-          <Star size={16} />
+          <Star size={16} aria-hidden="true" />
           {t("starred.title", "Starred Messages")}
           <span style={{
-            fontSize: "12px", fontWeight: 400, color: "var(--color-text-secondary)",
-            backgroundColor: "var(--color-bg-secondary, rgba(0,0,0,0.06))",
-            padding: "2px 8px", borderRadius: "10px",
+            fontSize: "var(--font-sm)", fontWeight: 400, color: "var(--color-text-secondary)",
+            backgroundColor: "var(--color-bg-secondary)",
+            padding: "2px 8px", borderRadius: "var(--radius-full)",
           }}>
             {totalCount}
           </span>
@@ -185,28 +174,25 @@ export default function StarredView() {
             display: "flex",
             justifyContent: "center",
           }}>
-            <button
-              onClick={handleLoadMore}
-              disabled={isFetchingNextPage}
-              style={{
-                padding: "6px 14px",
-                borderRadius: "4px",
-                border: "1px solid var(--color-border)",
-                backgroundColor: "transparent",
-                color: "var(--color-accent)",
-                fontSize: "13px",
-                cursor: isFetchingNextPage ? "default" : "pointer",
-                opacity: isFetchingNextPage ? 0.7 : 1,
-              }}
-            >
+            <Button onClick={handleLoadMore} loading={isFetchingNextPage}>
               {t("common.loadMore", "Load More")}
-            </button>
+            </Button>
           </div>
         )}
       </div>
 
       {scopedSelectedId && (
-        <div className="scroll-region starred-detail-scroll" style={{ flex: 1, overflow: "auto" }}>
+        <PaneSplitter
+          width={listPane.width}
+          min={listPane.min}
+          max={listPane.max}
+          onChange={listPane.setWidth}
+          onReset={listPane.reset}
+          controls="starred-list-pane"
+        />
+      )}
+      {scopedSelectedId && (
+        <div className="scroll-region starred-detail-scroll" style={{ flex: 1, minWidth: 0, overflow: "auto" }}>
           <MessageDetail
             messageId={scopedSelectedId}
             onBack={() => setSelectedId(null)}

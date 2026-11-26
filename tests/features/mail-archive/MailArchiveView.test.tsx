@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MailArchiveView from "../../../src/features/mail-archive/MailArchiveView";
 import en from "../../../src/locales/mail-archive.en.json";
 import zh from "../../../src/locales/mail-archive.zh.json";
+import { resetArchiveJobStore, useArchiveJobStore } from "../../../src/features/mail-archive/archiveJob.store";
 
 const mocks = vi.hoisted(() => ({
   listMailArchives: vi.fn(), createMailArchive: vi.fn(), listArchiveFolders: vi.fn(), createArchiveFolder: vi.fn(),
@@ -34,6 +35,7 @@ async function renderView(language = "en") {
 describe("Local mail archive browser", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    resetArchiveJobStore();
     mocks.listMailArchives.mockResolvedValue([{ id: "archive", account_id: "account", account_label: "owner@example.com", name: "Imported mail" }, { id: "other", account_id: "account", account_label: "owner@example.com", name: "Other archive" }]);
     mocks.listArchiveFolders.mockResolvedValue([{ id: "local", archive_id: "archive", name: "Imported" }, { id: "local-other", archive_id: "archive", name: "Other local folder" }]);
     mocks.listArchiveMessages.mockResolvedValue([{ id: "message", folder_id: "local", subject: "Subject A", sender: "sender@example.com", date: 1, is_read: false, is_starred: false }]);
@@ -138,12 +140,29 @@ describe("Local mail archive browser", () => {
     await waitFor(() => expect(mocks.importMailArchive).toHaveBeenCalled());
     const jobId = mocks.importMailArchive.mock.calls[0][0];
     act(() => mocks.listener?.({ payload: { job_id: jobId, processed: 37, imported: 35, duplicates: 2, failed: 0 } }));
-    await screen.findByText(/正在处理邮件… 37/);
+    await screen.findByText(/已处理 37 封/);
+    expect(screen.getByText(zh.mailArchive.keepsRunning)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "当前邮件完成后取消" }));
     expect(mocks.cancelArchiveJob).toHaveBeenCalledWith(jobId);
     await act(async () => finish({ processed: 37, imported: 35, duplicates: 2, failed: 0, cancelled: true, errors: [] }));
     await screen.findByText(zh.mailArchive.cancelled);
     expect((screen.getByRole("button", { name: "导入本地归档" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("keeps a running import alive when the page unmounts and reports completion", async () => {
+    await renderView();
+    fireEvent.click(screen.getByRole("button", { name: /Choose EML/ }));
+    await screen.findByText("mail.mbox (1.0 KiB)");
+    let finish!: (report: object) => void;
+    mocks.importMailArchive.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    fireEvent.click(screen.getByRole("button", { name: /Validate/ }));
+    await waitFor(() => expect(mocks.importMailArchive).toHaveBeenCalled());
+    cleanup();
+    expect(mocks.cancelArchiveJob).not.toHaveBeenCalled();
+    expect(useArchiveJobStore.getState().busy).toBe(true);
+    await act(async () => finish({ processed: 3, imported: 3, duplicates: 0, failed: 0, cancelled: false, errors: [] }));
+    expect(useArchiveJobStore.getState().busy).toBe(false);
+    expect(useArchiveJobStore.getState().report).toEqual(expect.objectContaining({ imported: 3 }));
   });
 
   it("has matching EN/ZH namespaces without missing or untranslated keys", () => {

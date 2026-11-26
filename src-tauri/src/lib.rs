@@ -814,6 +814,7 @@ pub fn run() {
             commands::notifications::get_notification_status,
             commands::notifications::show_test_notification,
             commands::notifications::clear_notification_attention,
+            commands::notifications::set_notification_labels,
             commands::pending_mail_ops::get_pending_mail_ops_summary,
             commands::pending_mail_ops::list_pending_mail_ops,
             commands::pending_mail_ops::dismiss_failed_pending_mail_ops,
