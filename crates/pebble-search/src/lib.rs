@@ -367,6 +367,7 @@ impl TantivySearch {
                 subject,
                 from_address,
                 date,
+                account_id: None,
             });
         }
 
@@ -510,6 +511,7 @@ impl TantivySearch {
                 subject,
                 from_address,
                 date,
+                account_id: None,
             });
         }
 
