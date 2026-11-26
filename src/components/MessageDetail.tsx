@@ -4,7 +4,6 @@ import { trustSender } from "@/lib/api";
 import ResumeDraftButton from "./ResumeDraftButton";
 import { useTranslation } from "react-i18next";
 import type { PrivacyMode, TranslateResult } from "@/lib/api";
-import { useClickOutside } from "@/hooks/useClickOutside";
 import { MessageDetailSkeleton } from "./Skeleton";
 import PrivacyBanner from "./PrivacyBanner";
 import AttachmentList from "./AttachmentList";
@@ -19,11 +18,28 @@ import { defaultPrivacyMode } from "@/lib/privacyMode";
 import { isMessageInKanban } from "@/hooks/queries/useKanbanCardsQuery";
 import { queryClient } from "@/lib/query-client";
 import { addKanbanCard, setKanbanContextNoteInCache } from "@/hooks/mutations/useKanbanMutations";
-import { useToastStore } from "@/stores/toast.store";
+import { toastError, useToastStore } from "@/stores/toast.store";
 import { useUIStore } from "@/stores/ui.store";
 import SelectionActionPopover from "./SelectionActionPopover";
 import ContactAddressAction from "./ContactAddressAction";
 import MessageParticipants from "./MessageParticipants";
+import IconButton from "./ui/IconButton";
+import { useDelayedFlag } from "@/hooks/useDelayedFlag";
+import "./ui/overlay.css";
+
+/** Skeleton appears only for loads slower than this… */
+const SKELETON_DELAY_MS = 200;
+/** …and then stays at least this long, so it never flickers. */
+const SKELETON_MIN_VISIBLE_MS = 300;
+
+type PopoverAnchor = { text: string; position: { x: number; y: number } };
+
+/** Keep the last non-null value while `open` is false so exit animations have content. */
+function useLatched<T>(value: T | null): { value: T | null; open: boolean } {
+  const ref = useRef<T | null>(value);
+  if (value !== null) ref.current = value;
+  return { value: ref.current, open: value !== null };
+}
 
 interface Props {
   messageId: string;
@@ -31,8 +47,8 @@ interface Props {
   folderRole?: string | null;
 }
 
-function formatFullDate(timestamp: number): string {
-  return new Date(timestamp * 1000).toLocaleString([], {
+function formatFullDate(timestamp: number, language?: string): string {
+  return new Date(timestamp * 1000).toLocaleString(language || [], {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -42,7 +58,7 @@ function formatFullDate(timestamp: number): string {
 }
 
 export default function MessageDetail({ messageId, onBack, folderRole }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [privacyOverride, setPrivacyOverride] = useState<{
     messageId: string;
     mode: PrivacyMode;
@@ -54,21 +70,21 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
   const [showSelectionActions, setShowSelectionActions] = useState<{ text: string; position: { x: number; y: number } } | null>(null);
   const [showTranslate, setShowTranslate] = useState<{ text: string; position: { x: number; y: number } } | null>(null);
 
-  const snoozeRef = useRef<HTMLDivElement>(null);
-  const selectionActionsRef = useRef<HTMLDivElement>(null);
-  const translateRef = useRef<HTMLDivElement>(null);
+  const snoozeButtonRef = useRef<HTMLButtonElement>(null);
+  const selectionPopover = useLatched<PopoverAnchor>(showSelectionActions);
+  const translatePopover = useLatched<PopoverAnchor>(showTranslate);
 
-  const { message, setMessage, rendered, loading, error, errorInfo } = useMessageLoader(messageId, privacyMode);
+  const { message, setMessage, rendered, loading, isStale, error, errorInfo } = useMessageLoader(messageId, privacyMode);
   const { bilingualMode, bilingualResult, bilingualLoading, handleBilingualToggle, resetBilingual } = useBilingualTranslation(messageId, rendered, message);
-
-  useClickOutside(snoozeRef, showSnooze, () => setShowSnooze(false));
-  useClickOutside(selectionActionsRef, !!showSelectionActions, () => setShowSelectionActions(null));
-  useClickOutside(translateRef, !!showTranslate, () => setShowTranslate(null));
+  const showSkeleton = useDelayedFlag(loading, { delayMs: SKELETON_DELAY_MS, minVisibleMs: SKELETON_MIN_VISIBLE_MS });
 
   // Reset bilingual state when messageId changes
   useEffect(() => {
     setPrivacyOverride({ messageId, mode: defaultPrivacyMode() });
     resetBilingual();
+    setShowSnooze(false);
+    setShowSelectionActions(null);
+    setShowTranslate(null);
   }, [messageId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleLoadImages() {
@@ -86,6 +102,7 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
         }
       } catch (err) {
         console.error("Failed to persist trusted sender:", err);
+        toastError(err, "privacy.trustSenderFailed");
       }
     }
   }
@@ -152,11 +169,8 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
         message: t("kanban.contextNoteAdded", "Added selected text to Kanban note"),
         type: "success",
       });
-    } catch {
-      useToastStore.getState().addToast({
-        message: t("kanban.contextNoteFailed", "Failed to add Kanban note"),
-        type: "error",
-      });
+    } catch (err) {
+      toastError(err, "kanban.contextNoteFailed");
     }
   }
 
@@ -178,8 +192,13 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
     };
   });
 
-  if (loading) {
+  if (showSkeleton) {
     return <MessageDetailSkeleton />;
+  }
+
+  if (loading && !message) {
+    // First load: stay blank for a moment instead of flashing a skeleton.
+    return <div aria-busy="true" style={{ height: "100%" }} />;
   }
 
   if (error) {
@@ -192,7 +211,7 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
           justifyContent: "center",
           height: "100%",
           color: "var(--color-danger)",
-          fontSize: "14px",
+          fontSize: "var(--font-md)",
           padding: "24px",
           textAlign: "center",
         }}
@@ -227,7 +246,9 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
 
   return (
     <div
-      className="message-detail-container"
+      className={isStale ? "message-detail-container message-detail--stale" : "message-detail-container"}
+      aria-busy={isStale || undefined}
+      inert={isStale || undefined}
       style={{
         display: "flex",
         flexDirection: "column",
@@ -243,22 +264,11 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
-          <button
+          <IconButton
+            label={t("compose.back", "Back")}
+            icon={<ArrowLeft size={16} />}
             onClick={onBack}
-            aria-label={t("compose.back", "Back")}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              padding: "4px",
-              borderRadius: "4px",
-              color: "var(--color-text-secondary)",
-              display: "flex",
-              alignItems: "center",
-            }}
-          >
-            <ArrowLeft size={18} />
-          </button>
+          />
           <h2
             style={{
               fontSize: "16px",
@@ -272,54 +282,32 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
           >
             {message.subject || t("inbox.noSubject", "(no subject)")}
           </h2>
-          <div ref={snoozeRef} style={{ position: "relative", marginLeft: "auto", flexShrink: 0 }}>
-            <button
-              onClick={() => setShowSnooze(!showSnooze)}
-              style={{
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                padding: "4px",
-                borderRadius: "4px",
-                color: "var(--color-text-secondary)",
-                display: "flex",
-                alignItems: "center",
+          <div style={{ display: "flex", alignItems: "center", gap: "2px", marginLeft: "auto", flexShrink: 0 }}>
+            <IconButton
+              ref={snoozeButtonRef}
+              label={t("messageActions.snooze", "Snooze message")}
+              icon={<Clock size={16} />}
+              aria-haspopup="menu"
+              aria-expanded={showSnooze}
+              onClick={() => setShowSnooze((value) => !value)}
+            />
+            <SnoozePopover
+              open={showSnooze}
+              anchorRef={snoozeButtonRef}
+              messageId={messageId}
+              onClose={() => setShowSnooze(false)}
+              onSnoozed={() => {
+                setShowSnooze(false);
+                onBack();
               }}
-              title={t("messageActions.snooze", "Snooze message")}
-              aria-label={t("messageActions.snooze", "Snooze message")}
-            >
-              <Clock size={16} />
-            </button>
-            {showSnooze && (
-              <SnoozePopover
-                messageId={messageId}
-                onClose={() => setShowSnooze(false)}
-                onSnoozed={() => {
-                  setShowSnooze(false);
-                  onBack();
-                }}
-              />
-            )}
+            />
+            <IconButton
+              label={t("messageActions.bilingualView", "Toggle bilingual view")}
+              icon={<Languages size={16} />}
+              pressed={bilingualMode}
+              onClick={handleBilingualToggle}
+            />
           </div>
-          <button
-            onClick={handleBilingualToggle}
-            aria-pressed={bilingualMode}
-            style={{
-              background: bilingualMode ? "var(--color-bg-hover)" : "none",
-              border: "none",
-              cursor: "pointer",
-              padding: "4px",
-              borderRadius: "4px",
-              color: bilingualMode ? "var(--color-accent)" : "var(--color-text-secondary)",
-              display: "flex",
-              alignItems: "center",
-              flexShrink: 0,
-            }}
-            title={t("messageActions.bilingualView", "Toggle bilingual view")}
-            aria-label={t("messageActions.bilingualView", "Toggle bilingual view")}
-          >
-            <Languages size={16} />
-          </button>
         </div>
         {/* Action Toolbar */}
         {message.is_draft && <ResumeDraftButton messageId={messageId} />}
@@ -370,7 +358,7 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
                   flexShrink: 0,
                 }}
               >
-                {formatFullDate(message.date)}
+                {formatFullDate(message.date, i18n?.language)}
               </span>
             </div>
             <MessageParticipants accountId={message.account_id} groups={contactParticipantsGroups} />
@@ -439,28 +427,26 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
       {/* Attachments */}
       {message.has_attachments && <AttachmentList messageId={message.id} />}
 
-      {showTranslate && (
-        <div ref={translateRef}>
-          <TranslatePopover
-            text={showTranslate.text}
-            position={showTranslate.position}
-            onClose={() => setShowTranslate(null)}
-          />
-        </div>
+      {translatePopover.value && (
+        <TranslatePopover
+          open={translatePopover.open}
+          text={translatePopover.value.text}
+          position={translatePopover.value.position}
+          onClose={() => setShowTranslate(null)}
+        />
       )}
 
-      {showSelectionActions && (
-        <div ref={selectionActionsRef}>
-          <SelectionActionPopover
-            text={showSelectionActions.text}
-            position={showSelectionActions.position}
-            onTranslate={handleTranslateSelectedText}
-            onSearch={handleSearchSelectedText}
-            onCreateRule={handleCreateRuleFromSelection}
-            onAddToKanbanNote={handleAddSelectionToKanbanNote}
-            onClose={() => setShowSelectionActions(null)}
-          />
-        </div>
+      {selectionPopover.value && (
+        <SelectionActionPopover
+          open={selectionPopover.open}
+          text={selectionPopover.value.text}
+          position={selectionPopover.value.position}
+          onTranslate={handleTranslateSelectedText}
+          onSearch={handleSearchSelectedText}
+          onCreateRule={handleCreateRuleFromSelection}
+          onAddToKanbanNote={handleAddSelectionToKanbanNote}
+          onClose={() => setShowSelectionActions(null)}
+        />
       )}
     </div>
   );

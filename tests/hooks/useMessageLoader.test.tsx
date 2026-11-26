@@ -1,7 +1,7 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message, RenderedHtml } from "../../src/lib/api";
-import { useMessageLoader } from "../../src/hooks/useMessageLoader";
+import { clearMessageCache, useMessageLoader } from "../../src/hooks/useMessageLoader";
 import { getMessageWithHtml, getRenderedHtml } from "../../src/lib/api";
 
 vi.mock("../../src/lib/api", () => ({
@@ -56,6 +56,7 @@ function makeRendered(html = "<p>Body</p>"): RenderedHtml {
 describe("useMessageLoader", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearMessageCache();
   });
 
   it("does not request a second HTML render after the initial message load", async () => {
@@ -114,5 +115,48 @@ describe("useMessageLoader", () => {
 
     await waitFor(() => expect(result.current.error).toBe("render failed"));
     expect(result.current.message?.id).toBe("message-1");
+  });
+
+  it("keeps the previous message (marked stale) while the next one loads", async () => {
+    let resolveSecond: (value: [Message, RenderedHtml]) => void = () => {};
+    vi.mocked(getMessageWithHtml).mockImplementation((id) => {
+      if (id === "message-1") return Promise.resolve([makeMessage(), makeRendered()]);
+      return new Promise((resolve) => { resolveSecond = resolve; });
+    });
+
+    const { result, rerender } = renderHook(
+      ({ id }) => useMessageLoader(id, "Strict"),
+      { initialProps: { id: "message-1" } },
+    );
+    await waitFor(() => expect(result.current.message?.id).toBe("message-1"));
+
+    rerender({ id: "message-2" });
+    expect(result.current.loading).toBe(true);
+    expect(result.current.message?.id).toBe("message-1");
+    expect(result.current.isStale).toBe(true);
+
+    resolveSecond([makeMessage({ id: "message-2", subject: "Second" }), makeRendered("<p>Two</p>")]);
+    await waitFor(() => expect(result.current.message?.id).toBe("message-2"));
+    expect(result.current.isStale).toBe(false);
+    expect(result.current.loading).toBe(false);
+  });
+
+  it("shows a cached message instantly when revisiting it and revalidates in the background", async () => {
+    vi.mocked(getMessageWithHtml).mockImplementation((id) =>
+      Promise.resolve([makeMessage({ id }), makeRendered(`<p>${id}</p>`)]),
+    );
+    const { result, rerender } = renderHook(
+      ({ id }) => useMessageLoader(id, "Strict"),
+      { initialProps: { id: "message-1" } },
+    );
+    await waitFor(() => expect(result.current.message?.id).toBe("message-1"));
+    rerender({ id: "message-2" });
+    await waitFor(() => expect(result.current.message?.id).toBe("message-2"));
+
+    rerender({ id: "message-1" });
+    expect(result.current.loading).toBe(false);
+    expect(result.current.message?.id).toBe("message-1");
+    expect(result.current.rendered?.html).toContain("message-1");
+    await waitFor(() => expect(getMessageWithHtml).toHaveBeenCalledTimes(3));
   });
 });
