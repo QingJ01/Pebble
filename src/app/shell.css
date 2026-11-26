@@ -110,6 +110,9 @@
 }
 
 /* ─── Compose FAB ─── */
+/* `.app-shell > .compose-fab` outranks `.app-shell > :not(.app-background-layer)`,
+   which would otherwise make the FAB position: relative. */
+.app-shell > .compose-fab,
 .compose-fab {
   position: fixed;
   right: 24px;
