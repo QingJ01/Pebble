@@ -97,7 +97,8 @@
     "addAccountHint": "Add an email account to get started",
     "messageView": "Message view",
     "threadView": "Thread view",
-    "messageList": "Message list"
+    "messageList": "Message list",
+    "threadList": "Threads"
   },
   "compose": {
     "newMessage": "New Message",
@@ -511,7 +512,24 @@
     "emptyTrashFailed": "Failed to empty trash",
     "restore": "Restore",
     "kanbanSuccess": "Added to kanban board",
-    "kanbanFailed": "Failed to add to kanban"
+    "kanbanFailed": "Failed to add to kanban",
+    "reportSpam": "Report spam",
+    "spamSuccess": "Marked as spam",
+    "spamFailed": "Failed to mark as spam",
+    "starFailed": "Failed to star message",
+    "unstarFailed": "Failed to unstar message",
+    "trashSuccess": "Moved to Trash",
+    "deletePermanently": "Delete permanently",
+    "deletePermanentTitle": "Delete permanently?",
+    "deletePermanentConfirm": "Permanently delete this message? This cannot be undone.",
+    "deletePermanentSuccess": "Message permanently deleted",
+    "undoSuccess": "Undone",
+    "undoFailed_one": "Couldn't undo for {{count}} message",
+    "undoFailed_other": "Couldn't undo for {{count}} messages",
+    "unreadIndicator": "Unread",
+    "openThread": "Open thread",
+    "threadContextMenu": "Thread actions",
+    "toolbar": "Message actions"
   },
   "snooze": {
     "failed": "Snooze failed",
@@ -544,7 +562,16 @@
     "undoRemove": "Undo",
     "note": "Kanban note",
     "contextNoteAdded": "Added selected text to Kanban note",
-    "contextNoteFailed": "Failed to add Kanban note"
+    "contextNoteFailed": "Failed to add Kanban note",
+    "moveFailed": "Couldn't move the card",
+    "removeFailed": "Couldn't remove the card",
+    "restoreFailed": "Couldn't put the card back",
+    "loadFailed": "Couldn't load card details",
+    "dragInstructions": "Press Space to pick up a card. Use the arrow keys to move it, Space or Enter to drop it, Escape to cancel.",
+    "dragStart": "Picked up {{subject}}.",
+    "dragOver": "{{subject}} is over {{column}}.",
+    "dragEnd": "Dropped {{subject}} in {{column}}.",
+    "dragCancel": "Moving {{subject}} was cancelled."
   },
   "accountSetup": {
     "title": "Add Email Account",
@@ -852,7 +879,18 @@
     "deleteButton": "Delete",
     "selectMessage": "Select message",
     "star": "Star",
-    "unstar": "Unstar"
+    "unstar": "Unstar",
+    "archiveSuccess_one": "{{count}} message archived",
+    "archiveSuccess_other": "{{count}} messages archived",
+    "trashSuccess_one": "{{count}} message moved to Trash",
+    "trashSuccess_other": "{{count}} messages moved to Trash",
+    "deletePermanentSuccess_one": "{{count}} message permanently deleted",
+    "deletePermanentSuccess_other": "{{count}} messages permanently deleted",
+    "deletePermanentConfirm_one": "Permanently delete {{count}} message? This cannot be undone.",
+    "deletePermanentConfirm_other": "Permanently delete {{count}} messages? This cannot be undone.",
+    "partialFailure_one": "{{count}} message could not be moved",
+    "partialFailure_other": "{{count}} messages could not be moved",
+    "toolbar": "Selection actions"
   },
   "messageDetail": {
     "body": "Message body",

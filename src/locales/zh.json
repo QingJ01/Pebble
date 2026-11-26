@@ -97,7 +97,8 @@
     "addAccountHint": "添加邮箱账户以开始使用",
     "messageView": "邮件视图",
     "threadView": "会话视图",
-    "messageList": "邮件列表"
+    "messageList": "邮件列表",
+    "threadList": "会话列表"
   },
   "compose": {
     "newMessage": "新邮件",
@@ -511,7 +512,23 @@
     "emptyTrashFailed": "清空废纸篓失败",
     "restore": "恢复",
     "kanbanSuccess": "已加入看板",
-    "kanbanFailed": "加入看板失败"
+    "kanbanFailed": "加入看板失败",
+    "reportSpam": "举报垃圾邮件",
+    "spamSuccess": "已标记为垃圾邮件",
+    "spamFailed": "标记垃圾邮件失败",
+    "starFailed": "加星标失败",
+    "unstarFailed": "取消星标失败",
+    "trashSuccess": "已移至废纸篓",
+    "deletePermanently": "永久删除",
+    "deletePermanentTitle": "永久删除？",
+    "deletePermanentConfirm": "永久删除这封邮件？此操作无法撤销。",
+    "deletePermanentSuccess": "邮件已永久删除",
+    "undoSuccess": "已撤销",
+    "undoFailed": "{{count}} 封邮件无法撤销",
+    "unreadIndicator": "未读",
+    "openThread": "打开会话",
+    "threadContextMenu": "会话操作",
+    "toolbar": "邮件操作"
   },
   "snooze": {
     "failed": "稍后提醒失败",
@@ -544,7 +561,16 @@
     "undoRemove": "撤销",
     "note": "看板备注",
     "contextNoteAdded": "已把选中文本加入看板备注",
-    "contextNoteFailed": "加入看板备注失败"
+    "contextNoteFailed": "加入看板备注失败",
+    "moveFailed": "无法移动卡片",
+    "removeFailed": "无法移除卡片",
+    "restoreFailed": "无法恢复卡片",
+    "loadFailed": "无法加载卡片详情",
+    "dragInstructions": "按空格键拿起卡片，用方向键移动，按空格键或 Enter 放下，按 Esc 取消。",
+    "dragStart": "已拿起「{{subject}}」。",
+    "dragOver": "「{{subject}}」位于「{{column}}」上方。",
+    "dragEnd": "已将「{{subject}}」放入「{{column}}」。",
+    "dragCancel": "已取消移动「{{subject}}」。"
   },
   "accountSetup": {
     "title": "添加邮箱账户",
@@ -852,7 +878,13 @@
     "deleteButton": "删除",
     "selectMessage": "选择邮件",
     "star": "加星标",
-    "unstar": "取消星标"
+    "unstar": "取消星标",
+    "archiveSuccess": "已归档 {{count}} 封邮件",
+    "trashSuccess": "已将 {{count}} 封邮件移至废纸篓",
+    "deletePermanentSuccess": "已永久删除 {{count}} 封邮件",
+    "deletePermanentConfirm": "永久删除 {{count}} 封邮件？此操作无法撤销。",
+    "partialFailure": "{{count}} 封邮件未能移动",
+    "toolbar": "批量操作"
   },
   "messageDetail": {
     "body": "邮件正文",
