@@ -1,5 +1,11 @@
 {
   "mailArchive": {
+    "jobFailed": "Local mail library task failed",
+    "importFinished": "Import finished: {{imported}} imported, {{failed}} failed",
+    "exportFinished": "Export finished: {{imported}} exported, {{failed}} failed",
+    "progressCounts": "Processing… {{processed}} processed · {{imported}} OK · {{duplicates}} duplicates · {{failed}} failed",
+    "keepsRunning": "You can leave this page; the task keeps running and you'll be notified when it finishes.",
+    "deletePermanently": "Delete permanently",
     "title": "Local mail archive",
     "localOnly": "Imported mail stays on this device, separate from server mailboxes. Reading, flags, moves and deletion never contact a provider. Moving archive mail to a remote mailbox is not supported. Archives remain after removing the original account.",
     "searchScope": "Search here covers only the selected local archive folder, including sender, recipients, subject and plain text. Regular mailbox search does not include archives.",
