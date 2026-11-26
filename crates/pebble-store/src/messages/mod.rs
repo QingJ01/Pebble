@@ -3,7 +3,7 @@ use rusqlite::{params, OptionalExtension, Row};
 use std::collections::{HashMap, HashSet};
 
 use crate::pending_ops::PendingMailOpStatus;
-use crate::Store;
+use crate::{Store, SQL_IN_CHUNK_SIZE};
 
 mod mutate;
 mod query;
@@ -13,6 +13,8 @@ mod remote;
 mod list_perf_tests;
 #[cfg(test)]
 mod remote_id_scope_tests;
+#[cfg(test)]
+mod sql_batching_tests;
 #[cfg(test)]
 mod thread_listing_tests;
 #[cfg(test)]

@@ -67,6 +67,7 @@ fn render() -> String {
         crate::commands::notifications::NotificationStatus,
         crate::commands::advanced_search::AdvancedSearchQuery,
         crate::commands::folders::ImapSyncFolderSettings,
+        crate::commands::batch::BatchMarkReadResult,
         crate::commands::pending_mail_ops::PendingMailOpsSummaryResponse,
         crate::commands::pending_mail_ops::PendingMailOpResponse,
         pebble_core::traits::SearchHit,

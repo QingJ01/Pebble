@@ -181,6 +181,7 @@ export default function InboxView() {
           {threadView ? (
             <ThreadList
               threads={threads}
+              folderIds={selectedFolderIds}
               selectedThreadId={selectedThreadId}
               selectedThreadAccountId={selectedThreadAccountId}
               onSelectThread={selectThread}
@@ -220,8 +221,9 @@ export default function InboxView() {
 }
 
 // Inline ThreadList component using virtualizer
-function ThreadList({ threads, selectedThreadId, selectedThreadAccountId, onSelectThread, loading }: {
+function ThreadList({ threads, folderIds, selectedThreadId, selectedThreadAccountId, onSelectThread, loading }: {
   threads: ThreadSummary[];
+  folderIds: string[];
   selectedThreadId: string | null;
   selectedThreadAccountId: string | null;
   onSelectThread: (thread: ThreadSummary) => void;
@@ -233,6 +235,7 @@ function ThreadList({ threads, selectedThreadId, selectedThreadAccountId, onSele
     count: threads.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 76,
+    getItemKey: (index) => threads[index]?.thread_id ?? index,
     measureElement: (el) => el.getBoundingClientRect().height,
     overscan: 5,
   });
@@ -282,6 +285,7 @@ function ThreadList({ threads, selectedThreadId, selectedThreadAccountId, onSele
                 thread={thread}
                 isSelected={isThreadSelected({ selectedThreadId, selectedThreadAccountId }, thread)}
                 onClick={() => onSelectThread(thread)}
+                folderIds={folderIds}
               />
             </div>
           );

@@ -322,8 +322,8 @@ option {
 
 /* Global focus ring for keyboard navigation — mouse clicks won't trigger */
 *:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
+  outline: 2px solid color-mix(in srgb, var(--color-text-primary) 34%, transparent);
+  outline-offset: 1px;
   border-radius: 4px;
 }
 
@@ -497,7 +497,7 @@ textarea:focus-visible {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: auto;
   border: 1px solid color-mix(in srgb, var(--color-border) 86%, transparent);
   border-radius: 8px;
   background: var(--color-bg);
@@ -541,6 +541,30 @@ textarea:focus-visible {
 
 .compose-editor-content .ProseMirror > :first-child {
   margin-top: 0;
+}
+
+
+.compose-editor-surface--with-quote .compose-editor-content,
+.compose-editor-surface--with-quote .compose-source-input,
+.compose-editor-surface--with-quote .compose-preview-split {
+  height: auto;
+  min-height: 140px;
+}
+
+.compose-editor-surface--with-quote .compose-editor-content {
+  flex: 0 0 auto;
+}
+
+.compose-editor-surface--with-quote .compose-editor-content .ProseMirror {
+  min-height: 104px;
+}
+
+.compose-editor-surface--with-quote .compose-source-input,
+.compose-editor-surface--with-quote .compose-preview-split,
+.compose-editor-surface--with-quote .compose-html-preview {
+  flex: 0 0 auto;
+  height: 180px;
+  min-height: 180px;
 }
 
 .compose-source-input {
@@ -602,11 +626,8 @@ textarea:focus-visible {
 
 .compose-quoted-reply {
   flex: 0 0 auto;
-  margin-top: 12px;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--color-bg) 94%, var(--color-bg-secondary));
-  overflow: hidden;
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 72%, transparent);
+  background: transparent;
 }
 
 .compose-quoted-reply-toggle {
@@ -615,7 +636,7 @@ textarea:focus-visible {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 12px;
+  padding: 0 22px;
   border: 0;
   background: transparent;
   color: var(--color-text-secondary);
@@ -637,10 +658,7 @@ textarea:focus-visible {
 }
 
 .compose-quoted-reply-content {
-  max-height: 240px;
-  overflow: auto;
-  padding: 12px 14px;
-  border-top: 1px solid var(--color-border);
+  padding: 2px 22px 18px;
   color: var(--color-text-secondary);
   font-size: 13px;
   line-height: 1.55;

@@ -1,0 +1,31 @@
+.sidebar-keyboard-only-action {
+  position: fixed;
+  left: 8px;
+  bottom: 8px;
+  z-index: 1001;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  font-size: 12.5px;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-240px);
+}
+
+.sidebar-keyboard-only-action:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+
+.sidebar-context-menu-item:focus-visible {
+  outline: none;
+  background: var(--color-bg-hover);
+}

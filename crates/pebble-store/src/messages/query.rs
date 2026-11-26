@@ -161,9 +161,14 @@ impl Store {
         if message_ids.is_empty() {
             return Ok(HashMap::new());
         }
+        let mut seen = HashSet::new();
+        let unique_ids: Vec<&String> = message_ids
+            .iter()
+            .filter(|message_id| seen.insert(*message_id))
+            .collect();
         self.with_read(|conn| {
             let mut out: HashMap<String, Vec<String>> = HashMap::new();
-            for chunk in message_ids.chunks(500) {
+            for chunk in unique_ids.chunks(SQL_IN_CHUNK_SIZE) {
                 let sql = format!(
                     "SELECT message_id, folder_id FROM message_folders
                      WHERE message_id IN ({})",
@@ -176,6 +181,53 @@ impl Store {
                 for row in rows {
                     let (mid, fid) = row?;
                     out.entry(mid).or_default().push(fid);
+                }
+            }
+            Ok(out)
+        })
+    }
+
+    /// List message IDs in a thread restricted to the given folders.
+    pub fn list_message_ids_by_thread_in_folders(
+        &self,
+        thread_id: &str,
+        folder_ids: &[String],
+    ) -> Result<Vec<String>> {
+        if folder_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut seen = HashSet::new();
+        let unique_folder_ids: Vec<&String> =
+            folder_ids.iter().filter(|id| seen.insert(*id)).collect();
+        self.with_read(|conn| {
+            let mut out = Vec::new();
+            for chunk in unique_folder_ids.chunks(SQL_IN_CHUNK_SIZE) {
+                let placeholders: Vec<String> =
+                    (3..=chunk.len() + 2).map(|i| format!("?{i}")).collect();
+                let sql = format!(
+                    "SELECT m.id FROM messages m
+                     JOIN message_folders mf ON mf.message_id = m.id
+                     WHERE (m.thread_id = ?1 OR (m.thread_id IS NULL AND m.id = ?1))
+                       AND mf.folder_id IN ({}) AND m.is_deleted = 0
+                     ORDER BY m.date ASC",
+                    placeholders.join(", "),
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = vec![
+                    Box::new(thread_id.to_string()),
+                    Box::new(thread_id.to_string()),
+                ];
+                for folder_id in chunk {
+                    param_values.push(Box::new((*folder_id).clone()));
+                }
+                let params: Vec<&dyn rusqlite::types::ToSql> =
+                    param_values.iter().map(|v| v.as_ref()).collect();
+                let rows = stmt.query_map(params.as_slice(), |row| row.get::<_, String>(0))?;
+                for row in rows {
+                    let id = row?;
+                    if !out.contains(&id) {
+                        out.push(id);
+                    }
                 }
             }
             Ok(out)
@@ -209,7 +261,7 @@ impl Store {
 
         self.with_read(|conn| {
             let mut by_id = HashMap::new();
-            for chunk in ids.chunks(500) {
+            for chunk in ids.chunks(SQL_IN_CHUNK_SIZE) {
                 let sql = format!(
                     "SELECT {MSG_SELECT} FROM {MSG_FROM} WHERE m.id IN ({})",
                     placeholders(1, chunk.len())
@@ -457,7 +509,7 @@ impl Store {
         }
         self.with_read(|conn| {
             let mut results = std::collections::HashMap::new();
-            for chunk in ref_ids.chunks(500) {
+            for chunk in ref_ids.chunks(SQL_IN_CHUNK_SIZE) {
                 let placeholders: String = chunk
                     .iter()
                     .enumerate()

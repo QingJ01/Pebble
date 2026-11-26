@@ -10,6 +10,22 @@
 .folder-modal button[type="submit"] { background: var(--color-accent); color: white; }
 .folder-modal button:disabled { opacity: .5; cursor: default; }
 .folder-modal form { display: flex; flex-direction: column; gap: 14px; }
+
+.folder-modal summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  padding: 5px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background-color 0.14s ease;
+}
+
+.folder-modal summary:hover,
+.folder-modal summary:focus-visible {
+  background: var(--color-bg-hover);
+}
 .folder-action-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--color-text-secondary); font-size: 12px; cursor: pointer; }
 .folder-action-button:hover { background: var(--color-bg-hover); }
 .folder-action-button:disabled { opacity: .45; cursor: default; }

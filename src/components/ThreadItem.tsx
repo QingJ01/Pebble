@@ -1,12 +1,18 @@
-import { memo } from "react";
-import { Star, Paperclip } from "lucide-react";
+import { memo, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useQueryClient } from "@tanstack/react-query";
+import { Star, Paperclip, Mail, MailOpen } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ThreadSummary } from "@/lib/api";
+import { updateThreadReadFlagsInFolders } from "@/lib/api";
+import { useClickOutside } from "@/hooks/useClickOutside";
+import { useToastStore } from "@/stores/toast.store";
 
 interface Props {
   thread: ThreadSummary;
   isSelected: boolean;
   onClick: () => void;
+  folderIds: string[];
 }
 
 function formatDate(timestamp: number): string {
@@ -22,9 +28,70 @@ function formatDate(timestamp: number): string {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-function ThreadItem({ thread, isSelected, onClick }: Props) {
+function ThreadItem({ thread, isSelected, onClick, folderIds }: Props) {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
   const hasUnread = thread.unread_count > 0;
+  useClickOutside(contextMenuRef, Boolean(contextMenu), () => setContextMenu(null));
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setContextMenu(null);
+    }
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [contextMenu]);
+
+  function handleContextMenu(event: React.MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({ x: event.clientX, y: event.clientY });
+  }
+
+  async function handleToggleRead() {
+    const nextReadState = hasUnread;
+    setContextMenu(null);
+    try {
+      const result = await updateThreadReadFlagsInFolders(thread.thread_id, folderIds, nextReadState);
+      if (result.failed > 0) {
+        useToastStore.getState().addToast({
+          message: t("messageActions.threadReadFailed", { count: result.failed }),
+          type: "error",
+        });
+      } else if (result.updated === 0 && result.queued === 0) {
+        useToastStore.getState().addToast({
+          message: t("messageActions.threadReadNoMessages"),
+          type: "error",
+        });
+      } else if (result.queued > 0) {
+        useToastStore.getState().addToast({
+          message: result.updated > 0
+            ? t("messageActions.threadReadPartiallyUpdated", { updated: result.updated, queued: result.queued })
+            : t("messageActions.threadReadQueued", { count: result.queued }),
+          type: "info",
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["messages"] });
+      queryClient.invalidateQueries({ queryKey: ["threads"] });
+      queryClient.invalidateQueries({ queryKey: ["threadMessages", thread.thread_id] });
+      queryClient.invalidateQueries({ queryKey: ["folder-unread-counts"] });
+    } catch {
+      useToastStore.getState().addToast({
+        message: t("messageActions.updateReadFailed", "Failed to update read state"),
+        type: "error",
+      });
+    }
+  }
+
+  const readToggleLabel = hasUnread
+    ? t("messageActions.markThreadRead", "Mark thread as read")
+    : t("messageActions.markThreadUnread", "Mark thread as unread");
+  const ReadToggleIcon = hasUnread ? MailOpen : Mail;
+  const contextMenuLeft = contextMenu ? Math.min(contextMenu.x, window.innerWidth - 210) : 0;
+  const contextMenuTop = contextMenu ? Math.min(contextMenu.y, window.innerHeight - 64) : 0;
   const participantText = thread.participants.slice(0, 3).join(", ") +
     (thread.participants.length > 3 ? ` +${thread.participants.length - 3}` : "");
 
@@ -35,6 +102,7 @@ function ThreadItem({ thread, isSelected, onClick }: Props) {
       aria-selected={isSelected}
       tabIndex={0}
       onClick={onClick}
+      onContextMenu={handleContextMenu}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
       style={{
         color: "var(--color-text-primary)",
@@ -88,6 +156,55 @@ function ThreadItem({ thread, isSelected, onClick }: Props) {
       <div style={{ fontSize: "12px", color: "var(--color-text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: "normal" }}>
         {thread.snippet}
       </div>
+      {contextMenu && createPortal(
+        <div
+          ref={contextMenuRef}
+          role="menu"
+          style={{
+            position: "fixed",
+            left: contextMenuLeft,
+            top: contextMenuTop,
+            minWidth: "190px",
+            padding: "4px",
+            borderRadius: "8px",
+            border: "1px solid var(--color-border)",
+            backgroundColor: "var(--color-bg)",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+            zIndex: 1000,
+          }}
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            event.stopPropagation();
+            if (event.key === "Escape") setContextMenu(null);
+          }}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            autoFocus
+            onClick={() => void handleToggleRead()}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              width: "100%",
+              padding: "7px 9px",
+              border: "none",
+              borderRadius: "6px",
+              backgroundColor: "transparent",
+              color: "var(--color-text-primary)",
+              cursor: "pointer",
+              fontSize: "12.5px",
+              textAlign: "left",
+            }}
+          >
+            <ReadToggleIcon size={14} />
+            <span>{readToggleLabel}</span>
+          </button>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }

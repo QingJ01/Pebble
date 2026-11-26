@@ -249,21 +249,25 @@ impl Store {
             return Ok(());
         }
         self.with_write(|conn| {
+            let tx = conn.unchecked_transaction()?;
             let now = pebble_core::now_timestamp();
-            let placeholders: Vec<String> = (0..message_ids.len())
-                .map(|i| format!("?{}", i + 2))
-                .collect();
-            let sql = format!(
-                "UPDATE messages SET is_deleted = 1, deleted_at = ?1, updated_at = ?1 WHERE id IN ({})",
-                placeholders.join(", ")
-            );
-            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::with_capacity(message_ids.len() + 1);
-            param_values.push(Box::new(now));
-            for id in message_ids {
-                param_values.push(Box::new(id.clone()));
+            for chunk in message_ids.chunks(SQL_IN_CHUNK_SIZE) {
+                let placeholders: Vec<String> = (0..chunk.len())
+                    .map(|i| format!("?{}", i + 2))
+                    .collect();
+                let sql = format!(
+                    "UPDATE messages SET is_deleted = 1, deleted_at = ?1, updated_at = ?1 WHERE id IN ({})",
+                    placeholders.join(", ")
+                );
+                let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::with_capacity(chunk.len() + 1);
+                param_values.push(Box::new(now));
+                for id in chunk {
+                    param_values.push(Box::new(id.clone()));
+                }
+                let params: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|v| v.as_ref()).collect();
+                tx.execute(&sql, params.as_slice())?;
             }
-            let params: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|v| v.as_ref()).collect();
-            conn.execute(&sql, params.as_slice())?;
+            tx.commit()?;
             Ok(())
         })
     }

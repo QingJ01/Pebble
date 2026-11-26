@@ -98,7 +98,10 @@ describe("buildComposeEditorContent", () => {
           '<style>#root { display: none }</style>' +
           '<link rel="stylesheet" href="https://tracker.example/mail.css">' +
           '<p style="color: red">Hello</p>' +
-          '<img src="https://tracker.example/pixel" srcset="https://tracker.example/2x 2x">',
+          '<img src="https://tracker.example/pixel" srcset="https://tracker.example/2x 2x">' +
+          '<img src=" \\\\tracker.example\\pixel">' +
+          '<img src="ht\nttps://tracker.example/obfuscated-pixel">' +
+          '<img src="data:image/png;base64,cG5nLWZpeHR1cmU=">',
       }),
       t,
     });
@@ -109,6 +112,7 @@ describe("buildComposeEditorContent", () => {
     expect(quote).not.toContain("<link");
     expect(quote).not.toContain("tracker.example");
     expect(quote).not.toContain("srcset");
+    expect(quote).toContain('src="data:image/png;base64,cG5nLWZpeHR1cmU="');
   });
 
   it("appends the quoted reply only when sending", () => {

@@ -22,6 +22,10 @@ export default function FolderManagementButton(props: Props) {
   </>;
 }
 
+export function FolderManagementModal(props: Props & { onClose: () => void }) {
+  return <FolderManager {...props} />;
+}
+
 function FolderManager({accounts,folders,accountId,onClose}: Props & {onClose: () => void}) {
   const {t} = useTranslation();
   const client = useQueryClient();

@@ -307,8 +307,9 @@ export function sanitizeComposeQuoteHtml(html: string): string {
   template.content.querySelectorAll<HTMLElement>("[src], [srcset], [background], [poster]").forEach((element) => {
     element.removeAttribute("srcset");
     for (const attribute of ["src", "background", "poster"]) {
-      const value = element.getAttribute(attribute)?.trim() ?? "";
-      if (/^(?:https?:)?\/\//i.test(value)) {
+      const value = element.getAttribute(attribute) ?? "";
+      const normalized = value.replace(/[\u0000-\u0020]+/g, "").toLowerCase();
+      if (!normalized.startsWith("data:")) {
         element.removeAttribute(attribute);
       }
     }

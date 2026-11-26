@@ -42,12 +42,12 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 
 vi.mock("@tanstack/react-virtual", () => ({
-  useVirtualizer: ({ count }: { count: number }) => ({
+  useVirtualizer: ({ count, getItemKey }: { count: number; getItemKey?: (index: number) => string | number }) => ({
     getTotalSize: () => count * 76,
     getVirtualItems: () =>
       Array.from({ length: count }, (_, index) => ({
         index,
-        key: `row-${index}`,
+        key: getItemKey?.(index) ?? `row-${index}`,
         start: index * 76,
       })),
     measureElement: vi.fn(),
@@ -80,23 +80,30 @@ vi.mock("../../src/stores/confirm.store", () => ({
     selector({ confirm: mocks.confirm }),
 }));
 
-vi.mock("../../src/components/MessageItem", () => ({
+vi.mock("../../src/components/MessageItem", async () => {
+  const { useState } = await import("react");
+  return {
   default: ({ message, folderRole, accountColor, accountLabel }: {
     message: MessageSummary;
     folderRole?: string | null;
     accountColor?: string;
     accountLabel?: string;
-  }) => (
-    <div
-      data-testid={`message-${message.id}`}
-      data-folder-role={folderRole ?? ""}
-      data-account-color={accountColor ?? ""}
-      data-account-label={accountLabel ?? ""}
-    >
-      {message.subject}
-    </div>
-  ),
-}));
+  }) => {
+    const [initialMessageId] = useState(message.id);
+    return (
+      <div
+        data-testid={`message-${message.id}`}
+        data-initial-message-id={initialMessageId}
+        data-folder-role={folderRole ?? ""}
+        data-account-color={accountColor ?? ""}
+        data-account-label={accountLabel ?? ""}
+      >
+        {message.subject}
+      </div>
+    );
+  },
+  };
+});
 
 vi.mock("../../src/components/Skeleton", () => ({
   MessageListSkeleton: () => <div>Loading messages</div>,
@@ -244,6 +251,25 @@ describe("MessageList", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+  });
+
+
+  it("keys virtual rows by message id so refresh insertion does not reuse row state", () => {
+    const first = makeMessage("m-1");
+    const inserted = makeMessage("m-2");
+    const { rerender } = render(
+      <MessageList messages={[first]} selectedMessageId={null} onSelectMessage={vi.fn()} loading={false} />,
+    );
+
+    rerender(
+      <MessageList messages={[inserted, first]} selectedMessageId={null} onSelectMessage={vi.fn()} loading={false} />,
+    );
+
+    const rows = Array.from(document.querySelectorAll<HTMLElement>('[data-testid^="message-"]'));
+    expect(rows[0].dataset.testid).toBe("message-m-2");
+    expect(rows[0].dataset.initialMessageId).toBe("m-2");
+    expect(rows[1].dataset.testid).toBe("message-m-1");
+    expect(rows[1].dataset.initialMessageId).toBe("m-1");
   });
 
   it("passes the active folder role to message items", () => {

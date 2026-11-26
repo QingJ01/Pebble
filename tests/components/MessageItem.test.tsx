@@ -25,6 +25,10 @@ vi.mock("react-i18next", () => ({
         "messageActions.reportSpam": "Report spam",
         "messageActions.star": "Star",
         "messageActions.unstar": "Unstar",
+        "messageActions.markUnread": "Mark as unread",
+        "messageActions.markRead": "Mark as read",
+        "messageActions.updateReadFailed": "Failed to update read state",
+        "messageActions.contextMenu": "Message actions",
       };
       return labels[key] ?? fallback ?? key;
     },
@@ -238,6 +242,57 @@ describe("MessageItem", () => {
       message: "Failed to star message",
       type: "error",
     });
+  });
+
+
+  it("marks a read message unread from the row context menu", async () => {
+    render(
+      <MessageItem
+        message={makeMessage({ is_read: true })}
+        isSelected={false}
+        onClick={vi.fn()}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("option"), { clientX: 120, clientY: 80 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Mark as unread" }));
+
+    await waitFor(() => expect(mocks.updateMessageFlags).toHaveBeenCalledWith("message-1", false));
+    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
+    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["starred-messages"] });
+    expect(screen.queryByRole("menu", { name: "Message actions" })).toBeNull();
+  });
+
+  it("does not let keyboard activation bubble from the portal menu to the row", () => {
+    const onClick = vi.fn();
+    render(
+      <MessageItem
+        message={makeMessage({ is_read: true })}
+        isSelected={false}
+        onClick={onClick}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("option"), { clientX: 120, clientY: 80 });
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Mark as unread" }), { key: "Enter" });
+
+    expect(onClick).not.toHaveBeenCalled();
+    expect(screen.getByRole("menu", { name: "Message actions" })).toBeTruthy();
+  });
+
+  it("marks an unread message read from the row context menu", async () => {
+    render(
+      <MessageItem
+        message={makeMessage({ is_read: false })}
+        isSelected={false}
+        onClick={vi.fn()}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("option"), { clientX: 120, clientY: 80 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Mark as read" }));
+
+    await waitFor(() => expect(mocks.updateMessageFlags).toHaveBeenCalledWith("message-1", true));
   });
 
   it("uses the custom batch checkbox control for row selection", () => {

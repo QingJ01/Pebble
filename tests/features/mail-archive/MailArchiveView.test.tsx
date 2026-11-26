@@ -62,6 +62,17 @@ describe("Local mail archive browser", () => {
     await waitFor(() => expect(mocks.saveArchiveAttachment).toHaveBeenCalledWith("archive", "message", 0));
   });
 
+
+  it("does not close a message opened before the initial search debounce would have fired", async () => {
+    await renderView();
+    fireEvent.click(screen.getByRole("button", { name: /Subject A — sender@example.com/ }));
+    await screen.findByRole("article", { name: "Archived message" });
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(screen.getByRole("article", { name: "Archived message" })).toBeTruthy();
+  });
+
   it("requires validation and explicit confirmation before a local import, reporting duplicates and failures", async () => {
     await renderView();
     const importButton = screen.getByRole("button", { name: "Import into local archive" }) as HTMLButtonElement;
@@ -104,6 +115,8 @@ describe("Local mail archive browser", () => {
     fireEvent.change(screen.getByLabelText("Move within this local archive"), { target: { value: "local-other" } });
     await waitFor(() => expect(mocks.updateArchiveMessage).toHaveBeenCalledWith("archive", "message", "local-other", false, false));
     await waitFor(() => expect(screen.queryByRole("article")).toBeNull());
+    const browsePanel = screen.getByRole("group", { name: "Browse local archive" }) as HTMLFieldSetElement;
+    await waitFor(() => expect(browsePanel.disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: /Subject A — sender@example.com/ }));
     await screen.findByRole("article", { name: "Archived message" });
     fireEvent.click(screen.getByRole("button", { name: "Delete archived message" }));

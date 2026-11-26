@@ -47,7 +47,15 @@ export default function MailArchiveView() {
   const messages = useQuery({ queryKey: [...ROOT, archiveId, folderId, search, offset], queryFn: () => api.listArchiveMessages(archiveId, folderId, search, offset), enabled: !!archiveId && !!folderId });
   const detail = useQuery({ queryKey: [...ROOT, archiveId, "message", messageId], queryFn: () => api.readArchiveMessage(archiveId, messageId), enabled: !!messageId && !!archiveId });
 
-  useEffect(() => { const timer = setTimeout(() => { setSearch(query); setOffset(0); setSelected([]); setMessageId(""); }, 250); return () => clearTimeout(timer); }, [query]);
+  const initialQueryEffect = useRef(true);
+  useEffect(() => {
+    if (initialQueryEffect.current) {
+      initialQueryEffect.current = false;
+      return;
+    }
+    const timer = setTimeout(() => { setSearch(query); setOffset(0); setSelected([]); setMessageId(""); }, 250);
+    return () => clearTimeout(timer);
+  }, [query]);
   useEffect(() => {
     const registration = listen<api.ArchiveProgress>("mail-archive:progress", ({ payload }) => { if (payload.job_id === job.current) setProgress(payload); });
     return () => { void registration.then((unlisten) => unlisten()).catch(() => {}); if (job.current) void api.cancelArchiveJob(job.current).catch(() => {}); };

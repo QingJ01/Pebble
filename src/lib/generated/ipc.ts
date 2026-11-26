@@ -25,6 +25,21 @@ export type Attachment = { id: string, message_id: string, filename: string, mim
 
 export type BackupPreview = { version: number, exported_at: number, account_count: number, rule_count: number, kanban_card_count: number, kanban_note_count: number, contact_count: number, has_translate_config: boolean, has_encrypted_secrets: boolean, secret_account_count: number, has_translate_secret: boolean, size_bytes: number, };
 
+export type BatchMarkReadResult = { 
+/**
+ * Messages whose local read state was updated immediately.
+ */
+updated: number, 
+/**
+ * Messages with a pending remote retry. This may overlap `updated` when
+ * the desired state was committed locally while offline.
+ */
+queued: number, 
+/**
+ * Requested messages that were neither updated nor queued.
+ */
+failed: number, };
+
 export type BilingualSegment = { source: string, target: string, };
 
 export type ConnectionSecurity = "tls" | "starttls" | "plain";

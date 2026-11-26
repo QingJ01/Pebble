@@ -1,3 +1,4 @@
+use crate::commands::batch::{batch_mark_read_detailed, BatchMarkReadResult};
 use crate::state::AppState;
 use pebble_core::{Message, PebbleError, ProviderType};
 use pebble_store::pending_ops::{FlagsOp, MailOp};
@@ -95,4 +96,32 @@ pub async fn update_message_flags(
     .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))??;
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn update_thread_read_flags_in_folders(
+    state: State<'_, AppState>,
+    thread_id: String,
+    folder_ids: Vec<String>,
+    is_read: bool,
+) -> std::result::Result<BatchMarkReadResult, PebbleError> {
+    let store = state.store.clone();
+    let ids = tokio::task::spawn_blocking(move || {
+        store.list_message_ids_by_thread_in_folders(&thread_id, &folder_ids)
+    })
+    .await
+    .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))??;
+
+    let mut result = BatchMarkReadResult {
+        updated: 0,
+        queued: 0,
+        failed: 0,
+    };
+    for chunk in ids.chunks(1000) {
+        let chunk_result = batch_mark_read_detailed(state.clone(), chunk.to_vec(), is_read).await?;
+        result.updated += chunk_result.updated;
+        result.queued += chunk_result.queued;
+        result.failed += chunk_result.failed;
+    }
+    Ok(result)
 }

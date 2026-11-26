@@ -55,6 +55,7 @@ export type {
 export type { KanbanColumn as KanbanColumnType } from "./generated/ipc";
 
 export type {
+  BatchMarkReadResult,
   ImapSyncFolderSettings,
   PendingMailOp,
   PendingMailOpsSummary,

@@ -2,7 +2,7 @@ import { senderIdentityLabel } from "@/lib/accountIdentity";
 import { useState, useEffect, useRef } from "react";
 import { EditorContent } from "@tiptap/react";
 import {
-  ArrowLeft, Send, X, AlertCircle,
+  ArrowLeft, Send, X, AlertCircle, Clock,
   Type, FileCode2, Hash, Eye, EyeOff,
   Paperclip, FileText, Trash2, BookTemplate,
   ChevronDown, ChevronRight,
@@ -160,7 +160,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [showSaveTemplate, setShowSaveTemplate] = useState(false);
   const [templateName, setTemplateName] = useState("");
-  const [showQuotedReply, setShowQuotedReply] = useState(false);
+  const [showQuotedReply, setShowQuotedReply] = useState(true);
 
   async function refreshTemplates() {
     try {
@@ -642,6 +642,20 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
     || pendingAttachmentStagingCount > 0
     || !fromAccountId
     || !hasToRecipient;
+  const headerActionStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    padding: "7px 16px",
+    backgroundColor: sendInProgress || sendMutation.isPending ? "var(--color-text-secondary)" : "var(--color-accent, #2563eb)",
+    color: "#fff",
+    border: "none",
+    borderRadius: "6px",
+    cursor: sendDisabled ? "default" : "pointer",
+    opacity: hasToRecipient ? 1 : 0.5,
+    fontSize: "13px",
+    fontWeight: 500,
+  };
 
   return (
     <div
@@ -686,27 +700,31 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
             {title}
           </span>
         </div>
-        <button
-          onClick={() => void handleSend()}
-          disabled={sendDisabled}
-          style={{
-            display: "flex", alignItems: "center", gap: "6px",
-            padding: "7px 20px",
-            backgroundColor: sendInProgress || sendMutation.isPending ? "var(--color-text-secondary)" : "var(--color-accent, #2563eb)",
-            color: "#fff", border: "none", borderRadius: "6px",
-            cursor: sendDisabled ? "default" : "pointer",
-            opacity: hasToRecipient ? 1 : 0.5,
-            fontSize: "13px", fontWeight: 500,
-          }}
-        >
-          <Send size={14} />
-          {sendInProgress || sendMutation.isPending ? t("compose.sending", "Sending...") : t("compose.send", "Send")}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <button
+            type="button"
+            aria-expanded={showSchedule}
+            onClick={() => setShowSchedule((value) => !value)}
+            disabled={sendDisabled}
+            style={headerActionStyle}
+          >
+            <Clock size={14} />
+            {t("sendControls.schedule")}
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleSend()}
+            disabled={sendDisabled}
+            style={headerActionStyle}
+          >
+            <Send size={14} />
+            {sendInProgress || sendMutation.isPending ? t("compose.sending", "Sending...") : t("compose.send", "Send")}
+          </button>
+        </div>
       </div>
 
-      <div className="send-controls-options">
-        <button disabled={sendDisabled} onClick={() => setShowSchedule((value) => !value)}>{t("sendControls.schedule")}</button>
-        {showSchedule && <>
+      {showSchedule && (
+        <div className="send-controls-options">
           <ScheduleTimeInput value={scheduleValue} onChange={setScheduleValue} />
           <button disabled={sendDisabled || scheduledInstant(scheduleValue) === null} onClick={() => {
             const instant = scheduledInstant(scheduleValue);
@@ -714,8 +732,8 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
             void handleSend(instant);
           }}>{t("sendControls.schedule")}</button>
           <small>{t("sendControls.policy")}</small>
-        </>}
-      </div>
+        </div>
+      )}
 
       {/* Error banner */}
       {sendError && (
@@ -1131,7 +1149,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
               }
             }}
           >
-            <div className="compose-editor-surface">
+            <div className={`compose-editor-surface${quotedReplyHtml ? " compose-editor-surface--with-quote" : ""}`}>
               {editorMode === "rich" ? (
                 <EditorContent
                   editor={editor}
@@ -1166,28 +1184,28 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
                   className={`compose-source-input${editorMode === "html" ? " is-code" : ""}`}
                 />
               )}
+              {quotedReplyHtml && (
+                <div className="compose-quoted-reply">
+                  <button
+                    type="button"
+                    className="compose-quoted-reply-toggle"
+                    aria-expanded={showQuotedReply}
+                    onClick={() => setShowQuotedReply((value) => !value)}
+                  >
+                    {showQuotedReply ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    {showQuotedReply
+                      ? t("compose.hideQuotedReply", "Hide quoted message")
+                      : t("compose.showQuotedReply", "Show quoted message")}
+                  </button>
+                  {showQuotedReply && (
+                    <div
+                      className="compose-quoted-reply-content"
+                      dangerouslySetInnerHTML={{ __html: quotedReplyHtml }}
+                    />
+                  )}
+                </div>
+              )}
             </div>
-            {quotedReplyHtml && (
-              <div className="compose-quoted-reply">
-                <button
-                  type="button"
-                  className="compose-quoted-reply-toggle"
-                  aria-expanded={showQuotedReply}
-                  onClick={() => setShowQuotedReply((value) => !value)}
-                >
-                  {showQuotedReply ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                  {showQuotedReply
-                    ? t("compose.hideQuotedReply", "Hide quoted message")
-                    : t("compose.showQuotedReply", "Show quoted message")}
-                </button>
-                {showQuotedReply && (
-                  <div
-                    className="scroll-region compose-quoted-reply-content"
-                    dangerouslySetInnerHTML={{ __html: quotedReplyHtml }}
-                  />
-                )}
-              </div>
-            )}
             {isDragging && (
               <div className="compose-drop-overlay">
                 <Paperclip size={20} />

@@ -1,8 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { BatchMarkReadResult } from "./ipc-types";
 
 // Re-export all IPC types so existing `import { Foo } from "@/lib/api"` keeps working.
 export type {
   Account,
+  BatchMarkReadResult,
   AccountProxyMode,
   AccountProxySetting,
   AddAccountRequest,
@@ -613,6 +615,10 @@ export async function batchDelete(messageIds: string[]): Promise<number> {
 
 export async function batchMarkRead(messageIds: string[], isRead: boolean): Promise<number> {
   return invoke<number>("batch_mark_read", { messageIds, isRead });
+}
+
+export async function updateThreadReadFlagsInFolders(threadId: string, folderIds: string[], isRead: boolean): Promise<BatchMarkReadResult> {
+  return invoke<BatchMarkReadResult>("update_thread_read_flags_in_folders", { threadId, folderIds, isRead });
 }
 
 export async function batchStar(messageIds: string[], starred: boolean): Promise<number> {

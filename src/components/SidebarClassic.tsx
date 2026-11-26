@@ -1,5 +1,4 @@
 import { accountOptionLabel } from "@/lib/accountIdentity";
-import FolderManagementButton from "./FolderManagementButton";
 import { useEffect, useMemo } from "react";
 import {
   Inbox,
@@ -28,6 +27,7 @@ import {
   sortFoldersForSidebar,
   unreadCountForFolder,
 } from "../lib/folderAggregation";
+import { useSidebarFolderManagement } from "../hooks/useSidebarFolderManagement";
 import type { Account, Folder as FolderType } from "../lib/api";
 
 const EMPTY_ACCOUNTS: Account[] = [];
@@ -75,6 +75,7 @@ export default function SidebarClassic() {
   );
   const { data: folders = EMPTY_FOLDERS, isFetched: foldersFetched } = useFoldersForAccountsQuery(folderAccountIds);
   const { data: unreadCounts = {} } = useFolderUnreadCountsForAccounts(folderAccountIds);
+  const { handleContextMenu: handleSidebarContextMenu, overlay: folderManagementOverlay } = useSidebarFolderManagement({ accounts, folders, accountId: activeAccountId });
   const ROLE_LABELS: Record<string, string> = {
     inbox: t("sidebar.inbox"),
     sent: t("sidebar.sent"),
@@ -153,6 +154,7 @@ export default function SidebarClassic() {
   return (
     <aside
       aria-label={t("sidebar.navigation", "Sidebar")}
+      onContextMenu={handleSidebarContextMenu}
       style={{
         width: sidebarCollapsed ? "48px" : "200px",
         flexShrink: 0,
@@ -225,7 +227,6 @@ export default function SidebarClassic() {
       )}
 
       {/* Folders section */}
-      <FolderManagementButton accounts={accounts} folders={folders} accountId={activeAccountId} collapsed={sidebarCollapsed}/>
       <nav
         className="scroll-region sidebar-folder-scroll"
         aria-label={t("sidebar.mailFolders", "Mail folders")}
@@ -351,6 +352,7 @@ export default function SidebarClassic() {
           onClick={() => safeSetActiveView("settings")}
         />
       </nav>
+      {folderManagementOverlay}
     </aside>
   );
 }
