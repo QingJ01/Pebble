@@ -9,6 +9,7 @@ import { updateMessageFlags, getMessage } from "@/lib/api";
 import { queryClient } from "@/lib/query-client";
 import type { MessageSummary, ThreadSummary } from "@/lib/api";
 import { findCachedMessage, patchMessagesCache, readFirstCachedMessages } from "@/hooks/queries";
+import { getActiveMessages, getActiveThreads } from "@/lib/activeMailList";
 import { runMailAction } from "@/hooks/mutations/mailActions";
 import { hasModalOverlay, hasOverlay } from "@/lib/overlayStack";
 
@@ -47,11 +48,13 @@ function allowsPlainShortcut(target: EventTarget | null, key: string): boolean {
 
 /** Read the first matching cached messages from React Query */
 function getCachedMessages(): MessageSummary[] {
-  return readFirstCachedMessages(queryClient);
+  return getActiveMessages() ?? readFirstCachedMessages(queryClient);
 }
 
 /** Read the first matching cached threads from React Query */
 function getCachedThreads(): ThreadSummary[] {
+  const active = getActiveThreads();
+  if (active) return active;
   const entries = queryClient.getQueriesData<ThreadSummary[]>({ queryKey: ["threads"] });
   for (const [, data] of entries) {
     if (data && data.length > 0) return data;

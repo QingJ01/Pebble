@@ -21,7 +21,11 @@ function scrollToEmailFragment(root: ShadowRoot, fragment: string) {
   target?.scrollIntoView?.({ block: "start" });
 }
 
-const PLAIN_TEXT_RE = /^\s*<pre class="pebble-plain-text-email">[\s\S]*<\/pre>\s*$/;
+// The backend's plain-text wrapper: escaped text plus the links its linkifier
+// adds, nothing else. Matching the whole body (not just the opening tag) keeps
+// an HTML mail from borrowing the class to skip the light HTML-mail card.
+const PLAIN_TEXT_RE =
+  /^\s*<pre class="pebble-plain-text-email">(?:[^<]|<a href="[^"]*" target="_blank" rel="noopener noreferrer">[^<]*<\/a>)*<\/pre>\s*$/;
 
 export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
   const hostRef = useRef<HTMLDivElement>(null);

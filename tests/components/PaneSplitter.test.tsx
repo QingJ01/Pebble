@@ -10,15 +10,32 @@ describe("usePaneWidth", () => {
   afterEach(() => { window.localStorage.clear(); vi.restoreAllMocks(); });
 
   it("restores, clamps and persists the width", () => {
+    vi.useFakeTimers();
     window.localStorage.setItem("pane", "9999");
     const { result } = renderHook(() => usePaneWidth("pane", 340, 260, 560));
     expect(result.current.width).toBe(560);
     act(() => result.current.setWidth(100));
     expect(result.current.width).toBe(260);
+    // Persisting is debounced so a drag doesn't write on every pointermove.
+    expect(window.localStorage.getItem("pane")).toBe("9999");
+    act(() => { vi.advanceTimersByTime(300); });
     expect(window.localStorage.getItem("pane")).toBe("260");
+    vi.useRealTimers();
     act(() => result.current.reset());
     expect(result.current.width).toBe(340);
     expect(window.localStorage.getItem("pane")).toBeNull();
+  });
+
+  it("writes once at the end of a drag", () => {
+    vi.useFakeTimers();
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    const { result } = renderHook(() => usePaneWidth("pane", 340, 260, 560));
+    for (let width = 300; width <= 400; width += 10) {
+      act(() => result.current.setWidth(width));
+    }
+    act(() => { vi.advanceTimersByTime(300); });
+    expect(setItem.mock.calls.filter(([key]) => key === "pane")).toEqual([["pane", "400"]]);
+    vi.useRealTimers();
   });
 
   it("falls back to the default when storage is unavailable", () => {

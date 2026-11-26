@@ -137,6 +137,15 @@ describe("Collapsed sidebar rail", () => {
     expect(bob.getAttribute("title")).toBe("bob@example.com, 4 unread");
   });
 
+  it("hides unread dots and counts when folder unread counts are turned off", () => {
+    // The unified-inbox filter bar may still have counts cached.
+    useUIStore.setState({ showFolderUnreadCount: false });
+    render(<Sidebar />);
+
+    const bob = screen.getByRole("button", { name: "bob@example.com" });
+    expect(bob.querySelector(".account-badge__dot")).toBeNull();
+  });
+
   it("opens the account menu with the keyboard, moves with arrows and returns focus on Escape", async () => {
     render(<Sidebar />);
 

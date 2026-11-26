@@ -22,10 +22,10 @@ import "@/components/mail-list.css";
 import { eventToKeyString, useShortcutStore } from "@/stores/shortcut.store";
 import { emptyTrash } from "@/lib/api";
 import { folderIdsForSelection, isAllAccountsFolderId, roleForSelection } from "@/lib/folderAggregation";
-import { assignAccountColors } from "@/lib/accountColors";
-import { useAccountBadges } from "@/hooks/useAccountBadges";
+import { useAccountBadges, withResolvedColors } from "@/hooks/useAccountBadges";
 import AccountFilterBar from "./AccountFilterBar";
 import type { ThreadSummary } from "@/lib/api";
+import { clearActiveMailList, setActiveMailList } from "@/lib/activeMailList";
 
 const EMPTY_THREADS: ThreadSummary[] = [];
 
@@ -66,8 +66,7 @@ export default function InboxView() {
   const spansAccounts = showAccountFilter && !accountFilter;
   const filterAccounts = useMemo(() => {
     if (!showAccountFilter) return [];
-    const colors = assignAccountColors(accounts);
-    return accounts.map((account) => ({ ...account, color: colors.get(account.id) ?? account.color }));
+    return withResolvedColors(accounts);
   }, [accounts, showAccountFilter]);
   const selectedFolderIds = folderIdsForSelection(activeFolderId, folders, accountFilter);
   const queryFolderId = selectedFolderIds[0] ?? null;
@@ -89,6 +88,12 @@ export default function InboxView() {
     0,
     threadView ? queryFolderIds : undefined,
   );
+  // Global J/K walks the list on screen, not whichever list was cached first.
+  useEffect(() => {
+    setActiveMailList(threadView ? { messages: null, threads } : { messages, threads: null });
+  });
+  useEffect(() => clearActiveMailList, []);
+
   const handleLoadMore = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) fetchNextPage();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
@@ -274,7 +279,11 @@ function ThreadList({
     count: threads.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => MAIL_ROW_HEIGHT,
-    getItemKey: (index) => threads[index]?.thread_id ?? index,
+    getItemKey: (index) => {
+      const thread = threads[index];
+      // thread_id is only unique per account.
+      return thread ? `${thread.account_id}:${thread.thread_id}` : index;
+    },
     measureElement: (el) => el.getBoundingClientRect().height,
     overscan: 5,
   });

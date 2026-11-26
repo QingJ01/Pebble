@@ -220,4 +220,20 @@ describe("ShadowDomEmail", () => {
     const contentRule = baseStyle.match(/\.pebble-email-content\s*\{([^}]+)\}/)![1];
     expect(contentRule).toContain("contain: layout paint");
   });
+  it("marks only the backend's plain-text wrapper as plain text", async () => {
+    const plain = '<pre class="pebble-plain-text-email">Hi &lt;you&gt; see <a href="https://example.com" target="_blank" rel="noopener noreferrer">https://example.com</a></pre>';
+    const spoof = '<pre class="pebble-plain-text-email"><span style="color:#111">dark text</span></pre>';
+
+    const contentOf = async (html: string) => {
+      const { container, unmount } = render(<ShadowDomEmail html={html} />);
+      const host = container.firstChild as HTMLDivElement | null;
+      await waitFor(() => expect(host?.shadowRoot).not.toBeNull());
+      const hasFlag = host!.shadowRoot!.querySelector(".pebble-email-content")!.hasAttribute("data-plain-text");
+      unmount();
+      return hasFlag;
+    };
+
+    expect(await contentOf(plain)).toBe(true);
+    expect(await contentOf(spoof)).toBe(false);
+  });
 });

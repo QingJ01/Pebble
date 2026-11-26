@@ -55,6 +55,15 @@ describe("toast store", () => {
     expect(store().toasts.every((t) => t.exiting)).toBe(true);
   });
 
+  it("never merges toasts that carry an action", () => {
+    const undoA = vi.fn();
+    const undoB = vi.fn();
+    store().addToast({ type: "success", message: "Archived", action: { label: "Undo", onClick: undoA } });
+    store().addToast({ type: "success", message: "Archived", action: { label: "Undo", onClick: undoB } });
+    expect(store().toasts).toHaveLength(2);
+    expect(store().toasts.map((t) => t.action?.onClick)).toEqual([undoA, undoB]);
+  });
+
   it("merges identical toasts into one with a count and restarts its timer", () => {
     const first = store().addToast({ type: "error", message: "Offline" });
     vi.advanceTimersByTime(7000);

@@ -795,7 +795,7 @@ fn migration_v11_backfills_existing_account_colors() {
         .unwrap();
     assert_eq!(
         colors,
-        vec![Some("#0ea5e9".to_string()), Some("#22c55e".to_string())]
+        vec![Some("#0ea5e9".to_string()), Some("#10b981".to_string())]
     );
 }
 

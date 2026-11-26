@@ -138,6 +138,31 @@ describe("mail actions with undo", () => {
     await vi.waitFor(() => expect(lastToast().message).toBe("Undone"));
   });
 
+  it("ignores a second archive of the same message while the first is in flight", async () => {
+    seedList(client, [message("m1"), message("m2")]);
+
+    const first = runMailAction(client, "archive", [message("m1")]);
+    const second = runMailAction(client, "archive", [message("m1")]);
+    const [a, b] = await Promise.all([first, second]);
+
+    expect(a.ok).toBe(true);
+    expect(b.ok).toBe(false);
+    expect(mocks.archiveMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps one undo per archive so undoing the toasts restores both messages", async () => {
+    seedList(client, [message("m1"), message("m2")]);
+
+    await runMailAction(client, "archive", [message("m1")]);
+    await runMailAction(client, "archive", [message("m2")]);
+
+    const undoable = useToastStore.getState().toasts.filter((t) => t.action);
+    expect(undoable).toHaveLength(2);
+    undoable.forEach((t) => t.action!.onClick());
+    await vi.waitFor(() => expect(mocks.moveToFolder).toHaveBeenCalledWith("m1", "inbox"));
+    await vi.waitFor(() => expect(mocks.moveToFolder).toHaveBeenCalledWith("m2", "inbox"));
+  });
+
   it("moves to trash without confirmation and undoes back to the source folder", async () => {
     const confirm = vi.fn();
     seedList(client, [message("m1")]);

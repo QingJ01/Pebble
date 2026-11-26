@@ -122,12 +122,22 @@ export function useMessageLoader(messageId: string | null, privacyMode: PrivacyM
     const cached = cache.get(messageId);
     setError(null);
 
-    if (cached) {
+    // Only reuse cached HTML rendered under the current privacy mode: HTML
+    // rendered under a looser mode could load remote images / trackers.
+    const cachedRenderUsable = !!cached && cached.renderKey === initialRenderKey;
+
+    if (cached && cachedRenderUsable) {
       // Show the cached copy immediately, then revalidate in the background.
       setMessageState(cached.message);
       setRendered(cached.rendered);
       renderedKeyRef.current = cached.renderKey;
       setLoading(false);
+    } else if (cached) {
+      // Headers are safe to show; the body waits for a render in this mode.
+      setMessageState(cached.message);
+      setRendered(null);
+      renderedKeyRef.current = null;
+      setLoading(true);
     } else {
       // Keep the previous message on screen (dimmed by the view) meanwhile.
       setLoading(true);
@@ -140,7 +150,7 @@ export function useMessageLoader(messageId: string | null, privacyMode: PrivacyM
         if (cancelled || !entry) return;
         setMessageState(entry.message);
         // A privacy re-render may already have replaced the cached HTML.
-        if (!cached || renderedKeyRef.current === initialRenderKey || renderedKeyRef.current === cached.renderKey) {
+        if (!cachedRenderUsable || renderedKeyRef.current === initialRenderKey) {
           renderedKeyRef.current = initialRenderKey;
           setRendered(entry.rendered);
         }
@@ -151,7 +161,7 @@ export function useMessageLoader(messageId: string | null, privacyMode: PrivacyM
         }
       } catch (err) {
         if (cancelled) return;
-        if (cached) {
+        if (cachedRenderUsable) {
           console.warn("Background message refresh failed:", err);
           return;
         }

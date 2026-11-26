@@ -23,10 +23,11 @@ import { useTranslation } from "react-i18next";
 import SidebarButton from "./SidebarButton";
 import SidebarRail, { RailMenuButton } from "./SidebarRail";
 import AccountBadge, { accountShortName } from "./ui/AccountBadge";
+import { useResolvedAccounts } from "../hooks/useAccountBadges";
 import { useUIStore } from "../stores/ui.store";
 import { isComposeDirty, useComposeStore } from "../stores/compose.store";
 import { useMailStore } from "../stores/mail.store";
-import { useAccountsQuery, useFoldersForAccountsQuery } from "../hooks/queries";
+import { useFoldersForAccountsQuery } from "../hooks/queries";
 import { useFolderUnreadCountsForAccounts } from "../hooks/queries/useFolderUnreadCounts";
 import {
   allAccountsFolderId,
@@ -36,9 +37,8 @@ import {
 } from "../lib/folderAggregation";
 import { profileLocalStorage } from "../lib/profileStorage";
 import { useSidebarFolderManagement } from "../hooks/useSidebarFolderManagement";
-import type { Account, Folder as FolderType } from "../lib/api";
+import type { Folder as FolderType } from "../lib/api";
 
-const EMPTY_ACCOUNTS: Account[] = [];
 const EMPTY_FOLDERS: FolderType[] = [];
 
 type AccountGroupRole = NonNullable<FolderType["role"]>;
@@ -77,7 +77,7 @@ export default function SidebarGrouped({ collapsed: sidebarCollapsed }: { collap
   const [collapsedAccountIds, setCollapsedAccountIds] = useState<Set<string>>(readCollapsedAccountIds);
 
   const showUnread = useUIStore((s) => s.showFolderUnreadCount);
-  const { data: accounts = EMPTY_ACCOUNTS } = useAccountsQuery();
+  const accounts = useResolvedAccounts();
   // The sidebar always renders every account group, so it needs all folders.
   const accountIds = useMemo(() => accounts.map((account) => account.id), [accounts]);
   const { data: folders = EMPTY_FOLDERS, isFetched: foldersFetched } = useFoldersForAccountsQuery(accountIds);
@@ -223,9 +223,9 @@ export default function SidebarGrouped({ collapsed: sidebarCollapsed }: { collap
           const accountFolders = foldersByAccount.get(account.id) ?? EMPTY_FOLDERS;
           const entries = sortFoldersForSidebar(accountFolders);
           const inbox = entries.find((folder) => folder.role === "inbox");
-          // Unread counts are only fetched while "show folder unread counts" is
-          // on, so the dot follows that setting like the expanded sidebar does.
-          const inboxUnread = inbox ? unreadCountForFolder(inbox.id, accountFolders, unreadCounts) : 0;
+          // The dot and label follow "show folder unread counts" like the
+          // expanded sidebar (the filter bar may fetch counts regardless).
+          const inboxUnread = showUnread && inbox ? unreadCountForFolder(inbox.id, accountFolders, unreadCounts) : 0;
           const name = accountShortName(account);
           const buttonLabel = inboxUnread > 0
             ? t("sidebar.accountUnread", "{{name}} · {{count}} unread", { name, count: inboxUnread })

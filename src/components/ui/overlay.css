@@ -14,14 +14,6 @@
 .dialog-panel--wide { width: min(560px, 100%); }
 .dialog-panel--flush { padding: 0; gap: 0; }
 
-.dialog-header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-/* In flush dialogs .dialog-header gets the .dialog-panel__header spec (index.css). */
-.dialog-header .dialog-title { flex: 1; min-width: 0; }
-
 .dialog-section-label {
   margin: 0;
   font-size: var(--font-sm);
@@ -82,7 +74,6 @@
 .menu-item:where(:not(:disabled)):active { background: var(--color-fill-pressed); }
 .menu-item:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--color-focus-ring); }
 .menu-item:disabled { opacity: var(--opacity-disabled); cursor: default; }
-.menu-item--danger { color: var(--color-danger); }
 .menu-item__hint {
   margin-left: auto;
   padding-left: var(--space-3);

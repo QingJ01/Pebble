@@ -12,9 +12,11 @@ mod v21;
 pub(crate) const CURRENT_VERSION: u32 = 22;
 /// How many pre-migration backups to keep next to the database file.
 const MIGRATION_BACKUPS_TO_KEEP: usize = 2;
+// Keep in sync with src/lib/accountColors.ts and src-tauri/src/account_colors.rs
+// (tests/lib/account-color-presets-sync.test.ts checks all three).
 const ACCOUNT_COLOR_PRESETS: [&str; 12] = [
-    "#0ea5e9", "#22c55e", "#f59e0b", "#8b5cf6", "#f43f5e", "#14b8a6", "#6366f1", "#f97316",
-    "#06b6d4", "#ec4899", "#84cc16", "#3b82f6",
+    "#0ea5e9", "#10b981", "#8b5cf6", "#ec4899", "#65a30d", "#6366f1", "#14b8a6", "#c026d3",
+    "#3b82f6", "#64748b", "#06b6d4", "#1e40af",
 ];
 
 fn get_schema_version(conn: &Connection) -> u32 {

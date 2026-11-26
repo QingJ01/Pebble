@@ -449,18 +449,29 @@ export interface RunOptions extends ExecuteOptions {
 }
 
 /** Plan, confirm if needed, then execute. */
+// Message ids with an action still being planned or run. Archive toggles on the
+// backend (an archived message goes back to the inbox), so a second E press or
+// palette Archive while the first is in flight must not act on it again.
+const actionsInFlight = new Set<string>();
+
 export async function runMailAction(
   client: QueryClient,
   kind: MailActionKind,
   messages: MailActionTarget[],
   options: RunOptions = {},
 ): Promise<MailActionResult> {
-  if (messages.length === 0) return { ok: false, count: 0 };
-  const plan = await planMailAction(client, kind, messages, { spamFolderId: options.spamFolderId });
-  if (plan.needsConfirm && options.confirm && !(await options.confirm(plan))) {
-    return { ok: false, count: 0 };
+  const targets = messages.filter((m) => !actionsInFlight.has(m.id));
+  if (targets.length === 0) return { ok: false, count: 0 };
+  for (const m of targets) actionsInFlight.add(m.id);
+  try {
+    const plan = await planMailAction(client, kind, targets, { spamFolderId: options.spamFolderId });
+    if (plan.needsConfirm && options.confirm && !(await options.confirm(plan))) {
+      return { ok: false, count: 0 };
+    }
+    return await executeMailAction(client, plan, options);
+  } finally {
+    for (const m of targets) actionsInFlight.delete(m.id);
   }
-  return executeMailAction(client, plan, options);
 }
 
 /** Standard confirmation copy for a trash plan that cannot be undone. */

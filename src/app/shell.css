@@ -362,11 +362,6 @@
 .pane-splitter:focus-visible { outline: none; }
 .pane-splitter:focus-visible::after { width: 2px; background: var(--color-focus-ring); }
 
-/* Clickable list rows outside the main message list */
-.list-row-hover { transition: background-color var(--dur-fast) var(--ease-out); }
-.list-row-hover:hover { background-color: var(--color-fill-hover); }
-.list-row-hover:active { background-color: var(--color-fill-pressed); }
-
 /* Over a background image the account switcher stays translucent (the chrome
    behind it is translucent too). Chevron is kept via background-image. */
 .app-shell--with-background .sidebar-account-switcher .select {

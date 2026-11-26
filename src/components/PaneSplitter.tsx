@@ -1,36 +1,48 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { profileLocalStorage } from "@/lib/profileStorage";
 
 /**
- * Width of a resizable left pane, persisted in localStorage under `storageKey`.
+ * Width of a resizable left pane, persisted per profile under `storageKey`.
+ * Writes are debounced so a drag doesn't hit storage on every pointermove.
  * Storage failures (private mode, quota, blocked) are ignored.
  */
 export function usePaneWidth(storageKey: string, defaultWidth: number, min: number, max: number) {
   const clamp = useCallback((value: number) => Math.round(Math.min(max, Math.max(min, value))), [min, max]);
   const [width, setWidthState] = useState(() => {
     try {
-      const stored = Number(window.localStorage.getItem(storageKey));
+      const stored = Number(profileLocalStorage.getItem(storageKey));
       return Number.isFinite(stored) && stored > 0 ? clamp(stored) : defaultWidth;
     } catch {
       return defaultWidth;
     }
   });
+  // Only widths the user set are persisted (not the initial or reset width).
+  const dirtyRef = useRef(false);
+
+  useEffect(() => {
+    if (!dirtyRef.current) return;
+    const handle = setTimeout(() => {
+      try {
+        profileLocalStorage.setItem(storageKey, String(width));
+      } catch {
+        // Persisting is best-effort.
+      }
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [storageKey, width]);
 
   const setWidth = useCallback((value: number) => {
-    const next = clamp(value);
-    setWidthState(next);
-    try {
-      window.localStorage.setItem(storageKey, String(next));
-    } catch {
-      // Persisting is best-effort.
-    }
-  }, [clamp, storageKey]);
+    dirtyRef.current = true;
+    setWidthState(clamp(value));
+  }, [clamp]);
 
   const reset = useCallback(() => {
+    dirtyRef.current = false;
     setWidthState(defaultWidth);
     try {
-      window.localStorage.removeItem(storageKey);
+      profileLocalStorage.removeItem(storageKey);
     } catch {
       // ignore
     }

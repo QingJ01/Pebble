@@ -1,6 +1,6 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Message, RenderedHtml } from "../../src/lib/api";
+import type { Message, PrivacyMode, RenderedHtml } from "../../src/lib/api";
 import { clearMessageCache, useMessageLoader } from "../../src/hooks/useMessageLoader";
 import { getMessageWithHtml, getRenderedHtml } from "../../src/lib/api";
 
@@ -158,5 +158,32 @@ describe("useMessageLoader", () => {
     expect(result.current.message?.id).toBe("message-1");
     expect(result.current.rendered?.html).toContain("message-1");
     await waitFor(() => expect(getMessageWithHtml).toHaveBeenCalledTimes(3));
+  });
+  it("does not show cached HTML that was rendered under a looser privacy mode", async () => {
+    vi.mocked(getRenderedHtml).mockResolvedValue(makeRendered("<p>re-rendered</p>"));
+    let release: (() => void) | null = null;
+    vi.mocked(getMessageWithHtml).mockImplementation((id, mode) => {
+      const value: [Message, RenderedHtml] = [makeMessage({ id }), makeRendered(`<p>${id} ${String(mode)}</p>`)];
+      if (mode === "Strict" && id === "message-1") {
+        return new Promise((resolve) => { release = () => resolve(value); });
+      }
+      return Promise.resolve(value);
+    });
+    const { result, rerender } = renderHook(
+      ({ id, mode }) => useMessageLoader(id, mode),
+      { initialProps: { id: "message-1", mode: "Off" as PrivacyMode } },
+    );
+    await waitFor(() => expect(result.current.rendered?.html).toContain("message-1 Off"));
+    rerender({ id: "message-2", mode: "Off" });
+    await waitFor(() => expect(result.current.message?.id).toBe("message-2"));
+
+    // The user tightens privacy, then reopens message-1 (cached under "Off").
+    rerender({ id: "message-2", mode: "Strict" });
+    rerender({ id: "message-1", mode: "Strict" });
+    expect(result.current.rendered).toBeNull();
+    expect(result.current.loading).toBe(true);
+
+    release!();
+    await waitFor(() => expect(result.current.rendered?.html).toContain("message-1 Strict"));
   });
 });

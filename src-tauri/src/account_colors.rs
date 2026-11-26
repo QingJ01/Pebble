@@ -1,7 +1,8 @@
 use pebble_core::Account;
 use std::collections::HashSet;
 
-// Keep in sync with src/lib/accountColors.ts. No orange, amber or red: those
+// Keep in sync with src/lib/accountColors.ts and the copy in
+// crates/pebble-store/src/migrations/mod.rs. No orange, amber or red: those
 // read as brand, star/warning and danger.
 const ACCOUNT_COLOR_PRESETS: [&str; 12] = [
     "#0ea5e9", "#10b981", "#8b5cf6", "#ec4899", "#65a30d", "#6366f1", "#14b8a6", "#c026d3",

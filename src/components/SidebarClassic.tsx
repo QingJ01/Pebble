@@ -23,10 +23,11 @@ import { useTranslation } from "react-i18next";
 import SidebarButton from "./SidebarButton";
 import SidebarRail, { RailMenuButton, type RailMenuItem } from "./SidebarRail";
 import AccountBadge, { accountShortName } from "./ui/AccountBadge";
+import { useResolvedAccounts } from "../hooks/useAccountBadges";
 import { useUIStore } from "../stores/ui.store";
 import { isComposeDirty, useComposeStore } from "../stores/compose.store";
 import { useMailStore } from "../stores/mail.store";
-import { useAccountsQuery, useFoldersForAccountsQuery } from "../hooks/queries";
+import { useFoldersForAccountsQuery } from "../hooks/queries";
 import { useFolderUnreadCountsForAccounts } from "../hooks/queries/useFolderUnreadCounts";
 import {
   ALL_ACCOUNTS_SELECT_VALUE,
@@ -35,9 +36,8 @@ import {
   unreadCountForFolder,
 } from "../lib/folderAggregation";
 import { useSidebarFolderManagement } from "../hooks/useSidebarFolderManagement";
-import type { Account, Folder as FolderType } from "../lib/api";
+import type { Folder as FolderType } from "../lib/api";
 
-const EMPTY_ACCOUNTS: Account[] = [];
 const EMPTY_FOLDERS: FolderType[] = [];
 
 const ROLE_ICONS: Record<string, React.ReactNode> = {
@@ -73,7 +73,7 @@ export default function SidebarClassic({ collapsed: sidebarCollapsed }: { collap
   const setActiveFolderId = useMailStore((s) => s.setActiveFolderId);
 
   const showUnread = useUIStore((s) => s.showFolderUnreadCount);
-  const { data: accounts = EMPTY_ACCOUNTS } = useAccountsQuery();
+  const accounts = useResolvedAccounts();
   const allAccountsMode = accounts.length > 1 && !activeAccountId;
   const folderAccountIds = useMemo(
     () => activeAccountId ? [activeAccountId] : accounts.map((account) => account.id),

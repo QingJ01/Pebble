@@ -9,8 +9,9 @@
  * Rules:
  * - At most MAX_VISIBLE_TOASTS (3) are shown; the rest wait in the queue and
  *   their timers start only once they become visible.
- * - An identical toast (same type + message + detail + action label) that is
+ * - An identical toast (same type + message + detail, no action) that is
  *   still showing is merged: `count` increments and its timer restarts.
+ *   Toasts with an action are never merged (each keeps its own callback).
  * - Default durations: success/info 4000ms, warning 6000ms, error 8000ms;
  *   toasts with an action stay at least 6000ms. `duration: Infinity` = sticky.
  */
@@ -87,10 +88,12 @@ export function selectVisibleToasts(toasts: Toast[]): Toast[] {
 }
 
 function sameToast(a: Toast, b: ToastInput) {
+  // Toasts with an action (Undo, Retry…) are never merged: each carries its own
+  // callback, and merging would leave earlier actions unreachable.
+  if (a.action || b.action) return false;
   return a.type === b.type
     && a.message === b.message
-    && (a.detail ?? "") === (b.detail ?? "")
-    && (a.action?.label ?? null) === (b.action?.label ?? null);
+    && (a.detail ?? "") === (b.detail ?? "");
 }
 
 function clearTimer(id: string) {
@@ -123,7 +126,7 @@ export const useToastStore = create<ToastState>((set, get) => {
       const existing = get().toasts.find((t) => !t.exiting && sameToast(t, input));
       if (existing) {
         set((s) => ({
-          toasts: s.toasts.map((t) => (t.id === existing.id ? { ...t, count: t.count + 1, action: input.action ?? t.action } : t)),
+          toasts: s.toasts.map((t) => (t.id === existing.id ? { ...t, count: t.count + 1 } : t)),
         }));
         if (timers.has(existing.id)) {
           clearTimer(existing.id);

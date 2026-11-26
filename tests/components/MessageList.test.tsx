@@ -236,6 +236,25 @@ describe("MessageList", () => {
     });
   });
 
+  it("fetches labels per stable page-sized chunk so earlier pages stay cached", () => {
+    mocks.labelQueryKeys = [];
+    const firstPages = Array.from({ length: 100 }, (_, index) => makeMessage(`m-${index}`));
+    const { rerender } = render(
+      <MessageList messages={firstPages} selectedMessageId={null} onSelectMessage={vi.fn()} loading={false} />,
+    );
+    const initialKeys = mocks.labelQueryKeys.at(-1)!;
+    expect(initialKeys).toHaveLength(2);
+    expect(String(initialKeys[0][1]).split(",")).toHaveLength(50);
+
+    const morePages = [...firstPages, ...Array.from({ length: 30 }, (_, index) => makeMessage(`n-${index}`))];
+    rerender(<MessageList messages={morePages} selectedMessageId={null} onSelectMessage={vi.fn()} loading={false} />);
+    const nextKeys = mocks.labelQueryKeys.at(-1)!;
+
+    expect(nextKeys).toHaveLength(3);
+    expect(nextKeys.slice(0, 2)).toEqual(initialKeys);
+    expect(String(nextKeys[2][1]).split(",")).toHaveLength(30);
+  });
+
   it("does not show Load more just because the current page has 50 messages", () => {
     render(
       <MessageList
