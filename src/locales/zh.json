@@ -885,7 +885,8 @@
     "actionValue": "动作值",
     "kanbanColumn": "看板列",
     "conditionValueRequired": "条件值不能为空。",
-    "contextRuleName": "选中文本规则"
+    "contextRuleName": "选中文本规则",
+    "listTitle": "我的规则"
   },
   "translate": {
     "title": "翻译",

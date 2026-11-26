@@ -525,9 +525,12 @@ option {
   justify-content: space-between;
   gap: var(--space-4);
 }
+.settings-section__header:not(:has(.settings-section__description)) { align-items: center; }
 .settings-section__heading { min-width: 0; }
 /* The body already spaces its children; don't double the .field + .field gap. */
-.settings-section__body > .field + .field { margin-top: 0; }
+.settings-section__body > .field + .field,
+.settings-form > .field + .field { margin-top: 0; }
+.settings-form { display: flex; flex-direction: column; gap: var(--space-4); }
 .settings-section__actions {
   display: flex;
   align-items: center;
@@ -560,7 +563,9 @@ option {
   gap: var(--space-2);
 }
 .settings-row > .field { flex: 1 1 200px; }
-.settings-row > .field + .field { margin-top: 0; }
+.settings-row > .field + .field,
+.settings-grid > .field + .field { margin-top: 0; }
+.settings-grid { display: grid; align-items: end; gap: var(--space-3); }
 .settings-row > .field--narrow { flex: 0 0 112px; }
 .settings-actions {
   display: flex;
@@ -622,7 +627,6 @@ option {
 .option-card[aria-pressed="true"] {
   border-color: var(--color-text-secondary);
   background: var(--color-fill-selected);
-  box-shadow: inset 0 0 0 1px var(--color-text-secondary);
 }
 .option-card:disabled { cursor: not-allowed; opacity: var(--opacity-disabled); }
 .option-card__title {

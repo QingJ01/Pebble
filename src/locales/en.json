@@ -898,7 +898,8 @@
     "actionValue": "Action value",
     "kanbanColumn": "Kanban column",
     "conditionValueRequired": "Condition values cannot be empty.",
-    "contextRuleName": "Selected text rule"
+    "contextRuleName": "Selected text rule",
+    "listTitle": "Your rules"
   },
   "translate": {
     "title": "Translation",

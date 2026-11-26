@@ -423,7 +423,7 @@ export default function RulesTab() {
   return (
     <div>
       <SettingsSection
-        title={t("rules.title")}
+        title={t("rules.listTitle", "Your rules")}
         actions={
           <Button size="sm" icon={<Plus size={14} />} onClick={startCreate} disabled={editingId !== null}>
             {t("rules.addRule")}

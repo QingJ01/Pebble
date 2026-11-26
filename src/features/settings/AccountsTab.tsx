@@ -460,7 +460,7 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
   };
   const colorInputValue = /^#[0-9a-fA-F]{6}$/.test(accountColor) ? accountColor : initialColor;
   const proxyFields = (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "var(--space-3)" }}>
+    <div className="settings-grid" style={{ gridTemplateColumns: "1fr auto" }}>
       <div className="field">
         <label className="field__label">{t("accountSetup.proxyHost", "SOCKS5 Proxy")} <span style={optionalStyle}>({t("settings.optional", "optional")})</span></label>
         <input aria-label={t("accountSetup.proxyHost", "SOCKS5 Proxy")} className="input" type="text" value={proxyHost} onChange={(e) => setProxyHost(e.target.value)} placeholder="127.0.0.1" />
@@ -491,7 +491,7 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
         </div>
 
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}>
-          <div className="scroll-region edit-account-scroll dialog-panel__body" style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
+          <div className="scroll-region edit-account-scroll dialog-panel__body settings-form">
             <div className="field">
               <label className="field__label">{t("accountSetup.accountLabel", "Account label")}</label>
               <input aria-label={t("accountSetup.accountLabel", "Account label")} className="input" maxLength={120}
@@ -597,7 +597,7 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
                   <input aria-label={t("accountSetup.password")} className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "var(--space-3)" }}>
+                <div className="settings-grid" style={{ gridTemplateColumns: "1fr auto auto" }}>
                   <div className="field">
                     <label className="field__label">{incomingHostLabel} <span style={optionalStyle}>({t("settings.optional", "optional")})</span></label>
                     <input aria-label={incomingHostLabel} className="input" type="text" value={imapHost} onChange={(e) => setImapHost(e.target.value)} placeholder={t("settings.leaveEmptyKeep")} />
@@ -617,7 +617,7 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
                   </div>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "var(--space-3)" }}>
+                <div className="settings-grid" style={{ gridTemplateColumns: "1fr auto auto" }}>
                   <div className="field">
                     <label className="field__label">{t("accountSetup.smtpHost")} <span style={optionalStyle}>({t("settings.optional", "optional")})</span></label>
                     <input aria-label={t("accountSetup.smtpHost")} className="input" type="text" value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} placeholder={t("settings.leaveEmptyKeep")} />

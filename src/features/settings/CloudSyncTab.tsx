@@ -549,19 +549,6 @@ export default function CloudSyncTab() {
         </div>
       </SettingsSection>
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="application/json,.json"
-        style={{ display: "none" }}
-        onChange={(event) => {
-          const file = event.currentTarget.files?.[0];
-          if (file) {
-            void handleImportFile(file);
-          }
-        }}
-      />
-
       <SettingsSection
         title={t("cloudSync.backupSection", "Backup and restore")}
         description={t(
@@ -569,6 +556,18 @@ export default function CloudSyncTab() {
           "Restoring without the backup encryption password is partial. Enter it to restore account passwords, OAuth tokens, and translation API keys when the backup contains them.",
         )}
       >
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/json,.json"
+          style={{ display: "none" }}
+          onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            if (file) {
+              void handleImportFile(file);
+            }
+          }}
+        />
         <div className="settings-actions">
           <Button variant="primary" onClick={handleBackup} disabled={anyLoading}>
             {backing ? t("common.saving") : t("cloudSync.backup", "Backup Settings")}

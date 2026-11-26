@@ -218,7 +218,7 @@ export default function AboutTab() {
       </SettingsSection>
 
       <SettingsSection title={t("about.links", "Links")}>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "var(--space-1)" }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "var(--space-2)" }}>
           {[
             { label: "GitHub Releases", url: RELEASES_URL },
             { label: t("about.sourceCode", "Source Code"), url: `https://github.com/${REPO}` },
