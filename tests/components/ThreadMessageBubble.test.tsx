@@ -84,7 +84,7 @@ describe("ThreadMessageBubble", () => {
 
     expect(listAttachments).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { expanded: false }));
-    const download = await screen.findByRole("button", { name: "attachments.download: report.pdf" });
+    const download = await screen.findByRole("button", { name: "attachments.downloadNamed" });
     expect(listAttachments).toHaveBeenCalledWith("message-1");
     expect(screen.queryByText("inline.png")).toBeNull();
 

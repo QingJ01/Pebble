@@ -25,6 +25,7 @@ import ContactAddressAction from "./ContactAddressAction";
 import MessageParticipants from "./MessageParticipants";
 import IconButton from "./ui/IconButton";
 import { useDelayedFlag } from "@/hooks/useDelayedFlag";
+import { formatDateTime } from "@/lib/formatDate";
 import "./ui/overlay.css";
 
 /** Skeleton appears only for loads slower than this… */
@@ -48,13 +49,13 @@ interface Props {
 }
 
 function formatFullDate(timestamp: number, language?: string): string {
-  return new Date(timestamp * 1000).toLocaleString(language || [], {
+  return formatDateTime(timestamp, {
     year: "numeric",
     month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-  });
+  }, language);
 }
 
 export default function MessageDetail({ messageId, onBack, folderRole }: Props) {

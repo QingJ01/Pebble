@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { Message } from "@/lib/api";
 import IconButton from "@/components/ui/IconButton";
+import { formatDate } from "@/lib/formatDate";
 
 interface Props {
   id: string;
@@ -52,7 +53,7 @@ export function KanbanCardBody({ id, note, message, onRemove }: Omit<Props, "onO
           {sender}
         </span>
         <span style={{ color: "var(--color-text-secondary)", fontSize: "var(--font-xs)", marginRight: "auto", whiteSpace: "nowrap" }}>
-          {new Date(message.date * 1000).toLocaleDateString(i18n?.language)}
+          {formatDate(message.date, undefined, i18n?.language)}
         </span>
         <IconButton
           label={t("kanban.removeFromBoard")}

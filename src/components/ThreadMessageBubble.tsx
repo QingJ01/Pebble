@@ -5,6 +5,7 @@ import { getRenderedHtml } from "@/lib/api";
 import type { Message, RenderedHtml } from "@/lib/api";
 import { defaultPrivacyMode } from "@/lib/privacyMode";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
+import { formatDateTime } from "@/lib/formatDate";
 import { ShadowDomEmail } from "./ShadowDomEmail";
 import ContactAddressAction from "./ContactAddressAction";
 import MessageParticipants from "./MessageParticipants";
@@ -17,15 +18,15 @@ interface Props {
   defaultExpanded?: boolean;
 }
 
-function formatFullDate(timestamp: number): string {
-  return new Date(timestamp * 1000).toLocaleString([], {
+function formatFullDate(timestamp: number, language?: string): string {
+  return formatDateTime(timestamp, {
     year: "numeric", month: "short", day: "numeric",
     hour: "2-digit", minute: "2-digit",
-  });
+  }, language);
 }
 
 export default function ThreadMessageBubble({ message, defaultExpanded = false }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [rendered, setRendered] = useState<RenderedHtml | null>(null);
   const contactParticipantsGroups = [
@@ -75,7 +76,7 @@ export default function ThreadMessageBubble({ message, defaultExpanded = false }
           {message.from_name || message.from_address}
         </span>
         <span style={{ fontSize: "12px", color: "var(--color-text-secondary)", flexShrink: 0 }}>
-          {formatFullDate(message.date)}
+          {formatFullDate(message.date, i18n?.language)}
         </span>
       </button>
 
