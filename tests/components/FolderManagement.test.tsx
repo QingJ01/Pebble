@@ -7,6 +7,7 @@ import { createMailFolder, renameMailFolder, getMailMoveContext, moveMailMessage
 import FolderManagementButton from "../../src/components/FolderManagementButton";
 import MoveToButton from "../../src/components/MoveToButton";
 import { useMailStore } from "../../src/stores/mail.store";
+import { useToastStore } from "../../src/stores/toast.store";
 import { folderTree } from "../../src/lib/folderManagement";
 import en from "../../src/locales/folders.en.json";
 import zh from "../../src/locales/folders.zh.json";
@@ -102,11 +103,21 @@ describe("Move To", () => {
     await waitFor(()=>expect(screen.queryByRole("dialog")).toBeNull());
     expect(useMailStore.getState().selectedThreadId).toBe("unrelated-thread");
   });
+  it("offers Undo after a move, which moves the messages back to the source folder", async () => {
+    useToastStore.getState().clearToasts();
+    mount(<MoveToButton messages={messages}/>);fireEvent.click(screen.getByRole("button",{name:"Move to folder"}));
+    await screen.findByRole("option",{name:"target"});fireEvent.change(screen.getByLabelText("Destination"),{target:{value:"target"}});fireEvent.click(screen.getByRole("button",{name:"Move"}));
+    await waitFor(()=>expect(useToastStore.getState().toasts.some((toast)=>toast.action)).toBe(true));
+    const toast=useToastStore.getState().toasts.find((item)=>item.action)!;
+    expect(toast.type).toBe("success");
+    toast.action!.onClick();
+    await waitFor(()=>expect(moveMailMessages).toHaveBeenLastCalledWith("a",["m1","m2"],"target","source"));
+  });
   it("retains failed batch selections and details, and reports only moved IDs", async () => {
     vi.mocked(moveMailMessages).mockResolvedValue({moved_ids:["m1"],failures:[{message_id:"m2",error:"offline; queued"}]});const onMoved=vi.fn();
     mount(<MoveToButton messages={messages} onMoved={onMoved}/>);fireEvent.click(screen.getByRole("button",{name:"Move to folder"}));
     await screen.findByRole("option",{name:"target"});fireEvent.change(screen.getByLabelText("Destination"),{target:{value:"target"}});fireEvent.click(screen.getByRole("button",{name:"Move"}));
-    await waitFor(()=>expect(onMoved).toHaveBeenCalledWith(["m1"]));expect(moveMailMessages).toHaveBeenCalledWith("a",["m1","m2"],"source","target");
+    await waitFor(()=>expect(onMoved).toHaveBeenCalledWith(["m1"],"source","target"));expect(moveMailMessages).toHaveBeenCalledWith("a",["m1","m2"],"source","target");
     expect([...useMailStore.getState().selectedMessageIds]).toEqual(["m2"]);expect(useMailStore.getState().selectedMessageId).toBe("m2");expect(useMailStore.getState().selectedThreadId).toBe("t1");
     expect(screen.getByRole("alert").textContent).toContain("1 moved; 1 failed");expect(screen.getByRole("dialog")).toBeTruthy();
   });
