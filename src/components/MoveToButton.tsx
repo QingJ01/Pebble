@@ -3,32 +3,58 @@ import { FolderInput } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listFolders } from "@/lib/api";
-import { getMailMoveContext, moveMailMessages, type MailMoveResult } from "@/lib/folders-api";
+import { getMailMoveContext, type MailMoveResult } from "@/lib/folders-api";
 import { clearMovedSelection, folderTree, invalidateFolderViews } from "@/lib/folderManagement";
 import { folderIdsForSelection } from "@/lib/folderAggregation";
 import { formatError } from "@/lib/extractErrorMessage";
+import { moveMessagesWithUndo } from "@/hooks/mutations/mailActions";
 import Button from "./ui/Button";
+import IconButton from "./ui/IconButton";
 import { useMailStore } from "@/stores/mail.store";
 import FolderModal from "./FolderModal";
 import { usePresence } from "@/hooks/usePresence";
 
-interface MoveMessage {id: string; account_id: string; is_draft: boolean; thread_id?: string | null}
-interface Props {messages: MoveMessage[]; disabled?: boolean; onMoved?: (ids: string[]) => void; showLabel?: boolean}
+export interface MoveMessage {id: string; account_id: string; is_draft: boolean; thread_id?: string | null}
+/**
+ * Called with the IDs that were actually moved, the folder they left (null when
+ * each message had a single folder and the backend picked it) and the target.
+ */
+export type OnMoved = (movedIds: string[], sourceFolderId: string | null, targetFolderId: string) => void;
+interface Props {messages: MoveMessage[]; disabled?: boolean; onMoved?: OnMoved; showLabel?: boolean}
+
+/** Why these messages cannot be moved, or null. */
+export function moveDisabledReason(messages: MoveMessage[], t: (key: string, fallback: string) => string): string | null {
+  if (new Set(messages.map((m) => m.account_id)).size > 1) return t("folderManagement.sameAccount", "Select messages from one account");
+  if (messages.some((m) => m.is_draft)) return t("folderManagement.draftsProtected", "Drafts cannot be moved; finish editing first");
+  return null;
+}
+
 export default function MoveToButton(props: Props) {
   const {t} = useTranslation();
   const [open,setOpen] = useState(false);
-  const presence = usePresence(open);
-  const mixed = new Set(props.messages.map((m) => m.account_id)).size !== 1;
-  const disabled = props.disabled || mixed || !props.messages.length || props.messages.some((m) => m.is_draft);
   const label = t("folderManagement.moveTo", "Move to folder");
-  const reason = mixed ? t("folderManagement.sameAccount", "Select messages from one account") : props.messages.some((m) => m.is_draft) ? t("folderManagement.draftsProtected", "Drafts cannot be moved; finish editing first") : label;
+  const blocked = moveDisabledReason(props.messages, t);
+  const disabled = props.disabled || !!blocked || !props.messages.length;
+  const onClick = (e: React.MouseEvent) => {e.stopPropagation();setOpen(true);};
   return <>
-    <button className="folder-action-button" disabled={disabled} title={reason} aria-label={label} onClick={(e) => {e.stopPropagation();setOpen(true);}}><FolderInput size={14} aria-hidden="true"/>{props.showLabel && label}</button>
-    {presence.mounted && <MovePicker {...props} open={open} onClose={() => setOpen(false)}/>}
+    {props.showLabel
+      ? <Button variant="ghost" size="sm" icon={<FolderInput size={14}/>} disabled={disabled} title={blocked ?? label} onClick={onClick}>{label}</Button>
+      : <IconButton label={label} tooltip={blocked ?? label} icon={<FolderInput size={14}/>} disabled={disabled} onClick={onClick}/>}
+    <MoveToDialog messages={props.messages} open={open} onClose={() => setOpen(false)} onMoved={props.onMoved}/>
   </>;
 }
 
-function MovePicker({messages,onMoved,onClose,open = true}: Props & {onClose: () => void; open?: boolean}) {
+/**
+ * The move-to-folder picker on its own, for menus: keep it rendered and toggle
+ * `open` (it plays its exit animation). The selection is snapshotted on open.
+ */
+export function MoveToDialog({messages, open, onClose, onMoved}: {messages: MoveMessage[]; open: boolean; onClose: () => void; onMoved?: OnMoved}) {
+  const presence = usePresence(open);
+  if (!presence.mounted || messages.length === 0) return null;
+  return <MovePicker messages={messages} open={open} onClose={onClose} onMoved={onMoved}/>;
+}
+
+function MovePicker({messages,onMoved,onClose,open = true}: {messages: MoveMessage[]; onMoved?: OnMoved; onClose: () => void; open?: boolean}) {
   const {t} = useTranslation();
   const client = useQueryClient();
   // Snapshot selection on open; background refetches cannot retarget this dialog.
@@ -61,11 +87,12 @@ function MovePicker({messages,onMoved,onClose,open = true}: Props & {onClose: ()
       e.preventDefault();if (busy || unsupportedSource || !targetFolder || targetDisabled(targetFolder) || (needsSource && !sourceId)) return;
       setBusy(true);setError("");
       try {
-        const response = await moveMailMessages(accountId,ids,sourceId || null,target);
+        const sourceByMessage = Object.fromEntries(ids.map((id) => [id, memberships[id]?.length === 1 ? memberships[id][0] : undefined]));
+        const response = await moveMessagesWithUndo(client,{accountId,messageIds:ids,sourceFolderId:sourceId || null,targetFolderId:target,targetFolderName:targetFolder.name,sourceByMessage});
         setResult(response);clearMovedSelection(response.moved_ids,selection);invalidateFolderViews(client);
         // Close selection/detail only for messages confirmed moved. Failed IDs
         // remain selected. Keep partial failures visible until dismissed.
-        onMoved?.(response.moved_ids);
+        onMoved?.(response.moved_ids,sourceId || null,target);
         if (!response.failures.length) onClose();
       } catch (e) { setError(formatError(e, { fallbackKey: "folderManagement.moveFailed", fallback: "Move failed" }));invalidateFolderViews(client); }
       finally {setBusy(false);}

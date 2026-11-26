@@ -1,8 +1,7 @@
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import type { TFunction } from "i18next";
-import { setTrayMenuLabels } from "@/lib/api";
+import { setNotificationLabels, setTrayMenuLabels } from "@/lib/api";
 import type { NotificationLabels } from "@/lib/generated/ipc";
 import { useUIStore } from "@/stores/ui.store";
 
@@ -37,7 +36,7 @@ export function useTrayI18n() {
       t("tray.hide", "Hide Window"),
       t("tray.quit", "Quit Pebble"),
     ).catch((err) => console.warn("Failed to sync tray menu labels", err));
-    invoke<void>("set_notification_labels", { labels: buildNotificationLabels(t) })
+    setNotificationLabels(buildNotificationLabels(t))
       .catch((err) => console.warn("Failed to sync notification labels", err));
   }, [language, t]);
 }

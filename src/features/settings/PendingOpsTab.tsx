@@ -49,7 +49,7 @@ function formatTimestamp(timestamp: number) {
 function statusTone(status: PendingMailOp["status"]) {
   if (status === "failed") {
     return {
-      color: "var(--color-warning, #d97706)",
+      color: "var(--color-warning)",
       background: "rgba(217, 119, 6, 0.12)",
     };
   }
@@ -210,7 +210,7 @@ export default function PendingOpsTab() {
                 borderRadius: "6px",
                 border: "1px solid var(--color-border)",
                 background: "var(--color-bg-secondary)",
-                color: "var(--color-warning, #d97706)",
+                color: "var(--color-warning)",
                 cursor: "pointer",
                 fontSize: "12px",
                 fontWeight: 500,
@@ -304,7 +304,7 @@ export default function PendingOpsTab() {
             borderRadius: "6px",
             border: "1px solid rgba(217, 119, 6, 0.3)",
             background: "rgba(217, 119, 6, 0.1)",
-            color: "var(--color-warning, #d97706)",
+            color: "var(--color-warning)",
             fontSize: "12px",
             lineHeight: 1.45,
           }}
@@ -390,7 +390,7 @@ export default function PendingOpsTab() {
                     </td>
                     <td style={tableCellStyle}>{accountLabel(op.account_id)}</td>
                     <td style={tableCellStyle}>{formatTimestamp(op.updated_at)}</td>
-                    <td style={{ ...tableCellStyle, color: op.last_error ? "var(--color-warning, #d97706)" : "var(--color-text-secondary)" }}>
+                    <td style={{ ...tableCellStyle, color: op.last_error ? "var(--color-warning)" : "var(--color-text-secondary)" }}>
                       {op.last_error ?? "-"}
                       {op.op_type === "send" && op.status === "failed" && (
                         <button disabled={retryingSend !== null} onClick={() => { void retrySend(op); }}>

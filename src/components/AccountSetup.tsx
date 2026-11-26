@@ -602,7 +602,7 @@ export default function AccountSetup({ onClose }: Props) {
                   alignItems: "flex-start",
                   gap: "8px",
                   fontSize: "12px",
-                  color: "var(--color-warning, #b45309)",
+                  color: "var(--color-warning)",
                 }}
               >
                 <input

@@ -1,6 +1,6 @@
-import { memo } from "react";
+import { memo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Star, StarOff, Paperclip, Mail, MailOpen, Archive, Trash2, Reply, MessageSquare } from "lucide-react";
+import { Star, StarOff, Paperclip, Mail, MailOpen, Archive, Trash2, Reply, MessageSquare, FolderInput } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { Folder, ThreadSummary } from "@/lib/api";
 import { batchStar, listThreadMessages, updateThreadReadFlagsInFolders } from "@/lib/api";
@@ -15,6 +15,7 @@ import {
   type MailActionKind,
 } from "@/hooks/mutations/mailActions";
 import ContextMenu, { useContextMenuState, type ContextMenuItem } from "./ContextMenu";
+import { MoveToDialog, type MoveMessage } from "./MoveToButton";
 import "./mail-list.css";
 
 interface Props {
@@ -45,6 +46,8 @@ function ThreadItem({ thread, isSelected, onClick, folderIds, folderRole, tabInd
   const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
   const menu = useContextMenuState();
+  const [moveTargets, setMoveTargets] = useState<MoveMessage[]>([]);
+  const [moveOpen, setMoveOpen] = useState(false);
   const hasUnread = thread.unread_count > 0;
 
   function invalidateThreadViews() {
@@ -116,6 +119,29 @@ function ThreadItem({ thread, isSelected, onClick, folderIds, folderRole, tabInd
     });
   }
 
+  async function handleMove() {
+    let messages;
+    try {
+      messages = await scopedMessages();
+    } catch (error) {
+      toastError(error, "folderManagement.loadFailed");
+      return;
+    }
+    // Drafts cannot be moved; move the rest of the conversation.
+    const movable = messages.filter((m) => !m.is_draft);
+    if (movable.length === 0) {
+      if (messages.length > 0) {
+        useToastStore.getState().addToast({
+          type: "info",
+          message: t("folderManagement.draftsProtected", "Drafts cannot be moved; finish editing first"),
+        });
+      }
+      return;
+    }
+    setMoveTargets(movable.map((m) => ({ id: m.id, account_id: m.account_id, is_draft: false, thread_id: thread.thread_id })));
+    setMoveOpen(true);
+  }
+
   async function handleReply() {
     try {
       const messages = await listThreadMessages(thread.account_id, thread.thread_id);
@@ -148,6 +174,12 @@ function ThreadItem({ thread, isSelected, onClick, folderIds, folderRole, tabInd
       label: thread.is_starred ? t("messageActions.unstar", "Unstar") : t("messageActions.star", "Star"),
       icon: thread.is_starred ? <StarOff size={14} /> : <Star size={14} />,
       onSelect: () => void handleToggleStar(),
+    },
+    {
+      id: "move",
+      label: t("folderManagement.moveToMenu", "Move to…"),
+      icon: <FolderInput size={14} />,
+      onSelect: () => void handleMove(),
     },
     ...(folderRole !== "archive" && folderRole !== "trash"
       ? [{ id: "archive", label: t("messageActions.archive", "Archive"), icon: <Archive size={14} />, onSelect: () => void runAction("archive"), separatorBefore: true }]
@@ -234,6 +266,15 @@ function ThreadItem({ thread, isSelected, onClick, folderIds, folderRole, tabInd
           restoreFocusTo={menu.trigger}
         />
       )}
+      <MoveToDialog
+        messages={moveTargets}
+        open={moveOpen}
+        onClose={() => setMoveOpen(false)}
+        onMoved={(ids) => {
+          const state = useMailStore.getState();
+          if (moveTargets.every((m) => ids.includes(m.id)) && isThreadSelected(state, thread)) state.selectThread(null);
+        }}
+      />
     </div>
   );
 }

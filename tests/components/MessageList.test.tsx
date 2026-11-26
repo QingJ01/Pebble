@@ -22,6 +22,11 @@ const mocks = vi.hoisted(() => ({
   toastError: vi.fn(),
   scrollToIndex: vi.fn(),
   itemProps: {} as Record<string, Record<string, unknown>>,
+  prefetchMessage: vi.fn(),
+}));
+
+vi.mock("../../src/hooks/useMessageLoader", () => ({
+  prefetchMessage: mocks.prefetchMessage,
 }));
 
 vi.mock("react-i18next", () => ({
@@ -506,6 +511,25 @@ describe("MessageList", () => {
     );
     const rows = screen.getAllByRole("option");
     expect(rows.map((row) => row.getAttribute("tabindex"))).toEqual(["-1", "0", "-1"]);
+  });
+
+  it("prefetches the neighbours of the open message once the selection settles", () => {
+    vi.useFakeTimers();
+    try {
+      mocks.prefetchMessage.mockClear();
+      const messages = [makeMessage("m-1"), makeMessage("m-2"), makeMessage("m-3"), makeMessage("m-4")];
+      const view = render(
+        <MessageList messages={messages} selectedMessageId="m-2" onSelectMessage={vi.fn()} loading={false} />,
+      );
+      // Moving on before the delay cancels the pending prefetch.
+      view.rerender(
+        <MessageList messages={messages} selectedMessageId="m-3" onSelectMessage={vi.fn()} loading={false} />,
+      );
+      vi.advanceTimersByTime(1000);
+      expect(mocks.prefetchMessage.mock.calls.map((call) => call[0]).sort()).toEqual(["m-2", "m-4"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("moves selection with arrow keys and J/K from a focused row", () => {

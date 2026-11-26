@@ -2,16 +2,16 @@
   position: fixed;
   left: 8px;
   bottom: 8px;
-  z-index: 1001;
+  z-index: var(--z-menu);
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 7px 10px;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--color-bg);
   color: var(--color-text-primary);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-popover);
   font-size: 12.5px;
   cursor: pointer;
   opacity: 0;
@@ -23,10 +23,4 @@
   opacity: 1;
   pointer-events: auto;
   transform: none;
-}
-
-.sidebar-context-menu-item:focus-visible {
-  outline: 2px solid var(--color-focus-ring);
-  outline-offset: -2px;
-  background: var(--color-bg-hover);
 }

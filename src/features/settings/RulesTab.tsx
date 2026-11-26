@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Plus, Pencil, Trash2, ShieldCheck, X } from "lucide-react";
 import { createRule, deleteRule, listRules, updateRule, type Rule } from "@/lib/api";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import IconButton from "@/components/ui/IconButton";
 import { useToastStore } from "@/stores/toast.store";
 import { useUIStore } from "@/stores/ui.store";
 import { extractErrorMessage, formatError } from "@/lib/extractErrorMessage";
@@ -427,8 +428,8 @@ export default function RulesTab() {
                 padding: "8px 10px",
                 borderRadius: "6px",
                 border: "1px solid var(--color-border)",
-                backgroundColor: form.is_enabled ? "var(--color-accent)" : "var(--color-bg)",
-                color: form.is_enabled ? "#fff" : "var(--color-text-secondary)",
+                backgroundColor: form.is_enabled ? "var(--color-accent-strong)" : "var(--color-bg)",
+                color: form.is_enabled ? "var(--color-on-accent)" : "var(--color-text-secondary)",
                 fontSize: "13px",
                 cursor: "pointer",
                 fontWeight: 500,
@@ -487,7 +488,7 @@ export default function RulesTab() {
 
         {/* Error */}
         {error && (
-          <p role="alert" style={{ margin: 0, fontSize: "12px", color: "#ef4444" }}>{error}</p>
+          <p role="alert" style={{ margin: 0, fontSize: "12px", color: "var(--color-danger)" }}>{error}</p>
         )}
 
         {/* Buttons */}
@@ -512,8 +513,8 @@ export default function RulesTab() {
               padding: "7px 14px",
               borderRadius: "6px",
               border: "none",
-              backgroundColor: "var(--color-accent)",
-              color: "#fff",
+              backgroundColor: "var(--color-accent-strong)",
+              color: "var(--color-on-accent)",
               fontSize: "13px",
               fontWeight: 600,
               cursor: "pointer",
@@ -557,8 +558,8 @@ export default function RulesTab() {
             padding: "7px 14px",
             borderRadius: "6px",
             border: "none",
-            backgroundColor: editingId !== null ? "var(--color-border)" : "var(--color-accent)",
-            color: "#fff",
+            backgroundColor: editingId !== null ? "var(--color-border)" : "var(--color-accent-strong)",
+            color: "var(--color-on-accent)",
             fontSize: "13px",
             fontWeight: 600,
             cursor: editingId !== null ? "not-allowed" : "pointer",
@@ -585,7 +586,7 @@ export default function RulesTab() {
             color: "var(--color-text-secondary)",
           }}
         >
-          <p style={{ color: "var(--color-error, #e53e3e)", fontSize: "14px", margin: 0 }}>
+          <p style={{ color: "var(--color-danger)", fontSize: "14px", margin: 0 }}>
             {t("rules.fetchError", "Failed to load rules")}
           </p>
           <p style={{ fontSize: "13px", margin: 0 }}>{fetchError}</p>
@@ -677,7 +678,7 @@ export default function RulesTab() {
                           padding: "1px 6px",
                           borderRadius: "4px",
                           backgroundColor: rule.is_enabled ? "rgba(34,197,94,0.12)" : "rgba(156,163,175,0.12)",
-                          color: rule.is_enabled ? "#22c55e" : "var(--color-text-secondary)",
+                          color: rule.is_enabled ? "var(--color-success)" : "var(--color-text-secondary)",
                         }}
                       >
                         {rule.is_enabled ? t("rules.enabled") : t("rules.disabled")}
@@ -693,59 +694,18 @@ export default function RulesTab() {
                     </span>
                   </div>
                   <div style={{ display: "flex", gap: "4px" }}>
-                    <button
-                      onClick={() => startEdit(rule)}
+                    <IconButton
+                      label={t("rules.editRule")}
+                      icon={<Pencil size={14} />}
                       disabled={editingId !== null}
-                      aria-label={t("rules.editRule")}
-                      title={t("rules.editRule")}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        padding: "6px",
-                        borderRadius: "6px",
-                        border: "none",
-                        backgroundColor: "transparent",
-                        color: editingId !== null ? "var(--color-border)" : "var(--color-text-secondary)",
-                        cursor: editingId !== null ? "not-allowed" : "pointer",
-                      }}
-                      onMouseEnter={(e) => {
-                        if (editingId === null) {
-                          e.currentTarget.style.color = "var(--color-accent)";
-                          e.currentTarget.style.backgroundColor = "var(--color-bg-hover)";
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.color = editingId !== null ? "var(--color-border)" : "var(--color-text-secondary)";
-                        e.currentTarget.style.backgroundColor = "transparent";
-                      }}
-                    >
-                      <Pencil size={15} />
-                    </button>
-                    <button
+                      onClick={() => startEdit(rule)}
+                    />
+                    <IconButton
+                      variant="danger"
+                      label={t("rules.deleteRule")}
+                      icon={<Trash2 size={14} />}
                       onClick={() => setDeleteTarget({ id: rule.id, name: rule.name })}
-                      aria-label={t("rules.deleteRule")}
-                      title={t("rules.deleteRule")}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        padding: "6px",
-                        borderRadius: "6px",
-                        border: "none",
-                        backgroundColor: "transparent",
-                        color: "var(--color-text-secondary)",
-                        cursor: "pointer",
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.color = "#ef4444";
-                        e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.08)";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.color = "var(--color-text-secondary)";
-                        e.currentTarget.style.backgroundColor = "transparent";
-                      }}
-                    >
-                      <Trash2 size={15} />
-                    </button>
+                    />
                   </div>
                 </div>
               )}

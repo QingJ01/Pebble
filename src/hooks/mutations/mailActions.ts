@@ -30,7 +30,7 @@ import {
   listThreadMessages,
   moveToFolder,
 } from "@/lib/api";
-import { getMailMoveContext, moveMailMessages } from "@/lib/folders-api";
+import { getMailMoveContext, moveMailMessages, type MailMoveResult } from "@/lib/folders-api";
 import { folderIdsForSelection } from "@/lib/folderAggregation";
 import { foldersQueryKey } from "@/hooks/queries/useFoldersQuery";
 import {
@@ -195,11 +195,17 @@ export async function planMailAction(
   };
 }
 
-interface UndoMove {
+export interface UndoMove {
   accountId: string;
   id: string;
   fromFolderId: string;
   toFolderId: string;
+  /**
+   * Move back with move_mail_messages (explicit source folder) even for a
+   * single message. Used for "Move to folder", whose forward move used it too
+   * (keeps Gmail labels symmetric).
+   */
+  explicitSource?: boolean;
 }
 
 function invalidateMailViews(client: QueryClient) {
@@ -219,7 +225,7 @@ export async function undoMoves(client: QueryClient, moves: UndoMove[]): Promise
   for (const group of groups.values()) {
     const { accountId, fromFolderId, toFolderId } = group[0];
     try {
-      if (group.length === 1) {
+      if (group.length === 1 && !group[0].explicitSource) {
         await moveToFolder(group[0].id, toFolderId);
       } else {
         for (const ids of chunk(group.map((m) => m.id), MAX_CONTEXT_IDS)) {
@@ -366,14 +372,23 @@ export async function executeMailAction(
     }
   }
 
-  useToastStore.getState().addToast({
+  showUndoableToast(client, successMessage(plan, count, unarchived), undoMovesList);
+  return { ok: true, count };
+}
+
+/**
+ * Success toast with an "Undo" action that moves the messages back (no action
+ * when `moves` is empty). The one undo implementation for every mail action.
+ */
+export function showUndoableToast(client: QueryClient, message: string, moves: UndoMove[]): string {
+  return useToastStore.getState().addToast({
     type: "success",
-    message: successMessage(plan, count, unarchived),
-    action: undoMovesList.length > 0
+    message,
+    action: moves.length > 0
       ? {
           label: t("common.undo", "Undo"),
           onClick: () => {
-            void undoMoves(client, undoMovesList).then((failed) => {
+            void undoMoves(client, moves).then((failed) => {
               if (failed === 0) {
                 useToastStore.getState().addToast({ type: "success", message: t("messageActions.undoSuccess", "Undone") });
               } else {
@@ -387,7 +402,44 @@ export async function executeMailAction(
         }
       : undefined,
   });
-  return { ok: true, count };
+}
+
+export interface MoveToFolderRequest {
+  accountId: string;
+  messageIds: string[];
+  /** The folder (or Gmail label) to move out of; null lets the backend pick the only one. */
+  sourceFolderId: string | null;
+  targetFolderId: string;
+  /** Shown in the success toast. */
+  targetFolderName?: string;
+  /** Folder each message is in now, used when `sourceFolderId` is null. */
+  sourceByMessage?: Record<string, string | undefined>;
+}
+
+/**
+ * "Move to folder": move, then offer Undo (moves the moved ones back to where
+ * they came from). Throws when the whole move failed; partial failures are in
+ * the result for the caller to show.
+ */
+export async function moveMessagesWithUndo(client: QueryClient, request: MoveToFolderRequest): Promise<MailMoveResult> {
+  const { accountId, messageIds, sourceFolderId, targetFolderId } = request;
+  const result = await moveMailMessages(accountId, messageIds, sourceFolderId, targetFolderId);
+  const movedIds = result?.moved_ids ?? [];
+  if (movedIds.length === 0) return result;
+  const moves: UndoMove[] = [];
+  for (const id of movedIds) {
+    const origin = sourceFolderId ?? request.sourceByMessage?.[id];
+    if (!origin || origin === targetFolderId) continue;
+    moves.push({ accountId, id, fromFolderId: targetFolderId, toFolderId: origin, explicitSource: true });
+  }
+  const message = request.targetFolderName
+    ? t("folderManagement.movedTo", "Moved to “{{folder}}”", {
+      folder: request.targetFolderName,
+      interpolation: { escapeValue: false },
+    })
+    : t("folderManagement.moved", "Moved");
+  showUndoableToast(client, message, moves);
+  return result;
 }
 
 export interface RunOptions extends ExecuteOptions {

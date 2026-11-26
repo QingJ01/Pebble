@@ -127,11 +127,6 @@
   visibility: hidden;
 }
 
-.message-row-actions .folder-action-button {
-  min-width: 28px;
-  min-height: 28px;
-}
-
 .icon-btn.message-row-actions__star[aria-pressed="true"] {
   color: var(--color-warning);
   background: transparent;
@@ -161,4 +156,26 @@
 .mail-list-load-more {
   padding: 12px;
   text-align: center;
+}
+
+/* Search results (SearchResultItem) */
+.search-result-row {
+  background: transparent;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
+.search-result-row[aria-selected="true"] {
+  background: var(--color-sidebar-active);
+}
+
+.search-result-row[aria-selected="false"]:hover,
+.search-result-row[aria-selected="false"]:focus {
+  background: var(--color-bg-hover);
+}
+
+.search-result-row__mark {
+  background: var(--color-accent-strong);
+  color: var(--color-on-accent);
+  border-radius: 2px;
+  padding: 0 1px;
 }

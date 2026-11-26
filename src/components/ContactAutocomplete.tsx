@@ -315,7 +315,7 @@ export default function ContactAutocomplete({
               alignItems: "center",
               gap: "4px",
               padding: "2px 8px",
-              backgroundColor: "var(--color-bg-secondary, #f0f0f0)",
+              backgroundColor: "var(--color-bg-secondary)",
               borderRadius: "12px",
               fontSize: "12px",
               color: "var(--color-text-primary)",

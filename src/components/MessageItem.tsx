@@ -1,10 +1,10 @@
-import { memo } from "react";
-import MoveToButton from "./MoveToButton";
+import { memo, useState } from "react";
+import MoveToButton, { MoveToDialog, moveDisabledReason } from "./MoveToButton";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Star, StarOff, Paperclip, Archive, LayoutGrid, ShieldAlert, RotateCcw, Mail, MailOpen,
-  Reply, ReplyAll, Forward, Trash2,
+  Reply, ReplyAll, Forward, Trash2, FolderInput,
 } from "lucide-react";
 import type { EmailAddress, Folder, Label, MessageSummary } from "@/lib/api";
 import { getMessage, restoreMessage, updateMessageFlags } from "@/lib/api";
@@ -74,6 +74,7 @@ function MessageItem({
   const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
   const menu = useContextMenuState();
+  const [moveOpen, setMoveOpen] = useState(false);
   const inKanban = useIsInKanban(message.id);
   const isArchiveFolder = folderRole === "archive";
   const archiveActionLabel = isArchiveFolder
@@ -185,6 +186,13 @@ function MessageItem({
       onSelect: handleToggleStar,
     },
     { id: "kanban", label: t("messageActions.addToKanban", "Add to Kanban"), icon: <LayoutGrid size={14} />, onSelect: handleAddToKanban },
+    {
+      id: "move",
+      label: t("folderManagement.moveToMenu", "Move to…"),
+      icon: <FolderInput size={14} />,
+      onSelect: () => setMoveOpen(true),
+      disabled: moveDisabledReason([message], t) !== null,
+    },
     ...(folderRole === "trash"
       ? [{ id: "restore", label: t("messageActions.restore", "Restore"), icon: <RotateCcw size={14} />, onSelect: () => void handleRestore(), separatorBefore: true }]
       : [{ id: "archive", label: archiveActionLabel, icon: <ArchiveActionIcon size={14} />, onSelect: () => runAction("archive"), separatorBefore: true }]),
@@ -370,6 +378,7 @@ function MessageItem({
           restoreFocusTo={menu.trigger}
         />
       )}
+      <MoveToDialog messages={[message]} open={moveOpen} onClose={() => setMoveOpen(false)} />
     </div>
   );
 }

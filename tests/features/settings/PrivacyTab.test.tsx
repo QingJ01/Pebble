@@ -44,7 +44,7 @@ describe("PrivacyTab", () => {
 
     expect(screen.getByText("Load external images by default. Trackers are still blocked.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Relaxed" }).getAttribute("style")).toContain(
-      "var(--color-accent)",
+      "var(--color-accent-strong)",
     );
   });
 

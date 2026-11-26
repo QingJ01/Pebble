@@ -19,7 +19,7 @@ import {
   loadAutoBackupConfig,
   type BackupPreview,
 } from "../../lib/api";
-import { extractErrorMessage as errorMessage } from "@/lib/extractErrorMessage";
+import { extractErrorMessage as errorMessage, formatError } from "@/lib/extractErrorMessage";
 import { profileLocalStorage } from "@/lib/profileStorage";
 
 const LAST_BACKUP_KEY = "pebble-cloud-sync-last-backup";
@@ -186,10 +186,10 @@ export default function CloudSyncTab() {
       setStatusType("success");
     } catch (err: unknown) {
       setStatusMsg(
-        t(
-          "cloudSync.autoBackupConfigSaveFailed",
-          `Failed to save automatic backup configuration: ${errorMessage(err)}`,
-        ),
+        t("cloudSync.autoBackupConfigSaveFailed", {
+          defaultValue: "Couldn't save automatic backup settings: {{error}}",
+          error: errorMessage(err),
+        }),
       );
       setStatusType("error");
     } finally {
@@ -206,7 +206,7 @@ export default function CloudSyncTab() {
       setStatusType("success");
     } catch (err: unknown) {
       setStatusMsg(
-        `${t("cloudSync.connectionFailed")}: ${errorMessage(err)}`,
+        formatError(err, { fallbackKey: "cloudSync.connectionFailed", fallback: "Connection failed" }),
       );
       setStatusType("error");
     } finally {
@@ -466,7 +466,7 @@ export default function CloudSyncTab() {
           "Back up contacts, rules, Kanban cards and notes, and account metadata to WebDAV. Account passwords, OAuth tokens, and API keys can be included with a separate backup encryption password.",
         )}
         {" "}
-        <span style={{ color: "var(--color-warning, #e67e22)" }}>
+        <span style={{ color: "var(--color-warning)" }}>
           {t(
             "cloudSync.encryptionWarning",
             "Note: regular settings are uploaded as JSON. Secrets are encrypted only when you enable the option below. Ensure your WebDAV server is trusted.",
@@ -588,7 +588,7 @@ export default function CloudSyncTab() {
         {includeSecrets && storedPassphraseIsWeak && !secretPassphrase && (
           <p
             role="note"
-            style={{ margin: "6px 0 0", fontSize: "12px", color: "var(--color-warning, #e67e22)" }}
+            style={{ margin: "6px 0 0", fontSize: "12px", color: "var(--color-warning)" }}
           >
             {t(
               "cloudSync.weakPassphraseHint",
@@ -616,8 +616,8 @@ export default function CloudSyncTab() {
         <button
           style={{
             ...buttonStyle,
-            background: "var(--color-accent)",
-            color: "#fff",
+            background: "var(--color-accent-strong)",
+            color: "var(--color-on-accent)",
             opacity: anyLoading ? 0.6 : 1,
           }}
           onClick={handleExportFile}
@@ -652,8 +652,8 @@ export default function CloudSyncTab() {
         <button
           style={{
             ...buttonStyle,
-            background: "var(--color-accent)",
-            color: "#fff",
+            background: "var(--color-accent-strong)",
+            color: "var(--color-on-accent)",
             opacity: anyLoading ? 0.6 : 1,
           }}
           onClick={handleBackup}
@@ -766,8 +766,8 @@ export default function CloudSyncTab() {
             style={{
               ...buttonStyle,
               marginTop: "12px",
-              background: "var(--color-accent)",
-              color: "#fff",
+              background: "var(--color-accent-strong)",
+              color: "var(--color-on-accent)",
               opacity: anyLoading ? 0.6 : 1,
             }}
             onClick={handleSaveAutoBackupConfig}
@@ -800,7 +800,7 @@ export default function CloudSyncTab() {
             color:
               statusType === "success"
                 ? "var(--color-text-primary)"
-                : "#dc3545",
+                : "var(--color-danger)",
             border: `1px solid ${statusType === "success" ? "var(--color-border)" : "rgba(220, 53, 69, 0.3)"}`,
           }}
         >

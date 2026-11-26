@@ -1,5 +1,8 @@
 {
   "folderManagement": {
+    "moved": "Moved",
+    "movedTo": "Moved to “{{folder}}”",
+    "moveToMenu": "Move to…",
     "manage": "Manage folders",
     "account": "Account",
     "action": "Action",

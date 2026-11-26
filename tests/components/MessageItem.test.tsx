@@ -265,6 +265,18 @@ describe("MessageItem", () => {
     expect(document.activeElement).toBe(row);
   });
 
+  it("offers Move to… in the context menu, disabled for drafts", () => {
+    const { unmount } = render(<MessageItem message={makeMessage()} isSelected={false} onClick={vi.fn()} />);
+    fireEvent.contextMenu(screen.getByRole("option"), { clientX: 10, clientY: 10 });
+    const item = screen.getByRole("menuitem", { name: /Move to/ });
+    expect(item.getAttribute("aria-disabled")).toBeNull();
+    unmount();
+
+    render(<MessageItem message={{ ...makeMessage(), is_draft: true }} isSelected={false} onClick={vi.fn()} />);
+    fireEvent.contextMenu(screen.getByRole("option"), { clientX: 10, clientY: 10 });
+    expect(screen.getByRole("menuitem", { name: /Move to/ }).getAttribute("aria-disabled")).toBe("true");
+  });
+
   it("closes the context menu when the page scrolls", () => {
     render(
       <MessageItem

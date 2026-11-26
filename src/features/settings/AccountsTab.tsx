@@ -111,8 +111,8 @@ export default function AccountsTab() {
             padding: "7px 14px",
             borderRadius: "6px",
             border: "none",
-            backgroundColor: "var(--color-accent)",
-            color: "#fff",
+            backgroundColor: "var(--color-accent-strong)",
+            color: "var(--color-on-accent)",
             fontSize: "13px",
             fontWeight: 600,
             cursor: "pointer",
@@ -821,7 +821,7 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
                 </div>
 
                 {folderError && (
-                  <div role="alert" style={{ color: "#ef4444", fontSize: "12px" }}>
+                  <div role="alert" style={{ color: "var(--color-danger)", fontSize: "12px" }}>
                     {t("settings.folderListFailed", "Failed to list IMAP folders: {{error}}", {
                       error: folderError,
                     })}

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Keyboard, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useShortcutStore } from "@/stores/shortcut.store";
+import { formatShortcut, useShortcutStore } from "@/stores/shortcut.store";
 import { eventToKeyString } from "@/hooks/useKeyboard";
 import Button from "@/components/ui/Button";
 
@@ -34,11 +34,10 @@ const SHORTCUT_GROUPS = [
   { categoryKey: "shortcuts.translate", actions: ["translate-selection", "toggle-bilingual"] },
 ];
 
-const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent);
 
 /** Fixed (not rebindable) shortcuts that only apply inside a specific view. */
 const FIXED_SHORTCUTS: Array<{ id: string; labelKey: string; fallback: string; keys: string }> = [
-  { id: "compose-send", labelKey: "shortcuts.composeSend", fallback: "Send message (in compose)", keys: IS_MAC ? "⌘ Enter" : "Ctrl+Enter" },
+  { id: "compose-send", labelKey: "shortcuts.composeSend", fallback: "Send message (in compose)", keys: "Ctrl+Enter" },
 ];
 
 function FixedShortcutRow({ labelKey, fallback, keys }: { labelKey: string; fallback: string; keys: string }) {
@@ -68,7 +67,7 @@ function FixedShortcutRow({ labelKey, fallback, keys }: { labelKey: string; fall
           textAlign: "center",
         }}
       >
-        {keys}
+        {formatShortcut(keys)}
       </kbd>
     </div>
   );
@@ -175,7 +174,7 @@ function ShortcutRow({ actionId }: { actionId: string }) {
             aria-label={
               isRecording
                 ? t("shortcuts.recording")
-                : t("shortcuts.editBinding", { keys: currentKeys || t("shortcuts.unbound", "Unbound") })
+                : t("shortcuts.editBinding", { keys: formatShortcut(currentKeys) || t("shortcuts.unbound", "Unbound") })
             }
             onClick={() => {
               if (isRecording) {
@@ -207,7 +206,7 @@ function ShortcutRow({ actionId }: { actionId: string }) {
               userSelect: "none",
             }}
           >
-            {isRecording ? t("shortcuts.recording") : currentKeys}
+            {isRecording ? t("shortcuts.recording") : formatShortcut(currentKeys)}
           </button>
         </div>
       </div>

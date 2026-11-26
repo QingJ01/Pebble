@@ -1,10 +1,16 @@
 import { useEffect, useId, useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useOverlayLayer } from "@/hooks/useOverlayLayer";
+import { usePresence } from "@/hooks/usePresence";
 import OverlayPortal from "./ui/OverlayPortal";
 import Button from "./ui/Button";
 
 interface Props {
+  /**
+   * Keep the dialog mounted and toggle this for an exit animation. Callers that
+   * mount it conditionally can omit it (always open; no exit animation).
+   */
+  open?: boolean;
   title: string;
   message: string;
   confirmLabel?: string;
@@ -28,6 +34,7 @@ interface Props {
  * this dialog is the top-most overlay; handled keys never reach global shortcuts.
  */
 export default function ConfirmDialog({
+  open = true,
   title,
   message,
   confirmLabel,
@@ -54,7 +61,10 @@ export default function ConfirmDialog({
   const onCancelRef = useRef(onCancel);
   onCancelRef.current = onCancel;
 
+  const { mounted, exiting } = usePresence(open);
+
   useOverlayLayer({
+    open,
     modal: true,
     containerRef: dialogRef,
     onEscape: () => {
@@ -63,6 +73,7 @@ export default function ConfirmDialog({
   });
 
   useEffect(() => {
+    if (!open) return;
     const previousFocus =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
@@ -76,23 +87,29 @@ export default function ConfirmDialog({
     return () => {
       if (previousFocus?.isConnected) previousFocus.focus();
     };
-  }, [destructive]);
+  }, [open, destructive]);
 
   const confirmText = busy
     ? busyConfirmLabel || confirmLabel || t("common.confirm", "Confirm")
     : confirmLabel || t("common.confirm", "Confirm");
 
+  if (!mounted) return null;
+
   return (
     <OverlayPortal>
-      <div className="overlay-backdrop anim-backdrop-in">
+      <div
+        className={`overlay-backdrop ${exiting ? "anim-backdrop-out" : "anim-backdrop-in"}`}
+        aria-hidden={exiting || undefined}
+      >
         <div
           ref={dialogRef}
+          inert={exiting || undefined}
           role="dialog"
           aria-modal="true"
           aria-busy={busy || undefined}
           aria-labelledby={titleId}
           aria-describedby={error ? `${messageId} ${errorId}` : messageId}
-          className="dialog-panel anim-dialog-in"
+          className={`dialog-panel ${exiting ? "anim-dialog-out" : "anim-dialog-in"}`}
         >
           <h3 id={titleId} className="dialog-title">{title}</h3>
           <p id={messageId} className="dialog-message">{message}</p>
@@ -115,7 +132,7 @@ export default function ConfirmDialog({
               ref={cancelRef}
               variant="secondary"
               aria-disabled={busy || undefined}
-              onClick={() => { if (!busy) onCancel(); }}
+              onClick={() => { if (!busy && open) onCancel(); }}
             >
               {cancelLabel || t("common.cancel", "Cancel")}
             </Button>
@@ -124,7 +141,7 @@ export default function ConfirmDialog({
               variant={destructive ? "danger" : "primary"}
               disabled={confirmDisabled}
               loading={busy}
-              onClick={() => { if (!busy && !confirmDisabled) onConfirm(); }}
+              onClick={() => { if (!busy && !confirmDisabled && open) onConfirm(); }}
             >
               {confirmText}
             </Button>

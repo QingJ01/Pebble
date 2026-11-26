@@ -310,6 +310,7 @@
     "confirmRemoveAccountDetail": "Remove {{email}} from Pebble? Local mail, attachments and changes that haven't synced yet are deleted from this device. Mail on the server is not affected."
   },
   "cloudSync": {
+    "autoBackupConfigSaveFailed": "Couldn't save automatic backup settings: {{error}}",
     "title": "Settings Backup",
     "description": "Back up contacts, rules, Kanban cards and notes, and account metadata to WebDAV. Account passwords, OAuth tokens, and API keys can be included with a separate backup encryption password.",
     "webdavUrl": "WebDAV URL",
@@ -508,6 +509,7 @@
     "toggleBilingual": "Toggle bilingual view"
   },
   "messageActions": {
+    "moreActions": "More actions",
     "reply": "Reply",
     "forward": "Forward",
     "star": "Star",
@@ -569,9 +571,6 @@
     "failed": "Snooze failed",
     "until": "Snooze until...",
     "oneHour": "1 hour",
-    "tonight": "Tonight (8 PM)",
-    "tomorrow": "Tomorrow (9 AM)",
-    "nextMonday": "Next Monday (9 AM)",
     "menuLabel": "Snooze until",
     "tonightShort": "Tonight",
     "tomorrowShort": "Tomorrow",
