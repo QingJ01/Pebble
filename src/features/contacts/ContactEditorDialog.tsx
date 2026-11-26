@@ -278,7 +278,7 @@ export default function ContactEditorDialog({
                         <button
                           type="button"
                           className="contact-inline-danger"
-                          aria-label={`${t("contacts.removeEmail", "Remove email")} ${index + 1}`}
+                          aria-label={t("contacts.removeEmailNumbered", { index: index + 1, defaultValue: "Remove email {{index}}" })}
                           onClick={() => removeEmail(email.key)}
                         >
                           <Trash2 size={14} />

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Clock, Bell } from "lucide-react";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
+import { formatDateTime } from "@/lib/formatDate";
 import type { SnoozedMessage, Message } from "@/lib/api";
 import { listSnoozed, unsnoozeMessage, getMessagesBatch } from "@/lib/api";
 import { useUIStore } from "@/stores/ui.store";
@@ -16,7 +17,7 @@ interface SnoozedEntry {
 }
 
 export default function SnoozedView() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [entries, setEntries] = useState<SnoozedEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -62,8 +63,7 @@ export default function SnoozedView() {
   }
 
   function formatSnoozeTime(timestamp: number): string {
-    const date = new Date(timestamp * 1000);
-    return date.toLocaleString();
+    return formatDateTime(timestamp, undefined, i18n?.language);
   }
 
   if (loading) {

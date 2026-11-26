@@ -15,6 +15,7 @@ import {
   usePendingMailOpsSummary,
 } from "@/hooks/queries";
 import { useMailStore } from "@/stores/mail.store";
+import { formatDateTime } from "@/lib/formatDate";
 
 const metricStyle: React.CSSProperties = {
   minWidth: "132px",
@@ -43,7 +44,7 @@ const tableCellStyle: React.CSSProperties = {
 };
 
 function formatTimestamp(timestamp: number) {
-  return new Date(timestamp * 1000).toLocaleString();
+  return formatDateTime(timestamp);
 }
 
 function statusTone(status: PendingMailOp["status"]) {

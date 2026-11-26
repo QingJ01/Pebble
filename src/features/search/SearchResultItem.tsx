@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { formatDate } from "@/lib/formatDate";
 import type { SearchHit, Message } from "@/lib/api";
 import "@/components/mail-list.css";
 
@@ -30,10 +31,10 @@ interface Props {
 }
 
 export default function SearchResultItem({ hit, message, isSelected, onClick, query = "", tabIndex = 0, onRowFocus }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const subject = hit.subject || message?.subject || hit.snippet || t("common.noSubject");
   const from = hit.from_address || message?.from_address || "";
-  const date = (hit.date || message?.date) ? new Date((hit.date || message!.date) * 1000).toLocaleDateString() : "";
+  const date = (hit.date || message?.date) ? formatDate(hit.date || message!.date, undefined, i18n?.language) : "";
 
   return (
     <div

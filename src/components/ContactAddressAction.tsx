@@ -47,8 +47,8 @@ export default function ContactAddressAction({
     || contact?.emails[0]?.address
     || name?.trim()
     || address;
-  const addLabel = `${t("contacts.addAddressPrefix", "Add")} ${address} ${t("contacts.addAddressSuffix", "to contacts")}`;
-  const viewLabel = `${t("contacts.viewPrefix", "View")} ${contactName} ${t("contacts.viewSuffix", "in contacts")}`;
+  const addLabel = t("contacts.addAddress", { address, defaultValue: "Add {{address}} to contacts" });
+  const viewLabel = t("contacts.viewInContacts", { name: contactName, defaultValue: "View {{name}} in contacts" });
 
   const handleSave = async (input: ContactInput) => {
     const saved = await save.mutateAsync(input);

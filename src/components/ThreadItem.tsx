@@ -16,6 +16,7 @@ import {
 } from "@/hooks/mutations/mailActions";
 import ContextMenu, { useContextMenuState, type ContextMenuItem } from "./ContextMenu";
 import { MoveToDialog, type MoveMessage } from "./MoveToButton";
+import { formatListDate } from "@/lib/formatDate";
 import "./mail-list.css";
 
 interface Props {
@@ -27,19 +28,6 @@ interface Props {
   /** Roving tabindex: 0 for the list's active row, -1 for the others. */
   tabIndex?: number;
   onRowFocus?: (thread: ThreadSummary) => void;
-}
-
-function formatDate(timestamp: number, locale: string | undefined): string {
-  const date = new Date(timestamp * 1000);
-  const now = new Date();
-  const isToday =
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate();
-  if (isToday) {
-    return date.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
-  }
-  return date.toLocaleDateString(locale, { month: "short", day: "numeric" });
 }
 
 function ThreadItem({ thread, isSelected, onClick, folderIds, folderRole, tabIndex = 0, onRowFocus }: Props) {
@@ -247,7 +235,7 @@ function ThreadItem({ thread, isSelected, onClick, folderIds, folderRole, tabInd
           {thread.is_starred && <Star size={13} fill="var(--color-warning)" color="var(--color-warning)" aria-hidden="true" />}
           {thread.has_attachments && <Paperclip size={13} color="var(--color-text-secondary)" aria-hidden="true" />}
           <span className="mail-row__date">
-            {formatDate(thread.last_date, i18n?.language)}
+            {formatListDate(thread.last_date, i18n?.language)}
           </span>
         </div>
       </div>

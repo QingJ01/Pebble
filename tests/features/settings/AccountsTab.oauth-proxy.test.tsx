@@ -13,7 +13,12 @@ vi.mock("react-i18next", () => ({
     init: vi.fn(),
   },
   useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback ?? _key,
+    t: (key: string, options?: unknown) => {
+      if (typeof options === "string") return options;
+      const opts = (options ?? {}) as Record<string, unknown>;
+      const template = typeof opts.defaultValue === "string" ? opts.defaultValue : key;
+      return template.replace(/\{\{(\w+)\}\}/g, (_m: string, n: string) => String(opts[n] ?? ""));
+    },
   }),
 }));
 
@@ -226,7 +231,7 @@ describe("AccountsTab OAuth proxy", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Edit account" }));
 
-    const preset = await screen.findByRole("button", { name: "Use color #0ea5e9" });
+    const preset = await screen.findByRole("button", { name: "Use Sky" });
     fireEvent.click(preset);
     fireEvent.click(screen.getByRole("button", { name: "common.save" }));
 

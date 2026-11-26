@@ -21,6 +21,7 @@
     "saveAll": "全部保存…",
     "savingAll": "正在保存附件…",
     "saveFailed": "无法保存附件：{{reason}}",
-    "saveSummary": "已保存 {{saved}} 个 · 失败 {{failed}} 个。现有文件未被覆盖。"
+    "saveSummary": "已保存 {{saved}} 个 · 失败 {{failed}} 个。现有文件未被覆盖。",
+    "previewNamed": "预览 {{name}}"
   }
 }

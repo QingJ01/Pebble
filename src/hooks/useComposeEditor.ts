@@ -5,6 +5,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { Markdown as MarkdownExtension } from "tiptap-markdown";
 import TurndownService from "turndown";
 import { getSignature } from "@/lib/signatures";
+import { formatDateTime } from "@/lib/formatDate";
 import { COMPOSE_QUOTE_CLASS, sanitizeComposeQuoteHtml } from "@/lib/sanitizeHtml";
 import type { Message } from "@/lib/ipc-types";
 import type { TFunction } from "i18next";
@@ -128,7 +129,7 @@ export function buildReplyQuoteHtml({ composeReplyTo, t }: BuildReplyQuoteHtmlAr
   if (!composeReplyTo) return "";
 
   const sender = escapeHtml(composeReplyTo.from_name || composeReplyTo.from_address || "");
-  const dateStr = escapeHtml(new Date((composeReplyTo.date || 0) * 1000).toLocaleString());
+  const dateStr = escapeHtml(formatDateTime(composeReplyTo.date || 0));
   const body = composeReplyTo.body_html_raw
     ? extractComposeBodyHtml(composeReplyTo.body_html_raw)
     : `<p>${escapeHtml(composeReplyTo.body_text || "")}</p>`;

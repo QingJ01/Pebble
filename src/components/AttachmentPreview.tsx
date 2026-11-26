@@ -81,7 +81,7 @@ export default function AttachmentPreview(props: Props) {
     <div className="attachment-preview-dialog anim-dialog-in" role="dialog" aria-modal="true" aria-labelledby={titleId} ref={dialogRef}>
       <header className="attachment-preview-header">
         <h2 id={titleId} title={attachment.filename}>{attachment.filename}</h2>
-        <IconButton size="md" icon={<Download size={16} />} onClick={() => props.onDownload(attachment)} loading={props.downloading} label={t("attachments.download") + ": " + attachment.filename} tooltip={t("attachments.download")} />
+        <IconButton size="md" icon={<Download size={16} />} onClick={() => props.onDownload(attachment)} loading={props.downloading} label={t("attachments.downloadNamed", { name: attachment.filename })} tooltip={t("attachments.download")} />
         <IconButton ref={closeRef} size="md" icon={<X size={18} />} onClick={props.onClose} label={t("attachmentViewer.close")} />
       </header>
       <nav className="attachment-preview-actions" aria-label={t("attachmentViewer.navigation")}>

@@ -10,11 +10,11 @@ import { extractErrorMessage } from "../../lib/extractErrorMessage";
 
 type ProviderType = "deeplx" | "deepl" | "generic_api" | "llm";
 
-const PROVIDER_OPTIONS: { value: ProviderType; label: string }[] = [
+const PROVIDER_OPTIONS: { value: ProviderType; label: string; labelKey?: string }[] = [
   { value: "deeplx", label: "DeepLX" },
   { value: "deepl", label: "DeepL" },
-  { value: "generic_api", label: "Generic API" },
-  { value: "llm", label: "LLM" },
+  { value: "generic_api", label: "Generic API", labelKey: "translate.providerGenericApi" },
+  { value: "llm", label: "LLM", labelKey: "translate.providerLlm" },
 ];
 
 const labelStyle: React.CSSProperties = {
@@ -417,7 +417,7 @@ export default function TranslateTab() {
         >
           {PROVIDER_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
-              {opt.label}
+              {opt.labelKey ? t(opt.labelKey, opt.label) : opt.label}
             </option>
           ))}
         </select>

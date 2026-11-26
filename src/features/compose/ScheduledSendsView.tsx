@@ -63,7 +63,7 @@ function ScheduledRow({ job }: { job: ControlledSend }) {
     <div className="send-controls-actions">
       {mutable && <Button size="sm" variant="primary" disabled={busy || dateInstant === null} onClick={() => void run(() => rescheduleControlledSend(job, dateInstant!))}>{t("sendControls.reschedule")}</Button>}
       {job.state !== "dispatching" && job.state !== "sent" && <Button size="sm" disabled={busy} onClick={() => void run(async () => {
-        if (!(await useConfirmStore.getState().confirm({ title: t("sendControls.edit"), message: t("sendControls.restoreWarning") }))) return;
+        if (!(await useConfirmStore.getState().confirm({ title: t("sendControls.edit"), message: t("sendControls.restoreWarning"), confirmLabel: t("sendControls.edit") }))) return;
         if (isComposeDirty()) throw new Error("Existing compose is dirty");
         const snapshot = await restoreControlledSend(job);
         if (!openSendSnapshot(snapshot)) throw new Error("Existing compose is dirty");

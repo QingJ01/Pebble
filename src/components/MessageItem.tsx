@@ -18,6 +18,7 @@ import { useConfirmStore } from "@/stores/confirm.store";
 import { patchMessagesCache, restoreMessagesCache, snapshotMessagesCache } from "@/hooks/queries";
 import IconButton from "./ui/IconButton";
 import ContextMenu, { useContextMenuState, type ContextMenuItem } from "./ContextMenu";
+import { formatListDate } from "@/lib/formatDate";
 import "./mail-list.css";
 
 interface Props {
@@ -40,21 +41,6 @@ interface Props {
   tabIndex?: number;
   /** The row received focus (lists use it to move their roving tab stop). */
   onRowFocus?: (messageId: string) => void;
-}
-
-function formatDate(timestamp: number, locale: string | undefined): string {
-  const date = new Date(timestamp * 1000);
-  const now = new Date();
-  const isToday =
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate();
-
-  if (isToday) {
-    return date.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
-  }
-
-  return date.toLocaleDateString(locale, { month: "short", day: "numeric" });
 }
 
 function addressLabel(address: EmailAddress): string {
@@ -320,7 +306,7 @@ function MessageItem({
             <Paperclip size={13} color="var(--color-text-secondary)" aria-hidden="true" />
           )}
           <span className="mail-row__date">
-            {formatDate(message.date, i18n?.language)}
+            {formatListDate(message.date, i18n?.language)}
           </span>
         </div>
       </div>

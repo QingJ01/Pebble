@@ -23,10 +23,10 @@ afterEach(() => { cleanup(); vi.clearAllMocks(); useToastStore.setState({ toasts
 describe("AttachmentList preview and Save All", () => {
   it("opens ordinary previewable/generic files without exposing active MIME files or CID editor paths", async () => {
     render(<AttachmentList messageId="m1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "attachmentViewer.preview: unknown.dat" }));
+    fireEvent.click(await screen.findByRole("button", { name: 'attachmentViewer.previewNamed{"name":"unknown.dat"}' }));
     expect(await screen.findByRole("dialog")).toBeTruthy();
     expect(previewAttachment).toHaveBeenCalledWith("generic");
-    expect(screen.queryByRole("button", { name: "attachmentViewer.preview: unsafe.svg" })).toBeNull();
+    expect(screen.queryByRole("button", { name: 'attachmentViewer.previewNamed{"name":"unsafe.svg"}' })).toBeNull();
     expect(screen.queryByText("inline.png")).toBeNull();
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -39,7 +39,7 @@ describe("AttachmentList preview and Save All", () => {
     const save = await screen.findByRole("button", { name: "attachmentViewer.saveAll" });
     fireEvent.click(save);
     expect(screen.getByRole("button", { name: "attachmentViewer.savingAll" }).hasAttribute("disabled")).toBe(true);
-    expect(screen.getByRole("button", { name: "attachments.download: photo.png" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: 'attachments.downloadNamed{"name":"photo.png"}' }).hasAttribute("disabled")).toBe(true);
     await act(async () => resolve([
       { attachment_id: "png", filename: "photo.png", saved_path: "/picked/photo (1).png", error: null },
       { attachment_id: "generic", filename: "unknown.dat", saved_path: null, error: "Source missing; sync and retry" },
@@ -58,9 +58,9 @@ describe("AttachmentList preview and Save All", () => {
     vi.mocked(downloadAttachment).mockResolvedValue("/downloads/photo (1).png");
     vi.mocked(saveAllAttachments).mockRejectedValue({ message: "Permission denied" });
     const view = render(<AttachmentList messageId="m1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "attachments.download: photo.png" }));
+    fireEvent.click(await screen.findByRole("button", { name: 'attachments.downloadNamed{"name":"photo.png"}' }));
     await waitFor(() => expect(downloadAttachment).toHaveBeenCalledWith("png", "/downloads/photo.png"));
-    await waitFor(() => expect(screen.getByRole("button", { name: "attachments.download: photo.png" }).getAttribute("title")).toBe("/downloads/photo (1).png"));
+    await waitFor(() => expect(screen.getByRole("button", { name: 'attachments.downloadNamed{"name":"photo.png"}' }).getAttribute("title")).toBe("/downloads/photo (1).png"));
     fireEvent.click(screen.getByRole("button", { name: "attachmentViewer.saveAll" }));
     await waitFor(() => expect(useToastStore.getState().toasts[0]?.message).toContain("Permission denied"));
     vi.mocked(listAttachments).mockRejectedValueOnce(new Error("offline"));
@@ -75,7 +75,7 @@ describe("AttachmentList preview and Save All", () => {
     vi.mocked(saveAllAttachments).mockImplementationOnce(() => new Promise((r) => { resolve = r; }) as never);
     const view = render(<AttachmentList messageId="m1" />);
     fireEvent.click(await screen.findByRole("button", { name: "attachmentViewer.saveAll" }));
-    fireEvent.click(screen.getByRole("button", { name: "attachmentViewer.preview: photo.png" }));
+    fireEvent.click(screen.getByRole("button", { name: 'attachmentViewer.previewNamed{"name":"photo.png"}' }));
     expect(await screen.findByRole("dialog")).toBeTruthy();
     vi.mocked(listAttachments).mockResolvedValueOnce([]);
     view.rerender(<AttachmentList messageId="m2" />);

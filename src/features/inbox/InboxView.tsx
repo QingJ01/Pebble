@@ -120,7 +120,9 @@ export default function InboxView() {
             {showTrashConfirm && (
               <ConfirmDialog
                 title={t("messageActions.emptyTrash", "Empty Trash")}
-                message={t("messageActions.emptyTrashConfirm", "Permanently delete all messages in Trash?")}
+                message={activeAccountId
+                  ? t("messageActions.emptyTrashConfirm", "Permanently delete all messages in this account's Trash? This can't be undone.")
+                  : t("messageActions.emptyTrashConfirmAll", "Permanently delete all messages in Trash for all accounts? This can't be undone.")}
                 confirmLabel={t("messageActions.deletePermanently", "Delete permanently")}
                 destructive
                 onCancel={() => setShowTrashConfirm(false)}

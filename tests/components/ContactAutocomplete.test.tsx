@@ -8,7 +8,12 @@ import {
 } from "../../src/lib/api";
 
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (_key: string, fallback?: string) => fallback ?? _key }),
+  useTranslation: () => ({ t: (key: string, options?: unknown) => {
+      if (typeof options === "string") return options;
+      const opts = (options ?? {}) as Record<string, unknown>;
+      const template = typeof opts.defaultValue === "string" ? opts.defaultValue : key;
+      return template.replace(/\{\{(\w+)\}\}/g, (_m: string, n: string) => String(opts[n] ?? ""));
+    } }),
 }));
 
 vi.mock("../../src/lib/api", () => ({
@@ -177,7 +182,7 @@ describe("ContactAutocomplete", () => {
 
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "alex" } });
     const removeButton = await screen.findByRole("button", {
-      name: "Remove suggestion alex@example.com",
+      name: "Remove suggestion: alex@example.com",
     });
     fireEvent.click(removeButton);
 
@@ -213,7 +218,7 @@ describe("ContactAutocomplete", () => {
     const input = screen.getByRole("combobox");
     fireEvent.change(input, { target: { value: "alex" } });
     const removeButton = await screen.findByRole("button", {
-      name: "Remove suggestion alex@example.com",
+      name: "Remove suggestion: alex@example.com",
     });
 
     expect(removeButton.closest('[role="option"]')).toBeNull();
@@ -223,7 +228,7 @@ describe("ContactAutocomplete", () => {
     expect(document.activeElement).toBe(removeButton);
     expect(input.getAttribute("aria-expanded")).toBe("true");
     fireEvent.blur(removeButton, { relatedTarget: document.body });
-    expect(screen.queryByRole("button", { name: "Remove suggestion alex@example.com" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove suggestion: alex@example.com" })).toBeNull();
   });
 
   it("ignores an older search response that resolves after the latest query", async () => {

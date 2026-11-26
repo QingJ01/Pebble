@@ -5,6 +5,7 @@ import i18next from "i18next";
 import { useAccountsQuery, useFoldersQuery } from "@/hooks/queries";
 import { useMailStore } from "@/stores/mail.store";
 import { useConfirmStore } from "@/stores/confirm.store";
+import { formatDateTime } from "@/lib/formatDate";
 import * as api from "@/lib/mail-archive-api";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import { useToastStore } from "@/stores/toast.store";
@@ -110,7 +111,7 @@ export default function MailArchiveView() {
   async function runImport(isPreview: boolean) {
     if (!selection || !archiveId || !folderId) return;
     await perform(async () => {
-      if (!isPreview && !await useConfirmStore.getState().confirm({ title: t("mailArchive.importTitle"), message: t("mailArchive.confirmImport") })) return;
+      if (!isPreview && !await useConfirmStore.getState().confirm({ title: t("mailArchive.importTitle"), message: t("mailArchive.confirmImport"), confirmLabel: t("mailArchive.importConfirmAction") })) return;
       const id = crypto.randomUUID(); setJob({ jobId: id, progress: null });
       const result = await api.importMailArchive(id, selection.id, archiveId, folderId, isPreview);
       reportFinished(isPreview ? "preview" : "import", result);
@@ -188,15 +189,15 @@ export default function MailArchiveView() {
       {!messages.isLoading && messages.data?.length === 0 && <p>{t("mailArchive.empty")}</p>}
       <ul className="mail-archive-messages">{messages.data?.map((message) => <li key={message.id}>
         <input aria-label={t("mailArchive.selectMessage", { subject: message.subject })} type="checkbox" checked={selected.includes(message.id)} onChange={(e) => setSelected((ids) => e.target.checked ? [...ids, message.id] : ids.filter((id) => id !== message.id))} />
-        <button aria-pressed={messageId === message.id} className={message.is_read ? "" : "mail-archive-unread"} onClick={() => setMessageId(message.id)}>{message.is_starred ? "★ " : ""}{message.subject || t("mailArchive.noSubject")} — {message.sender}<time>{new Date(message.date * 1000).toLocaleString()}</time></button>
+        <button aria-pressed={messageId === message.id} className={message.is_read ? "" : "mail-archive-unread"} onClick={() => setMessageId(message.id)}>{message.is_starred ? "★ " : ""}{message.subject || t("mailArchive.noSubject")} — {message.sender}<time>{formatDateTime(message.date)}</time></button>
       </li>)}</ul>
       <div className="mail-archive-row"><button disabled={!offset} onClick={() => { setOffset(Math.max(0, offset - 100)); setSelected([]); setMessageId(""); }}>{t("mailArchive.previous")}</button><span>{offset + 1}–{offset + (messages.data?.length || 0)}</span><button disabled={messages.data?.length !== 100} onClick={() => { setOffset(offset + 100); setSelected([]); setMessageId(""); }}>{t("mailArchive.next")}</button></div>
       {detail.data && <article className="mail-archive-detail" aria-label={t("mailArchive.message")}>
         <h3>{detail.data.metadata.subject || t("mailArchive.noSubject")}</h3>
         <p>{detail.data.metadata.from_name} &lt;{detail.data.metadata.from_address}&gt;</p>
-        <p>{t("mailArchive.to")}: {detail.data.metadata.to_list.map((a) => a.address).join(", ")}</p>
-        <p>Cc: {detail.data.metadata.cc_list.map((a) => a.address).join(", ")}</p><p>Bcc: {detail.data.metadata.bcc_list.map((a) => a.address).join(", ")}</p>
-        <p>{new Date(detail.data.metadata.date * 1000).toLocaleString()}</p>
+        <p>{t("mailArchive.toLine", { list: detail.data.metadata.to_list.map((a) => a.address).join(", ") })}</p>
+        <p>{t("mailArchive.ccLine", { list: detail.data.metadata.cc_list.map((a) => a.address).join(", ") })}</p><p>{t("mailArchive.bccLine", { list: detail.data.metadata.bcc_list.map((a) => a.address).join(", ") })}</p>
+        <p>{formatDateTime(detail.data.metadata.date)}</p>
         <div className="mail-archive-row"><button onClick={() => void edit(detail.data!.folder_id, !detail.data!.is_read, detail.data!.is_starred)}>{t(detail.data.is_read ? "mailArchive.markUnread" : "mailArchive.markRead")}</button><button onClick={() => void edit(detail.data!.folder_id, detail.data!.is_read, !detail.data!.is_starred)}>{t(detail.data.is_starred ? "mailArchive.unstar" : "mailArchive.star")}</button>
           <label>{t("mailArchive.move")}<select value={detail.data.folder_id} onChange={(e) => void edit(e.target.value, detail.data!.is_read, detail.data!.is_starred)}>{folders.data?.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label>
           <button onClick={() => void perform(async () => { if (await useConfirmStore.getState().confirm({ title: t("mailArchive.delete"), message: t("mailArchive.deleteWarning"), confirmLabel: t("mailArchive.deletePermanently", "Delete permanently"), destructive: true })) { await api.deleteArchiveMessage(archiveId, detail.data!.id); clearBrowser(); await refresh(); } })}>{t("mailArchive.delete")}</button>

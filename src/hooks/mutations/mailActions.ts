@@ -477,9 +477,9 @@ export function trashConfirmCopy(plan: MailActionPlan) {
         : plan.permanent
           ? t("messageActions.deletePermanentConfirm", "Permanently delete this message? This cannot be undone.")
           : t("messageActions.deleteConfirm", "Move this message to trash?"),
-      confirmLabel: plan.permanent
+      confirmLabel: plan.permanent || draft
         ? t("messageActions.deletePermanently", "Delete permanently")
-        : t("common.delete", "Delete"),
+        : t("messageActions.moveToTrash", "Move to Trash"),
     };
   }
   const includesLocalDraft = plan.messages.some(isLocalOnlyDraft);
@@ -490,10 +490,10 @@ export function trashConfirmCopy(plan: MailActionPlan) {
         "Local-only drafts in this selection will be permanently deleted and cannot be restored. Other messages will move to Trash.")
       : plan.permanent
         ? t("batch.deletePermanentConfirm", "Permanently delete {{count}} messages? This cannot be undone.", { count })
-        : t("batch.deleteConfirm", "This will move {{count}} message(s) to Trash.", { count }),
+        : t("batch.deleteConfirm", "Move {{count}} messages to Trash? You can restore them from Trash.", { count }),
     confirmLabel: plan.permanent
       ? t("messageActions.deletePermanently", "Delete permanently")
-      : t("batch.deleteButton", "Delete"),
+      : t("messageActions.moveToTrash", "Move to Trash"),
   };
 }
 

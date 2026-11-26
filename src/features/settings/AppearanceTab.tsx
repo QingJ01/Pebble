@@ -4,6 +4,7 @@ import { Image, Trash2, Upload } from "lucide-react";
 import { useUIStore } from "@/stores/ui.store";
 import type { BackgroundImageFit, Language, SidebarStyle, Theme } from "@/stores/ui.store";
 import { backgroundImageUrl, deleteBackgroundImage, importBackgroundImage } from "@/lib/backgroundImage";
+import { formatError } from "@/lib/extractErrorMessage";
 
 const THEMES: { id: Theme; labelKey: string; descKey: string }[] = [
   { id: "light", labelKey: "settings.themeLight", descKey: "settings.themeLightDesc" },
@@ -28,9 +29,7 @@ const SIDEBAR_STYLES: { id: SidebarStyle; labelKey: string; descKey: string }[] 
 ];
 
 function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === "string") return error;
-  return "Failed to update background image";
+  return formatError(error, { fallbackKey: "settings.backgroundImageFailed", fallback: "Couldn't update the background image" });
 }
 
 export default function AppearanceTab() {

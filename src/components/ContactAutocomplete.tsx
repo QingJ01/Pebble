@@ -477,7 +477,7 @@ export default function ContactAutocomplete({
           {removableSuggestion && (
             <button
               type="button"
-              aria-label={`${t("compose.removeSuggestion", "Remove suggestion")} ${removableSuggestion.address}`}
+              aria-label={t("compose.removeSuggestionFor", { address: removableSuggestion.address, defaultValue: "Remove suggestion: {{address}}" })}
               onClick={(event) => removeSuggestion(event, removableSuggestion)}
               style={{
                 display: "flex",
@@ -498,7 +498,7 @@ export default function ContactAutocomplete({
               }}
             >
               <X size={12} aria-hidden="true" />
-              {t("compose.removeSuggestion", "Remove suggestion")}: {removableSuggestion.address}
+              {t("compose.removeSuggestionFor", { address: removableSuggestion.address, defaultValue: "Remove suggestion: {{address}}" })}
             </button>
           )}
         </div>
