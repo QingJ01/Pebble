@@ -197,6 +197,7 @@ vi.mock("../../../src/stores/confirm.store", () => ({
 
 vi.mock("../../../src/stores/toast.store", () => ({
   useToastStore: { getState: () => ({ addToast: mocks.addToast }) },
+  toastError: (err: unknown) => mocks.addToast({ type: "error", message: String((err as Error)?.message ?? err) }),
 }));
 
 vi.mock("../../../src/lib/api", () => ({

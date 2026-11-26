@@ -5,7 +5,7 @@ import { createRule, deleteRule, listRules, updateRule, type Rule } from "@/lib/
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { useToastStore } from "@/stores/toast.store";
 import { useUIStore } from "@/stores/ui.store";
-import { extractErrorMessage } from "@/lib/extractErrorMessage";
+import { extractErrorMessage, formatError } from "@/lib/extractErrorMessage";
 import {
   parseRuleActions,
   parseRuleConditions,
@@ -175,7 +175,7 @@ export default function RulesTab() {
       cancelEdit();
       await fetchRules();
     } catch (err) {
-      setError(String(err));
+      setError(formatError(err, { fallbackKey: "errors.saveRule" }));
     }
   }
 

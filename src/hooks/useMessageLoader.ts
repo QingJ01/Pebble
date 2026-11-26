@@ -3,12 +3,25 @@ import { getMessageWithHtml, getRenderedHtml } from "@/lib/api";
 import { useUpdateFlagsMutation } from "@/hooks/mutations/useUpdateFlagsMutation";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
 import type { Message, RenderedHtml, PrivacyMode } from "@/lib/api";
+import { describeError, extractErrorMessage, type DescribedError } from "@/lib/extractErrorMessage";
 
 export function useMessageLoader(messageId: string | null, privacyMode: PrivacyMode) {
   const flagsMutation = useUpdateFlagsMutation();
   const [message, setMessage] = useState<Message | null>(null);
   const [rendered, setRendered] = useState<RenderedHtml | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  /** Raw error message (never "[object Object]"). */
+  const [error, setErrorMessage] = useState<string | null>(null);
+  /** Localized description of the same error for display. */
+  const [errorInfo, setErrorInfo] = useState<DescribedError | null>(null);
+  const setError = (err: unknown) => {
+    if (err === null) {
+      setErrorMessage(null);
+      setErrorInfo(null);
+      return;
+    }
+    setErrorMessage(extractErrorMessage(err));
+    setErrorInfo(describeError(err, { fallbackKey: "errors.loadMessage" }));
+  };
   const [loading, setLoading] = useState(true);
   const privacyModeRef = useRef(privacyMode);
   const renderedKeyRef = useRef<string | null>(null);
@@ -53,7 +66,7 @@ export function useMessageLoader(messageId: string | null, privacyMode: PrivacyM
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
+          setError(err);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -83,12 +96,12 @@ export function useMessageLoader(messageId: string | null, privacyMode: PrivacyM
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
+          setError(err);
         }
       });
 
     return () => { cancelled = true; };
   }, [privacyMode, messageId, message]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { message, setMessage, rendered, loading, error };
+  return { message, setMessage, rendered, loading, error, errorInfo };
 }

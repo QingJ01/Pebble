@@ -6,7 +6,7 @@ import { AlertCircle, Clock, RefreshCw, Trash2 } from "lucide-react";
 import type { PendingMailOp } from "@/lib/api";
 import { dismissFailedPendingMailOps, retryFailedSend } from "@/lib/api";
 import { useConfirmStore } from "@/stores/confirm.store";
-import { useToastStore } from "@/stores/toast.store";
+import { toastError } from "@/stores/toast.store";
 import {
   pendingMailOpsQueryKey,
   pendingMailOpsSummaryQueryKey,
@@ -85,7 +85,7 @@ export default function PendingOpsTab() {
       await retryFailedSend(op.id);
       await refresh();
     } catch (error) {
-      useToastStore.getState().addToast({ type: "error", message: String(error) });
+      toastError(error, "errors.retrySend");
     } finally {
       setRetryingSend(null);
     }

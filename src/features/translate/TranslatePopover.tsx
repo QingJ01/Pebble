@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Copy, Check, X } from "lucide-react";
 import { translateText } from "@/lib/api";
 import { profileLocalStorage } from "@/lib/profileStorage";
+import { formatError } from "@/lib/extractErrorMessage";
 
 interface Props {
   text: string;
@@ -36,7 +37,7 @@ export default function TranslatePopover({ text, position, onClose }: Props) {
         if (!cancelled) setTranslated(result.translated);
       })
       .catch((err) => {
-        if (!cancelled) setError(String(err));
+        if (!cancelled) setError(formatError(err, { fallbackKey: "errors.translate" }));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

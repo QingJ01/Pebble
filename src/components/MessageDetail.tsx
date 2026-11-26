@@ -58,7 +58,7 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
   const selectionActionsRef = useRef<HTMLDivElement>(null);
   const translateRef = useRef<HTMLDivElement>(null);
 
-  const { message, setMessage, rendered, loading, error } = useMessageLoader(messageId, privacyMode);
+  const { message, setMessage, rendered, loading, error, errorInfo } = useMessageLoader(messageId, privacyMode);
   const { bilingualMode, bilingualResult, bilingualLoading, handleBilingualToggle, resetBilingual } = useBilingualTranslation(messageId, rendered, message);
 
   useClickOutside(snoozeRef, showSnooze, () => setShowSnooze(false));
@@ -191,13 +191,14 @@ export default function MessageDetail({ messageId, onBack, folderRole }: Props) 
           alignItems: "center",
           justifyContent: "center",
           height: "100%",
-          color: "var(--color-error, #dc2626)",
+          color: "var(--color-danger)",
           fontSize: "14px",
           padding: "24px",
           textAlign: "center",
         }}
+        title={errorInfo?.detail || error}
       >
-        {t("common.messageLoadFailed", "Failed to load message")}: {error}
+        {errorInfo?.title ?? t("common.messageLoadFailed", "Failed to load message")}
       </div>
     );
   }

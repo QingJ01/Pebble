@@ -4,13 +4,23 @@ import { useUIStore } from "@/stores/ui.store";
 import { useComposeStore } from "@/stores/compose.store";
 import { useMailStore } from "@/stores/mail.store";
 
+/** FAB geometry, shared with ToastContainer so toasts stack above the FAB. */
+export const COMPOSE_FAB_BOTTOM = 48;
+export const COMPOSE_FAB_SIZE = 48;
+
+/** Whether the compose FAB is currently shown. */
+export function useComposeFabVisible(): boolean {
+  const activeView = useUIStore((s) => s.activeView);
+  const selectedMessageId = useMailStore((s) => s.selectedMessageId);
+  return !(activeView === "compose" || selectedMessageId);
+}
+
 export default function ComposeFAB() {
   const { t } = useTranslation();
-  const activeView = useUIStore((s) => s.activeView);
   const openCompose = useComposeStore((s) => s.openCompose);
-  const selectedMessageId = useMailStore((s) => s.selectedMessageId);
+  const visible = useComposeFabVisible();
 
-  if (activeView === "compose" || selectedMessageId) return null;
+  if (!visible) return null;
 
   return (
     <button
@@ -19,11 +29,11 @@ export default function ComposeFAB() {
       title={t("sidebar.compose", "Compose")}
       style={{
         position: "fixed",
-        bottom: "48px",
+        bottom: `${COMPOSE_FAB_BOTTOM}px`,
         right: "24px",
         zIndex: 100,
-        width: "48px",
-        height: "48px",
+        width: `${COMPOSE_FAB_SIZE}px`,
+        height: `${COMPOSE_FAB_SIZE}px`,
         borderRadius: "50%",
         border: "none",
         backgroundColor: "var(--color-accent, #2563eb)",

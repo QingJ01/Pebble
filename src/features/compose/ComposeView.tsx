@@ -21,7 +21,8 @@ import { useComposeDraft, loadDraftFromStorage, clearDraftStorage } from "@/hook
 import { cleanupStagedComposeAttachment, deleteDraft, stageComposeAttachment } from "@/lib/api";
 import { appendReplyQuoteHtml, useComposeEditor } from "@/hooks/useComposeEditor";
 import { useConfirmStore } from "@/stores/confirm.store";
-import { useToastStore } from "@/stores/toast.store";
+import { toastError, useToastStore } from "@/stores/toast.store";
+import { formatError } from "@/lib/extractErrorMessage";
 import type { Account } from "@/lib/ipc-types";
 import type { ComposeAttachment } from "./compose-draft";
 import { ModeButton, EditorToolbar, MarkdownToolbar, composeStyles } from "./ComposeToolbar";
@@ -578,8 +579,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
         onError: (e) => {
           sendInProgressRef.current = false;
           setSendInProgress(false);
-          const msg = e instanceof Error ? e.message : String(e);
-          setSendError(msg || t("compose.sendError", "Failed to send"));
+          setSendError(formatError(e, { fallbackKey: "compose.sendError", fallback: "Failed to send" }));
         },
       },
     );
@@ -622,7 +622,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
       useComposeStore.getState().setComposeDirty(false);
       confirmCloseCompose();
     } catch (error) {
-      useToastStore.getState().addToast({ type: "error", message: String(error) });
+      toastError(error, "errors.saveDraft");
     } finally {
       setIsSaving(false);
     }
