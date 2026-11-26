@@ -8,6 +8,74 @@ use tauri::State;
 
 const MAX_INLINE_EXPANSION_BYTES: usize = 20 * 1024 * 1024;
 
+/// Raster image types an inline (cid:) image may be shown as. SVG is never
+/// inlined (it can carry script and external references).
+const INLINE_IMAGE_TYPES: [&str; 5] = [
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/bmp",
+];
+
+/// The declared MIME type, with parameters dropped and common non-standard
+/// aliases (`image/jpg`, `image/x-png`…) mapped to their standard names.
+fn normalize_image_mime(declared: &str) -> String {
+    let base = declared
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    match base.as_str() {
+        "image/jpg" | "image/pjpeg" => "image/jpeg".to_string(),
+        "image/x-png" => "image/png".to_string(),
+        "image/x-bmp" | "image/x-ms-bmp" => "image/bmp".to_string(),
+        _ => base,
+    }
+}
+
+/// Raster format from the file's leading bytes, for parts sent as
+/// `application/octet-stream` or another generic type.
+fn sniff_image_mime(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        Some("image/jpeg")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else if bytes.starts_with(b"BM") {
+        Some("image/bmp")
+    } else {
+        None
+    }
+}
+
+/// Key for matching a `cid:` reference to a Content-ID: angle brackets and
+/// whitespace dropped, %XX escapes decoded (cid URLs may be URL-encoded, RFC
+/// 2392) and case folded, since mailers disagree on both.
+fn normalize_cid(raw: &str) -> String {
+    let trimmed = raw.trim().trim_matches(['<', '>']).trim();
+    let bytes = trimmed.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).ok();
+            if let Some(value) = hex.and_then(|h| u8::from_str_radix(h, 16).ok()) {
+                decoded.push(value);
+                i += 3;
+                continue;
+            }
+        }
+        decoded.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&decoded).to_lowercase()
+}
+
 fn resolve_inline_images(
     store: &Store,
     root: &Path,
@@ -26,11 +94,10 @@ fn resolve_inline_images(
         let Some(cid) = attachment.content_id else {
             continue;
         };
-        let mime = attachment.mime_type.to_ascii_lowercase();
-        if !matches!(
-            mime.as_str(),
-            "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "image/bmp"
-        ) {
+        let declared = normalize_image_mime(&attachment.mime_type);
+        // Declared SVG or another non-raster image type: never inlined. Generic
+        // types (octet-stream…) are decided from the bytes below.
+        if declared.starts_with("image/") && !INLINE_IMAGE_TYPES.contains(&declared.as_str()) {
             continue;
         }
         let Some(path) = attachment.local_path else {
@@ -51,10 +118,17 @@ fn resolve_inline_images(
         let Ok(bytes) = std::fs::read(path) else {
             continue;
         };
+        let mime = if INLINE_IMAGE_TYPES.contains(&declared.as_str()) {
+            declared.as_str()
+        } else if let Some(sniffed) = sniff_image_mime(&bytes) {
+            sniffed
+        } else {
+            continue;
+        };
         total_size += bytes.len() as u64;
         images.insert(
-            cid.trim().trim_matches(['<', '>']).to_string(),
-            format!("data:{mime};base64,{}", STANDARD.encode(bytes)),
+            normalize_cid(&cid),
+            format!("data:{mime};base64,{}", STANDARD.encode(&bytes)),
         );
     }
     let mut expanded_bytes = 0;
@@ -67,8 +141,8 @@ fn resolve_inline_images(
                         .get(..4)
                         .is_some_and(|prefix| prefix.eq_ignore_ascii_case("cid:"))
                     {
-                        let cid = src[4..].trim().trim_matches(['<', '>']);
-                        if let Some(data) = images.get(cid).filter(|data| {
+                        let cid = normalize_cid(&src[4..]);
+                        if let Some(data) = images.get(&cid).filter(|data| {
                             data.len() <= MAX_INLINE_EXPANSION_BYTES - expanded_bytes
                         }) {
                             element.set_attribute("src", data)?;
@@ -218,6 +292,86 @@ mod tests {
         resolve_inline_images(&store, &root, &other.id, &mut other_html).unwrap();
         assert!(!other_html.html.contains("data:image"));
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Signature images as real mailers send them (issue #102): non-standard
+    /// or generic MIME types, and cid references whose case or encoding
+    /// differs from the Content-ID.
+    #[test]
+    fn signature_images_with_loose_types_and_cids_are_inlined() {
+        let (store, message) = store_with_trusted_sender(TrustType::Images);
+        let root = std::env::temp_dir().join(format!("pebble-cid-loose-{}", new_id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let png = b"\x89PNG\r\n\x1a\nrest-of-png".to_vec();
+        let jpeg = vec![0xff, 0xd8, 0xff, 0xe0, 1, 2, 3];
+        let not_an_image = b"<svg xmlns='http://www.w3.org/2000/svg'/>".to_vec();
+        for (content_id, file, mime, bytes) in [
+            (
+                "<image001.png@01DA1234.ABCD>",
+                "logo.png",
+                "application/octet-stream",
+                &png,
+            ),
+            (
+                "<Banner@Example.COM>",
+                "banner.jpg",
+                "image/jpg; name=banner.jpg",
+                &jpeg,
+            ),
+            (
+                "<vector>",
+                "vector.bin",
+                "application/octet-stream",
+                &not_an_image,
+            ),
+        ] {
+            let path = root.join(file);
+            std::fs::write(&path, bytes).unwrap();
+            store
+                .insert_attachment(&pebble_core::Attachment {
+                    id: new_id(),
+                    message_id: message.id.clone(),
+                    filename: file.into(),
+                    mime_type: mime.into(),
+                    size: bytes.len() as i64,
+                    local_path: Some(path.to_string_lossy().into_owned()),
+                    content_id: Some(content_id.into()),
+                    is_inline: true,
+                })
+                .unwrap();
+        }
+        let mut rendered = PrivacyGuard::new().render_safe_html(
+            r#"<img src="cid:image001.png%4001DA1234.ABCD"><img src="CID:banner@example.com"><img src="cid:vector">"#,
+            &PrivacyMode::Strict,
+        );
+        resolve_inline_images(&store, &root, &message.id, &mut rendered).unwrap();
+        assert!(rendered
+            .html
+            .contains(&format!("data:image/png;base64,{}", STANDARD.encode(&png))));
+        assert!(rendered.html.contains(&format!(
+            "data:image/jpeg;base64,{}",
+            STANDARD.encode(&jpeg)
+        )));
+        assert_eq!(
+            rendered.html.matches("data:").count(),
+            2,
+            "non-images are never inlined"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn image_type_helpers_normalize_aliases_and_sniff_formats() {
+        assert_eq!(normalize_image_mime("IMAGE/JPG"), "image/jpeg");
+        assert_eq!(normalize_image_mime("image/x-png; name=a.png"), "image/png");
+        assert_eq!(sniff_image_mime(b"GIF89a..."), Some("image/gif"));
+        assert_eq!(
+            sniff_image_mime(b"RIFF\0\0\0\0WEBPVP8 "),
+            Some("image/webp")
+        );
+        assert_eq!(sniff_image_mime(b"<svg/>"), None);
+        assert_eq!(normalize_cid(" <A%40B.c> "), "a@b.c");
+        assert_eq!(normalize_cid("100%"), "100%");
     }
 
     #[test]
