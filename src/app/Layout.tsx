@@ -27,6 +27,7 @@ import { useTrayI18n } from "./useTrayI18n";
 import { useMailtoOpen } from "./useMailtoOpen";
 import AppBackground from "./AppBackground";
 import Button from "../components/ui/Button";
+import ErrorDiagnosticsButton from "../components/ErrorDiagnosticsButton";
 import Spinner from "../components/Spinner";
 import { LOADING_INDICATOR_DELAY_MS } from "../hooks/useDelayedVisible";
 import "./shell.css";
@@ -178,9 +179,9 @@ function ViewLoadingFallback() {
 
 class ViewErrorBoundary extends Component<
   { children: ReactNode },
-  { error: Error | null }
+  { error: Error | null; componentStack?: string | null }
 > {
-  state: { error: Error | null } = { error: null };
+  state: { error: Error | null; componentStack?: string | null } = { error: null };
 
   static getDerivedStateFromError(error: Error) {
     return { error };
@@ -188,6 +189,7 @@ class ViewErrorBoundary extends Component<
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("[ViewError]", error, info.componentStack);
+    this.setState({ componentStack: info.componentStack ?? null });
   }
 
   render() {
@@ -200,7 +202,7 @@ class ViewErrorBoundary extends Component<
         }}>
           <p style={{ fontSize: "var(--font-md)", fontWeight: 600, margin: 0, color: "var(--color-text-primary)" }}>{i18next.t("errorBoundary.title", "Something went wrong")}</p>
           <p style={{ fontSize: "var(--font-sm)", margin: 0, color: "var(--color-text-secondary)" }}>
-            {i18next.t("errorBoundary.description", "Please try again or refresh the application.")}
+            {i18next.t("errorBoundary.description", "This view ran into an unexpected error. Try again, or reload Pebble if it keeps happening.")}
           </p>
           {this.state.error && import.meta.env.DEV && (
             <pre style={{ fontSize: "var(--font-xs)", color: "var(--color-danger)", maxWidth: "90%", overflow: "auto", whiteSpace: "pre-wrap", textAlign: "left" }}>
@@ -209,9 +211,12 @@ class ViewErrorBoundary extends Component<
               {this.state.error.stack}
             </pre>
           )}
-          <Button variant="primary" onClick={() => this.setState({ error: null })}>
-            {i18next.t("errorBoundary.retry", "Retry")}
-          </Button>
+          <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", alignItems: "center", gap: 8 }}>
+            <Button variant="primary" onClick={() => this.setState({ error: null, componentStack: null })}>
+              {i18next.t("errorBoundary.retry", "Retry")}
+            </Button>
+            <ErrorDiagnosticsButton error={this.state.error} componentStack={this.state.componentStack} />
+          </div>
         </div>
       );
     }
