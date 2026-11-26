@@ -387,7 +387,10 @@
     "autoBackupSecretPassphraseRequired": "要包含敏感凭据，请先填写备份加密密码。",
     "saveAutoBackupConfig": "保存自动备份设置",
     "lastBackupAt": "上次备份：{{time}}",
-    "connectionFailedWithReason": "连接失败：{{error}}"
+    "connectionFailedWithReason": "连接失败：{{error}}",
+    "connectionSection": "WebDAV 服务器",
+    "secretsSection": "敏感信息",
+    "backupSection": "备份与恢复"
   },
   "pendingOps": {
     "retrySend": "重试发送",

@@ -389,7 +389,10 @@
     "autoBackupSecretPassphraseRequired": "Enter a backup encryption password to include sensitive credentials.",
     "saveAutoBackupConfig": "Save automatic backup settings",
     "lastBackupAt": "Last backup: {{time}}",
-    "connectionFailedWithReason": "Connection failed: {{error}}"
+    "connectionFailedWithReason": "Connection failed: {{error}}",
+    "connectionSection": "WebDAV server",
+    "secretsSection": "Secrets",
+    "backupSection": "Backup and restore"
   },
   "pendingOps": {
     "retrySend": "Retry send",

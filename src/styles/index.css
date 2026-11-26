@@ -526,6 +526,8 @@ option {
   gap: var(--space-4);
 }
 .settings-section__heading { min-width: 0; }
+/* The body already spaces its children; don't double the .field + .field gap. */
+.settings-section__body > .field + .field { margin-top: 0; }
 .settings-section__actions {
   display: flex;
   align-items: center;
@@ -541,6 +543,15 @@ option {
   font-size: var(--font-sm);
   font-weight: var(--weight-semibold);
   line-height: var(--leading-tight);
+}
+/* Checkbox whose label has a second description line. */
+.settings-section .choice--top { align-items: flex-start; }
+.choice__description {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+  line-height: var(--leading-normal);
 }
 .settings-row {
   display: flex;
