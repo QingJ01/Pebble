@@ -1018,7 +1018,9 @@
     "archivePartialFailure_one": "{{count}} message could not be archived",
     "archivePartialFailure_other": "{{count}} messages could not be archived",
     "deleteMixedSuccess_one": "{{count}} message deleted: local drafts permanently, the rest moved to Trash",
-    "deleteMixedSuccess_other": "{{count}} messages deleted: local drafts permanently, the rest moved to Trash"
+    "deleteMixedSuccess_other": "{{count}} messages deleted: local drafts permanently, the rest moved to Trash",
+    "deletePartialFailure_one": "{{count}} message could not be deleted",
+    "deletePartialFailure_other": "{{count}} messages could not be deleted"
   },
   "messageDetail": {
     "body": "Message body",

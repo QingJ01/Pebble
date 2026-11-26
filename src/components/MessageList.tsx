@@ -298,7 +298,11 @@ export default function MessageList({
           if (current && ids.includes(current)) useMailStore.getState().setSelectedMessage(null);
         },
       });
-      if (result.ok) clearSelection();
+      // Keep the messages that failed selected so they can be retried.
+      if (result.ok) {
+        if (result.failedIds?.length) selectAllMessages(result.failedIds);
+        else clearSelection();
+      }
     } finally {
       setBatchLoading(false);
     }

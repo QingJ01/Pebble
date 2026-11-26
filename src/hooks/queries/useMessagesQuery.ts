@@ -114,3 +114,50 @@ export function restoreMessagesCache(
     queryClient.setQueryData(key, data);
   }
 }
+
+/**
+ * Roll back an optimistic removal for `ids` only: put those messages back into
+ * each cached list (from `snapshot`) without touching anything else, so a
+ * concurrent action that already removed other messages isn't undone. Each
+ * message goes back right after the neighbour it followed in the snapshot.
+ */
+export function restoreMessagesInCache(
+  queryClient: QueryClient,
+  snapshot: ReturnType<typeof snapshotMessagesCache>,
+  ids: Iterable<string>,
+) {
+  const idSet = new Set(ids);
+  for (const [key, before] of snapshot) {
+    if (!before) continue;
+    const beforeFlat = before.pages.flat();
+    if (!beforeFlat.some((m) => idSet.has(m.id))) continue;
+    queryClient.setQueryData<MessagesInfiniteData>(key, (current) => {
+      if (!current) return current;
+      const merged = current.pages.flat();
+      const present = new Set(merged.map((m) => m.id));
+      let changed = false;
+      beforeFlat.forEach((message, index) => {
+        if (!idSet.has(message.id) || present.has(message.id)) return;
+        // Insert after the closest earlier snapshot neighbour still listed.
+        let at = 0;
+        for (let i = index - 1; i >= 0; i -= 1) {
+          const pos = merged.findIndex((m) => m.id === beforeFlat[i].id);
+          if (pos !== -1) { at = pos + 1; break; }
+        }
+        merged.splice(at, 0, message);
+        present.add(message.id);
+        changed = true;
+      });
+      if (!changed) return current;
+      // Keep the page structure: same page sizes, the last page takes the rest.
+      const pages: MessageSummary[][] = [];
+      let offset = 0;
+      current.pages.forEach((page, index) => {
+        const size = index === current.pages.length - 1 ? merged.length - offset : page.length;
+        pages.push(merged.slice(offset, offset + size));
+        offset += size;
+      });
+      return { ...current, pages };
+    });
+  }
+}

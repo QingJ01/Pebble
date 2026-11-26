@@ -8,6 +8,7 @@ export {
   readFirstCachedMessages,
   snapshotMessagesCache,
   restoreMessagesCache,
+  restoreMessagesInCache,
   MESSAGES_PAGE_SIZE,
 } from "./useMessagesQuery";
 export { useThreadsQuery, threadsQueryKey } from "./useThreadsQuery";

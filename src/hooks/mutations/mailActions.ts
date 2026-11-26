@@ -35,7 +35,7 @@ import { folderIdsForSelection } from "@/lib/folderAggregation";
 import { foldersQueryKey } from "@/hooks/queries/useFoldersQuery";
 import {
   patchMessagesCache,
-  restoreMessagesCache,
+  restoreMessagesInCache,
   snapshotMessagesCache,
 } from "@/hooks/queries/useMessagesQuery";
 import { invalidateKanbanQueries } from "@/hooks/queries/useKanbanCardsQuery";
@@ -77,6 +77,8 @@ export interface MailActionPlan {
 export interface MailActionResult {
   ok: boolean;
   count: number;
+  /** Partial success: the messages known to have failed (keep them selected). */
+  failedIds?: string[];
 }
 
 const MAX_CONTEXT_IDS = 500;
@@ -122,10 +124,28 @@ function isLocalOnlyDraft(message: MailActionTarget) {
   return Boolean(message.is_draft) && message.remote_id === "";
 }
 
+/**
+ * Whether move_mail_messages accepts moving between these folders. Mirrors
+ * validate_move_route in src-tauri/src/commands/folder_management.rs: Gmail
+ * only moves between user labels, Inbox, Spam and Trash (not Sent, Drafts,
+ * All Mail…), and server and device-only folders don't mix (except POP3).
+ */
+export function canManagedMove(provider: string | undefined, source: Folder | undefined, target: Folder | undefined): boolean {
+  if (!source || !target || source.id === target.id) return false;
+  const local = (f: Folder) => f.remote_id.startsWith("__local_");
+  if (provider === "gmail" && !local(target)) {
+    const mutable = (f: Folder) => !f.is_system || f.role === "inbox" || f.role === "spam" || f.role === "trash";
+    if (!mutable(source) || !mutable(target)) return false;
+  }
+  if (provider !== "pop3" && local(source) !== local(target)) return false;
+  return true;
+}
+
 /** Record the folder each message is in now (the folder Undo returns it to). */
 async function captureOrigins(
   messages: MailActionTarget[],
   foldersByAccount: Map<string, Folder[]>,
+  providers: Map<string, string>,
 ): Promise<Map<string, Origin>> {
   const origins = new Map<string, Origin>();
   const activeFolderId = useMailStore.getState().activeFolderId;
@@ -134,6 +154,7 @@ async function captureOrigins(
     for (const ids of chunk(group.map((m) => m.id), MAX_CONTEXT_IDS)) {
       try {
         const context = await getMailMoveContext(accountId, ids);
+        if (context?.provider) providers.set(accountId, context.provider);
         for (const id of ids) {
           const memberships = context?.folder_ids_by_message?.[id] ?? [];
           const source = memberships.find((folderId) => viewFolderIds.includes(folderId)) ?? memberships[0];
@@ -158,7 +179,18 @@ export async function planMailAction(
   await Promise.all(accountIds.map(async (accountId) => {
     foldersByAccount.set(accountId, await loadFolders(client, accountId));
   }));
-  const origins = await captureOrigins(messages, foldersByAccount);
+  const providers = new Map<string, string>();
+  const origins = await captureOrigins(messages, foldersByAccount, providers);
+  const folderById = (accountId: string, id: string | undefined) =>
+    foldersByAccount.get(accountId)?.find((f) => f.id === id);
+  /** Every message can be moved from its origin to the account's `role` folder (and back). */
+  const allManagedMovable = (role: Folder["role"]) => messages.every((m) => {
+    const origin = origins.get(m.id);
+    const source = folderById(m.account_id, origin?.sourceFolderId);
+    const target = folderByRole(foldersByAccount.get(m.account_id), role);
+    const provider = providers.get(m.account_id);
+    return canManagedMove(provider, source, target) && canManagedMove(provider, target, source);
+  });
 
   const sourceRole = (message: MailActionTarget) => {
     const origin = origins.get(message.id);
@@ -177,15 +209,23 @@ export async function planMailAction(
     const everyAccountHasTrash = accountIds.every((id) => Boolean(folderByRole(foldersByAccount.get(id), "trash")));
     // Batch trash goes through move_mail_messages, which refuses drafts.
     const draftInBatch = messages.length > 1 && messages.some((m) => m.is_draft);
-    undoable = undoable && !permanent && everyAccountHasTrash && !draftInBatch;
+    // Batches move through move_mail_messages (that's what makes them
+    // undoable); when any message can't take that route (e.g. Gmail Sent),
+    // the batch uses batch_delete instead, without undo.
+    const batchMovable = messages.length === 1 || allManagedMovable("trash");
+    undoable = undoable && !permanent && everyAccountHasTrash && !draftInBatch && batchMovable;
   } else if (kind === "archive") {
     // Without an archive folder the message is soft-deleted locally: no undo.
     const everyAccountHasArchive = accountIds.every((id) => Boolean(folderByRole(foldersByAccount.get(id), "archive")));
     const unarchiving = messages.some((m) => sourceRole(m) === "archive");
     const everyAccountHasInbox = accountIds.every((id) => Boolean(folderByRole(foldersByAccount.get(id), "inbox")));
-    undoable = undoable && everyAccountHasArchive && (!unarchiving || everyAccountHasInbox);
+    // A batch undo moves back with move_mail_messages: only offer it when
+    // that route accepts every message (Gmail's archive is All Mail: no).
+    const undoMovable = messages.length === 1 || allManagedMovable(unarchiving ? "inbox" : "archive");
+    undoable = undoable && everyAccountHasArchive && (!unarchiving || everyAccountHasInbox) && undoMovable;
   } else {
-    undoable = undoable && Boolean(options.spamFolderId);
+    const undoMovable = messages.length === 1 || allManagedMovable("spam");
+    undoable = undoable && Boolean(options.spamFolderId) && undoMovable;
   }
 
   return {
@@ -286,6 +326,25 @@ export interface ExecuteOptions {
   onFailed?: (ids: string[]) => void;
 }
 
+/** Ids of the plan's messages still in the folder they started in (null = unknown). */
+async function idsStillInOrigin(plan: MailActionPlan, ids: string[]): Promise<string[] | null> {
+  const stillThere: string[] = [];
+  try {
+    const byAccount = groupBy(ids.filter((id) => plan.origins.has(id)), (id) => plan.origins.get(id)!.accountId);
+    for (const [accountId, group] of byAccount) {
+      for (const part of chunk(group, MAX_CONTEXT_IDS)) {
+        const context = await getMailMoveContext(accountId, part);
+        for (const id of part) {
+          if (context?.folder_ids_by_message?.[id]?.includes(plan.origins.get(id)!.sourceFolderId)) stillThere.push(id);
+        }
+      }
+    }
+  } catch {
+    return null;
+  }
+  return stillThere;
+}
+
 /** Ids of the plan's messages that are now in their account's `role` folder. */
 async function idsInRoleFolder(plan: MailActionPlan, role: Folder["role"]): Promise<string[]> {
   const found: string[] = [];
@@ -319,12 +378,16 @@ export async function executeMailAction(
   patchMessagesCache(client, (page) => page.filter((m) => !idSet.has(m.id)));
   options.onRemoved?.(ids);
 
+  // Put back only this action's messages (another action may have removed
+  // others meanwhile), then refetch so the lists match the server again.
   const rollback = () => {
-    restoreMessagesCache(client, previousLists);
+    restoreMessagesInCache(client, previousLists, ids);
+    invalidateMailViews(client);
     options.onFailed?.(ids);
   };
 
   let count = ids.length;
+  let failedIds: string[] | undefined;
   let unarchived = false;
   let undoIds: string[] = ids;
   let currentFolder: (accountId: string) => string | undefined = () => undefined;
@@ -334,7 +397,7 @@ export async function executeMailAction(
       if (ids.length === 1) {
         const result = await archiveMessage(ids[0]);
         if (result === "skipped") {
-          restoreMessagesCache(client, previousLists);
+          restoreMessagesInCache(client, previousLists, ids);
           return { ok: false, count: 0 };
         }
         unarchived = result === "unarchived";
@@ -344,7 +407,12 @@ export async function executeMailAction(
         if (count < ids.length) {
           // batch_archive only reports how many succeeded; look up which ones
           // are now in Archive so Undo moves back only those.
-          undoIds = plan.undoable ? await idsInRoleFolder(plan, "archive") : [];
+          const archived = await idsInRoleFolder(plan, "archive");
+          undoIds = plan.undoable ? archived : [];
+          if (archived.length > 0) {
+            const archivedSet = new Set(archived);
+            failedIds = ids.filter((id) => !archivedSet.has(id));
+          }
           invalidateMailViews(client);
           useToastStore.getState().addToast({
             type: "warning",
@@ -382,6 +450,10 @@ export async function executeMailAction(
       if (moved.length === 0 && failures > 0) throw new Error("No messages were moved to Trash");
       count = moved.length;
       undoIds = moved;
+      if (failures > 0) {
+        const movedSet = new Set(moved);
+        failedIds = ids.filter((id) => !movedSet.has(id));
+      }
       currentFolder = (accountId) => folderByRole(plan.foldersByAccount.get(accountId), "trash")?.id;
       if (failures > 0) {
         // Failed ones stay where they were; bring them back into the lists.
@@ -393,6 +465,15 @@ export async function executeMailAction(
       }
     } else {
       count = await batchDelete(ids);
+      if (count === 0) throw new Error("No messages were deleted");
+      if (count < ids.length) {
+        failedIds = (await idsStillInOrigin(plan, ids)) ?? undefined;
+        invalidateMailViews(client);
+        useToastStore.getState().addToast({
+          type: "warning",
+          message: t("batch.deletePartialFailure", "{{count}} messages could not be deleted", { count: ids.length - count }),
+        });
+      }
     }
   } catch (error) {
     rollback();
@@ -414,7 +495,7 @@ export async function executeMailAction(
   }
 
   showUndoableToast(client, successMessage(plan, count, unarchived), undoMovesList);
-  return { ok: true, count };
+  return { ok: true, count, ...(failedIds?.length ? { failedIds } : {}) };
 }
 
 /**

@@ -263,6 +263,81 @@ describe("mail actions with undo", () => {
     expect(lastToast().message).toContain("local drafts permanently, the rest moved to Trash");
   });
 
+  it("batch-deletes from Gmail Sent with batch_delete instead of a managed move", async () => {
+    mocks.listFolders.mockResolvedValue([...FOLDERS, folder("sent", "sent")]);
+    mocks.getMailMoveContext.mockImplementation(async (_account: string, ids: string[]) => ({
+      provider: "gmail",
+      folder_ids_by_message: Object.fromEntries(ids.map((id) => [id, ["sent"]])),
+    }));
+    useMailStore.setState({ activeFolderId: "sent" });
+    mocks.batchDelete.mockResolvedValue(2);
+    const confirm = vi.fn().mockResolvedValue(true);
+
+    const result = await runMailAction(client, "trash", [message("m1"), message("m2")], { confirm });
+
+    expect(result.ok).toBe(true);
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ undoable: false }));
+    expect(mocks.batchDelete).toHaveBeenCalledWith(["m1", "m2"]);
+    expect(mocks.moveMailMessages).not.toHaveBeenCalled();
+  });
+
+  it("still batch-moves Gmail Inbox mail to Trash with undo", async () => {
+    mocks.getMailMoveContext.mockImplementation(async (_account: string, ids: string[]) => ({
+      provider: "gmail",
+      folder_ids_by_message: Object.fromEntries(ids.map((id) => [id, ["inbox"]])),
+    }));
+
+    await runMailAction(client, "trash", [message("m1"), message("m2")], { confirm: vi.fn() });
+
+    expect(mocks.moveMailMessages).toHaveBeenCalledWith("acc", ["m1", "m2"], "inbox", "trash");
+    expect(mocks.batchDelete).not.toHaveBeenCalled();
+  });
+
+  it("treats a batch delete where nothing was deleted as a failure", async () => {
+    const draft = message("d1", { is_draft: true, remote_id: "" });
+    seedList(client, [draft, message("m1")]);
+    mocks.batchDelete.mockResolvedValue(0);
+
+    const result = await runMailAction(client, "trash", [draft, message("m1")], { confirm: vi.fn().mockResolvedValue(true) });
+
+    expect(result.ok).toBe(false);
+    expect(listIds(client)).toEqual(["d1", "m1"]);
+    expect(lastToast().type).toBe("error");
+  });
+
+  it("reports the messages a partial batch delete left behind", async () => {
+    const draft = message("d1", { is_draft: true, remote_id: "" });
+    mocks.batchDelete.mockResolvedValue(1);
+    // After the call m1 is still in the inbox; the local draft is gone.
+    mocks.getMailMoveContext.mockImplementation(async (_account: string, ids: string[]) => ({
+      provider: "imap",
+      folder_ids_by_message: Object.fromEntries(ids.map((id) => [id, ["inbox"]])),
+    }));
+
+    const result = await runMailAction(client, "trash", [draft, message("m1")], { confirm: vi.fn().mockResolvedValue(true) });
+
+    expect(result.ok).toBe(true);
+    expect(result.failedIds).toContain("m1");
+    expect(useToastStore.getState().toasts.some((t) => t.type === "warning")).toBe(true);
+  });
+
+  it("a failed action doesn't bring back messages another action removed meanwhile", async () => {
+    seedList(client, [message("m1"), message("m2"), message("m3")]);
+    let failB!: (error: unknown) => void;
+    mocks.archiveMessage.mockImplementation((id: string) =>
+      id === "m2" ? new Promise((_resolve, reject) => { failB = reject; }) : Promise.resolve("archived"));
+
+    const b = runMailAction(client, "archive", [message("m2")]);
+    await vi.waitFor(() => expect(mocks.archiveMessage).toHaveBeenCalledWith("m2"));
+    await runMailAction(client, "archive", [message("m1")]);
+    expect(listIds(client)).toEqual(["m3"]);
+
+    failB({ kind: "Network", message: "offline" });
+    await b;
+
+    expect(listIds(client)).toEqual(["m2", "m3"]);
+  });
+
   it("marks spam with undo back to the original folder", async () => {
     await runMailAction(client, "spam", [message("m1")], { spamFolderId: "spam" });
 

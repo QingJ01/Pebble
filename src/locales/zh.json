@@ -995,7 +995,8 @@
     "partialFailure": "{{count}} 封邮件未能移动",
     "toolbar": "批量操作",
     "archivePartialFailure": "{{count}} 封邮件未能归档",
-    "deleteMixedSuccess": "已删除 {{count}} 封邮件：本地草稿已永久删除，其余已移至废纸篓"
+    "deleteMixedSuccess": "已删除 {{count}} 封邮件：本地草稿已永久删除，其余已移至废纸篓",
+    "deletePartialFailure": "{{count}} 封邮件未能删除"
   },
   "messageDetail": {
     "body": "邮件正文",
