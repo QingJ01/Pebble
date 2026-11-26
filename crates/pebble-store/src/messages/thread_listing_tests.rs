@@ -190,3 +190,44 @@ fn list_threads_by_folders_counts_messages_once_across_selected_folders() {
     assert_eq!(threads[0].message_count, 2);
     assert_eq!(threads[0].snippet, format!("snippet-{base}"));
 }
+
+#[test]
+fn thread_subject_comes_from_the_earliest_message_not_the_largest_string() {
+    let store = Store::open_in_memory().unwrap();
+    let (account, folder) = seed_account_and_folder(&store);
+    let mut original = make_msg(&account, "t-subject", "a@example.com", 10);
+    original.subject = "Budget".into();
+    let mut reply = make_msg(&account, "t-subject", "b@example.com", 20);
+    reply.subject = "Re: Zebra crossing (was: Budget)".into();
+    let mut later = make_msg(&account, "t-subject", "c@example.com", 30);
+    later.subject = "RE: Budget".into();
+    for msg in [&later, &reply, &original] {
+        store
+            .insert_message(msg, std::slice::from_ref(&folder))
+            .unwrap();
+    }
+
+    for threads in [
+        store.list_threads_by_folder(&folder, 50, 0).unwrap(),
+        store
+            .list_threads_by_folders(std::slice::from_ref(&folder), 50, 0)
+            .unwrap(),
+    ] {
+        assert_eq!(threads.len(), 1);
+        assert_eq!(threads[0].subject, "Budget");
+    }
+}
+
+#[test]
+fn thread_subject_strips_reply_prefix_when_the_original_is_not_in_view() {
+    let store = Store::open_in_memory().unwrap();
+    let (account, folder) = seed_account_and_folder(&store);
+    let mut reply = make_msg(&account, "t-reply", "b@example.com", 20);
+    reply.subject = "Re: 回复：Quarterly plan".into();
+    store
+        .insert_message(&reply, std::slice::from_ref(&folder))
+        .unwrap();
+
+    let threads = store.list_threads_by_folder(&folder, 50, 0).unwrap();
+    assert_eq!(threads[0].subject, "Quarterly plan");
+}

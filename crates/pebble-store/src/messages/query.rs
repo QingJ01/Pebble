@@ -426,8 +426,11 @@ impl Store {
                 let from_address: String = row.get(8)?;
                 let has_attachments: bool = row.get::<_, i64>(9)? != 0;
 
-                if acc.message_ids.len() == 1 || subject > acc.subject {
-                    acc.subject = subject;
+                // Rows arrive oldest first: the thread's title is the
+                // earliest message's subject without reply/forward prefixes,
+                // so a later reply that edits the subject cannot rename it.
+                if acc.subject.is_empty() {
+                    acc.subject = pebble_core::normalize_subject(&subject);
                 }
                 if acc.message_ids.len() == 1 || date > acc.last_date {
                     acc.last_date = date;
