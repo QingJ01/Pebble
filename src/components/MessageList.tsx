@@ -20,10 +20,14 @@ import MoveToButton from "./MoveToButton";
 import IconButton from "./ui/IconButton";
 import Button from "./ui/Button";
 import { MessageListSkeleton } from "./Skeleton";
+import { prefetchMessage } from "@/hooks/useMessageLoader";
+import { defaultPrivacyMode } from "@/lib/privacyMode";
 import "./mail-list.css";
 
 const LABEL_CHUNK_SIZE = 50;
 const PAGE_STEP = 10;
+/** Wait for the selection to settle (J/K held down) before warming neighbours. */
+const PREFETCH_DELAY_MS = 300;
 
 // Module-level so React Query only re-runs it when a chunk result changes.
 function mergeLabelChunks(results: { data?: Record<string, Label[]> }[]) {
@@ -164,6 +168,24 @@ export default function MessageList({
       focusRow(selectedMessageId);
     }
   }, [selectedMessageId, indexById, virtualizer, focusRow]);
+
+  // Warm the cache for the messages around the open one, so J/K and ↑/↓ open
+  // them instantly. Debounced and cancelled when the selection moves on;
+  // prefetchMessage dedupes in-flight loads and swallows errors.
+  const prevNeighbourId = selectedMessageId ? messageIds[(indexById.get(selectedMessageId) ?? -1) - 1] : undefined;
+  const nextNeighbourId = selectedMessageId && indexById.has(selectedMessageId)
+    ? messageIds[indexById.get(selectedMessageId)! + 1]
+    : undefined;
+  useEffect(() => {
+    if (!selectedMessageId || batchMode) return;
+    const neighbours = [nextNeighbourId, prevNeighbourId].filter((id): id is string => Boolean(id));
+    if (neighbours.length === 0) return;
+    const timer = setTimeout(() => {
+      const mode = defaultPrivacyMode();
+      for (const id of neighbours) void prefetchMessage(id, mode);
+    }, PREFETCH_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [selectedMessageId, nextNeighbourId, prevNeighbourId, batchMode]);
 
   const moveActive = useCallback((index: number) => {
     if (messages.length === 0) return;

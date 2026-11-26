@@ -9,6 +9,7 @@ import ThreadItem from "@/components/ThreadItem";
 import SearchBar from "@/components/SearchBar";
 import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import PaneSplitter, { usePaneWidth } from "@/components/PaneSplitter";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -43,6 +44,7 @@ export default function InboxView() {
   const queryClient = useQueryClient();
   const addToast = useToastStore((s) => s.addToast);
   const [showTrashConfirm, setShowTrashConfirm] = useState(false);
+  const listPane = usePaneWidth("pebble-inbox-list-width", 320, 260, 560);
 
   const activeFolderRole = roleForSelection(activeFolderId, folders);
   const isTrashFolder = activeFolderRole === "trash";
@@ -162,8 +164,10 @@ export default function InboxView() {
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {/* List panel */}
         <div
+          id="inbox-list-pane"
           style={{
-            width: detailOpen ? "clamp(260px, 32%, 360px)" : "100%",
+            width: detailOpen ? `${listPane.width}px` : "100%",
+            maxWidth: detailOpen ? "55%" : undefined,
             flexShrink: 0,
             borderRight: detailOpen ? "1px solid var(--color-border)" : "none",
             display: "flex",
@@ -195,9 +199,20 @@ export default function InboxView() {
           )}
         </div>
 
+        {detailOpen && (
+          <PaneSplitter
+            width={listPane.width}
+            min={listPane.min}
+            max={listPane.max}
+            onChange={listPane.setWidth}
+            onReset={listPane.reset}
+            controls="inbox-list-pane"
+          />
+        )}
+
         {/* Detail panel */}
         {detailOpen && (
-          <div style={{ flex: 1, overflow: "hidden" }}>
+          <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
             {threadView && selectedThreadId ? (
               <ThreadView />
             ) : selectedMessageId ? (
