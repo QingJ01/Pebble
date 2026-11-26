@@ -6,6 +6,7 @@ import {
   kanbanCardsQueryKey,
 } from "@/hooks/queries/useKanbanCardsQuery";
 import { saveKanbanContextNote } from "@/hooks/queries/useKanbanContextNotesQuery";
+import { toastError } from "@/stores/toast.store";
 
 interface KanbanMutationContext {
   previous: KanbanCard[] | undefined;
@@ -41,16 +42,22 @@ export function moveCardInList(
   );
 }
 
+/**
+ * Give `column` exactly the order `orderedIds`. A card listed there that
+ * currently sits in another column moves into `column` (cross-column drop at
+ * a specific position).
+ */
 export function reorderColumnInList(
   cards: KanbanCard[],
   column: KanbanColumnType,
   orderedIds: string[],
 ): KanbanCard[] {
-  const others = cards.filter((card) => card.column !== column);
+  const listed = new Set(orderedIds);
+  const others = cards.filter((card) => card.column !== column && !listed.has(card.message_id));
   const reordered = orderedIds
     .map((id, index) => {
       const card = cards.find((candidate) => candidate.message_id === id);
-      return card ? { ...card, position: index } : null;
+      return card ? { ...card, column, position: index } : null;
     })
     .filter((card): card is KanbanCard => card !== null);
   return [...others, ...reordered];
@@ -66,7 +73,10 @@ export function useMoveKanbanCardMutation() {
     }) => moveToKanban(messageId, column, position),
     onMutate: ({ messageId, column, position }) =>
       applyOptimistic(client, (cards) => moveCardInList(cards, messageId, column, position)),
-    onError: (_error, _vars, context) => rollback(client, context),
+    onError: (error, _vars, context) => {
+      rollback(client, context);
+      toastError(error, "kanban.moveFailed");
+    },
     onSettled: () => invalidateKanbanQueries(client),
   });
 }
@@ -86,7 +96,10 @@ export function useReorderKanbanColumnMutation() {
       applyOptimistic(client, (cards) => reorderColumnInList(cards, column, orderedIds)),
     // Any failed write rolls the whole column back; the refetch then shows
     // whatever subset the backend actually persisted.
-    onError: (_error, _vars, context) => rollback(client, context),
+    onError: (error, _vars, context) => {
+      rollback(client, context);
+      toastError(error, "kanban.moveFailed");
+    },
     onSettled: () => invalidateKanbanQueries(client),
   });
 }
@@ -97,7 +110,10 @@ export function useRemoveKanbanCardMutation() {
     mutationFn: ({ messageId }: { messageId: string }) => removeFromKanban(messageId),
     onMutate: ({ messageId }) =>
       applyOptimistic(client, (cards) => cards.filter((card) => card.message_id !== messageId)),
-    onError: (_error, _vars, context) => rollback(client, context),
+    onError: (error, _vars, context) => {
+      rollback(client, context);
+      toastError(error, "kanban.removeFailed");
+    },
     onSettled: () => invalidateKanbanQueries(client),
   });
 }

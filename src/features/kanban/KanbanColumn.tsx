@@ -32,8 +32,10 @@ export default function KanbanColumn({ id, title, cardIds, contextNotes, message
       <div
         style={{
           padding: "12px 16px",
-          fontWeight: 600,
-          fontSize: "14px",
+          fontWeight: "var(--font-weight-title)" as React.CSSProperties["fontWeight"],
+          fontSize: "var(--font-md)",
+          userSelect: "none",
+          WebkitUserSelect: "none",
           color: "var(--color-text-primary)",
           display: "flex",
           justifyContent: "space-between",
@@ -43,11 +45,11 @@ export default function KanbanColumn({ id, title, cardIds, contextNotes, message
         <span>{title}</span>
         <span
           style={{
-            fontSize: "12px",
+            fontSize: "var(--font-sm)",
             color: "var(--color-text-secondary)",
-            backgroundColor: "var(--color-bg-secondary, rgba(0,0,0,0.06))",
+            backgroundColor: "var(--color-bg-secondary)",
             padding: "2px 8px",
-            borderRadius: "10px",
+            borderRadius: "var(--radius-full)",
           }}
         >
           {cardIds.length}
@@ -60,9 +62,9 @@ export default function KanbanColumn({ id, title, cardIds, contextNotes, message
           flex: 1,
           padding: "0 8px 8px",
           overflowY: "auto",
-          backgroundColor: isOver ? "var(--color-bg-hover, rgba(0,0,0,0.03))" : "transparent",
-          borderRadius: "8px",
-          transition: "background-color 0.15s ease",
+          backgroundColor: isOver ? "var(--color-bg-hover)" : "transparent",
+          borderRadius: "var(--radius-lg)",
+          transition: "background-color var(--dur-fast) var(--ease-out)",
           minHeight: "100px",
         }}
       >
@@ -83,8 +85,9 @@ export default function KanbanColumn({ id, title, cardIds, contextNotes, message
             style={{
               textAlign: "center",
               color: "var(--color-text-secondary)",
-              fontSize: "13px",
+              fontSize: "var(--font-base)",
               padding: "24px 0",
+              userSelect: "none",
             }}
           >
             {t("kanban.dropHere")}
