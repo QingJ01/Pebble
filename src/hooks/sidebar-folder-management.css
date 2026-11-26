@@ -26,6 +26,7 @@
 }
 
 .sidebar-context-menu-item:focus-visible {
-  outline: none;
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
   background: var(--color-bg-hover);
 }

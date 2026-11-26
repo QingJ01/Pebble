@@ -21,6 +21,8 @@ function scrollToEmailFragment(root: ShadowRoot, fragment: string) {
   target?.scrollIntoView?.({ block: "start" });
 }
 
+const PLAIN_TEXT_RE = /^\s*<pre class="pebble-plain-text-email">[\s\S]*<\/pre>\s*$/;
+
 export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
   const hostRef = useRef<HTMLDivElement>(null);
 
@@ -32,6 +34,10 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
       || hostRef.current.attachShadow({ mode: "open" });
 
     const safeHtml = sanitizeHtml(html);
+    // Plain-text mail arrives wrapped as <pre class="pebble-plain-text-email">;
+    // it has no authored colors, so it follows the app theme instead of
+    // sitting on the light HTML-mail card in dark mode.
+    const isPlainText = PLAIN_TEXT_RE.test(safeHtml);
     shadow.innerHTML = `
       <style>
         :host {
@@ -44,8 +50,10 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
           isolation: isolate;
           transform: translateZ(0);
           overflow: hidden;
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+            "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif);
           font-size: 14px;
+          line-height: 1.6;
           color: var(--color-text-primary);
           background: transparent;
           word-break: break-word;
@@ -60,9 +68,23 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
           display: var(--email-content-display);
           max-width: 100%;
           overflow-x: auto;
+          padding: var(--email-content-padding, 0);
+          border-radius: var(--email-content-radius, 0);
           color-scheme: var(--email-content-color-scheme);
           color: var(--email-content-color);
           background: var(--email-content-bg);
+        }
+        .pebble-email-content[data-plain-text] {
+          padding: 0;
+          border-radius: 0;
+          color-scheme: var(--app-color-scheme, light);
+          color: var(--color-text-primary);
+          background: transparent;
+        }
+        .pebble-plain-text-email {
+          margin: 0;
+          font: inherit;
+          line-height: inherit;
         }
         pre {
           white-space: pre-wrap;
@@ -108,16 +130,18 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
           display: inline-block;
           padding: 6px 12px;
           font-size: 12px;
-          color: #888;
-          background: #f5f5f5;
-          border: 1px dashed #ccc;
+          /* Derived from the surrounding text color so it reads on both the
+             light HTML-mail card and themed plain-text content. */
+          color: color-mix(in srgb, currentColor 62%, transparent);
+          background: color-mix(in srgb, currentColor 6%, transparent);
+          border: 1px dashed color-mix(in srgb, currentColor 32%, transparent);
           border-radius: 4px;
           text-align: center;
           max-width: 100%;
           box-sizing: border-box;
         }
       </style>
-      <div class="pebble-email-content">${safeHtml}</div>
+      <div class="pebble-email-content"${isPlainText ? " data-plain-text" : ""}>${safeHtml}</div>
     `;
 
     const handleClick = (event: Event) => {

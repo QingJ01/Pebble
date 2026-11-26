@@ -9,7 +9,7 @@ describe("search controls CSS", () => {
     expect(css).toMatch(/\.search-input-shell\s*\{[^}]*height\s*:\s*42px/i);
     expect(css).toMatch(/\.search-input-shell\s*\{[^}]*border-radius\s*:\s*8px/i);
     expect(css).toMatch(/\.search-input-shell\s*\{[^}]*transition\s*:[^;]*box-shadow/i);
-    expect(css).toMatch(/\.search-input-shell:focus-within\s*\{[^}]*box-shadow\s*:[^}]*0 0 0 2\.5px/i);
+    expect(css).toMatch(/\.search-input-shell:focus-within\s*\{[^}]*border-color\s*:\s*var\(--color-focus-ring\)/i);
     expect(css).toMatch(
       /\.app-shell--with-background\s+\.search-input-shell\s*\{[^}]*color-mix\(in srgb,\s*var\(--color-bg\)\s*18%,\s*transparent\)/i,
     );
