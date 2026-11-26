@@ -1294,7 +1294,8 @@ MICROSOFT_CLIENT_SECRET='microsoft-secret'
 
     #[test]
     fn oauth_provider_configs_wire_client_secrets_only_where_required() {
-        let source = include_str!("oauth.rs");
+        // Normalise line endings: Windows checkouts may use CRLF.
+        let source = include_str!("oauth.rs").replace("\r\n", "\n");
         let gmail_start = source
             .find("pub(crate) fn gmail_oauth_config")
             .expect("gmail_oauth_config should exist");
