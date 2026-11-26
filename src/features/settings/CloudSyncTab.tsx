@@ -19,7 +19,7 @@ import {
   loadAutoBackupConfig,
   type BackupPreview,
 } from "../../lib/api";
-import { extractErrorMessage as errorMessage } from "@/lib/extractErrorMessage";
+import { extractErrorMessage as errorMessage, formatError } from "@/lib/extractErrorMessage";
 import { profileLocalStorage } from "@/lib/profileStorage";
 
 const LAST_BACKUP_KEY = "pebble-cloud-sync-last-backup";
@@ -186,10 +186,10 @@ export default function CloudSyncTab() {
       setStatusType("success");
     } catch (err: unknown) {
       setStatusMsg(
-        t(
-          "cloudSync.autoBackupConfigSaveFailed",
-          `Failed to save automatic backup configuration: ${errorMessage(err)}`,
-        ),
+        t("cloudSync.autoBackupConfigSaveFailed", {
+          defaultValue: "Couldn't save automatic backup settings: {{error}}",
+          error: errorMessage(err),
+        }),
       );
       setStatusType("error");
     } finally {
@@ -206,7 +206,7 @@ export default function CloudSyncTab() {
       setStatusType("success");
     } catch (err: unknown) {
       setStatusMsg(
-        `${t("cloudSync.connectionFailed")}: ${errorMessage(err)}`,
+        formatError(err, { fallbackKey: "cloudSync.connectionFailed", fallback: "Connection failed" }),
       );
       setStatusType("error");
     } finally {

@@ -8,7 +8,7 @@ import {
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: string) => {
+    t: (key: string, fallback?: string | { defaultValue?: string; [name: string]: unknown }) => {
       const labels: Record<string, string> = {
         "cloudSync.webdavUrl": "WebDAV URL",
         "cloudSync.username": "Username",
@@ -20,6 +20,13 @@ vi.mock("react-i18next", () => ({
         "cloudSync.autoBackupConfigSaved": "Automatic backup configuration saved",
         "common.saving": "Saving…",
       };
+      if (fallback && typeof fallback === "object") {
+        let text = labels[key] ?? fallback.defaultValue ?? key;
+        for (const [name, value] of Object.entries(fallback)) {
+          if (typeof value === "string") text = text.replaceAll(`{{${name}}}`, value);
+        }
+        return text;
+      }
       return labels[key] ?? (typeof fallback === "string" ? fallback : key);
     },
   }),

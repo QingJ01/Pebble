@@ -221,9 +221,10 @@ class ViewErrorBoundary extends Component<
 
 function GlobalConfirmDialog() {
   const { isOpen, title, message, destructive, confirmLabel, cancelLabel, handleConfirm, handleCancel } = useConfirmStore();
-  if (!isOpen) return null;
+  // Stays mounted so closing plays the exit animation (the store keeps the copy).
   return (
     <ConfirmDialog
+      open={isOpen}
       title={title}
       message={message}
       destructive={destructive}

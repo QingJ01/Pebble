@@ -33,6 +33,8 @@ vi.mock("../../src/stores/ui.store", () => ({
 
 vi.mock("../../src/lib/api", () => ({
   setTrayMenuLabels: mocks.setTrayMenuLabels,
+  // The real wrapper forwards to invoke("set_notification_labels", { labels }).
+  setNotificationLabels: (labels: unknown) => mocks.invoke("set_notification_labels", { labels }),
 }));
 
 import { useTrayI18n } from "../../src/app/useTrayI18n";
