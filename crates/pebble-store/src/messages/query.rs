@@ -187,6 +187,35 @@ impl Store {
         })
     }
 
+    /// Owning account of each message id, in one query per chunk. Unknown ids
+    /// are absent from the map.
+    pub fn get_message_account_ids_batch(
+        &self,
+        message_ids: &[String],
+    ) -> Result<HashMap<String, String>> {
+        if message_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        self.with_read(|conn| {
+            let mut out = HashMap::with_capacity(message_ids.len());
+            for chunk in message_ids.chunks(SQL_IN_CHUNK_SIZE) {
+                let sql = format!(
+                    "SELECT id, account_id FROM messages WHERE id IN ({})",
+                    placeholders(1, chunk.len()),
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?;
+                for row in rows {
+                    let (id, account_id) = row?;
+                    out.insert(id, account_id);
+                }
+            }
+            Ok(out)
+        })
+    }
+
     /// List message IDs in a thread restricted to the given folders.
     pub fn list_message_ids_by_thread_in_folders(
         &self,
@@ -393,7 +422,7 @@ impl Store {
                 .collect();
             let sql = format!(
                 "SELECT m.account_id, mf.thread_key, m.id, m.subject, m.snippet, m.date,
-                        m.is_read, m.is_starred, m.from_address, m.has_attachments
+                        m.is_read, m.is_starred, m.from_address, m.has_attachments, m.from_name
                  FROM message_folders mf
                  JOIN messages m ON m.id = mf.message_id
                  WHERE mf.folder_id IN ({})
@@ -443,9 +472,21 @@ impl Store {
                 }
                 acc.starred |= is_starred;
                 acc.has_attachments |= has_attachments;
-                let from_address = from_address.trim().to_string();
-                if !from_address.is_empty() && !acc.participants.contains(&from_address) {
-                    acc.participants.push(from_address);
+                // Participants are shown as names (like the message list),
+                // falling back to the address; one entry per address.
+                let from_name: String = row.get::<_, Option<String>>(10)?.unwrap_or_default();
+                let from_address = from_address.trim();
+                if !from_address.is_empty()
+                    && acc
+                        .participant_addresses
+                        .insert(from_address.to_ascii_lowercase())
+                {
+                    let name = from_name.trim();
+                    acc.participants.push(if name.is_empty() {
+                        from_address.to_string()
+                    } else {
+                        name.to_string()
+                    });
                 }
             }
 

@@ -27,12 +27,14 @@ import {
   type ContactInput,
   type VcardImportResult,
 } from "@/lib/api";
-import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import { queryClient } from "@/lib/query-client";
 import { useComposeStore } from "@/stores/compose.store";
 import { useConfirmStore } from "@/stores/confirm.store";
-import { useToastStore } from "@/stores/toast.store";
+import { toastError, useToastStore } from "@/stores/toast.store";
 import { useUIStore } from "@/stores/ui.store";
+import Button from "@/components/ui/Button";
+import IconButton from "@/components/ui/IconButton";
+import Checkbox from "@/components/ui/Checkbox";
 import ContactEditorDialog from "./ContactEditorDialog";
 import ContactListItem from "./ContactListItem";
 
@@ -64,7 +66,7 @@ export default function ContactsView() {
   const contactListVirtualizer = useVirtualizer({
     count: contacts.length,
     getScrollElement: () => listPaneRef.current,
-    estimateSize: () => 60,
+    estimateSize: () => 49,
     measureElement: (element) => element.getBoundingClientRect().height,
     getItemKey: (index) => contacts[index]?.id ?? index,
     overscan: 8,
@@ -117,7 +119,7 @@ export default function ContactsView() {
         isFavorite: !contact.is_favorite,
       });
     } catch (favoriteError) {
-      addToast({ message: extractErrorMessage(favoriteError), type: "error" });
+      toastError(favoriteError, "contacts.favoriteFailed");
     }
   };
 
@@ -141,7 +143,7 @@ export default function ContactsView() {
         type: "success",
       });
     } catch (deleteError) {
-      addToast({ message: extractErrorMessage(deleteError), type: "error" });
+      toastError(deleteError, "contacts.deleteFailed");
     }
   };
 
@@ -159,7 +161,7 @@ export default function ContactsView() {
         type: "success",
       });
     } catch (copyError) {
-      addToast({ message: extractErrorMessage(copyError), type: "error" });
+      toastError(copyError, "contacts.copyFailed");
     }
   };
 
@@ -189,7 +191,7 @@ export default function ContactsView() {
         type: "success",
       });
     } catch (importError) {
-      addToast({ message: extractErrorMessage(importError), type: "error" });
+      toastError(importError, "contacts.importFailed");
     } finally {
       setIsImporting(false);
     }
@@ -212,7 +214,7 @@ export default function ContactsView() {
         type: "success",
       });
     } catch (exportError) {
-      addToast({ message: extractErrorMessage(exportError), type: "error" });
+      toastError(exportError, "contacts.exportFailed");
     } finally {
       if (downloadUrl) URL.revokeObjectURL(downloadUrl);
       setIsExporting(false);
@@ -221,11 +223,10 @@ export default function ContactsView() {
 
   return (
     <section className="contacts-view" aria-labelledby="contacts-view-title">
-      <header className="contacts-header">
-        <div>
-          <span className="contacts-eyebrow">{t("sidebar.mail", "Mail")}</span>
+      <header className="page-header">
+        <div className="page-header__text">
           <div className="contacts-title-row">
-            <h1 id="contacts-view-title">{t("contacts.title", "Contacts")}</h1>
+            <h1 id="contacts-view-title" className="page-header__title">{t("contacts.title", "Contacts")}</h1>
             <span
               className="contacts-count"
               aria-label={t("contacts.count", { count: contacts.length })}
@@ -234,7 +235,7 @@ export default function ContactsView() {
             </span>
           </div>
         </div>
-        <div className="contacts-header-actions">
+        <div className="page-header__actions">
           <input
             ref={fileInputRef}
             className="sr-only"
@@ -243,55 +244,47 @@ export default function ContactsView() {
             aria-label={t("contacts.chooseVcard", "Choose vCard file")}
             onChange={handleImport}
           />
-          <button
-            type="button"
-            className="contact-secondary-button"
+          <Button
             disabled={isImporting}
+            icon={<Upload size={14} />}
             onClick={() => fileInputRef.current?.click()}
           >
-            <Upload size={15} />
             {isImporting
               ? t("contacts.importingVcard", "Importing…")
               : t("contacts.importVcard", "Import vCard")}
-          </button>
-          <button
-            type="button"
-            className="contact-secondary-button"
+          </Button>
+          <Button
             disabled={isExporting}
+            icon={<Download size={14} />}
             onClick={handleExport}
           >
-            <Download size={15} />
             {isExporting
               ? t("contacts.exportingVcard", "Exporting…")
               : t("contacts.exportVcard", "Export vCard")}
-          </button>
-          <button type="button" className="contact-primary-button" onClick={() => setEditorContact(null)}>
-            <Plus size={15} />
+          </Button>
+          <Button variant="primary" icon={<Plus size={14} />} onClick={() => setEditorContact(null)}>
             {t("contacts.new", "New contact")}
-          </button>
+          </Button>
         </div>
       </header>
 
       <div className="contacts-toolbar">
-        <label className="contacts-search-shell">
-          <Search size={15} aria-hidden="true" />
+        <label className="contacts-search">
+          <Search className="contacts-search__icon" size={14} aria-hidden="true" />
           <span className="sr-only">{t("contacts.search", "Search contacts")}</span>
           <input
+            className="input contacts-search__input"
             aria-label={t("contacts.search", "Search contacts")}
             placeholder={t("contacts.search", "Search contacts")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
         </label>
-        <label className="contacts-favorite-filter">
-          <input
-            type="checkbox"
-            checked={favoriteOnly}
-            onChange={(event) => setFavoriteOnly(event.target.checked)}
-          />
-          <Star size={14} aria-hidden="true" />
-          {t("contacts.favoritesOnly", "Favorites only")}
-        </label>
+        <Checkbox
+          checked={favoriteOnly}
+          onChange={(event) => setFavoriteOnly(event.target.checked)}
+          label={t("contacts.favoritesOnly", "Favorites only")}
+        />
       </div>
 
       {importResult && (
@@ -299,13 +292,13 @@ export default function ContactsView() {
           <div>
             <strong>{t("contacts.importSummary", "Import summary")}</strong>
             <p>
-              {importResult.created} {t("contacts.importCreated", "created")}
+              {t("contacts.importCreated", { count: importResult.created, defaultValue: "{{count}} created" })}
               {" · "}
-              {importResult.merged} {t("contacts.importMerged", "merged")}
+              {t("contacts.importMerged", { count: importResult.merged, defaultValue: "{{count}} merged" })}
               {" · "}
-              {importResult.skipped} {t("contacts.importSkipped", "skipped")}
+              {t("contacts.importSkipped", { count: importResult.skipped, defaultValue: "{{count}} skipped" })}
               {" · "}
-              {importResult.invalid} {t("contacts.importInvalid", "invalid")}
+              {t("contacts.importInvalid", { count: importResult.invalid, defaultValue: "{{count}} invalid" })}
             </p>
             {importResult.errors.length > 0 && (
               <ul>
@@ -313,14 +306,11 @@ export default function ContactsView() {
               </ul>
             )}
           </div>
-          <button
-            type="button"
-            className="contact-icon-button"
-            aria-label={t("contacts.closeImportSummary", "Close import summary")}
+          <IconButton
+            label={t("contacts.closeImportSummary", "Close import summary")}
+            icon={<X size={14} />}
             onClick={() => setImportResult(null)}
-          >
-            <X size={15} />
-          </button>
+          />
         </div>
       )}
 
@@ -332,9 +322,9 @@ export default function ContactsView() {
           {!isLoading && error && (
             <div className="contacts-state contacts-state--error">
               <p>{t("contacts.loadError", "Failed to load contacts")}</p>
-              <button type="button" className="contact-secondary-button" onClick={() => refetch()}>
+              <Button onClick={() => refetch()}>
                 {t("contacts.retry", "Retry")}
-              </button>
+              </Button>
             </div>
           )}
           {!isLoading && !error && contacts.length === 0 && (
@@ -342,20 +332,16 @@ export default function ContactsView() {
               <span className="contacts-empty-mark" aria-hidden="true"><Mail size={22} /></span>
               <h2>{t("contacts.empty", "No contacts yet")}</h2>
               <p>{t("contacts.emptyHint", "Save the people you email most for faster addressing.")}</p>
-              <button type="button" className="contact-secondary-button" onClick={() => setEditorContact(null)}>
-                <Plus size={14} />
+              <Button icon={<Plus size={14} />} onClick={() => setEditorContact(null)}>
                 {t("contacts.new", "New contact")}
-              </button>
+              </Button>
             </div>
           )}
           {!isLoading && !error && contacts.length > 0 && (
             <div
               className="contact-list"
               role="list"
-              style={{
-                height: contactListVirtualizer.getTotalSize() + 14,
-                position: "relative",
-              }}
+              style={{ height: contactListVirtualizer.getTotalSize() }}
             >
               {contactListVirtualizer.getVirtualItems().map((virtualRow) => {
                 const contact = contacts[virtualRow.index];
@@ -365,13 +351,8 @@ export default function ContactsView() {
                     role="listitem"
                     key={virtualRow.key}
                     data-index={virtualRow.index}
-                    style={{
-                      left: 7,
-                      position: "absolute",
-                      top: 0,
-                      transform: `translateY(${virtualRow.start + 7}px)`,
-                      width: "calc(100% - 14px)",
-                    }}
+                    className="contact-list__row"
+                    style={{ transform: `translateY(${virtualRow.start}px)` }}
                   >
                     <ContactListItem
                       contact={contact}
@@ -437,19 +418,19 @@ function ContactDetail({
 }: ContactDetailProps) {
   const { t } = useTranslation();
   const primary = primaryEmailFor(contact);
-  const name = contact.display_name.trim() || primary?.address || "Unknown contact";
+  const name = contact.display_name.trim() || primary?.address || t("contacts.unknown", "Unknown contact");
 
   return (
     <article className="contact-detail">
-      <button
-        type="button"
-        className="contacts-mobile-back contact-text-button"
+      <Button
+        variant="ghost"
+        size="sm"
+        className="contacts-mobile-back"
         onClick={onBack}
-        aria-label={t("contacts.back", "Back to contacts")}
+        icon={<ArrowLeft size={14} />}
       >
-        <ArrowLeft size={15} />
         {t("contacts.back", "Back to contacts")}
-      </button>
+      </Button>
 
       <div className="contact-detail-heading">
         <span className="contact-detail-avatar" aria-hidden="true">
@@ -458,34 +439,27 @@ function ContactDetail({
         <div>
           <div className="contact-detail-name-row">
             <h2>{name}</h2>
-            {contact.is_favorite && <Star size={16} fill="currentColor" aria-hidden="true" />}
+            {contact.is_favorite && <Star className="contact-favorite-star" size={16} fill="currentColor" aria-hidden="true" />}
           </div>
           {primary && <p>{primary.address}</p>}
         </div>
       </div>
 
       <div className="contact-detail-actions">
-        <button type="button" className="contact-primary-button" onClick={onWrite}>
-          <Mail size={15} />
+        <Button icon={<Mail size={14} />} onClick={onWrite}>
           {t("contacts.write", "Write email")}
-        </button>
-        <button
-          type="button"
-          className="contact-secondary-button"
-          aria-label={contact.is_favorite
-            ? t("contacts.favoriteRemove", "Remove from favorites")
-            : t("contacts.favoriteAdd", "Add to favorites")}
+        </Button>
+        <Button
+          icon={<Star className={contact.is_favorite ? "contact-favorite-star" : undefined} size={14} fill={contact.is_favorite ? "currentColor" : "none"} />}
           onClick={onFavorite}
         >
-          <Star size={15} fill={contact.is_favorite ? "currentColor" : "none"} />
           {contact.is_favorite
             ? t("contacts.favoriteRemove", "Remove from favorites")
             : t("contacts.favoriteAdd", "Add to favorites")}
-        </button>
-        <button type="button" className="contact-secondary-button" onClick={onEdit}>
-          <Pencil size={15} />
+        </Button>
+        <Button icon={<Pencil size={14} />} onClick={onEdit}>
           {t("contacts.editAction", "Edit contact")}
-        </button>
+        </Button>
       </div>
 
       <section className="contact-detail-section">
@@ -500,14 +474,11 @@ function ContactDetail({
                   {email.is_primary ? ` · ${t("contacts.primary", "Primary")}` : ""}
                 </span>
               </div>
-              <button
-                type="button"
-                className="contact-icon-button"
-                aria-label={`${t("contacts.copy", "Copy email address")}: ${email.address}`}
+              <IconButton
+                label={t("contacts.copyNamed", { address: email.address, defaultValue: "Copy email address {{address}}" })}
+                icon={<Clipboard size={14} />}
                 onClick={() => onCopy(email.address)}
-              >
-                <Clipboard size={15} />
-              </button>
+              />
             </div>
           ))}
         </div>
@@ -521,10 +492,9 @@ function ContactDetail({
       )}
 
       <div className="contact-detail-danger-zone">
-        <button type="button" className="contact-danger-button" onClick={onDelete}>
-          <Trash2 size={15} />
+        <Button variant="danger-ghost" icon={<Trash2 size={14} />} onClick={onDelete}>
           {t("contacts.delete", "Delete contact")}
-        </button>
+        </Button>
       </div>
     </article>
   );

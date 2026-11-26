@@ -13,6 +13,17 @@ import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import { parseProxyPort, PROXY_PORT_ERROR_KEY } from "@/lib/proxy-port";
 import { useAccountsQuery } from "@/hooks/queries";
 import { useToastStore } from "@/stores/toast.store";
+import Button from "@/components/ui/Button";
+import Input from "@/components/ui/Input";
+import {
+  OptionCard,
+  OptionCardGroup,
+  SettingsEmpty,
+  SettingsList,
+  SettingsSection,
+  StatusChip,
+} from "./SettingsLayout";
+import { providerLabel } from "./providerLabel";
 
 type AccountProxyDraft = {
   mode: AccountProxyMode;
@@ -203,244 +214,131 @@ export default function ProxyTab() {
 
   return (
     <div>
-      <h3 style={{ fontSize: "14px", fontWeight: 600, marginBottom: "8px" }}>
-        {t("settings.globalProxy", "Global Proxy")}
-      </h3>
-      <p style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginBottom: "12px", marginTop: 0 }}>
-        {t("settings.globalProxyDesc", "Used by translation, OAuth, Gmail/Outlook API requests, IMAP, POP3, and SMTP when an account does not define its own SOCKS5 proxy.")}
-      </p>
-      <div
-        role="group"
-        aria-label={t("settings.globalProxy", "Global Proxy")}
-        style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "flex-end" }}
+      <SettingsSection
+        title={t("settings.globalProxy", "Global Proxy")}
+        description={t("settings.globalProxyDesc", "Used by translation, OAuth, Gmail/Outlook API requests, IMAP, POP3, and SMTP when an account does not define its own SOCKS5 proxy.")}
       >
-        <label style={{ display: "grid", gap: "6px", fontSize: "12px", color: "var(--color-text-secondary)", flex: "1 1 220px", minWidth: 0 }}>
-          {t("settings.globalProxyHost", "SOCKS5 Proxy")}
-          <input
-            aria-label={t("settings.globalProxyHost", "SOCKS5 Proxy")}
-            type="text"
-            value={proxyHost}
-            onChange={(e) => setProxyHost(e.target.value)}
-            placeholder="127.0.0.1"
-            disabled={proxyLoading || proxySaving}
-            style={{
-              width: "100%",
-              minWidth: 0,
-              boxSizing: "border-box",
-              padding: "8px 10px",
-              borderRadius: "6px",
-              border: "1px solid var(--color-border)",
-              backgroundColor: "var(--color-bg-primary)",
-              color: "var(--color-text-primary)",
-              fontSize: "13px",
-            }}
-          />
-        </label>
-        <label style={{ display: "grid", gap: "6px", fontSize: "12px", color: "var(--color-text-secondary)", width: "110px", minWidth: 0 }}>
-          {t("settings.globalProxyPort", "Port")}
-          <input
-            aria-label={t("settings.globalProxyPort", "Port")}
-            type="number"
-            value={proxyPort}
-            onChange={(e) => setProxyPort(e.target.value)}
-            placeholder="7890"
-            disabled={proxyLoading || proxySaving}
-            style={{
-              width: "100%",
-              minWidth: 0,
-              boxSizing: "border-box",
-              padding: "8px 10px",
-              borderRadius: "6px",
-              border: "1px solid var(--color-border)",
-              backgroundColor: "var(--color-bg-primary)",
-              color: "var(--color-text-primary)",
-              fontSize: "13px",
-            }}
-          />
-        </label>
-        <button
-          type="button"
-          onClick={saveGlobalProxy}
-          disabled={proxyLoading || proxySaving}
-          style={{
-            padding: "8px 12px",
-            borderRadius: "6px",
-            border: "1px solid var(--color-border)",
-            backgroundColor: "var(--color-bg-hover)",
-            color: "var(--color-text-primary)",
-            cursor: proxyLoading || proxySaving ? "default" : "pointer",
-            fontSize: "13px",
-            fontWeight: 500,
-          }}
-        >
-          {proxySaving ? t("common.saving", "Saving...") : t("common.save", "Save")}
-        </button>
-      </div>
-      {proxyError && (
-        <p style={{ fontSize: "12px", color: "var(--color-error)", marginTop: "8px", marginBottom: 0 }}>
-          {proxyError}
-        </p>
-      )}
+        <div role="group" aria-label={t("settings.globalProxy", "Global Proxy")} className="settings-row">
+          <label className="field">
+            <span className="field__label">{t("settings.globalProxyHost", "SOCKS5 Proxy")}</span>
+            <Input
+              aria-label={t("settings.globalProxyHost", "SOCKS5 Proxy")}
+              type="text"
+              value={proxyHost}
+              onChange={(e) => setProxyHost(e.target.value)}
+              placeholder="127.0.0.1"
+              disabled={proxyLoading || proxySaving}
+            />
+          </label>
+          <label className="field field--narrow">
+            <span className="field__label">{t("settings.globalProxyPort", "Port")}</span>
+            <Input
+              aria-label={t("settings.globalProxyPort", "Port")}
+              type="number" min={1} max={65535} step={1} inputMode="numeric"
+              value={proxyPort}
+              onChange={(e) => setProxyPort(e.target.value)}
+              placeholder="7890"
+              disabled={proxyLoading || proxySaving}
+            />
+          </label>
+          <Button
+            variant="primary"
+            onClick={saveGlobalProxy}
+            disabled={proxyLoading}
+            loading={proxySaving}
+          >
+            {proxySaving ? t("common.saving", "Saving...") : t("common.save", "Save")}
+          </Button>
+        </div>
+        {proxyError && <p className="settings-error">{proxyError}</p>}
+      </SettingsSection>
 
-      <h3 style={{ fontSize: "14px", fontWeight: 600, marginBottom: "8px", marginTop: "32px" }}>
-        {t("settings.accountProxies", "Account Proxies")}
-      </h3>
-      <p style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginBottom: "12px", marginTop: 0 }}>
-        {t("settings.accountProxiesDesc", "Override the global SOCKS5 proxy for individual accounts.")}
-      </p>
-
-      {proxyAccounts.length === 0 ? (
-        <p id="account-proxy-list" style={{ fontSize: "13px", color: "var(--color-text-secondary)", margin: 0 }}>
-          {t("settings.noAccounts", "No accounts added yet")}
-        </p>
-      ) : (
-        <div id="account-proxy-list" style={{ display: "grid", gap: "10px" }}>
+      <SettingsSection
+        title={t("settings.accountProxies", "Account Proxies")}
+        description={t("settings.accountProxiesDesc", "Override the global SOCKS5 proxy for individual accounts.")}
+      >
+        {proxyAccounts.length === 0 ? (
+          <SettingsEmpty id="account-proxy-list">
+            {t("settings.noAccounts", "No accounts added yet")}
+          </SettingsEmpty>
+        ) : (
+          <SettingsList id="account-proxy-list">
             {proxyAccounts.map((account) => {
               const draft = accountProxyDrafts[account.id] ?? {
                 ...emptyAccountDraft(),
                 loading: true,
               };
               const fieldsDisabled = draft.loading || draft.saving;
-              const controlsDisabled = draft.loading || draft.saving;
               const showProxyFields = draft.mode === "custom";
               return (
                 <div
                   key={account.id}
                   role="group"
-                  aria-label={`${account.email} ${t("settings.accountProxy", "Account Proxy")}`}
-                  style={{
-                    border: "1px solid var(--color-border)",
-                    borderRadius: "8px",
-                    padding: "12px",
-                    display: "grid",
-                    gap: "10px",
-                  }}
+                  aria-label={t("settings.accountProxyFor", { email: account.email, defaultValue: "Proxy for {{email}}" })}
+                  className="settings-list__row settings-list__row--stacked"
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "baseline" }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--color-text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {account.display_name || account.email}
-                      </div>
-                      <div style={{ fontSize: "12px", color: "var(--color-text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {account.email}
-                      </div>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: "var(--space-3)" }}>
+                    <div className="settings-list__main">
+                      <div className="settings-list__title">{account.display_name || account.email}</div>
+                      <div className="settings-list__meta">{account.email}</div>
                     </div>
-                    <span style={{ fontSize: "11px", color: "var(--color-text-secondary)", textTransform: "capitalize" }}>
-                      {account.provider}
-                    </span>
+                    <StatusChip>{providerLabel(account.provider)}</StatusChip>
                   </div>
-                  <div role="group" aria-label={t("settings.accountProxyMode", "Proxy mode")} style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                    {modeOptions.map((option) => {
-                      const selected = draft.mode === option.mode;
-                      return (
-                        <button
-                          key={option.mode}
-                          type="button"
-                          aria-pressed={selected}
-                          onClick={() => updateAccountDraft(account.id, { mode: option.mode })}
-                          disabled={controlsDisabled}
-                          style={{
-                            flex: "1 1 180px",
-                            minWidth: 0,
-                            padding: "8px 10px",
-                            borderRadius: "6px",
-                            border: selected ? "2px solid var(--color-accent)" : "1px solid var(--color-border)",
-                            backgroundColor: selected ? "var(--color-bg-hover)" : "transparent",
-                            color: "var(--color-text-primary)",
-                            cursor: controlsDisabled ? "default" : "pointer",
-                            textAlign: "left",
-                            fontSize: "13px",
-                            fontWeight: selected ? 600 : 500,
-                          }}
-                        >
-                          {option.label}
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <OptionCardGroup label={t("settings.accountProxyMode", "Proxy mode")} columns={3}>
+                    {modeOptions.map((option) => (
+                      <OptionCard
+                        key={option.mode}
+                        selected={draft.mode === option.mode}
+                        onClick={() => updateAccountDraft(account.id, { mode: option.mode })}
+                        disabled={fieldsDisabled}
+                        title={option.label}
+                      />
+                    ))}
+                  </OptionCardGroup>
                   {showProxyFields && (
-                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "flex-end" }}>
-                      <label style={{ display: "grid", gap: "6px", fontSize: "12px", color: "var(--color-text-secondary)", flex: "1 1 220px", minWidth: 0 }}>
-                        {t("settings.globalProxyHost", "SOCKS5 Proxy")}
-                        <input
+                    <div className="settings-row">
+                      <label className="field">
+                        <span className="field__label">{t("settings.globalProxyHost", "SOCKS5 Proxy")}</span>
+                        <Input
                           aria-label={t("settings.globalProxyHost", "SOCKS5 Proxy")}
                           type="text"
                           value={draft.host}
                           onChange={(e) => updateAccountDraft(account.id, { host: e.target.value })}
                           placeholder="127.0.0.1"
                           disabled={fieldsDisabled}
-                          style={{
-                            width: "100%",
-                            minWidth: 0,
-                            boxSizing: "border-box",
-                            padding: "8px 10px",
-                            borderRadius: "6px",
-                            border: "1px solid var(--color-border)",
-                            backgroundColor: "var(--color-bg-primary)",
-                            color: "var(--color-text-primary)",
-                            fontSize: "13px",
-                            opacity: fieldsDisabled ? 0.7 : 1,
-                          }}
                         />
                       </label>
-                      <label style={{ display: "grid", gap: "6px", fontSize: "12px", color: "var(--color-text-secondary)", width: "110px", minWidth: 0 }}>
-                        {t("settings.globalProxyPort", "Port")}
-                        <input
+                      <label className="field field--narrow">
+                        <span className="field__label">{t("settings.globalProxyPort", "Port")}</span>
+                        <Input
                           aria-label={t("settings.globalProxyPort", "Port")}
-                          type="number"
+                          type="number" min={1} max={65535} step={1} inputMode="numeric"
                           value={draft.port}
                           onChange={(e) => updateAccountDraft(account.id, { port: e.target.value })}
                           placeholder="7890"
                           disabled={fieldsDisabled}
-                          style={{
-                            width: "100%",
-                            minWidth: 0,
-                            boxSizing: "border-box",
-                            padding: "8px 10px",
-                            borderRadius: "6px",
-                            border: "1px solid var(--color-border)",
-                            backgroundColor: "var(--color-bg-primary)",
-                            color: "var(--color-text-primary)",
-                            fontSize: "13px",
-                            opacity: fieldsDisabled ? 0.7 : 1,
-                          }}
                         />
                       </label>
                     </div>
                   )}
-                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                    <button
-                      type="button"
+                  <div className="settings-actions settings-actions--end">
+                    <Button
+                      size="sm"
                       aria-label={t("settings.saveAccountProxy", "Save account proxy")}
                       onClick={() => saveAccountProxy(account)}
-                      disabled={draft.loading || draft.saving}
-                      style={{
-                        minWidth: "88px",
-                        minHeight: "36px",
-                        padding: "8px 16px",
-                        borderRadius: "6px",
-                        border: draft.loading || draft.saving ? "1px solid var(--color-border)" : "1px solid var(--color-accent)",
-                        backgroundColor: draft.loading || draft.saving ? "var(--color-bg-hover)" : "var(--color-accent)",
-                        color: draft.loading || draft.saving ? "var(--color-text-secondary)" : "#fff",
-                        cursor: draft.loading || draft.saving ? "default" : "pointer",
-                        fontSize: "13px",
-                        fontWeight: 600,
-                        boxShadow: draft.loading || draft.saving ? "none" : "0 1px 2px rgba(0, 0, 0, 0.12)",
-                      }}
+                      disabled={draft.loading}
+                      loading={draft.saving}
                     >
                       {draft.saving ? t("common.saving", "Saving...") : t("common.save", "Save")}
-                    </button>
+                    </Button>
                   </div>
-                  {draft.error && (
-                    <p style={{ fontSize: "12px", color: "var(--color-error)", margin: 0 }}>
-                      {draft.error}
-                    </p>
-                  )}
+                  {draft.error && <p className="settings-error">{draft.error}</p>}
                 </div>
               );
             })}
-        </div>
-      )}
+          </SettingsList>
+        )}
+      </SettingsSection>
     </div>
   );
 }

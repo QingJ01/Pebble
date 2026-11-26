@@ -24,4 +24,19 @@ i18n.use(initReactI18next).init({
   interpolation: { escapeValue: false },
 });
 
+/** Keep <html lang> in sync so the webview picks CJK glyphs / hyphenation correctly. */
+export function documentLangFor(language: string | undefined): string {
+  if (!language) return "en";
+  return language.toLowerCase().startsWith("zh") ? "zh-CN" : language;
+}
+
+function syncDocumentLang(language: string | undefined) {
+  if (typeof document !== "undefined") {
+    document.documentElement.lang = documentLangFor(language);
+  }
+}
+
+syncDocumentLang(i18n.language ?? initialLanguage);
+if (typeof i18n.on === "function") i18n.on("languageChanged", syncDocumentLang);
+
 export default i18n;

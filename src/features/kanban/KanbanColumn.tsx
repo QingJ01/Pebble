@@ -3,6 +3,7 @@ import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import { useTranslation } from "react-i18next";
 import type { KanbanColumnType, Message } from "@/lib/api";
 import KanbanCardComponent from "./KanbanCard";
+import "./kanban.css";
 
 interface Props {
   id: KanbanColumnType;
@@ -19,52 +20,14 @@ export default function KanbanColumn({ id, title, cardIds, contextNotes, message
   const { setNodeRef, isOver } = useDroppable({ id });
 
   return (
-    <div
-      style={{
-        flex: 1,
-        minWidth: "240px",
-        maxWidth: "380px",
-        display: "flex",
-        flexDirection: "column",
-        height: "100%",
-      }}
-    >
-      <div
-        style={{
-          padding: "12px 16px",
-          fontWeight: 600,
-          fontSize: "14px",
-          color: "var(--color-text-primary)",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}
-      >
+    <div className="kanban-column">
+      <div className="kanban-column__header">
         <span>{title}</span>
-        <span
-          style={{
-            fontSize: "12px",
-            color: "var(--color-text-secondary)",
-            backgroundColor: "var(--color-bg-secondary, rgba(0,0,0,0.06))",
-            padding: "2px 8px",
-            borderRadius: "10px",
-          }}
-        >
-          {cardIds.length}
-        </span>
+        <span className="kanban-column__count">{cardIds.length}</span>
       </div>
       <div
         ref={setNodeRef}
-        className="scroll-region kanban-column-scroll"
-        style={{
-          flex: 1,
-          padding: "0 8px 8px",
-          overflowY: "auto",
-          backgroundColor: isOver ? "var(--color-bg-hover, rgba(0,0,0,0.03))" : "transparent",
-          borderRadius: "8px",
-          transition: "background-color 0.15s ease",
-          minHeight: "100px",
-        }}
+        className={`scroll-region kanban-column-scroll kanban-column__cards${isOver ? " is-over" : ""}`}
       >
         <SortableContext items={cardIds} strategy={verticalListSortingStrategy}>
           {cardIds.map((cardId) => (
@@ -79,16 +42,7 @@ export default function KanbanColumn({ id, title, cardIds, contextNotes, message
           ))}
         </SortableContext>
         {cardIds.length === 0 && (
-          <div
-            style={{
-              textAlign: "center",
-              color: "var(--color-text-secondary)",
-              fontSize: "13px",
-              padding: "24px 0",
-            }}
-          >
-            {t("kanban.dropHere")}
-          </div>
+          <div className="kanban-column__empty">{t("kanban.dropHere")}</div>
         )}
       </div>
     </div>

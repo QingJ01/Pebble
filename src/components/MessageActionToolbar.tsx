@@ -1,32 +1,70 @@
-import { Reply, ReplyAll, Forward, Star, Archive, Trash2, LayoutGrid, RotateCcw } from "lucide-react";
+import { useLayoutEffect, useRef, useState, type RefObject } from "react";
+import {
+  Reply, ReplyAll, Forward, Star, StarOff, Archive, Trash2, LayoutGrid, RotateCcw, FolderInput, MoreHorizontal,
+} from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { invalidateKanbanQueries, useIsInKanban } from "@/hooks/queries/useKanbanCardsQuery";
 import { addKanbanCard } from "@/hooks/mutations/useKanbanMutations";
-import { useToastStore } from "@/stores/toast.store";
-import { useTranslation } from "react-i18next";
+import { runMailAction, trashConfirmCopy } from "@/hooks/mutations/mailActions";
+import { toastError, useToastStore } from "@/stores/toast.store";
+import { useConfirmStore } from "@/stores/confirm.store";
 import { useUpdateFlagsMutation } from "@/hooks/mutations/useUpdateFlagsMutation";
 import { useComposeStore } from "@/stores/compose.store";
-import { archiveMessage, deleteMessage, restoreMessage } from "@/lib/api";
+import { restoreMessage } from "@/lib/api";
 import type { Message } from "@/lib/api";
 import {
   patchMessagesCache,
   snapshotMessagesCache,
   restoreMessagesCache,
 } from "@/hooks/queries";
-import { useEffect, useState } from "react";
-import ConfirmDialog from "./ConfirmDialog";
+import IconButton from "./ui/IconButton";
+import ContextMenu, { type ContextMenuItem, type ContextMenuPosition } from "./ContextMenu";
+import { MoveToDialog, moveDisabledReason } from "./MoveToButton";
+import "./mail-list.css";
 
 interface Props {
   message: Message;
   folderRole?: string | null;
   onBack: () => void;
+  /** Reopen this message after an archive/delete failed (the list was rolled back). */
+  onReopen?: (messageId: string) => void;
   onMessageUpdate: (msg: Message) => void;
+}
+
+type KanbanColumn = "todo" | "waiting" | "done";
+
+/** Toolbar button (--control-md 32) + gap (--space-1 4). */
+const BUTTON_STEP = 36;
+/** .toolbar-separator: 1px + --space-1 margin each side. */
+const SEPARATOR_WIDTH = 9;
+
+/**
+ * True when `ref` is narrower than `minWidth` (ResizeObserver). Without
+ * ResizeObserver (old engines, tests) it reports false: everything visible.
+ */
+export function useIsNarrower(ref: RefObject<HTMLElement | null>, minWidth: number): boolean {
+  const [narrow, setNarrow] = useState(false);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const measure = (width: number) => setNarrow(width > 0 && width < minWidth);
+    measure(element.getBoundingClientRect().width);
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[entries.length - 1];
+      measure(entry?.contentRect?.width ?? element.getBoundingClientRect().width);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref, minWidth]);
+  return narrow;
 }
 
 export default function MessageActionToolbar({
   message,
   folderRole,
   onBack,
+  onReopen,
   onMessageUpdate,
 }: Props) {
   const { t } = useTranslation();
@@ -34,8 +72,13 @@ export default function MessageActionToolbar({
   const queryClient = useQueryClient();
   const flagsMutation = useUpdateFlagsMutation();
   const inKanban = useIsInKanban(message.id);
-  const [showKanbanPicker, setShowKanbanPicker] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const kanbanButtonRef = useRef<HTMLButtonElement>(null);
+  const [kanbanMenu, setKanbanMenu] = useState<ContextMenuPosition | null>(null);
+  const [busy, setBusy] = useState(false);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
+  const [moreMenu, setMoreMenu] = useState<ContextMenuPosition | null>(null);
+  const [moveOpen, setMoveOpen] = useState(false);
 
   function invalidateMessageViews(includeUnreadCounts = false) {
     queryClient.invalidateQueries({ queryKey: ["messages"] });
@@ -47,249 +90,208 @@ export default function MessageActionToolbar({
     }
   }
 
-  useEffect(() => {
-    if (!showKanbanPicker) return;
-    function handleClick() { setShowKanbanPicker(false); }
-    // Delay to avoid catching the same click that opened the picker
-    const timer = setTimeout(() => {
-      document.addEventListener("click", handleClick);
-    }, 0);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener("click", handleClick);
-    };
-  }, [showKanbanPicker]);
-
-  async function handleAddToKanban(column: "todo" | "waiting" | "done") {
-    setShowKanbanPicker(false);
+  async function handleAddToKanban(column: KanbanColumn) {
     try {
       await addKanbanCard(message.id, column, queryClient);
       useToastStore.getState().addToast({
         message: t("messageActions.kanbanSuccess", "Added to kanban board"),
         type: "success",
       });
-    } catch {
-      useToastStore.getState().addToast({
-        message: t("messageActions.kanbanFailed", "Failed to add to kanban"),
-        type: "error",
-      });
+    } catch (error) {
+      toastError(error, "messageActions.kanbanFailed");
     }
   }
 
-  const actions: Array<{
-    icon: React.ComponentType<{ size?: number }>;
-    label: string;
-    action: () => void;
-    active?: boolean;
-    disabled?: boolean;
-  }> = [
-    { icon: Reply, label: t("messageActions.reply"), action: () => openCompose("reply", message) },
-    { icon: ReplyAll, label: t("messageActions.replyAll"), action: () => openCompose("reply-all", message) },
-    { icon: Forward, label: t("messageActions.forward"), action: () => openCompose("forward", message) },
+  async function handleMoveAction(kind: "archive" | "trash") {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await runMailAction(queryClient, kind, [message], {
+        confirm: (plan) => useConfirmStore.getState().confirm({ ...trashConfirmCopy(plan), destructive: true }),
+        onRemoved: () => onBack(),
+        onFailed: () => onReopen?.(message.id),
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRestore() {
+    const previousLists = snapshotMessagesCache(queryClient);
+    patchMessagesCache(queryClient, (page) => page.filter((m) => m.id !== message.id));
+    try {
+      await restoreMessage(message.id);
+      invalidateMessageViews(true);
+      useToastStore.getState().addToast({
+        message: t("messageActions.restoreSuccess", "Message restored to inbox"),
+        type: "success",
+      });
+      onBack();
+    } catch (error) {
+      restoreMessagesCache(queryClient, previousLists);
+      toastError(error, "messageActions.restoreFailed");
+    }
+  }
+
+  function openKanbanMenu() {
+    const rect = kanbanButtonRef.current?.getBoundingClientRect();
+    setKanbanMenu({ x: rect?.left ?? 0, y: (rect?.bottom ?? 0) + 4 });
+  }
+
+  const starLabel = message.is_starred ? t("messageActions.unstar") : t("messageActions.star");
+  const isArchiveFolder = folderRole === "archive";
+  const archiveLabel = isArchiveFolder ? t("messageActions.unarchive", "Unarchive") : t("messageActions.archive");
+  const isTrash = folderRole === "trash";
+  const moveLabel = t("folderManagement.moveTo", "Move to folder");
+  const moveBlocked = moveDisabledReason([message], t);
+
+  // Reply, archive (+ restore in Trash) and delete always stay visible; the
+  // rest collapses into "More" when the reading pane is too narrow for one row.
+  const fullButtonCount = 8 + (isTrash ? 1 : 0);
+  const narrow = useIsNarrower(toolbarRef, fullButtonCount * BUTTON_STEP + SEPARATOR_WIDTH);
+
+  function toggleStar() {
+    flagsMutation.mutate(
+      { messageId: message.id, isStarred: !message.is_starred },
+      { onSuccess: () => onMessageUpdate({ ...message, is_starred: !message.is_starred }) },
+    );
+  }
+
+  function openMoreMenu() {
+    const rect = moreButtonRef.current?.getBoundingClientRect();
+    setMoreMenu({ x: rect?.left ?? 0, y: (rect?.bottom ?? 0) + 4 });
+  }
+
+  const overflowItems: ContextMenuItem[] = [
+    { id: "reply-all", label: t("messageActions.replyAll"), icon: <ReplyAll size={14} />, onSelect: () => openCompose("reply-all", message) },
+    { id: "forward", label: t("messageActions.forward"), icon: <Forward size={14} />, onSelect: () => openCompose("forward", message) },
     {
-      icon: Star,
-      label: message.is_starred ? t("messageActions.unstar") : t("messageActions.star"),
-      action: () => {
-        flagsMutation.mutate(
-          { messageId: message.id, isStarred: !message.is_starred },
-          { onSuccess: () => onMessageUpdate({ ...message, is_starred: !message.is_starred }) },
-        );
-      },
-      active: message.is_starred,
+      id: "star",
+      label: starLabel,
+      icon: message.is_starred ? <StarOff size={14} /> : <Star size={14} />,
+      onSelect: toggleStar,
+      separatorBefore: true,
     },
     {
-      icon: folderRole === "archive" ? RotateCcw : Archive,
-      label: folderRole === "archive"
-        ? t("messageActions.unarchive", "Unarchive")
-        : t("messageActions.archive"),
-      action: async () => {
-        const previousLists = snapshotMessagesCache(queryClient);
-        patchMessagesCache(queryClient, (page) => page.filter((m) => m.id !== message.id));
-        try {
-          const result = await archiveMessage(message.id);
-          if (result === "skipped") return;
-          invalidateMessageViews(true);
-          if (result === "unarchived") {
-            useToastStore.getState().addToast({
-              message: t("messageActions.unarchiveSuccess", "Message moved to inbox"),
-              type: "success",
-            });
-          } else {
-            useToastStore.getState().addToast({
-              message: t("messageActions.archiveSuccess", "Message archived"),
-              type: "success",
-            });
-          }
-          onBack();
-        } catch {
-          restoreMessagesCache(queryClient, previousLists);
-          useToastStore.getState().addToast({
-            message: folderRole === "archive"
-              ? t("messageActions.unarchiveFailed", "Failed to unarchive")
-              : t("messageActions.archiveFailed", "Failed to archive message"),
-            type: "error",
-          });
-        }
-      },
+      id: "move",
+      label: t("folderManagement.moveToMenu", "Move to…"),
+      icon: <FolderInput size={14} />,
+      onSelect: () => setMoveOpen(true),
+      disabled: moveBlocked !== null,
     },
-    ...(folderRole === "trash" ? [{
-      icon: RotateCcw,
-      label: t("messageActions.restore", "Restore"),
-      action: async () => {
-        const previousLists = snapshotMessagesCache(queryClient);
-        patchMessagesCache(queryClient, (page) => page.filter((m) => m.id !== message.id));
-        try {
-          await restoreMessage(message.id);
-          invalidateMessageViews(true);
-          useToastStore.getState().addToast({
-            message: t("messageActions.restoreSuccess", "Message restored to inbox"),
-            type: "success",
-          });
-          onBack();
-        } catch {
-          restoreMessagesCache(queryClient, previousLists);
-          useToastStore.getState().addToast({
-            message: t("messageActions.restoreFailed", "Failed to restore message"),
-            type: "error",
-          });
-        }
-      },
-    }] : []),
     {
-      icon: Trash2,
-      label: t("messageActions.delete"),
-      action: () => setShowDeleteConfirm(true),
+      id: "kanban",
+      label: t("messageActions.addToKanban"),
+      icon: <LayoutGrid size={14} />,
+      onSelect: () => void handleAddToKanban("todo"),
     },
   ];
 
   return (
-    <>
-      <div style={{ display: "flex", gap: "2px", padding: "4px 16px 4px 48px", position: "relative" }}>
-        {actions.map(({ icon: Icon, label, action, active, disabled }, i) => (
-          <button
-            key={i}
-            onClick={disabled ? undefined : action}
-            title={disabled ? label + " (coming soon)" : label}
-            aria-label={label}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: disabled ? "default" : "pointer",
-              padding: "6px 8px",
-              borderRadius: "4px",
-              color: active ? "var(--color-accent)" : "var(--color-text-secondary)",
-              display: "flex",
-              alignItems: "center",
-              transition: "background-color 0.12s ease, color 0.12s ease",
-              opacity: disabled ? 0.35 : 1,
-            }}
-            onMouseEnter={disabled ? undefined : (e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = "var(--color-bg-hover)"; }}
-            onMouseLeave={disabled ? undefined : (e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = "transparent"; }}
-          >
-            <Icon size={16} />
-          </button>
-        ))}
-        {/* Kanban button + picker */}
-        <div style={{ position: "relative" }}>
-          <button
-            onClick={() => setShowKanbanPicker(true)}
-            title={t("messageActions.addToKanban")}
-            aria-label={t("messageActions.addToKanban")}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              padding: "6px 8px",
-              borderRadius: "4px",
-              color: inKanban ? "var(--color-accent)" : "var(--color-text-secondary)",
-              display: "flex",
-              alignItems: "center",
-              transition: "background-color 0.12s ease, color 0.12s ease",
-            }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = "var(--color-bg-hover)"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = "transparent"; }}
-          >
-            <LayoutGrid size={16} />
-          </button>
-          {showKanbanPicker && (
-            <div
-              onClick={(e) => e.stopPropagation()}
-              style={{
-                position: "absolute",
-                right: "0px",
-                top: "100%",
-                marginTop: "4px",
-                backgroundColor: "var(--color-bg)",
-                border: "1px solid var(--color-border)",
-                borderRadius: "8px",
-                boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
-                padding: "4px",
-                zIndex: 10,
-                minWidth: "140px",
-              }}
-            >
-              {([
-                { col: "todo" as const, label: t("kanban.todo", "To Do") },
-                { col: "waiting" as const, label: t("kanban.waiting", "Waiting") },
-                { col: "done" as const, label: t("kanban.done", "Done") },
-              ]).map(({ col, label }) => (
-                <button
-                  key={col}
-                  onClick={() => handleAddToKanban(col)}
-                  style={{
-                    display: "block",
-                    width: "100%",
-                    padding: "8px 12px",
-                    border: "none",
-                    background: "transparent",
-                    cursor: "pointer",
-                    fontSize: "13px",
-                    color: "var(--color-text-primary)",
-                    borderRadius: "4px",
-                    textAlign: "left",
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--color-bg-hover)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {showDeleteConfirm && (
-        <ConfirmDialog
-          title={t("messageActions.delete", "Delete")}
-          message={message.is_draft && message.remote_id === ""
-            ? t("messageActions.deleteLocalDraftConfirm", "Permanently delete this local draft? This cannot be undone.")
-            : t("messageActions.deleteConfirm", "Move this message to trash?")}
-          confirmLabel={t("common.delete", "Delete")}
-          destructive
-          onCancel={() => setShowDeleteConfirm(false)}
-          onConfirm={async () => {
-            setShowDeleteConfirm(false);
-            const previousLists = snapshotMessagesCache(queryClient);
-            patchMessagesCache(queryClient, (page) => page.filter((m) => m.id !== message.id));
-            try {
-              await deleteMessage(message.id);
-              invalidateMessageViews(true);
-              useToastStore.getState().addToast({
-                message: t("messageActions.deleteSuccess", "Message deleted"),
-                type: "success",
-              });
-              onBack();
-            } catch {
-              restoreMessagesCache(queryClient, previousLists);
-              useToastStore.getState().addToast({
-                message: t("messageActions.deleteFailed", "Failed to delete message"),
-                type: "error",
-              });
-            }
-          }}
+    <div
+      ref={toolbarRef}
+      role="toolbar"
+      aria-label={t("messageActions.toolbar", "Message actions")}
+      className={narrow ? "message-toolbar message-toolbar--narrow" : "message-toolbar"}
+    >
+      <IconButton size="md" label={t("messageActions.reply")} icon={<Reply size={16} />} onClick={() => openCompose("reply", message)} />
+      {!narrow && (
+        <>
+          <IconButton size="md" label={t("messageActions.replyAll")} icon={<ReplyAll size={16} />} onClick={() => openCompose("reply-all", message)} />
+          <IconButton size="md" label={t("messageActions.forward")} icon={<Forward size={16} />} onClick={() => openCompose("forward", message)} />
+          <IconButton
+            size="md"
+            label={starLabel}
+            pressed={message.is_starred}
+            icon={<Star size={16} fill={message.is_starred ? "currentColor" : "none"} />}
+            onClick={toggleStar}
+          />
+        </>
+      )}
+      <IconButton
+        size="md"
+        label={archiveLabel}
+        icon={isArchiveFolder ? <RotateCcw size={16} /> : <Archive size={16} />}
+        onClick={() => void handleMoveAction("archive")}
+      />
+      {isTrash && (
+        <IconButton
+          size="md"
+          label={t("messageActions.restore", "Restore")}
+          icon={<RotateCcw size={16} />}
+          onClick={() => void handleRestore()}
         />
       )}
-    </>
+      {!narrow && (
+        <>
+          <IconButton
+            size="md"
+            label={moveLabel}
+            tooltip={moveBlocked ?? moveLabel}
+            icon={<FolderInput size={16} />}
+            disabled={moveBlocked !== null}
+            onClick={() => setMoveOpen(true)}
+          />
+          <IconButton
+            ref={kanbanButtonRef}
+            size="md"
+            label={t("messageActions.addToKanban")}
+            icon={<LayoutGrid size={16} />}
+            aria-haspopup="menu"
+            aria-expanded={kanbanMenu !== null}
+            pressed={inKanban}
+            onClick={openKanbanMenu}
+          />
+        </>
+      )}
+      {narrow && (
+        <IconButton
+          ref={moreButtonRef}
+          size="md"
+          label={t("messageActions.moreActions", "More actions")}
+          icon={<MoreHorizontal size={16} />}
+          aria-haspopup="menu"
+          aria-expanded={moreMenu !== null}
+          onClick={openMoreMenu}
+        />
+      )}
+      {/* Destructive action kept apart from the safe ones. */}
+      <span className="toolbar-separator" aria-hidden="true" />
+      <IconButton
+        size="md"
+        variant="danger"
+        label={isTrash ? t("messageActions.deletePermanently", "Delete permanently") : t("messageActions.delete")}
+        icon={<Trash2 size={16} />}
+        onClick={() => void handleMoveAction("trash")}
+      />
+      {kanbanMenu && (
+        <ContextMenu
+          label={t("messageActions.addToKanban")}
+          position={kanbanMenu}
+          onClose={() => setKanbanMenu(null)}
+          restoreFocusTo={kanbanButtonRef.current}
+          items={([
+            { col: "todo" as const, label: t("kanban.todo", "To Do") },
+            { col: "waiting" as const, label: t("kanban.waiting", "Waiting") },
+            { col: "done" as const, label: t("kanban.done", "Done") },
+          ]).map(({ col, label }) => ({ id: col, label, onSelect: () => void handleAddToKanban(col) }))}
+        />
+      )}
+      {moreMenu && (
+        <ContextMenu
+          label={t("messageActions.moreActions", "More actions")}
+          position={moreMenu}
+          onClose={() => setMoreMenu(null)}
+          restoreFocusTo={moreButtonRef.current}
+          items={overflowItems}
+        />
+      )}
+      <MoveToDialog
+        messages={[message]}
+        open={moveOpen}
+        onClose={() => setMoveOpen(false)}
+        onMoved={(ids) => { if (ids.includes(message.id)) onBack(); }}
+      />
+    </div>
   );
 }

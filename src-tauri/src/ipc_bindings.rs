@@ -65,6 +65,7 @@ fn render() -> String {
         crate::commands::diagnostics::AppLogSnapshot,
         crate::commands::appearance::ImportedBackgroundImage,
         crate::commands::notifications::NotificationStatus,
+        crate::commands::notifications::NotificationLabels,
         crate::commands::advanced_search::AdvancedSearchQuery,
         crate::commands::folders::ImapSyncFolderSettings,
         crate::commands::batch::BatchMarkReadResult,

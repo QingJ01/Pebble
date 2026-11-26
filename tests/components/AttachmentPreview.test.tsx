@@ -32,12 +32,12 @@ describe("AttachmentPreview", () => {
     expect(image.getAttribute("src")).toBe("data:image/png;base64,safePNG");
     fireEvent.load(image);
     expect(image.hasAttribute("hidden")).toBe(false);
-    fireEvent.click(screen.getByRole("button", { name: "attachments.download: first.png" }));
+    fireEvent.click(screen.getByRole("button", { name: "attachments.downloadNamed" }));
     expect(onDownload).toHaveBeenCalledWith(attachments[0]);
     fireEvent.keyDown(document, { key: "Tab" });
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "attachmentViewer.next" }));
     fireEvent.keyDown(document, { key: "Tab" });
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "attachments.download: first.png" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "attachments.downloadNamed" }));
     fireEvent.keyDown(document, { key: "ArrowRight" });
     expect(await screen.findByRole("heading", { name: "second.pdf" })).toBeTruthy();
     expect(previewAttachment).toHaveBeenCalledWith("a1");

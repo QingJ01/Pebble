@@ -1,12 +1,17 @@
 import { Loader } from "lucide-react";
+import { useDelayedVisible } from "@/hooks/useDelayedVisible";
 
 interface SpinnerProps {
   size?: number;
   label?: string;
+  /** Hold the spinner back for this long so fast loads never flash it (ms). */
+  delayMs?: number;
 }
 
 /** A centered spinner with optional label text. */
-export default function Spinner({ size = 20, label }: SpinnerProps) {
+export default function Spinner({ size = 20, label, delayMs = 0 }: SpinnerProps) {
+  const visible = useDelayedVisible(delayMs);
+  if (!visible) return <div role="status" aria-busy="true" style={{ height: "100%" }} />;
   return (
     <div
       role="status"
@@ -17,10 +22,10 @@ export default function Spinner({ size = 20, label }: SpinnerProps) {
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        gap: "10px",
-        padding: "40px",
+        gap: "var(--space-2)",
+        padding: "var(--space-8)",
         color: "var(--color-text-secondary)",
-        fontSize: "13px",
+        fontSize: "var(--font-base)",
       }}
     >
       <Loader size={size} className="spinner" />

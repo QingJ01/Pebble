@@ -489,6 +489,8 @@ struct ThreadAccumulator {
     starred: bool,
     has_attachments: bool,
     participants: Vec<String>,
+    /// Lower-cased sender addresses already in `participants`.
+    participant_addresses: HashSet<String>,
 }
 
 impl Store {

@@ -5,7 +5,12 @@ import ContactEditorDialog from "@/features/contacts/ContactEditorDialog";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback ?? _key,
+    t: (key: string, options?: unknown) => {
+      if (typeof options === "string") return options;
+      const opts = (options ?? {}) as Record<string, unknown>;
+      const template = typeof opts.defaultValue === "string" ? opts.defaultValue : key;
+      return template.replace(/\{\{(\w+)\}\}/g, (_m: string, n: string) => String(opts[n] ?? ""));
+    },
   }),
 }));
 

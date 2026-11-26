@@ -1,0 +1,313 @@
+/* ─── Reading pane (MessageDetail, ThreadView, ThreadMessageBubble) ─────
+   One content edge: everything in the reader (toolbar, title, sender card,
+   privacy banner content, body, attachments) starts at --reader-gutter from
+   the pane edge. Full-bleed bands (toolbar, banner) keep their fill edge to
+   edge and pad their content by the same gutter.
+   Toolbar row = pane header height (52 = 36 + 2 × 8, same as the inbox
+   search row and the list headers), one control size (32) per row. */
+
+.message-detail-container,
+.thread-reader {
+  --reader-gutter: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  background-color: var(--color-canvas);
+}
+
+.app-shell--with-background .message-detail-container,
+.app-shell--with-background .thread-reader {
+  background-color: transparent;
+}
+
+.reader-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: calc(var(--control-lg) + 2 * var(--space-2));
+  box-sizing: border-box;
+  padding: 0 var(--reader-gutter);
+  border-bottom: 1px solid var(--color-divider);
+  flex-shrink: 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.reader-toolbar__end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.reader-toolbar__count {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.reader-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--reader-gutter);
+  border-bottom: 1px solid var(--color-divider);
+  flex-shrink: 0;
+}
+
+.reader-title {
+  width: 100%;
+  margin: 0;
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-size: var(--font-lg);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Sender + recipients well. */
+.reader-sender-card {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-surface-sunken);
+  color: var(--color-text-primary);
+}
+
+.reader-sender-card__line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--space-1);
+  font-size: var(--font-base);
+  line-height: var(--leading-normal);
+}
+
+.reader-sender-card__name {
+  font-weight: var(--weight-semibold);
+}
+
+.reader-sender-card__address {
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+}
+
+.reader-sender-card__date {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.reader-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-4) var(--reader-gutter);
+}
+
+.reader-body__status {
+  color: var(--color-text-secondary);
+  font-size: var(--font-base);
+}
+
+.reader-plain-text {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: var(--font-base);
+  line-height: var(--leading-relaxed);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.reader-plain-text--translated {
+  font-size: var(--font-md);
+}
+
+.reader-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: var(--space-6);
+  box-sizing: border-box;
+  color: var(--color-text-secondary);
+  font-size: var(--font-md);
+  text-align: center;
+}
+/* Under the Back toolbar (error / not found): fill the rest of the pane. */
+.message-detail-container > .reader-state {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+}
+
+.reader-state--error {
+  color: var(--color-danger);
+}
+
+/* Blocked-content band (PrivacyBanner). */
+.privacy-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-3);
+  row-gap: var(--space-2);
+  padding: var(--space-2) var(--reader-gutter, var(--space-4));
+  border-bottom: 1px solid var(--color-divider);
+  background-color: var(--color-warning-bg);
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+  flex-shrink: 0;
+}
+
+.privacy-banner__text {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1 1 240px;
+  min-width: 0;
+  line-height: var(--leading-normal);
+}
+
+.privacy-banner__icon {
+  flex-shrink: 0;
+  color: var(--color-warning);
+}
+
+.privacy-banner__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+/* ─── Thread view: one bubble per message ─────────────────────────────── */
+.thread-reader__messages {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--reader-gutter);
+}
+
+.thread-reader__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0 0 0 var(--space-1);
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-size: var(--font-md);
+  font-weight: var(--weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-bubble {
+  flex-shrink: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-surface-raised);
+  box-shadow: var(--shadow-raised);
+}
+
+.thread-bubble__draft {
+  padding: var(--space-2) var(--space-3) 0;
+}
+
+.thread-bubble__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: calc(var(--control-md) + var(--space-2));
+  box-sizing: border-box;
+  padding: 0 var(--space-3);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
+.thread-bubble__header:hover {
+  background-color: var(--color-fill-hover);
+}
+
+.thread-bubble__header:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--color-focus-ring);
+}
+
+.thread-bubble__chevron {
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+}
+
+.thread-bubble__sender {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--font-base);
+  font-weight: var(--weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-bubble__date {
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.thread-bubble__body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-top: 1px solid var(--color-divider);
+}
+
+.thread-bubble__body > * {
+  align-self: stretch;
+}
+
+.thread-bubble__body > .btn {
+  align-self: flex-start;
+}
+
+/* Attachments inside a bubble share the bubble's padding. */
+.thread-bubble .attachment-section {
+  padding: var(--space-3) 0 0;
+  border-top: 1px solid var(--color-divider);
+  background: transparent;
+}
+
+/* Selected-text action bar (SelectionActionPopover). */
+.popover-panel.selection-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  overflow: visible;
+}

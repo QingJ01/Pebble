@@ -6,6 +6,8 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { Editor } from "@tiptap/react";
+import Button from "@/components/ui/Button";
+import IconButton from "@/components/ui/IconButton";
 
 // ─── Mode Button ───────────────────────────────────────────────────────────────
 
@@ -13,15 +15,17 @@ export function ModeButton({ icon: Icon, label, active, onClick }: {
   icon: React.ElementType; label: string; active: boolean; onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
+      size="sm"
       onClick={onClick}
       title={label}
-      className={`compose-mode-button${active ? " is-active" : ""}`}
+      pressed={active}
+      className="compose-mode-button"
+      icon={<Icon size={14} />}
     >
-      <Icon size={13} />
       {label}
-    </button>
+    </Button>
   );
 }
 
@@ -69,16 +73,13 @@ export function EditorToolbar({ editor }: { editor: Editor }) {
       {items.map((item, i) => {
         const Icon = item.icon;
         return (
-          <button
+          <IconButton
             key={i}
-            type="button"
             onClick={item.action}
-            title={item.label}
-            aria-label={item.label}
-            className={`compose-format-button${item.active ? " is-active" : ""}`}
-          >
-            <Icon size={15} />
-          </button>
+            label={item.label}
+            pressed={item.active}
+            icon={<Icon size={14} />}
+          />
         );
       })}
     </div>
@@ -133,45 +134,14 @@ export function MarkdownToolbar({ textareaRef, onInsert, source }: {
       {items.map((item, i) => {
         const Icon = item.icon;
         return (
-          <button
+          <IconButton
             key={i}
-            type="button"
             onClick={item.action}
-            title={item.label}
-            aria-label={item.label}
-            className="compose-format-button"
-          >
-            <Icon size={15} />
-          </button>
+            label={item.label}
+            icon={<Icon size={14} />}
+          />
         );
       })}
     </div>
   );
 }
-
-// ─── Shared Styles ─────────────────────────────────────────────────────────────
-
-export const composeStyles = {
-  fieldLabel: {
-    padding: "8px 0", fontSize: "13px", color: "var(--color-text-secondary)",
-    width: "52px", flexShrink: 0, textAlign: "right", marginRight: "8px",
-  } as React.CSSProperties,
-
-  fieldRow: {
-    display: "flex", alignItems: "center",
-    borderBottom: "1px solid var(--color-border)",
-  } as React.CSSProperties,
-
-  toggleBtn: {
-    padding: "4px 8px", border: "none", background: "none", cursor: "pointer",
-    color: "var(--color-text-secondary)", fontSize: "12px", whiteSpace: "nowrap",
-    borderRadius: "4px",
-  } as React.CSSProperties,
-
-  backBtn: {
-    display: "flex", alignItems: "center", gap: "4px",
-    background: "none", border: "none", cursor: "pointer",
-    color: "var(--color-text-secondary)", fontSize: "13px",
-    padding: "4px 8px", borderRadius: "4px",
-  } as React.CSSProperties,
-};

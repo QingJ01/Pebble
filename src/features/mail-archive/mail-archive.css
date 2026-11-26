@@ -1,20 +1,135 @@
-.mail-archive { color: var(--color-text-primary); width: 100%; }
-.mail-archive h2 { font-size: 20px; margin: 0 0 12px; }
-.mail-archive h3 { margin: 12px 0; }
-.mail-archive fieldset { border: 1px solid var(--color-border); border-radius: 8px; padding: 16px; margin: 20px 0; min-width: 0; }
-.mail-archive legend { padding: 0 6px; font-weight: 600; }
-.mail-archive label { display: flex; flex-direction: column; gap: 5px; min-width: 120px; flex: 1; }
-.mail-archive button, .mail-archive select, .mail-archive input:not([type=checkbox]) { border: 1px solid var(--color-border); border-radius: 5px; padding: 7px 10px; font: inherit; color: inherit; background: var(--color-bg-primary); min-width: 0; }
-.mail-archive button { cursor: pointer; }
-.mail-archive button:disabled { opacity: 0.45; cursor: default; }
-.mail-archive-row { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
-.mail-archive-note { font-size: 12px; color: var(--color-text-secondary); line-height: 1.6; }
-.mail-archive-messages { list-style: none; padding: 0; }
-.mail-archive-messages li { display: flex; gap: 8px; align-items: center; padding: 3px 0; }
-.mail-archive-messages button { flex: 1; text-align: left; overflow-wrap: anywhere; }
-.mail-archive-messages time { display: block; font-weight: 400; font-size: 11px; color: var(--color-text-secondary); margin-top: 4px; }
-.mail-archive-unread { font-weight: 600 !important; }
-.mail-archive-detail { border-top: 1px solid var(--color-border); padding-top: 12px; overflow-wrap: anywhere; }
-.mail-archive-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; max-height: 500px; overflow-y: auto; }
-.mail-archive code { display: block; font-size: 10px; overflow-wrap: anywhere; margin: 6px 0; }
-.mail-archive [role=alert] { color: var(--color-danger, #b42318); }
+/* Local mail library (settings tab): .page-header--flush, then fieldsets laid
+   out like .settings-section (13/600 titles, 32px rhythm); controls are
+   .input / .select / .checkbox and Button. */
+.mail-archive { width: 100%; color: var(--color-text-primary); font-size: var(--font-base); }
+.mail-archive .page-header__description + .page-header__description { margin-top: var(--space-1); }
+.mail-archive h3 {
+  margin: var(--space-3) 0 var(--space-2);
+  font-size: var(--font-base);
+  font-weight: var(--weight-semibold);
+}
+.mail-archive h4 {
+  margin: var(--space-4) 0 var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-semibold);
+}
+.mail-archive p { margin: var(--space-2) 0; }
+.mail-archive fieldset {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: var(--space-7) 0 0;
+  padding: 0;
+  border: 0;
+}
+.mail-archive fieldset > * { align-self: stretch; }
+.mail-archive fieldset > .btn { align-self: flex-start; }
+.mail-archive legend {
+  margin-bottom: var(--space-3);
+  padding: 0;
+  font-size: var(--font-base);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+}
+/* <label>Text<select class="select"/></label> reads like .field + .field__label. */
+.mail-archive label {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 120px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-medium);
+}
+.mail-archive-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-3);
+  margin: 0;
+}
+.mail-archive-row > span { align-self: center; color: var(--color-text-tertiary); font-size: var(--font-sm); font-variant-numeric: tabular-nums; }
+.mail-archive-note,
+.mail-archive p.mail-archive-note {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+  line-height: var(--leading-normal);
+}
+
+/* Message list: one .list-row-like row per message (checkbox + row button). */
+.mail-archive-messages {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--color-divider);
+  list-style: none;
+}
+.mail-archive-messages li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-left: var(--space-3);
+  border-bottom: 1px solid var(--color-divider);
+}
+.mail-archive-message {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3) var(--space-2) 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-weight: var(--weight-regular);
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.mail-archive-messages li:hover { background: var(--color-fill-hover); }
+.mail-archive-messages li:has(.mail-archive-message[aria-pressed="true"]) { background: var(--color-fill-selected); }
+.mail-archive-message time {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-regular);
+}
+.mail-archive-unread { font-weight: var(--weight-semibold); }
+.mail-archive-star { color: var(--color-warning); }
+
+.mail-archive-detail {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-divider);
+  overflow-wrap: anywhere;
+}
+.mail-archive-detail p { margin: var(--space-1) 0; color: var(--color-text-secondary); font-size: var(--font-sm); }
+.mail-archive-detail .mail-archive-row { margin: var(--space-3) 0; }
+.mail-archive-detail pre {
+  max-height: 500px;
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3);
+  overflow-y: auto;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+  font: inherit;
+  line-height: var(--leading-relaxed);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.mail-archive-attachments { margin: 0; padding-left: var(--space-4); }
+.mail-archive-attachments li { margin-bottom: var(--space-2); }
+.mail-archive code {
+  display: block;
+  margin: var(--space-1) 0;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  overflow-wrap: anywhere;
+}
+.mail-archive [role=alert] { color: var(--color-danger); }
+.mail-archive-progress { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); margin-top: var(--space-4); }
+.mail-archive-progress p { margin: 0; }
+.mail-archive > .page-header + fieldset { margin-top: var(--space-2); }

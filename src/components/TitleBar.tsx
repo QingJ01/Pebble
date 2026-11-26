@@ -21,11 +21,12 @@ export default function TitleBar() {
   return (
     <div
       data-tauri-drag-region
-      className="flex items-center justify-between h-9 select-none"
-      style={{ backgroundColor: "var(--color-titlebar-bg)" }}
+      className={`titlebar flex items-center justify-between h-9 select-none${isMac ? " titlebar--mac" : ""}`}
     >
-      {/* Brand block under the native titlebar; the macOS traffic lights sit at
-          the top-left corner via trafficLightPosition in tauri.conf.json. */}
+      {/* Brand block. On macOS the window uses the overlay title bar with the
+          native title hidden (hiddenTitle) and the traffic lights at
+          trafficLightPosition in tauri.conf.json: titlebar--mac reserves
+          that space (see shell.css). */}
       <div data-tauri-drag-region className="flex items-center gap-2 px-3">
         <img
           data-tauri-drag-region
@@ -35,18 +36,16 @@ export default function TitleBar() {
           draggable={false}
           className="h-5 w-5 shrink-0 bg-transparent object-contain"
         />
-        <span
-          className="text-sm font-semibold"
-          style={{ color: "var(--color-text-primary)" }}
-        >
+        <span className="titlebar__brand">
           Pebble
         </span>
       </div>
       {!isMac && (
         <div className="flex items-center">
           <button
+            type="button"
             onClick={() => appWindow.minimize()}
-            className="h-9 w-11 inline-flex items-center justify-center hover:bg-black/5"
+            className="titlebar-btn"
             aria-label={t("titleBar.minimize")}
           >
             <svg width="10" height="1" viewBox="0 0 10 1">
@@ -54,8 +53,9 @@ export default function TitleBar() {
             </svg>
           </button>
           <button
+            type="button"
             onClick={() => appWindow.toggleMaximize()}
-            className="h-9 w-11 inline-flex items-center justify-center hover:bg-black/5"
+            className="titlebar-btn"
             aria-label={t("titleBar.maximize")}
           >
             <svg width="10" height="10" viewBox="0 0 10 10">
@@ -71,8 +71,9 @@ export default function TitleBar() {
             </svg>
           </button>
           <button
+            type="button"
             onClick={() => void handleCloseWindow()}
-            className="h-9 w-11 inline-flex items-center justify-center hover:bg-red-500 hover:text-white"
+            className="titlebar-btn titlebar-btn--close"
             aria-label={t("titleBar.close")}
           >
             <svg width="10" height="10" viewBox="0 0 10 10">

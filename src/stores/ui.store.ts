@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { isNarrowWindow } from "@/lib/narrowWindow";
 import i18n from "@/lib/i18n";
 import { getInitialLanguage, LANGUAGE_STORAGE_KEY, type Language } from "@/lib/language";
 import { profileLocalStorage, profileSessionStorage } from "@/lib/profileStorage";
@@ -138,6 +139,8 @@ export function applyThemeToDom(theme: Theme) {
 
 interface UIState {
   sidebarCollapsed: boolean;
+  /** Narrow windows only: the user expanded the icon rail (not persisted). */
+  sidebarNarrowExpanded: boolean;
   activeView: ActiveView;
   theme: Theme;
   backgroundImage: BackgroundImageSettings | null;
@@ -187,6 +190,7 @@ interface UIState {
 
 export const useUIStore = create<UIState>((set) => ({
   sidebarCollapsed: false,
+  sidebarNarrowExpanded: false,
   activeView: "inbox",
   theme: (profileLocalStorage.getItem("pebble-theme") as Theme) || "light",
   backgroundImage: initialBackgroundImage,
@@ -214,7 +218,9 @@ export const useUIStore = create<UIState>((set) => ({
   previousView: "inbox",
   pendingContactId: null,
   toggleSidebar: () =>
-    set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+    set((state) => (isNarrowWindow()
+      ? { sidebarNarrowExpanded: !state.sidebarNarrowExpanded }
+      : { sidebarCollapsed: !state.sidebarCollapsed })),
   setActiveView: (view) => {
     const state = useUIStore.getState();
     if (state.activeView === view) {

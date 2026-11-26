@@ -176,7 +176,7 @@ describe("MessageDetail selected-text context actions", () => {
 
     const body = screen.getByRole("region", { name: "Message body" });
 
-    expect(body.getAttribute("style")).not.toContain("outline: none");
+    expect(body.getAttribute("style") ?? "").not.toContain("outline: none");
   });
 
   it("uses the shared smooth scroll region for the message body", () => {
@@ -196,28 +196,35 @@ describe("MessageDetail selected-text context actions", () => {
     expect(screen.queryByText(/current@example\.com/)).toBeNull();
   });
 
-  it("renders the sender line as a semibold header card with a right-aligned date", () => {
+  it("renders the subject and sender card on the reader content edge", () => {
     render(<MessageDetail messageId="message-1" onBack={vi.fn()} />);
 
     const heading = screen.getByRole("heading", { name: "Context actions" });
-
-    expect(heading.style.fontSize).toBe("16px");
+    expect(heading.className).toContain("reader-title");
 
     const senderName = screen.getByText("Sender");
-
-    expect(senderName.style.fontWeight).toBe("600");
+    expect(senderName.className).toContain("reader-sender-card__name");
 
     const senderRow = senderName.parentElement as HTMLElement;
     const card = senderRow.parentElement as HTMLElement;
+    expect(senderRow.className).toContain("reader-sender-card__line");
+    expect(card.className).toContain("reader-sender-card");
+    // Title and sender card share the header block (one left edge).
+    expect(card.parentElement).toBe(heading.parentElement);
 
-    expect(senderRow.style.fontSize).toBe("13px");
-    expect(card.style.borderRadius).toBe("8px");
-    expect(card.style.padding).toBe("8px 12px");
-
-    const dateSpan = Array.from(senderRow.querySelectorAll("span"))
-      .find((node) => node.style.marginLeft === "auto");
-
+    const dateSpan = senderRow.querySelector(".reader-sender-card__date");
     expect(dateSpan?.textContent).toContain("2023");
+  });
+
+  it("puts back, message actions, snooze and bilingual in one 32px toolbar row", () => {
+    render(<MessageDetail messageId="message-1" onBack={vi.fn()} />);
+
+    const back = screen.getByRole("button", { name: "Back" });
+    const row = back.parentElement as HTMLElement;
+    expect(row.className).toContain("reader-toolbar");
+    const buttons = Array.from(row.querySelectorAll<HTMLButtonElement>("button.icon-btn"));
+    expect(buttons.length).toBeGreaterThanOrEqual(3);
+    for (const button of buttons) expect(button.className).toContain("icon-btn--md");
   });
 
   it("offers contact actions for the sender and each visible recipient", () => {

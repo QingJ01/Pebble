@@ -17,7 +17,7 @@ vi.mock("react-i18next", () => ({
     init: vi.fn(),
   },
   useTranslation: () => ({
-    t: (key: string, fallback?: string) => {
+    t: (key: string, fallback?: unknown) => {
       const labels: Record<string, string> = {
         "common.save": "Save",
         "common.saving": "Saving...",
@@ -35,7 +35,12 @@ vi.mock("react-i18next", () => ({
         "settings.inheritsGlobalProxy": "Inherit global proxy unless a custom proxy or disabled mode is selected.",
         "settings.saveAccountProxy": "Save account proxy",
       };
-      return labels[key] ?? fallback ?? key;
+      return labels[key] ?? (() => {
+        if (typeof fallback === "string") return fallback;
+        const opts = (fallback ?? {}) as Record<string, unknown>;
+        const template = typeof opts.defaultValue === "string" ? opts.defaultValue : key;
+        return template.replace(/\{\{(\w+)\}\}/g, (_m: string, n: string) => String(opts[n] ?? ""));
+      })();
     },
   }),
 }));
@@ -182,7 +187,7 @@ describe("ProxyTab global proxy", () => {
       expect(getAccountProxySetting).toHaveBeenCalledWith("imap-1");
       expect(getOAuthAccountProxySetting).toHaveBeenCalledWith("gmail-1");
     });
-    expect(screen.getByRole("group", { name: "imap@example.com Account Proxy" })).not.toBeNull();
+    expect(screen.getByRole("group", { name: "Proxy for imap@example.com" })).not.toBeNull();
   });
 
   it("loads and saves per-account proxy modes from the proxy tab", async () => {
@@ -191,24 +196,21 @@ describe("ProxyTab global proxy", () => {
     await waitFor(() => {
       expect(getAccountProxySetting).toHaveBeenCalledWith("imap-1");
     });
-    const imapGroup = screen.getByRole("group", { name: "imap@example.com Account Proxy" });
+    const imapGroup = screen.getByRole("group", { name: "Proxy for imap@example.com" });
     const customModeButton = within(imapGroup).getByRole("button", { name: "Use custom proxy" });
-    expect(customModeButton.getAttribute("style")).toContain("border: 2px solid var(--color-accent)");
-    expect(customModeButton.getAttribute("style")).toContain("background-color: var(--color-bg-hover)");
+    expect(customModeButton.getAttribute("aria-pressed")).toBe("true");
+    expect(customModeButton.className).toContain("option-card");
     expect(screen.queryAllByText("Inherit global proxy unless a custom proxy or disabled mode is selected.")).toHaveLength(0);
     const saveButton = within(imapGroup).getByRole("button", { name: "Save account proxy" });
-    expect(saveButton.getAttribute("style")).toContain("background-color: var(--color-accent)");
-    expect(saveButton.getAttribute("style")).toContain("color: rgb(255, 255, 255)");
+    expect(saveButton.className).toContain("btn");
     const accountProxyHostInput = within(imapGroup).getByLabelText("SOCKS5 Proxy") as HTMLInputElement;
     const accountProxyPortInput = within(imapGroup).getByLabelText("Port") as HTMLInputElement;
     expect(accountProxyHostInput.value).toBe("192.168.0.2");
     expect(accountProxyPortInput.value).toBe("1080");
-    expect(accountProxyHostInput.getAttribute("style")).toContain("width: 100%");
-    expect(accountProxyHostInput.getAttribute("style")).toContain("box-sizing: border-box");
-    expect(accountProxyPortInput.getAttribute("style")).toContain("width: 100%");
-    expect(accountProxyPortInput.getAttribute("style")).toContain("box-sizing: border-box");
+    expect(accountProxyHostInput.className).toContain("input");
+    expect(accountProxyPortInput.className).toContain("input");
 
-    const gmailGroup = screen.getByRole("group", { name: "gmail@example.com Account Proxy" });
+    const gmailGroup = screen.getByRole("group", { name: "Proxy for gmail@example.com" });
     expect(within(gmailGroup).queryByLabelText("SOCKS5 Proxy")).toBeNull();
     expect(within(gmailGroup).queryByLabelText("Port")).toBeNull();
 

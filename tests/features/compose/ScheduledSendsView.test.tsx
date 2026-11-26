@@ -56,7 +56,7 @@ describe("ScheduledSendsView with real locales", () => {
   it("restores full editable content, BCC, reply mode and staged attachment paths", async () => {
     vi.mocked(restoreControlledSend).mockResolvedValue({ accountId: "a", to: ["to@example.com"], cc: [], bcc: ["private@example.com"], subject: "Subject", bodyText: "body", editorMode: "markdown", composeMode: "reply-all", rawSource: "**body**", richTextHtml: "<p>body</p>", quotedReplyHtml: "<blockquote>quote</blockquote>", attachments: [{ name: "file.txt", path: "/staged/file.txt", size: 20 }] });
     await mount(<ScheduledSendsView />);
-    fireEvent.click(await screen.findByRole("button", { name: "Cancel / restore to draft" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel and edit" }));
     await waitFor(() => expect(useComposeStore.getState().composeDraft?.rawSource).toBe("**body**"));
     expect(restoreControlledSend).toHaveBeenCalledWith(job);
     expect(useComposeStore.getState().composeMode).toBe("reply-all");
@@ -66,7 +66,7 @@ describe("ScheduledSendsView with real locales", () => {
   it("does not offer cancel/reschedule for an in-flight message", async () => {
     vi.mocked(listControlledSends).mockResolvedValue([{ ...job, state: "dispatching" }]);
     await mount(<ScheduledSendsView />); await screen.findByText(job.subject);
-    expect(screen.queryByRole("button", { name: "Cancel / restore to draft" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cancel and edit" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Reschedule" })).toBeNull();
   });
   it("requires explicit review after interruption instead of offering blind reschedule", async () => {
@@ -80,7 +80,7 @@ describe("ScheduledSendsView with real locales", () => {
   it("reports a stale revision race instead of claiming cancellation succeeded", async () => {
     vi.mocked(restoreControlledSend).mockRejectedValue(new Error("already dispatching"));
     await mount(<ScheduledSendsView />);
-    fireEvent.click(await screen.findByRole("button", { name: "Cancel / restore to draft" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel and edit" }));
     await screen.findByRole("alert");
     expect(useComposeStore.getState().composeDraft).toBeNull();
   });

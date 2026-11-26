@@ -8,7 +8,7 @@ import {
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: string) => {
+    t: (key: string, fallback?: unknown) => {
       const labels: Record<string, string> = {
         "cloudSync.webdavUrl": "WebDAV URL",
         "cloudSync.username": "Username",
@@ -20,7 +20,12 @@ vi.mock("react-i18next", () => ({
         "cloudSync.autoBackupConfigSaved": "Automatic backup configuration saved",
         "common.saving": "Saving…",
       };
-      return labels[key] ?? (typeof fallback === "string" ? fallback : key);
+      return labels[key] ?? (() => {
+        if (typeof fallback === "string") return fallback;
+        const opts = (fallback ?? {}) as Record<string, unknown>;
+        const template = typeof opts.defaultValue === "string" ? opts.defaultValue : key;
+        return template.replace(/\{\{(\w+)\}\}/g, (_m: string, n: string) => String(opts[n] ?? ""));
+      })();
     },
   }),
 }));

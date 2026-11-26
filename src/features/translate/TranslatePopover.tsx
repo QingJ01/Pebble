@@ -1,20 +1,28 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useId } from "react";
 import { useTranslation } from "react-i18next";
 import { Copy, Check, X } from "lucide-react";
 import { translateText } from "@/lib/api";
 import { profileLocalStorage } from "@/lib/profileStorage";
+import { describeError, type DescribedError } from "@/lib/extractErrorMessage";
+import Popover from "@/components/ui/Popover";
+import Button from "@/components/ui/Button";
+import IconButton from "@/components/ui/IconButton";
+import { selectClassName } from "@/components/ui/Select";
+import "./translate.css";
 
 interface Props {
   text: string;
   position: { x: number; y: number };
+  open?: boolean;
   onClose: () => void;
 }
 
-export default function TranslatePopover({ text, position, onClose }: Props) {
+export default function TranslatePopover({ text, position, open = true, onClose }: Props) {
   const { t } = useTranslation();
+  const titleId = useId();
   const [translated, setTranslated] = useState("");
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<DescribedError | null>(null);
   const [copied, setCopied] = useState(false);
   const uiLang = profileLocalStorage.getItem("pebble-language") || "zh";
   const [targetLang, setTargetLang] = useState(uiLang === "en" ? "zh" : "en");
@@ -30,13 +38,13 @@ export default function TranslatePopover({ text, position, onClose }: Props) {
     }
     let cancelled = false;
     setLoading(true);
-    setError("");
+    setError(null);
     translateText(text, "auto", targetLang)
       .then((result) => {
         if (!cancelled) setTranslated(result.translated);
       })
       .catch((err) => {
-        if (!cancelled) setError(String(err));
+        if (!cancelled) setError(describeError(err, { fallbackKey: "errors.translate" }));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -44,50 +52,42 @@ export default function TranslatePopover({ text, position, onClose }: Props) {
     return () => { cancelled = true; };
   }, [text, targetLang, privacyAcked]);
 
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
   function handleAcceptPrivacy() {
     profileLocalStorage.setItem("pebble-translate-privacy-ack", "1");
     setPrivacyAcked(true);
   }
 
   function handleCopy() {
-    navigator.clipboard.writeText(translated);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    void navigator.clipboard.writeText(translated).then(() => setCopied(true)).catch(() => {});
   }
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        left: Math.min(position.x, window.innerWidth - 340),
-        top: Math.min(position.y + 10, window.innerHeight - 200),
-        width: "320px",
-        padding: "12px",
-        borderRadius: "8px",
-        border: "1px solid var(--color-border)",
-        backgroundColor: "var(--color-bg)",
-        boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-        zIndex: 1000,
-        color: "var(--color-text-primary)",
-      }}
-      onClick={(e) => e.stopPropagation()}
+    <Popover
+      open={open}
+      onClose={onClose}
+      point={position}
+      placement="bottom-start"
+      role="dialog"
+      aria-labelledby={titleId}
+      initialFocus="container"
+      className="translate-popover"
     >
       {/* Header with target lang selector */}
-      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-        <span style={{ fontSize: "11px", fontWeight: 600, color: "var(--color-text-secondary)", textTransform: "uppercase", flex: 1 }}>
+      <div className="translate-popover__header">
+        <h2 id={titleId} className="translate-popover__title">
           {t("translate.title")}
-        </span>
+        </h2>
         <select
           value={targetLang}
           onChange={(e) => setTargetLang(e.target.value)}
-          style={{
-            fontSize: "11px",
-            padding: "2px 4px",
-            border: "1px solid var(--color-border)",
-            borderRadius: "4px",
-            backgroundColor: "var(--color-bg)",
-            color: "var(--color-text-primary)",
-          }}
+          aria-label={t("translate.targetLanguage", "Target language")}
+          className={selectClassName("sm")}
         >
           <option value="zh">{t("languages.chinese", "Chinese")}</option>
           <option value="en">{t("languages.english", "English")}</option>
@@ -97,80 +97,45 @@ export default function TranslatePopover({ text, position, onClose }: Props) {
           <option value="de">{t("languages.german", "German")}</option>
           <option value="es">{t("languages.spanish", "Spanish")}</option>
         </select>
-        <button
-          onClick={onClose}
-          style={{
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            padding: "2px",
-            color: "var(--color-text-secondary)",
-            display: "flex",
-            alignItems: "center",
-          }}
-        >
-          <X size={14} />
-        </button>
+        <IconButton label={t("common.close", "Close")} icon={<X size={14} />} onClick={onClose} />
       </div>
 
       {/* Privacy notice for first-time use */}
       {!privacyAcked ? (
-        <div style={{ fontSize: "13px", lineHeight: 1.5, padding: "8px 0" }}>
-          <p style={{ margin: "0 0 8px", color: "var(--color-warning, #e67e22)" }}>
+        <div className="translate-popover__notice">
+          <p>
             {t(
               "translate.privacyNotice",
               "Translation will send the selected text to a third-party translation service. Your email content will leave this device.",
             )}
           </p>
-          <button
-            onClick={handleAcceptPrivacy}
-            style={{
-              padding: "6px 14px",
-              border: "1px solid var(--color-border)",
-              borderRadius: "4px",
-              backgroundColor: "var(--color-accent, #3b82f6)",
-              color: "#fff",
-              fontSize: "12px",
-              cursor: "pointer",
-            }}
-          >
+          <Button variant="primary" size="sm" onClick={handleAcceptPrivacy}>
             {t("translate.acceptAndContinue", "I understand, continue")}
-          </button>
+          </Button>
         </div>
-      ) : /* Content */
-      loading ? (
-        <div style={{ fontSize: "13px", color: "var(--color-text-secondary)", padding: "8px 0" }}>
+      ) : loading ? (
+        <div role="status" className="translate-popover__status">
           {t("common.translating")}
         </div>
       ) : error ? (
-        <div style={{ fontSize: "13px", color: "#ef4444", padding: "8px 0" }}>
-          {error}
+        <div role="alert" className="dialog-error translate-popover__error" title={error.detail || undefined}>
+          {error.title}
         </div>
       ) : (
         <div>
-          <div style={{ fontSize: "13px", lineHeight: "1.5", marginBottom: "8px" }}>
+          <div className="translate-popover__result">
             {translated}
           </div>
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={handleCopy}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "4px",
-              padding: "4px 8px",
-              border: "1px solid var(--color-border)",
-              borderRadius: "4px",
-              backgroundColor: "transparent",
-              color: "var(--color-text-secondary)",
-              fontSize: "11px",
-              cursor: "pointer",
-            }}
+            icon={copied ? <Check size={14} /> : <Copy size={14} />}
           >
-            {copied ? <Check size={12} /> : <Copy size={12} />}
             {copied ? t("common.copied") : t("common.copy")}
-          </button>
+          </Button>
         </div>
       )}
-    </div>
+    </Popover>
   );
 }

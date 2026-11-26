@@ -1,6 +1,5 @@
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
-import { inputStyle, labelStyle } from "../styles/form";
 
 export interface SyncRangeDraft {
   preset: "all" | "30" | "90" | "365" | "custom";
@@ -33,11 +32,11 @@ export default function SyncRangeFields({ value, onChange, disabled = false, uns
   const id = useId();
   const invalid = syncRangeDays(value) === undefined;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "16px" }}>
-      <label htmlFor={`${id}-range`} style={labelStyle}>{t("syncRange.label", "Sync range")}</label>
+    <div className="field sync-range-field">
+      <label htmlFor={`${id}-range`} className="field__label">{t("syncRange.label", "Sync range")}</label>
       <select
         id={`${id}-range`}
-        style={inputStyle}
+        className="select"
         value={unsupported ? "all" : value.preset}
         disabled={disabled || unsupported}
         aria-describedby={`${id}-help`}
@@ -51,17 +50,17 @@ export default function SyncRangeFields({ value, onChange, disabled = false, uns
       </select>
       {!unsupported && value.preset === "custom" && (
         <>
-          <label htmlFor={`${id}-days`} style={labelStyle}>{t("syncRange.days", "Number of days")}</label>
+          <label htmlFor={`${id}-days`} className="field__label">{t("syncRange.days", "Number of days")}</label>
           <input id={`${id}-days`} type="number" min={1} max={36500} step={1} required
-            style={inputStyle} value={value.customDays} disabled={disabled}
+            className="input" value={value.customDays} disabled={disabled}
             aria-invalid={invalid} aria-describedby={invalid ? `${id}-error` : `${id}-help`}
             onChange={(event) => onChange({ ...value, customDays: event.target.value })} />
-          {invalid && <div id={`${id}-error`} role="alert" style={{ color: "var(--color-danger)", fontSize: "12px" }}>
+          {invalid && <div id={`${id}-error`} role="alert" className="field__error">
             {t("syncRange.invalid", "Enter a whole number from 1 to 36500.")}
           </div>}
         </>
       )}
-      <div id={`${id}-help`} style={{ color: "var(--color-text-secondary)", fontSize: "12px", lineHeight: 1.5 }}>
+      <div id={`${id}-help`} className="field__hint">
         {unsupported
           ? t("syncRange.pop3", "POP3 does not support server-side date filtering; all mail will be synced.")
           : t("syncRange.help", "Limits history downloaded from the server, starting at midnight UTC. New mail continues to sync; existing local mail is kept. To load earlier mail, choose a wider range or All mail and save.")}

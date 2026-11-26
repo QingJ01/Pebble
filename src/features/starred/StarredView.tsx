@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MAIL_ROW_HEIGHT } from "@/components/mailRowMetrics";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTranslation } from "react-i18next";
 import { Star } from "lucide-react";
@@ -7,6 +8,13 @@ import { useMailStore } from "@/stores/mail.store";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import MessageItem from "@/components/MessageItem";
 import MessageDetail from "@/components/MessageDetail";
+import Button from "@/components/ui/Button";
+import { MessageListSkeleton } from "@/components/Skeleton";
+import PaneSplitter, { usePaneWidth } from "@/components/PaneSplitter";
+import { LOADING_INDICATOR_DELAY_MS } from "@/hooks/useDelayedVisible";
+import { useRovingList } from "@/hooks/useRovingList";
+import { useAccountBadges } from "@/hooks/useAccountBadges";
+import "@/components/mail-list.css";
 
 const EMPTY_REMOVED_IDS = new Set<string>();
 
@@ -39,10 +47,11 @@ export default function StarredView() {
   }, [messages, scopedRemovedIds]);
 
   const parentRef = useRef<HTMLDivElement>(null);
+  const listPane = usePaneWidth("pebble-starred-list-width", 340, 260, 560);
   const virtualizer = useVirtualizer({
     count: visibleMessages.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 76,
+    estimateSize: () => MAIL_ROW_HEIGHT,
     measureElement: (el) => el.getBoundingClientRect().height,
     overscan: 5,
   });
@@ -50,6 +59,19 @@ export default function StarredView() {
   function handleOpen(messageId: string) {
     setSelectedId(messageId);
   }
+
+  const visibleIds = useMemo(() => visibleMessages.map((m) => m.id), [visibleMessages]);
+  const visibleAccountIds = useMemo(() => visibleMessages.map((m) => m.account_id), [visibleMessages]);
+  const badgeAccounts = useAccountBadges(visibleAccountIds);
+  const virtualItems = virtualizer.getVirtualItems();
+  const roving = useRovingList({
+    ids: visibleIds,
+    selectedId: scopedSelectedId,
+    onSelect: setSelectedId,
+    containerRef: parentRef,
+    scrollToIndex: (index) => virtualizer.scrollToIndex(index, { align: "auto" }),
+    renderedIds: virtualItems.map((item) => visibleIds[item.index]).filter(Boolean),
+  });
 
   const handleLoadMore = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) fetchNextPage();
@@ -74,90 +96,66 @@ export default function StarredView() {
 
   if (error && messages.length === 0) {
     return (
-      <div className="fade-in" style={{
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        height: "100%", gap: "12px", color: "var(--color-text-secondary)",
-      }}>
+      <div className="fade-in mail-empty-state">
         <Star size={40} strokeWidth={1.2} />
-        <p style={{ color: "var(--color-error, #e53e3e)", fontSize: "14px", margin: 0 }}>
+        <p role="alert" className="mail-empty-state__error">
           {t("starred.loadError", "Failed to load starred messages")}
         </p>
-        <p style={{ fontSize: "13px", margin: 0 }}>{extractErrorMessage(error)}</p>
-        <button
-          onClick={() => refetch()}
-          style={{
-            marginTop: "4px",
-            padding: "6px 16px",
-            borderRadius: "4px",
-            border: "1px solid var(--color-border)",
-            backgroundColor: "transparent",
-            color: "var(--color-accent)",
-            fontSize: "13px",
-            cursor: "pointer",
-          }}
-        >
+        <p className="mail-empty-state__detail">{extractErrorMessage(error)}</p>
+        <Button onClick={() => refetch()}>
           {t("common.retry", "Retry")}
-        </button>
+        </Button>
       </div>
     );
   }
 
   if (loading) {
-    return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--color-text-secondary)" }}>
-        <Star size={20} className="spinner" style={{ marginRight: "8px" }} />
-        {t("common.loading", "Loading...")}
-      </div>
-    );
+    return <MessageListSkeleton delayMs={LOADING_INDICATOR_DELAY_MS} />;
   }
 
   if (visibleMessages.length === 0 && !hasNextPage) {
     return (
-      <div className="fade-in" style={{
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        height: "100%", gap: "12px", color: "var(--color-text-secondary)",
-      }}>
+      <div className="fade-in mail-empty-state">
         <Star size={40} strokeWidth={1.2} />
-        <p style={{ fontSize: "14px", margin: 0 }}>{t("starred.empty", "No starred messages")}</p>
+        <p>{t("starred.empty", "No starred messages")}</p>
       </div>
     );
   }
 
   return (
     <div className="fade-in" style={{ display: "flex", height: "100%" }}>
-      <div style={{
-        width: scopedSelectedId ? "340px" : "100%",
+      <div id="starred-list-pane" style={{
+        width: scopedSelectedId ? `${listPane.width}px` : "100%",
+        maxWidth: "55%",
+        flexShrink: 0,
         borderRight: scopedSelectedId ? "1px solid var(--color-border)" : "none",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
-        transition: "width 0.15s ease",
       }}>
-        <div style={{
-          padding: "12px 16px", borderBottom: "1px solid var(--color-border)",
-          fontSize: "14px", fontWeight: 600, color: "var(--color-text-primary)",
-          display: "flex", alignItems: "center", gap: "8px",
-        }}>
-          <Star size={16} />
+        <div className="pane-header">
+          <Star size={16} aria-hidden="true" className="pane-header__icon" />
           {t("starred.title", "Starred Messages")}
-          <span style={{
-            fontSize: "12px", fontWeight: 400, color: "var(--color-text-secondary)",
-            backgroundColor: "var(--color-bg-secondary, rgba(0,0,0,0.06))",
-            padding: "2px 8px", borderRadius: "10px",
-          }}>
-            {totalCount}
-          </span>
+          <span className="pane-header__count">{totalCount}</span>
         </div>
 
-        <div ref={parentRef} className="scroll-region starred-list-scroll" style={{ flex: 1, overflow: "auto" }}>
-          <div style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
-            {virtualizer.getVirtualItems().map((virtualItem) => {
+        <div
+          ref={parentRef}
+          className="scroll-region starred-list-scroll"
+          role="listbox"
+          aria-label={t("starred.title", "Starred Messages")}
+          {...roving.containerProps}
+          style={{ flex: 1, overflow: "auto", outline: "none" }}
+        >
+          <div role="presentation" style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
+            {virtualItems.map((virtualItem) => {
               const msg = visibleMessages[virtualItem.index];
               return (
                 <div
                   key={msg.id}
                   ref={virtualizer.measureElement}
                   data-index={virtualItem.index}
+                  role="presentation"
                   style={{
                     position: "absolute",
                     top: 0,
@@ -169,8 +167,15 @@ export default function StarredView() {
                   <MessageItem
                     message={msg}
                     isSelected={msg.id === scopedSelectedId}
-                    onClick={() => handleOpen(msg.id)}
+                    onClick={() => {
+                      roving.setActiveId(msg.id);
+                      handleOpen(msg.id);
+                    }}
+                    onOpen={() => handleOpen(msg.id)}
                     onToggleStar={handleToggleStar}
+                    tabIndex={roving.tabIndexFor(msg.id)}
+                    onRowFocus={roving.setActiveId}
+                    account={badgeAccounts?.get(msg.account_id)}
                   />
                 </div>
               );
@@ -179,37 +184,30 @@ export default function StarredView() {
         </div>
 
         {hasNextPage && (
-          <div style={{
-            borderTop: "1px solid var(--color-border)",
-            padding: "10px 16px",
-            display: "flex",
-            justifyContent: "center",
-          }}>
-            <button
-              onClick={handleLoadMore}
-              disabled={isFetchingNextPage}
-              style={{
-                padding: "6px 14px",
-                borderRadius: "4px",
-                border: "1px solid var(--color-border)",
-                backgroundColor: "transparent",
-                color: "var(--color-accent)",
-                fontSize: "13px",
-                cursor: isFetchingNextPage ? "default" : "pointer",
-                opacity: isFetchingNextPage ? 0.7 : 1,
-              }}
-            >
+          <div className="mail-list-load-more mail-list-load-more--bar">
+            <Button size="sm" onClick={handleLoadMore} loading={isFetchingNextPage}>
               {t("common.loadMore", "Load More")}
-            </button>
+            </Button>
           </div>
         )}
       </div>
 
       {scopedSelectedId && (
-        <div className="scroll-region starred-detail-scroll" style={{ flex: 1, overflow: "auto" }}>
+        <PaneSplitter
+          width={listPane.width}
+          min={listPane.min}
+          max={listPane.max}
+          onChange={listPane.setWidth}
+          onReset={listPane.reset}
+          controls="starred-list-pane"
+        />
+      )}
+      {scopedSelectedId && (
+        <div className="scroll-region starred-detail-scroll" style={{ flex: 1, minWidth: 0, overflow: "auto" }}>
           <MessageDetail
             messageId={scopedSelectedId}
             onBack={() => setSelectedId(null)}
+            onReopen={(id) => setSelectedId((current) => current ?? id)}
           />
         </div>
       )}

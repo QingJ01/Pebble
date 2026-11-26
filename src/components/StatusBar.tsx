@@ -1,8 +1,11 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { listen } from "@tauri-apps/api/event";
-import { AlertCircle, AppWindow, Clock, RefreshCw } from "lucide-react";
+import { AlertCircle, AppWindow, Bell, Clock, RefreshCw, WifiOff, X } from "lucide-react";
+import IconButton from "@/components/ui/IconButton";
+import { describeError } from "@/lib/extractErrorMessage";
+import { toastError } from "@/stores/toast.store";
 import { useQueryClient, type Query, type QueryClient } from "@tanstack/react-query";
 import { useUIStore, type RealtimeStatus } from "../stores/ui.store";
 import { useMailStore } from "@/stores/mail.store";
@@ -159,6 +162,11 @@ export default function StatusBar() {
   const queryClient = useQueryClient();
   const { data: pendingOpsSummary } = usePendingMailOpsSummary(activeAccountId);
   const syncStatusRef = useRef(syncStatus);
+  // Progress of the current pass for the active account: phase + messages received so far.
+  const [syncPhase, setSyncPhase] = useState<string | null>(null);
+  const [syncedCount, setSyncedCount] = useState(0);
+  const activeAccountIdRef = useRef(activeAccountId);
+  activeAccountIdRef.current = activeAccountId;
 
   useEffect(() => {
     syncStatusRef.current = syncStatus;
@@ -171,10 +179,10 @@ export default function StatusBar() {
 
   // Listen for mail:error events from Rust backend
   useEffect(() => {
+    // Errors stay visible until dismissed or the next successful sync pass, so
+    // an earlier error can never clear a later one.
     const unlisten = listen<MailErrorPayload>("mail:error", (event) => {
       setLastMailError(event.payload.message);
-      // Auto-clear error after 10 seconds
-      setTimeout(() => setLastMailError(null), 10_000);
     });
     return () => {
       unlisten.then((fn) => fn());
@@ -209,12 +217,16 @@ export default function StatusBar() {
   // UI "syncing" must track a concrete pass rather than worker lifetime.
   useEffect(() => {
     const unlisten = listen<SyncProgressPayload>("mail:sync-progress", (event) => {
-      const { account_id, status, message } = event.payload;
+      const { account_id, status, message, phase } = event.payload;
       if (!isActiveAccountEvent(account_id)) return;
       if (status === "started") {
+        setSyncPhase(phase ?? null);
+        setSyncedCount(0);
         updateSyncStatus("syncing");
       } else if (status === "completed") {
         updateSyncStatus("idle");
+        setSyncPhase(null);
+        setLastMailError(null);
         refreshMailQueries();
       } else if (status === "error") {
         updateSyncStatus("error");
@@ -231,6 +243,11 @@ export default function StatusBar() {
     const coalescer = createMailNewCoalescer(queryClient);
     const unlisten = listen<MailNewPayload>("mail:new", (event) => {
       coalescer.push(event.payload);
+      const accountId = event.payload?.account_id;
+      const active = activeAccountIdRef.current;
+      if (syncStatusRef.current === "syncing" && (!accountId || !active || accountId === active)) {
+        setSyncedCount((count) => count + 1);
+      }
     });
     return () => {
       // Deliver what already arrived rather than dropping it on unmount.
@@ -263,8 +280,13 @@ export default function StatusBar() {
   async function handleSync() {
     if (!activeAccountId) return;
     if (syncStatus === "syncing") {
-      try { await stopSync(activeAccountId); } catch {}
-      updateSyncStatus("idle");
+      try {
+        await stopSync(activeAccountId);
+        updateSyncStatus("idle");
+        setSyncPhase(null);
+      } catch (error) {
+        toastError(error, "status.stopSyncFailed");
+      }
     } else {
       updateSyncStatus("syncing");
       try {
@@ -275,11 +297,17 @@ export default function StatusBar() {
     }
   }
 
+  const syncingBase = syncPhase === "initial"
+    ? t("status.syncingInitial", "Initial sync…")
+    : t("status.syncing", "Syncing...");
   const syncText = {
     idle: t("status.ready", "Ready"),
-    syncing: t("status.syncing", "Syncing..."),
+    syncing: syncedCount > 0
+      ? t("status.syncingWithCount", "{{status}} {{count}} new", { status: syncingBase, count: syncedCount })
+      : syncingBase,
     error: t("status.syncError", "Sync error"),
   }[syncStatus];
+  const mailError = lastMailError ? describeError(lastMailError, { fallbackKey: "errors.sync" }) : null;
   const realtimeStatus = activeAccountId ? realtimeStatusByAccount[activeAccountId] : undefined;
   const realtimeStatusText = getRealtimeStatusText(realtimeStatus, t);
 
@@ -303,30 +331,16 @@ export default function StatusBar() {
 
   return (
     <footer
-      className="flex items-center px-3 h-6 text-xs border-t gap-3"
-      style={{
-        backgroundColor: "var(--color-statusbar-bg)",
-        borderColor: "var(--color-border)",
-        color: "var(--color-text-secondary)",
-      }}
+      className="status-bar flex items-center gap-3"
     >
       {networkStatus === "offline" ? (
+        // The offline banner above the content announces the state; this is a
+        // compact, non-live reminder so screen readers hear it only once.
         <span
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
           className="flex items-center gap-1"
-          style={{ color: "var(--color-error, #ef4444)" }}
+          style={{ color: "var(--color-danger)" }}
         >
-          <svg aria-hidden="true" focusable="false" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <line x1="1" y1="1" x2="23" y2="23" />
-            <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55" />
-            <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39" />
-            <path d="M10.71 5.05A16 16 0 0 1 22.56 9" />
-            <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88" />
-            <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
-            <line x1="12" y1="20" x2="12.01" y2="20" />
-          </svg>
+          <WifiOff aria-hidden="true" size={12} />
           {t("status.offline", "Offline")}
         </span>
       ) : (
@@ -345,30 +359,17 @@ export default function StatusBar() {
               {realtimeStatusText}
             </span>
           )}
-          <button
-            onClick={handleSync}
+          <IconButton
+            onClick={() => void handleSync()}
             disabled={!activeAccountId}
-            title={syncStatus === "syncing" ? t("status.stopSync") : t("status.syncNow")}
-            aria-label={syncStatus === "syncing" ? t("status.stopSync") : t("status.syncNow")}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: activeAccountId ? "pointer" : "default",
-              padding: "2px",
-              color: "var(--color-text-secondary)",
-              display: "flex",
-              alignItems: "center",
-              opacity: activeAccountId ? 1 : 0.4,
-            }}
-          >
-            <RefreshCw
-              aria-hidden="true"
-              size={13}
-              style={{
-                animation: syncStatus === "syncing" ? "spin 1s linear infinite" : "none",
-              }}
-            />
-          </button>
+            label={syncStatus === "syncing" ? t("status.stopSync") : t("status.syncNow")}
+            icon={(
+              <RefreshCw
+                size={13}
+                className={syncStatus === "syncing" ? "status-bar__spin" : undefined}
+              />
+            )}
+          />
           {pendingRemoteWrites > 0 && (
             <span
               role={failedRemoteWrites > 0 ? "alert" : "status"}
@@ -378,7 +379,7 @@ export default function StatusBar() {
               title={pendingOpsSummary?.last_error ?? pendingRemoteText}
               style={{
                 color: failedRemoteWrites > 0
-                  ? "var(--color-warning, #d97706)"
+                  ? "var(--color-warning)"
                   : "var(--color-text-secondary)",
                 maxWidth: "220px",
               }}
@@ -390,48 +391,38 @@ export default function StatusBar() {
         </>
       )}
 
-      {lastMailError && (
-        <span
-          role="alert"
-          aria-live="assertive"
-          aria-atomic="true"
-          className="truncate"
-          style={{ color: "var(--color-error, #ef4444)" }}
-        >
-          {lastMailError}
+      {mailError && (
+        <span className="flex items-center gap-1 min-w-0" style={{ color: "var(--color-danger)" }}>
+          <span
+            role="alert"
+            aria-live="assertive"
+            aria-atomic="true"
+            className="truncate"
+            title={mailError.detail ? `${mailError.title}\n${mailError.detail}` : mailError.title}
+          >
+            {mailError.title}
+          </span>
+          <IconButton
+            label={t("status.dismissError", "Dismiss error")}
+            icon={<X size={12} />}
+            onClick={() => setLastMailError(null)}
+            style={{ color: "inherit" }}
+          />
         </span>
       )}
 
       <span className="ml-auto flex items-center gap-1">
-        <button
-          type="button"
+        <IconButton
           onClick={() => setKeepRunningInBackground(!keepRunningInBackground)}
-          aria-label={backgroundToggleLabel}
-          aria-pressed={keepRunningInBackground}
-          title={backgroundToggleTitle}
-          className="inline-flex items-center justify-center"
-          style={{
-            width: "20px",
-            height: "20px",
-            border: "1px solid transparent",
-            borderRadius: "4px",
-            background: keepRunningInBackground
-              ? "color-mix(in srgb, var(--color-accent) 16%, transparent)"
-              : "transparent",
-            color: keepRunningInBackground
-              ? "var(--color-accent)"
-              : "var(--color-text-secondary)",
-            cursor: "pointer",
-            padding: 0,
-          }}
-        >
-          <AppWindow aria-hidden="true" size={13} />
-        </button>
+          label={backgroundToggleLabel}
+          tooltip={backgroundToggleTitle}
+          pressed={keepRunningInBackground}
+          icon={<AppWindow size={13} />}
+        />
         {notificationsEnabled && (
-          <svg aria-hidden="true" focusable="false" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-          </svg>
+          <span title={t("status.notificationsOn", "Notifications on")} className="inline-flex">
+            <Bell aria-hidden="true" size={12} />
+          </span>
         )}
       </span>
     </footer>

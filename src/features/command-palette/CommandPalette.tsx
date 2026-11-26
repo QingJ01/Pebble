@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useCommandStore } from "@/stores/command.store";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
+import OverlayPortal from "@/components/ui/OverlayPortal";
+import { formatShortcut, useShortcutStore } from "@/stores/shortcut.store";
+import { COMMAND_SHORTCUT_ACTIONS } from "./commands";
+import "./command-palette.css";
 
 export default function CommandPalette() {
   const { t } = useTranslation();
@@ -9,6 +14,10 @@ export default function CommandPalette() {
   const inputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const bindings = useShortcutStore((s) => s.bindings);
+
+  useOverlayLayer({ open: isOpen, modal: true, onEscape: close, containerRef: dialogRef });
 
   useEffect(() => {
     if (isOpen) {
@@ -30,6 +39,13 @@ export default function CommandPalette() {
   useEffect(() => {
     setSelectedIndex(0);
   }, [query]);
+
+  // Keep the keyboard-selected command visible.
+  useEffect(() => {
+    if (!isOpen) return;
+    const option = listRef.current?.querySelector<HTMLElement>(`[data-index="${selectedIndex}"]`);
+    option?.scrollIntoView?.({ block: "nearest" });
+  }, [selectedIndex, isOpen]);
 
   // Focus trap: keep Tab cycling within the dialog
   const handleTabTrap = useCallback((e: React.KeyboardEvent) => {
@@ -79,35 +95,19 @@ export default function CommandPalette() {
   }
 
   return (
+    <OverlayPortal>
     <div
       onClick={close}
+      className="anim-backdrop-in command-palette-backdrop"
       role="dialog"
       aria-modal="true"
       aria-label={t("commandPalette.title", "Command Palette")}
-      style={{
-        position: "fixed",
-        inset: 0,
-        backgroundColor: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "flex-start",
-        justifyContent: "center",
-        paddingTop: "20vh",
-        zIndex: 1000,
-      }}
     >
       <div
         ref={dialogRef}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
-        style={{
-          width: "100%",
-          maxWidth: "480px",
-          backgroundColor: "var(--color-bg)",
-          borderRadius: "12px",
-          border: "1px solid var(--color-border)",
-          boxShadow: "0 25px 50px -12px rgba(0,0,0,0.25)",
-          overflow: "hidden",
-        }}
+        className="anim-dialog-in command-palette"
       >
         <input
           ref={inputRef}
@@ -125,81 +125,52 @@ export default function CommandPalette() {
           role="combobox"
           aria-expanded="true"
           aria-autocomplete="list"
-          style={{
-            width: "100%",
-            padding: "16px",
-            border: "none",
-            borderBottom: "1px solid var(--color-border)",
-            backgroundColor: "transparent",
-            fontSize: "15px",
-            color: "var(--color-text-primary)",
-          }}
+          className="command-palette__input"
         />
         <div
+          ref={listRef}
           id="command-listbox"
-          className="scroll-region command-list-scroll"
+          className="scroll-region command-list-scroll command-palette__list"
           role="listbox"
           aria-label={t("commandPalette.results", "Commands")}
-          style={{ maxHeight: "320px", overflowY: "auto" }}
         >
           {filteredCommands.map((cmd, i) => (
             <div
               key={cmd.id}
               id={`cmd-${cmd.id}`}
               role="option"
+              data-index={i}
               aria-selected={i === selectedIndex}
               onClick={() => execute(cmd.id)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "10px 16px",
-                cursor: "pointer",
-                backgroundColor: i === selectedIndex ? "var(--color-bg-hover, rgba(0,0,0,0.05))" : "transparent",
-                color: "var(--color-text-primary)",
-              }}
+              // Pointer movement (not mere hover while the list scrolls under a
+              // still pointer) moves the single highlight.
+              onMouseMove={() => { if (i !== selectedIndex) setSelectedIndex(i); }}
+              className="command-palette__option"
             >
               <div>
-                <span style={{ fontSize: "14px" }}>{cmd.name}</span>
-                <span
-                  style={{
-                    fontSize: "11px",
-                    color: "var(--color-text-secondary)",
-                    marginLeft: "8px",
-                  }}
-                >
-                  {cmd.category}
-                </span>
+                <span className="command-palette__name">{cmd.name}</span>
+                <span className="command-palette__category">{cmd.category}</span>
               </div>
-              {cmd.shortcut && (
-                <span
-                  style={{
-                    fontSize: "12px",
-                    color: "var(--color-text-secondary)",
-                    backgroundColor: "var(--color-bg-secondary, rgba(0,0,0,0.06))",
-                    padding: "2px 6px",
-                    borderRadius: "4px",
-                  }}
-                >
-                  {cmd.shortcut}
-                </span>
-              )}
+              {(() => {
+                const action = COMMAND_SHORTCUT_ACTIONS[cmd.id];
+                const keys = action ? bindings[action] : cmd.shortcut;
+                if (!keys) return null;
+                return (
+                  <kbd className="command-palette__kbd">
+                    {formatShortcut(keys)}
+                  </kbd>
+                );
+              })()}
             </div>
           ))}
           {filteredCommands.length === 0 && (
-            <div
-              style={{
-                padding: "24px 16px",
-                textAlign: "center",
-                color: "var(--color-text-secondary)",
-                fontSize: "13px",
-              }}
-            >
+            <div className="command-palette__empty">
               {t("commandPalette.noResults")}
             </div>
           )}
         </div>
       </div>
     </div>
+    </OverlayPortal>
   );
 }

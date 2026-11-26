@@ -28,10 +28,8 @@ export default function SendControlExitGuard() {
     finally { setBusy(false); }
   }
   if (!open) return null;
-  return <>
-    {error && <p role="alert">{t("sendControls.error")}</p>}
-    <ConfirmDialog title={t("sendControls.exitTitle")} message={t("sendControls.exitMessage")}
-      confirmLabel={t("sendControls.exitConfirm")} cancelLabel={t("sendControls.exitCancel")}
-      busy={busy} destructive onConfirm={() => void resolve(true)} onCancel={() => void resolve(false)} />
-  </>;
+  return <ConfirmDialog title={t("sendControls.exitTitle")} message={t("sendControls.exitMessage")}
+    confirmLabel={t("sendControls.exitConfirm")} cancelLabel={t("sendControls.exitCancel")}
+    error={error ? t("sendControls.error") : undefined}
+    busy={busy} destructive onConfirm={() => void resolve(true)} onCancel={() => void resolve(false)} />;
 }

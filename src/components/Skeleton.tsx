@@ -1,3 +1,8 @@
+import { useDelayedVisible } from "@/hooks/useDelayedVisible";
+import "./mail-list.css";
+import "./message-reader.css";
+import "../features/kanban/kanban.css";
+
 interface SkeletonProps {
   width?: string;
   height?: string;
@@ -9,7 +14,7 @@ interface SkeletonProps {
 export function Skeleton({
   width = "100%",
   height = "14px",
-  borderRadius = "4px",
+  borderRadius = "var(--radius-sm)",
   style,
 }: SkeletonProps) {
   return (
@@ -20,30 +25,24 @@ export function Skeleton({
   );
 }
 
-/** Skeleton that mimics a mail list item (avatar + 2 text lines). */
+/** Skeleton that mimics a mail list row (sender + date, subject, snippet; 72px). */
 export function MessageSkeleton() {
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "flex-start",
-        gap: "12px",
-        padding: "12px 14px",
-        borderBottom: "1px solid var(--color-border)",
-      }}
-    >
-      <Skeleton width="32px" height="32px" borderRadius="50%" />
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "8px" }}>
+    <div className="message-list-row skeleton-row" aria-hidden="true">
+      <div className="skeleton-row__line">
         <Skeleton width="40%" height="12px" />
-        <Skeleton width="70%" height="11px" />
-        <Skeleton width="90%" height="10px" />
+        <Skeleton width="36px" height="10px" />
       </div>
+      <Skeleton width="70%" height="12px" />
+      <Skeleton width="90%" height="10px" />
     </div>
   );
 }
 
 /** Multiple message skeletons stacked. */
-export function MessageListSkeleton({ count = 6 }: { count?: number }) {
+export function MessageListSkeleton({ count = 6, delayMs = 0 }: { count?: number; delayMs?: number }) {
+  const visible = useDelayedVisible(delayMs);
+  if (!visible) return <div role="status" aria-busy="true" />;
   return (
     <div role="status" aria-live="polite" className="fade-in">
       {Array.from({ length: count }, (_, i) => (
@@ -53,47 +52,43 @@ export function MessageListSkeleton({ count = 6 }: { count?: number }) {
   );
 }
 
-/** Skeleton for the kanban board columns. */
+/** Skeleton for the kanban board columns (same column wells as the board). */
 export function KanbanSkeleton() {
   return (
-    <div role="status" aria-live="polite" className="fade-in" style={{ display: "flex", gap: "16px", padding: "20px" }}>
+    <div role="status" aria-live="polite" className="fade-in kanban-board">
       {[1, 2, 3].map((col) => (
-        <div
-          key={col}
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            gap: "10px",
-          }}
-        >
-          <Skeleton width="60%" height="16px" />
-          <Skeleton height="80px" borderRadius="8px" />
-          <Skeleton height="80px" borderRadius="8px" />
+        <div key={col} className="kanban-column">
+          <div className="kanban-column__header">
+            <Skeleton width="40%" height="14px" />
+          </div>
+          <div className="kanban-column__cards">
+            <Skeleton height="72px" borderRadius="var(--radius-lg)" />
+            <Skeleton height="72px" borderRadius="var(--radius-lg)" />
+          </div>
         </div>
       ))}
     </div>
   );
 }
 
-/** Skeleton for message detail view. */
+/** Skeleton for the reading pane: toolbar row, subject + sender card, body. */
 export function MessageDetailSkeleton() {
   return (
-    <div role="status" aria-live="polite" className="fade-in" style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "16px" }}>
-      <Skeleton width="55%" height="18px" />
-      <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-        <Skeleton width="28px" height="28px" borderRadius="50%" />
-        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-          <Skeleton width="140px" height="12px" />
-          <Skeleton width="200px" height="10px" />
-        </div>
+    <div role="status" aria-live="polite" className="fade-in message-detail-container">
+      <div className="reader-toolbar">
+        <Skeleton width="160px" height="16px" />
       </div>
-      <div style={{ height: "1px", background: "var(--color-border)" }} />
-      <Skeleton width="100%" height="12px" />
-      <Skeleton width="95%" height="12px" />
-      <Skeleton width="80%" height="12px" />
-      <Skeleton width="100%" height="12px" />
-      <Skeleton width="60%" height="12px" />
+      <div className="reader-header">
+        <Skeleton width="55%" height="18px" />
+        <Skeleton height="56px" borderRadius="var(--radius-lg)" />
+      </div>
+      <div className="reader-body skeleton-stack">
+        <Skeleton width="100%" height="12px" />
+        <Skeleton width="95%" height="12px" />
+        <Skeleton width="80%" height="12px" />
+        <Skeleton width="100%" height="12px" />
+        <Skeleton width="60%" height="12px" />
+      </div>
     </div>
   );
 }

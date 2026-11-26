@@ -1,11 +1,21 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Pencil, Trash2, ShieldCheck, X } from "lucide-react";
 import { createRule, deleteRule, listRules, updateRule, type Rule } from "@/lib/api";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import IconButton from "@/components/ui/IconButton";
+import Button from "@/components/ui/Button";
+import Checkbox from "@/components/ui/Checkbox";
+import {
+  SettingsList,
+  SettingsListRow,
+  SettingsNotice,
+  SettingsSection,
+  StatusChip,
+} from "./SettingsLayout";
 import { useToastStore } from "@/stores/toast.store";
 import { useUIStore } from "@/stores/ui.store";
-import { extractErrorMessage } from "@/lib/extractErrorMessage";
+import { extractErrorMessage, formatError } from "@/lib/extractErrorMessage";
 import {
   parseRuleActions,
   parseRuleConditions,
@@ -175,7 +185,7 @@ export default function RulesTab() {
       cancelEdit();
       await fetchRules();
     } catch (err) {
-      setError(String(err));
+      setError(formatError(err, { fallbackKey: "errors.saveRule" }));
     }
   }
 
@@ -234,53 +244,16 @@ export default function RulesTab() {
     }));
   }
 
-  // ── Styles ──────────────────────────────────────────────────
-  const inputStyle: React.CSSProperties = {
-    width: "100%",
-    padding: "8px 10px",
-    borderRadius: "6px",
-    border: "1px solid var(--color-border)",
-    backgroundColor: "var(--color-bg)",
-    color: "var(--color-text-primary)",
-    fontSize: "13px",
-    boxSizing: "border-box",
-  };
-
-  const selectStyle: React.CSSProperties = {
-    ...inputStyle,
-    appearance: "auto",
-    cursor: "pointer",
-  };
-
-  const labelStyle: React.CSSProperties = {
-    display: "block",
-    fontSize: "12px",
-    fontWeight: 500,
-    color: "var(--color-text-secondary)",
-    marginBottom: "4px",
-  };
-
-  const smallBtnStyle: React.CSSProperties = {
-    padding: "4px",
-    border: "none",
-    background: "transparent",
-    borderRadius: "4px",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    color: "var(--color-text-secondary)",
-    flexShrink: 0,
-  };
-
   // ── Condition row renderer ──────────────────────────────────
   function renderConditionRow(condition: Condition, index: number) {
     return (
-      <div key={index} style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+      <div key={index} style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
         <select
           aria-label={t("rules.conditionField", "Condition field")}
+          className="select"
           value={condition.field}
           onChange={(e) => updateCondition(index, { field: e.target.value as ConditionField })}
-          style={{ ...selectStyle, flex: "0 0 120px" }}
+          style={{ flex: "0 0 120px" }}
         >
           {CONDITION_FIELDS.map((f) => (
             <option key={f} value={f}>{t(`rules.field_${f}`, f)}</option>
@@ -288,9 +261,10 @@ export default function RulesTab() {
         </select>
         <select
           aria-label={t("rules.conditionOp", "Condition operator")}
+          className="select"
           value={condition.op}
           onChange={(e) => updateCondition(index, { op: e.target.value as ConditionOp })}
-          style={{ ...selectStyle, flex: "0 0 130px" }}
+          style={{ flex: "0 0 132px" }}
         >
           {CONDITION_OPS.map((op) => (
             <option key={op} value={op}>{t(`rules.op_${op}`, op)}</option>
@@ -298,20 +272,20 @@ export default function RulesTab() {
         </select>
         <input
           type="text"
+          className="input"
           aria-label={t("rules.conditionValue", "Condition value")}
           value={condition.value}
           onChange={(e) => updateCondition(index, { value: e.target.value })}
           placeholder={t("rules.valuePlaceholder", "Value")}
-          style={{ ...inputStyle, flex: 1 }}
+          style={{ flex: 1 }}
         />
-        <button
+        <IconButton
+          size="md"
+          label={t("common.remove", "Remove")}
+          icon={<X size={14} />}
           onClick={() => removeCondition(index)}
-          style={smallBtnStyle}
-          title={t("common.remove", "Remove")}
           disabled={form.conditions.length <= 1}
-        >
-          <X size={14} />
-        </button>
+        />
       </div>
     );
   }
@@ -321,16 +295,17 @@ export default function RulesTab() {
     const needsValue = action.type === "AddLabel" || action.type === "MoveToFolder" || action.type === "SetKanbanColumn";
 
     return (
-      <div key={index} style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+      <div key={index} style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
         <select
           aria-label={t("rules.actionType", "Action type")}
+          className="select"
           value={action.type}
           onChange={(e) => {
             const newType = e.target.value as ActionType;
             const val = newType === "SetKanbanColumn" ? "todo" : "";
             updateAction(index, { type: newType, value: val });
           }}
-          style={{ ...selectStyle, flex: "0 0 160px" }}
+          style={{ flex: "0 0 160px" }}
         >
           {ACTION_TYPES.map((at) => (
             <option key={at} value={at}>{t(`rules.action_${at}`, at)}</option>
@@ -340,9 +315,10 @@ export default function RulesTab() {
           action.type === "SetKanbanColumn" ? (
             <select
               aria-label={t("rules.kanbanColumn", "Kanban column")}
+              className="select"
               value={action.value || "todo"}
               onChange={(e) => updateAction(index, { value: e.target.value })}
-              style={{ ...selectStyle, flex: 1 }}
+              style={{ flex: 1 }}
             >
               {KANBAN_COLUMNS.map((c) => (
                 <option key={c} value={c}>{t(`rules.kanban_${c}`, c)}</option>
@@ -351,6 +327,7 @@ export default function RulesTab() {
           ) : (
             <input
               type="text"
+              className="input"
               aria-label={t("rules.actionValue", "Action value")}
               value={action.value || ""}
               onChange={(e) => updateAction(index, { value: e.target.value })}
@@ -359,168 +336,85 @@ export default function RulesTab() {
                   ? t("rules.labelPlaceholder", "Label name")
                   : t("rules.folderPlaceholder", "Folder name")
               }
-              style={{ ...inputStyle, flex: 1 }}
+              style={{ flex: 1 }}
             />
           )
         )}
         {!needsValue && <div style={{ flex: 1 }} />}
-        <button
+        <IconButton
+          size="md"
+          label={t("common.remove", "Remove")}
+          icon={<X size={14} />}
           onClick={() => removeAction(index)}
-          style={smallBtnStyle}
-          title={t("common.remove", "Remove")}
           disabled={form.actions.length <= 1}
-        >
-          <X size={14} />
-        </button>
+        />
       </div>
     );
   }
 
-  // ── Editor panel ────────────────────────────────────────────
+  // ── Editor panel (rendered as a stacked row of the rules list) ──
   function renderEditor() {
     return (
-      <div
-        style={{
-          padding: "16px",
-          borderRadius: "8px",
-          border: "1px solid var(--color-border)",
-          backgroundColor: "var(--color-bg)",
-          marginBottom: "16px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "14px",
-        }}
-      >
-        {/* Name */}
-        <div>
-          <label htmlFor="rule-name" style={labelStyle}>{t("rules.name")}</label>
-          <input
-            id="rule-name"
-            type="text"
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-            placeholder={t("rules.namePlaceholder")}
-            style={inputStyle}
-          />
-        </div>
-
-        {/* Priority + Enabled row */}
-        <div style={{ display: "flex", gap: "16px", alignItems: "flex-end" }}>
-          <div style={{ flex: 1 }}>
-            <label htmlFor="rule-priority" style={labelStyle}>{t("rules.priority")}</label>
+      <div className="settings-list__row settings-list__row--stacked" style={{ gap: "var(--space-4)" }}>
+        <div className="settings-row">
+          <div className="field">
+            <label htmlFor="rule-name" className="field__label">{t("rules.name")}</label>
+            <input
+              id="rule-name"
+              type="text"
+              className="input"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder={t("rules.namePlaceholder")}
+            />
+          </div>
+          <div className="field field--narrow">
+            <label htmlFor="rule-priority" className="field__label">{t("rules.priority")}</label>
             <input
               id="rule-priority"
               type="number"
+              className="input"
               value={form.priority}
               onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })}
-              style={inputStyle}
             />
           </div>
-          <div style={{ flex: 1 }}>
-            <label id="rule-enabled-label" style={labelStyle}>{t("rules.enabled")}</label>
-            <button
-              aria-pressed={form.is_enabled}
-              aria-labelledby="rule-enabled-label"
-              onClick={() => setForm({ ...form, is_enabled: !form.is_enabled })}
-              style={{
-                width: "100%",
-                padding: "8px 10px",
-                borderRadius: "6px",
-                border: "1px solid var(--color-border)",
-                backgroundColor: form.is_enabled ? "var(--color-accent)" : "var(--color-bg)",
-                color: form.is_enabled ? "#fff" : "var(--color-text-secondary)",
-                fontSize: "13px",
-                cursor: "pointer",
-                fontWeight: 500,
-              }}
-            >
-              {form.is_enabled ? t("rules.enabled") : t("rules.disabled")}
-            </button>
-          </div>
         </div>
 
-        {/* Conditions — visual builder */}
-        <div>
-          <label style={labelStyle}>{t("rules.conditions", "Conditions")}</label>
-          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+        <Checkbox
+          checked={form.is_enabled}
+          onChange={(e) => setForm({ ...form, is_enabled: e.target.checked })}
+          label={t("rules.enabled")}
+        />
+
+        <div className="field">
+          <span className="field__label">{t("rules.conditions", "Conditions")}</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
             {form.conditions.map((c, i) => renderConditionRow(c, i))}
           </div>
-          <button
-            onClick={addCondition}
-            style={{
-              marginTop: "6px",
-              padding: "4px 10px",
-              fontSize: "12px",
-              border: "1px solid var(--color-border)",
-              borderRadius: "4px",
-              background: "transparent",
-              color: "var(--color-text-secondary)",
-              cursor: "pointer",
-            }}
-          >
-            + {t("rules.addCondition", "Add condition")}
-          </button>
+          <div>
+            <Button size="sm" variant="ghost" icon={<Plus size={14} />} onClick={addCondition}>
+              {t("rules.addCondition", "Add condition")}
+            </Button>
+          </div>
         </div>
 
-        {/* Actions — visual builder */}
-        <div>
-          <label style={labelStyle}>{t("rules.actions", "Actions")}</label>
-          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+        <div className="field">
+          <span className="field__label">{t("rules.actions", "Actions")}</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
             {form.actions.map((a, i) => renderActionRow(a, i))}
           </div>
-          <button
-            onClick={addAction}
-            style={{
-              marginTop: "6px",
-              padding: "4px 10px",
-              fontSize: "12px",
-              border: "1px solid var(--color-border)",
-              borderRadius: "4px",
-              background: "transparent",
-              color: "var(--color-text-secondary)",
-              cursor: "pointer",
-            }}
-          >
-            + {t("rules.addAction", "Add action")}
-          </button>
+          <div>
+            <Button size="sm" variant="ghost" icon={<Plus size={14} />} onClick={addAction}>
+              {t("rules.addAction", "Add action")}
+            </Button>
+          </div>
         </div>
 
-        {/* Error */}
-        {error && (
-          <p role="alert" style={{ margin: 0, fontSize: "12px", color: "#ef4444" }}>{error}</p>
-        )}
+        {error && <p role="alert" className="settings-error">{error}</p>}
 
-        {/* Buttons */}
-        <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-          <button
-            onClick={cancelEdit}
-            style={{
-              padding: "7px 14px",
-              borderRadius: "6px",
-              border: "1px solid var(--color-border)",
-              backgroundColor: "transparent",
-              color: "var(--color-text-primary)",
-              fontSize: "13px",
-              cursor: "pointer",
-            }}
-          >
-            {t("common.cancel")}
-          </button>
-          <button
-            onClick={handleSave}
-            style={{
-              padding: "7px 14px",
-              borderRadius: "6px",
-              border: "none",
-              backgroundColor: "var(--color-accent)",
-              color: "#fff",
-              fontSize: "13px",
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            {t("common.save")}
-          </button>
+        <div className="settings-actions settings-actions--end">
+          <Button onClick={cancelEdit}>{t("common.cancel")}</Button>
+          <Button variant="primary" onClick={handleSave}>{t("common.save")}</Button>
         </div>
       </div>
     );
@@ -528,237 +422,88 @@ export default function RulesTab() {
 
   return (
     <div>
-      {/* Section header */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: "20px",
-        }}
+      <SettingsSection
+        title={t("rules.listTitle", "Your rules")}
+        actions={
+          <Button size="sm" icon={<Plus size={14} />} onClick={startCreate} disabled={editingId !== null}>
+            {t("rules.addRule")}
+          </Button>
+        }
       >
-        <h2
-          style={{
-            margin: 0,
-            fontSize: "16px",
-            fontWeight: 600,
-            color: "var(--color-text-primary)",
-          }}
-        >
-          {t("rules.title")}
-        </h2>
-        <button
-          onClick={startCreate}
-          disabled={editingId !== null}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "6px",
-            padding: "7px 14px",
-            borderRadius: "6px",
-            border: "none",
-            backgroundColor: editingId !== null ? "var(--color-border)" : "var(--color-accent)",
-            color: "#fff",
-            fontSize: "13px",
-            fontWeight: 600,
-            cursor: editingId !== null ? "not-allowed" : "pointer",
-          }}
-        >
-          <Plus size={14} />
-          {t("rules.addRule")}
-        </button>
-      </div>
+        {editingId === "__new__" && <SettingsList>{renderEditor()}</SettingsList>}
 
-      {/* Inline editor for new rule */}
-      {editingId === "__new__" && renderEditor()}
-
-      {/* Fetch error state */}
-      {fetchError && editingId !== "__new__" && (
-        <div
-          className="fade-in"
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "12px",
-            padding: "48px 0",
-            color: "var(--color-text-secondary)",
-          }}
-        >
-          <p style={{ color: "var(--color-error, #e53e3e)", fontSize: "14px", margin: 0 }}>
-            {t("rules.fetchError", "Failed to load rules")}
-          </p>
-          <p style={{ fontSize: "13px", margin: 0 }}>{fetchError}</p>
-          <button
-            onClick={fetchRules}
-            style={{
-              marginTop: "4px",
-              padding: "6px 16px",
-              borderRadius: "4px",
-              border: "1px solid var(--color-border)",
-              backgroundColor: "transparent",
-              color: "var(--color-accent)",
-              fontSize: "13px",
-              cursor: "pointer",
-            }}
-          >
-            {t("common.retry", "Retry")}
-          </button>
-        </div>
-      )}
-
-      {/* Empty state */}
-      {rules.length === 0 && !fetchError && editingId !== "__new__" && (
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "12px",
-            padding: "48px 0",
-            color: "var(--color-text-secondary)",
-          }}
-        >
-          <ShieldCheck size={40} strokeWidth={1.5} />
-          <p style={{ margin: 0, fontSize: "14px" }}>{t("rules.noRules")}</p>
-          <button
-            onClick={startCreate}
-            style={{
-              marginTop: "4px",
-              padding: "8px 18px",
-              borderRadius: "6px",
-              border: "1px solid var(--color-border)",
-              backgroundColor: "transparent",
-              color: "var(--color-text-primary)",
-              fontSize: "13px",
-              cursor: "pointer",
-            }}
-          >
-            {t("rules.createFirst")}
-          </button>
-        </div>
-      )}
-
-      {/* Rules list */}
-      {rules.length > 0 && (
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "1px",
-            borderRadius: "8px",
-            overflow: "hidden",
-            border: "1px solid var(--color-border)",
-          }}
-        >
-          {rules.map((rule, index) => (
-            <div key={rule.id}>
-              {editingId === rule.id ? (
-                <div style={{ padding: "1px 0" }}>{renderEditor()}</div>
-              ) : (
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "14px 16px",
-                    backgroundColor: "var(--color-bg)",
-                    borderTop: index > 0 ? "1px solid var(--color-border)" : "none",
-                  }}
-                >
-                  <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <span style={{ fontSize: "13px", fontWeight: 500, color: "var(--color-text-primary)" }}>
-                        {rule.name}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: "11px",
-                          padding: "1px 6px",
-                          borderRadius: "4px",
-                          backgroundColor: rule.is_enabled ? "rgba(34,197,94,0.12)" : "rgba(156,163,175,0.12)",
-                          color: rule.is_enabled ? "#22c55e" : "var(--color-text-secondary)",
-                        }}
-                      >
-                        {rule.is_enabled ? t("rules.enabled") : t("rules.disabled")}
-                      </span>
-                    </div>
-                    <span
-                      style={{
-                        fontSize: "12px",
-                        color: "var(--color-text-secondary)",
-                      }}
-                    >
-                      {t("rules.priorityLabel", { value: rule.priority })}
-                    </span>
-                  </div>
-                  <div style={{ display: "flex", gap: "4px" }}>
-                    <button
-                      onClick={() => startEdit(rule)}
-                      disabled={editingId !== null}
-                      aria-label={t("rules.editRule")}
-                      title={t("rules.editRule")}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        padding: "6px",
-                        borderRadius: "6px",
-                        border: "none",
-                        backgroundColor: "transparent",
-                        color: editingId !== null ? "var(--color-border)" : "var(--color-text-secondary)",
-                        cursor: editingId !== null ? "not-allowed" : "pointer",
-                      }}
-                      onMouseEnter={(e) => {
-                        if (editingId === null) {
-                          e.currentTarget.style.color = "var(--color-accent)";
-                          e.currentTarget.style.backgroundColor = "var(--color-bg-hover)";
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.color = editingId !== null ? "var(--color-border)" : "var(--color-text-secondary)";
-                        e.currentTarget.style.backgroundColor = "transparent";
-                      }}
-                    >
-                      <Pencil size={15} />
-                    </button>
-                    <button
-                      onClick={() => setDeleteTarget({ id: rule.id, name: rule.name })}
-                      aria-label={t("rules.deleteRule")}
-                      title={t("rules.deleteRule")}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        padding: "6px",
-                        borderRadius: "6px",
-                        border: "none",
-                        backgroundColor: "transparent",
-                        color: "var(--color-text-secondary)",
-                        cursor: "pointer",
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.color = "#ef4444";
-                        e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.08)";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.color = "var(--color-text-secondary)";
-                        e.currentTarget.style.backgroundColor = "transparent";
-                      }}
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                </div>
-              )}
+        {fetchError && editingId !== "__new__" && (
+          <SettingsNotice tone="danger" className="fade-in" role="alert">
+            <strong style={{ color: "inherit" }}>{t("rules.fetchError", "Failed to load rules")}</strong>
+            <div style={{ marginTop: "var(--space-1)" }}>{fetchError}</div>
+            <div style={{ marginTop: "var(--space-2)" }}>
+              <Button size="sm" onClick={fetchRules}>{t("common.retry", "Retry")}</Button>
             </div>
-          ))}
-        </div>
-      )}
+          </SettingsNotice>
+        )}
 
-      {/* Delete confirmation */}
+        {rules.length === 0 && !fetchError && editingId !== "__new__" && (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "var(--space-3)",
+              padding: "var(--space-8) 0",
+              color: "var(--color-text-tertiary)",
+            }}
+          >
+            <ShieldCheck size={40} strokeWidth={1.5} aria-hidden="true" />
+            <p className="settings-empty">{t("rules.noRules")}</p>
+            <Button onClick={startCreate}>{t("rules.createFirst")}</Button>
+          </div>
+        )}
+
+        {rules.length > 0 && (
+          <SettingsList>
+            {rules.map((rule) => (
+              editingId === rule.id ? (
+                <Fragment key={rule.id}>{renderEditor()}</Fragment>
+              ) : (
+                <SettingsListRow
+                  key={rule.id}
+                  title={
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-2)", maxWidth: "100%" }}>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{rule.name}</span>
+                      <StatusChip tone={rule.is_enabled ? "success" : "neutral"}>
+                        {rule.is_enabled ? t("rules.enabled") : t("rules.disabled")}
+                      </StatusChip>
+                    </span>
+                  }
+                  meta={t("rules.priorityLabel", { value: rule.priority })}
+                  actions={
+                    <>
+                      <IconButton
+                        label={t("rules.editRule")}
+                        icon={<Pencil size={14} />}
+                        disabled={editingId !== null}
+                        onClick={() => startEdit(rule)}
+                      />
+                      <IconButton
+                        variant="danger"
+                        label={t("rules.deleteRule")}
+                        icon={<Trash2 size={14} />}
+                        onClick={() => setDeleteTarget({ id: rule.id, name: rule.name })}
+                      />
+                    </>
+                  }
+                />
+              )
+            ))}
+          </SettingsList>
+        )}
+      </SettingsSection>
+
       {deleteTarget && (
         <ConfirmDialog
           title={t("rules.deleteRule")}
           message={t("rules.confirmDelete", { name: deleteTarget.name })}
+          confirmLabel={t("rules.deleteRule")}
           destructive
           onCancel={() => setDeleteTarget(null)}
           onConfirm={() => {

@@ -10,6 +10,10 @@ import { queryClient } from "@/lib/query-client";
 import { contactSuggestionsQueryRoot } from "@/hooks/queries";
 import { useToastStore } from "@/stores/toast.store";
 import { isValidEmailAddress } from "@/features/compose/recipient-utils";
+import OverlayPortal from "./ui/OverlayPortal";
+import { useFloatingPosition } from "@/hooks/useFloatingPosition";
+import Button from "./ui/Button";
+import "./ui/overlay.css";
 
 interface ContactAutocompleteProps {
   value: string[];
@@ -46,6 +50,15 @@ export default function ContactAutocomplete({
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  useFloatingPosition({
+    open: showDropdown,
+    floatingRef: dropdownRef,
+    anchorRef: containerRef,
+    placement: "bottom-start",
+    gap: 2,
+    matchWidth: true,
+  });
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchGenerationRef = useRef(0);
   const activeAccountIdRef = useRef(accountId);
@@ -198,6 +211,10 @@ export default function ContactAutocomplete({
         addRawAddress(inputValue);
       }
     } else if (e.key === "Escape") {
+      if (showDropdown) {
+        // Close only the suggestions; don't let Escape also close the composer.
+        e.stopPropagation();
+      }
       setShowDropdown(false);
       setActiveIndex(-1);
     } else if (e.key === "Backspace" && !inputValue && value.length > 0) {
@@ -221,9 +238,11 @@ export default function ContactAutocomplete({
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
       if (
         containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
+        !containerRef.current.contains(target) &&
+        !dropdownRef.current?.contains(target)
       ) {
         setShowDropdown(false);
       }
@@ -270,7 +289,7 @@ export default function ContactAutocomplete({
     : suggestions.find((suggestion) => suggestion.source === "recent");
 
   return (
-    <div ref={containerRef} style={{ position: "relative", flex: 1 }}
+    <div ref={containerRef} className="contact-autocomplete"
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
           setShowDropdown(false);
@@ -278,47 +297,18 @@ export default function ContactAutocomplete({
         }
       }}>
         <div
-          className="scroll-region contact-autocomplete-scroll"
-          style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: "4px",
-          alignItems: "center",
-          padding: "4px 8px",
-          minHeight: "32px",
-        }}
+          className="scroll-region contact-autocomplete-scroll contact-autocomplete__field"
         onClick={() => inputRef.current?.focus()}
       >
         {value.map((addr) => (
-          <span
-            key={addr}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "4px",
-              padding: "2px 8px",
-              backgroundColor: "var(--color-bg-secondary, #f0f0f0)",
-              borderRadius: "12px",
-              fontSize: "12px",
-              color: "var(--color-text-primary)",
-              border: "1px solid var(--color-border)",
-            }}
-          >
-            {addr}
+          <span key={addr} className="chip chip--md contact-chip">
+            <span className="contact-chip__label">{addr}</span>
             <button
               type="button"
+              className="chip__remove"
               onClick={(e) => {
                 e.stopPropagation();
                 removeChip(addr);
-              }}
-              style={{
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                padding: "0 2px",
-                fontSize: "12px",
-                color: "var(--color-text-secondary)",
-                lineHeight: 1,
               }}
               aria-label={t("common.remove")}
             >
@@ -347,56 +337,29 @@ export default function ContactAutocomplete({
           aria-expanded={showDropdown && suggestions.length > 0}
           aria-controls={`${instanceId}-listbox`}
           aria-activedescendant={activeIndex >= 0 ? `${instanceId}-option-${activeIndex}` : undefined}
-          style={{
-            flex: 1,
-            minWidth: "120px",
-            border: "none",
-            backgroundColor: "transparent",
-            fontSize: "13px",
-            color: "var(--color-text-primary)",
-            padding: "4px 0",
-          }}
+          className="contact-autocomplete__input"
         />
       </div>
 
       {showDropdown && (
+        <OverlayPortal>
         <div
-          style={{
-            position: "absolute",
-            top: "100%",
-            left: 0,
-            right: 0,
-            zIndex: 1100,
-            backgroundColor: "var(--color-bg)",
-            border: "1px solid var(--color-border)",
-            borderRadius: "8px",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-            marginTop: "2px",
-          }}
+          ref={dropdownRef}
+          className="popover-panel anim-popover-in contact-suggestions"
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
         >
           <div
             id={`${instanceId}-listbox`}
             role="listbox"
-            style={{ maxHeight: "200px", overflowY: "auto" }}
+            className="contact-suggestions__list"
           >
           {loading ? (
-            <div
-              style={{
-                padding: "8px 12px",
-                fontSize: "12px",
-                color: "var(--color-text-secondary)",
-              }}
-            >
+            <div className="contact-suggestions__note">
               {t("common.loading")}
             </div>
           ) : suggestions.length === 0 ? (
-            <div
-              style={{
-                padding: "8px 12px",
-                fontSize: "12px",
-                color: "var(--color-text-secondary)",
-              }}
-            >
+            <div className="contact-suggestions__note">
               {t("compose.noContactsFound")}
             </div>
           ) : (
@@ -410,49 +373,19 @@ export default function ContactAutocomplete({
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => selectContact(contact)}
                 onMouseEnter={() => setActiveIndex(idx)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "10px",
-                  padding: "7px 9px 7px 12px",
-                  cursor: "pointer",
-                  backgroundColor:
-                    idx === activeIndex
-                      ? "var(--color-bg-secondary, #f5f5f5)"
-                      : "transparent",
-                  fontSize: "13px",
-                }}
+                className={`menu-item contact-suggestion${idx === activeIndex ? " is-active" : ""}`}
               >
-                <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="contact-suggestion__text">
                   {contact.name && (
-                    <div
-                      style={{
-                        color: "var(--color-text-primary)",
-                        fontWeight: 500,
-                      }}
-                    >
+                    <div className="contact-suggestion__name">
                       {highlightMatch(contact.name, inputValue)}
                     </div>
                   )}
-                  <div
-                    style={{
-                      color: "var(--color-text-secondary)",
-                      fontSize: "12px",
-                    }}
-                  >
+                  <div className="contact-suggestion__address">
                     {highlightMatch(contact.address, inputValue)}
                   </div>
                 </div>
-                <span
-                  style={{
-                    flex: "0 0 auto",
-                    color: contact.source === "saved"
-                      ? "var(--color-accent)"
-                      : "var(--color-text-secondary)",
-                    fontSize: "10px",
-                    fontWeight: 600,
-                  }}
-                >
+                <span className="contact-suggestion__source">
                   {contact.source === "saved"
                     ? t("compose.savedContact", "Saved contact")
                     : t("compose.recentContact", "Recent")}
@@ -462,33 +395,19 @@ export default function ContactAutocomplete({
           )}
           </div>
           {removableSuggestion && (
-            <button
-              type="button"
-              aria-label={`${t("compose.removeSuggestion", "Remove suggestion")} ${removableSuggestion.address}`}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="contact-suggestions__remove"
+              aria-label={t("compose.removeSuggestionFor", { address: removableSuggestion.address, defaultValue: "Remove suggestion: {{address}}" })}
+              icon={<X size={12} />}
               onClick={(event) => removeSuggestion(event, removableSuggestion)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "6px",
-                width: "100%",
-                minHeight: "32px",
-                padding: "5px 10px",
-                border: 0,
-                borderTop: "1px solid var(--color-border)",
-                borderRadius: "0 0 8px 8px",
-                background: "var(--color-bg)",
-                color: "var(--color-text-secondary)",
-                cursor: "pointer",
-                font: "inherit",
-                fontSize: "11px",
-              }}
             >
-              <X size={12} aria-hidden="true" />
-              {t("compose.removeSuggestion", "Remove suggestion")}: {removableSuggestion.address}
-            </button>
+              {t("compose.removeSuggestionFor", { address: removableSuggestion.address, defaultValue: "Remove suggestion: {{address}}" })}
+            </Button>
           )}
         </div>
+        </OverlayPortal>
       )}
     </div>
   );

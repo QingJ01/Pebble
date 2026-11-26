@@ -21,6 +21,7 @@
     "saveAll": "Save all…",
     "savingAll": "Saving attachments…",
     "saveFailed": "Could not save attachments: {{reason}}",
-    "saveSummary": "{{saved}} saved · {{failed}} failed. Existing files were not overwritten."
+    "saveSummary": "{{saved}} saved · {{failed}} failed. Existing files were not overwritten.",
+    "previewNamed": "Preview {{name}}"
   }
 }

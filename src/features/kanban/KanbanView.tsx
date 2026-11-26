@@ -1,7 +1,21 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { DndContext, DragEndEvent, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
+import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  closestCorners,
+  useSensor,
+  useSensors,
+  type Announcements,
+  type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent,
+  type UniqueIdentifier,
+} from "@dnd-kit/core";
 import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import type { KanbanCard, KanbanColumnType, Message } from "@/lib/api";
 import { getMessagesBatch } from "@/lib/api";
@@ -9,15 +23,16 @@ import { useKanbanContextNotesQuery, type KanbanContextNotes } from "@/hooks/que
 import { useKanbanCardsQuery } from "@/hooks/queries/useKanbanCardsQuery";
 import {
   addKanbanCard,
-  useMoveKanbanCardMutation,
   useRemoveKanbanCardMutation,
   useReorderKanbanColumnMutation,
 } from "@/hooks/mutations/useKanbanMutations";
-import { useToastStore } from "@/stores/toast.store";
+import { toastError, useToastStore } from "@/stores/toast.store";
 import { useUIStore } from "@/stores/ui.store";
 import { useMailStore } from "@/stores/mail.store";
 import KanbanColumn from "./KanbanColumn";
+import { KanbanCardPreview } from "./KanbanCard";
 import { KanbanSkeleton } from "@/components/Skeleton";
+import "./kanban.css";
 
 const COLUMN_IDS: { id: KanbanColumnType; titleKey: string }[] = [
   { id: "todo", titleKey: "kanban.todo" },
@@ -25,8 +40,48 @@ const COLUMN_IDS: { id: KanbanColumnType; titleKey: string }[] = [
   { id: "done", titleKey: "kanban.done" },
 ];
 
+type ColumnItems = Record<KanbanColumnType, string[]>;
+
 const NO_CARDS: KanbanCard[] = [];
 const NO_NOTES: KanbanContextNotes = {};
+/** Ignore the click that a pointer drag can leave behind on the card. */
+const CLICK_AFTER_DRAG_MS = 250;
+
+export function columnsFromCards(cards: KanbanCard[]): ColumnItems {
+  const items: ColumnItems = { todo: [], waiting: [], done: [] };
+  for (const card of [...cards].sort((a, b) => a.position - b.position)) {
+    items[card.column]?.push(card.message_id);
+  }
+  return items;
+}
+
+function isColumnId(id: UniqueIdentifier): id is KanbanColumnType {
+  return COLUMN_IDS.some((column) => column.id === id);
+}
+
+function findColumn(items: ColumnItems, id: UniqueIdentifier): KanbanColumnType | null {
+  if (isColumnId(id)) return id;
+  for (const column of COLUMN_IDS) {
+    if (items[column.id].includes(String(id))) return column.id;
+  }
+  return null;
+}
+
+/** Move `activeId` into the column of `overId`, before `overId` (or at the end of an empty column). */
+export function moveAcrossColumns(items: ColumnItems, activeId: string, overId: UniqueIdentifier): ColumnItems {
+  const from = findColumn(items, activeId);
+  const to = findColumn(items, overId);
+  if (!from || !to || from === to) return items;
+  const target = items[to].filter((id) => id !== activeId);
+  const overIndex = isColumnId(overId) ? target.length : target.indexOf(String(overId));
+  const insertAt = overIndex < 0 ? target.length : overIndex;
+  target.splice(insertAt, 0, activeId);
+  return {
+    ...items,
+    [from]: items[from].filter((id) => id !== activeId),
+    [to]: target,
+  };
+}
 
 export default function KanbanView() {
   const { t } = useTranslation();
@@ -36,14 +91,23 @@ export default function KanbanView() {
   // Notes are optional: a failed load leaves the board usable without them.
   const { data: contextNotes = NO_NOTES } = useKanbanContextNotesQuery({ refetchOnMount: "always" });
   const queryClient = useQueryClient();
-  const moveCard = useMoveKanbanCardMutation();
   const reorderColumn = useReorderKanbanColumnMutation();
   const removeCard = useRemoveKanbanCardMutation();
   const [messages, setMessages] = useState<Map<string, Message>>(new Map());
+  const [dragItems, setDragItems] = useState<ColumnItems | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const lastDragEndRef = useRef(0);
+
+  const baseItems = useMemo(() => columnsFromCards(cards), [cards]);
+  const items = dragItems ?? baseItems;
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+      // Enter is reserved for opening the card; Space picks up and drops.
+      keyboardCodes: { start: ["Space"], cancel: ["Escape"], end: ["Space", "Enter"] },
+    }),
   );
 
   // Load message details for all cards (batch)
@@ -60,52 +124,85 @@ export default function KanbanView() {
         }
         return next;
       });
+    }).catch((error) => {
+      if (!cancelled) toastError(error, "kanban.loadFailed");
     });
     return () => { cancelled = true; };
   }, [cards]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleOpenMessage(messageId: string) {
+    if (Date.now() - lastDragEndRef.current < CLICK_AFTER_DRAG_MS) return;
     useMailStore.getState().setSelectedMessage(messageId);
     useUIStore.getState().setActiveView("inbox");
   }
 
-  function handleDragEnd(event: DragEndEvent) {
+  function subjectOf(id: UniqueIdentifier) {
+    const message = messages.get(String(id));
+    return message?.subject || t("common.noSubject");
+  }
+
+  function columnTitle(id: UniqueIdentifier | undefined | null) {
+    if (id === undefined || id === null) return "";
+    const column = findColumn(items, id);
+    const def = COLUMN_IDS.find((c) => c.id === column);
+    return def ? t(def.titleKey) : "";
+  }
+
+  const announcements: Announcements = {
+    onDragStart: ({ active }) => t("kanban.dragStart", "Picked up {{subject}}.", { subject: subjectOf(active.id) }),
+    onDragOver: ({ active, over }) => over
+      ? t("kanban.dragOver", "{{subject}} is over {{column}}.", { subject: subjectOf(active.id), column: columnTitle(over.id) })
+      : undefined,
+    onDragEnd: ({ active, over }) => over
+      ? t("kanban.dragEnd", "Dropped {{subject}} in {{column}}.", { subject: subjectOf(active.id), column: columnTitle(over.id) })
+      : t("kanban.dragCancel", "Moving {{subject}} was cancelled.", { subject: subjectOf(active.id) }),
+    onDragCancel: ({ active }) => t("kanban.dragCancel", "Moving {{subject}} was cancelled.", { subject: subjectOf(active.id) }),
+  };
+
+  function resetDrag() {
+    setDragItems(null);
+    setActiveId(null);
+    lastDragEndRef.current = Date.now();
+  }
+
+  function handleDragStart(event: DragStartEvent) {
+    setActiveId(String(event.active.id));
+    setDragItems(baseItems);
+  }
+
+  // Cross-column moves happen while dragging so the card shows where it lands.
+  function handleDragOver(event: DragOverEvent) {
     const { active, over } = event;
     if (!over) return;
+    setDragItems((current) => moveAcrossColumns(current ?? baseItems, String(active.id), over.id));
+  }
 
-    const activeId = active.id as string;
-    const overId = over.id as string;
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    const current = dragItems ?? baseItems;
+    const activeKey = String(active.id);
+    const originalColumn = cards.find((c) => c.message_id === activeKey)?.column;
+    resetDrag();
+    if (!over || !originalColumn) return;
 
-    // Determine target column
-    let targetColumn: KanbanColumnType;
-    if (COLUMN_IDS.some((c) => c.id === overId)) {
-      targetColumn = overId as KanbanColumnType;
-    } else {
-      const overCard = cards.find((c) => c.message_id === overId);
-      if (!overCard) return;
-      targetColumn = overCard.column;
-    }
-
-    const activeCard = cards.find((c) => c.message_id === activeId);
-    if (!activeCard) return;
-
-    if (activeCard.column === targetColumn) {
-      // Same-column reorder
-      const columnIds = cards
-        .filter((c) => c.column === targetColumn)
-        .sort((a, b) => a.position - b.position)
-        .map((c) => c.message_id);
-      const oldIndex = columnIds.indexOf(activeId);
-      const newIndex = columnIds.indexOf(overId);
+    const column = findColumn(current, activeKey);
+    if (!column) return;
+    let ordered = current[column];
+    if (!isColumnId(over.id)) {
+      const oldIndex = ordered.indexOf(activeKey);
+      const newIndex = ordered.indexOf(String(over.id));
       if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
-        const reordered = arrayMove(columnIds, oldIndex, newIndex);
-        reorderColumn.mutate({ column: targetColumn, orderedIds: reordered });
+        ordered = arrayMove(ordered, oldIndex, newIndex);
       }
-    } else {
-      // Cross-column move
-      const targetCards = cards.filter((c) => c.column === targetColumn);
-      moveCard.mutate({ messageId: activeId, column: targetColumn, position: targetCards.length });
     }
+
+    const unchanged = column === originalColumn
+      && ordered.length === baseItems[column].length
+      && ordered.every((id, index) => baseItems[column][index] === id);
+    if (unchanged) return;
+    // Persist the whole target column order; this also moves the dragged card
+    // into the column at its drop position.
+    reorderColumn.mutate({ column, orderedIds: ordered });
   }
 
   async function handleRemove(messageId: string) {
@@ -114,7 +211,7 @@ export default function KanbanView() {
     try {
       await removeCard.mutateAsync({ messageId });
     } catch {
-      return; // rolled back; the card is still on the board
+      return; // rolled back + error toast; the card is still on the board
     }
     useToastStore.getState().addToast({
       message: t("kanban.removedFromBoard", "Card removed from board"),
@@ -122,7 +219,7 @@ export default function KanbanView() {
       action: {
         label: t("kanban.undoRemove", "Undo"),
         onClick: () => {
-          addKanbanCard(messageId, oldColumn, queryClient).catch(() => {});
+          addKanbanCard(messageId, oldColumn, queryClient).catch((error) => toastError(error, "kanban.restoreFailed"));
         },
       },
     });
@@ -133,20 +230,48 @@ export default function KanbanView() {
   }
 
   return (
-    <div style={{ display: "flex", gap: "8px", padding: "16px", height: "100%", overflow: "hidden" }}>
-      <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+    <div className="kanban-board">
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCorners}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+        onDragCancel={resetDrag}
+        accessibility={{
+          announcements,
+          screenReaderInstructions: {
+            draggable: t(
+              "kanban.dragInstructions",
+              "Press Space to pick up a card. Use the arrow keys to move it, Space or Enter to drop it, Escape to cancel.",
+            ),
+          },
+        }}
+      >
         {COLUMN_IDS.map((col) => (
           <KanbanColumn
             key={col.id}
             id={col.id}
             title={t(col.titleKey)}
-            cardIds={cards.filter((c) => c.column === col.id).map((c) => c.message_id)}
+            cardIds={items[col.id]}
             contextNotes={contextNotes}
             messages={messages}
             onRemove={handleRemove}
             onOpen={handleOpenMessage}
           />
         ))}
+        {typeof document !== "undefined" && createPortal(
+          <DragOverlay zIndex={1000 /* --z-menu */}>
+            {activeId ? (
+              <KanbanCardPreview
+                id={activeId}
+                note={contextNotes[activeId]}
+                message={messages.get(activeId) ?? null}
+              />
+            ) : null}
+          </DragOverlay>,
+          document.body,
+        )}
       </DndContext>
     </div>
   );

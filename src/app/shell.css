@@ -1,0 +1,400 @@
+/* App-shell chrome: title bar, sidebar, status bar, FAB, banners, splitter.
+   Uses the design tokens from src/styles/index.css; hover/active are CSS only. */
+
+/* ─── Title bar ─── */
+/* Hairline between the title bar and the content row (chrome vs canvas). */
+.titlebar {
+  border-bottom: 1px solid var(--color-border);
+  background-color: var(--color-chrome-bg);
+}
+/* macOS overlay title bar: keep the brand clear of the traffic lights
+   (trafficLightPosition x=12 in tauri.conf.json; three buttons end near
+   x≈66, plus breathing room). The native title is hidden (hiddenTitle). */
+.titlebar--mac { padding-left: 72px; }
+
+.titlebar__brand {
+  color: var(--color-text-primary);
+  font-size: var(--font-md);
+  font-weight: var(--weight-semibold);
+}
+
+/* ─── Title bar window controls ─── */
+/* Window controls follow the OS convention (wider than tall), full bar height. */
+.titlebar-btn {
+  height: var(--control-lg);
+  width: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.titlebar-btn:hover { background: var(--color-fill-hover); }
+.titlebar-btn:active { background: var(--color-fill-pressed); }
+.titlebar-btn--close:hover,
+.titlebar-btn--close:active { background: var(--color-danger-solid); color: var(--color-on-danger); }
+
+/* ─── Sidebar ─── */
+.app-sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  border-right: 1px solid var(--color-border);
+  background-color: var(--color-chrome-bg);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--space-2);
+}
+.sidebar-nav--top { padding-top: var(--space-2); }
+.sidebar-nav--folders { flex: 1; overflow-y: auto; }
+.sidebar-nav--bottom { padding-top: var(--space-1); padding-bottom: var(--space-2); }
+.sidebar-divider {
+  height: 1px;
+  margin: 0 var(--space-2);
+  background-color: var(--color-divider);
+}
+/* Section / group labels: 11/600 secondary, aligned with row content. */
+.sidebar-section-label {
+  padding: var(--space-3) var(--space-4) var(--space-1);
+  color: var(--color-text-secondary);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.sidebar-account-switcher {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2) var(--space-2);
+}
+.sidebar-account-switcher .select { flex: 1; min-width: 0; }
+.sidebar-account-switcher__badge {
+  display: inline-flex;
+  flex: none;
+  padding-left: var(--space-2);
+  color: var(--color-text-secondary);
+}
+.sidebar-group { display: flex; flex-direction: column; }
+.sidebar-empty-note {
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-sm);
+}
+
+/* Rows: 32px, 4/8 padding; selected = neutral fill (never accent). */
+.sidebar-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--control-md);
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-base);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+/* Indented rows line their icon up with the group header label. */
+.sidebar-btn--indent { padding-left: var(--space-6); }
+.sidebar-btn--rail {
+  flex: none;
+  justify-content: center;
+  width: var(--control-md);
+  height: var(--control-md);
+  padding: 0;
+}
+.sidebar-btn:hover:not(:disabled) { background: var(--color-fill-hover); }
+.sidebar-btn:active:not(:disabled) { background: var(--color-fill-pressed); }
+.sidebar-btn.is-active,
+.sidebar-btn.is-active:hover { background: var(--color-fill-selected); }
+.sidebar-btn.is-active { font-weight: var(--weight-medium); }
+.sidebar-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.sidebar-btn__icon { display: inline-flex; flex-shrink: 0; color: var(--color-text-secondary); }
+.sidebar-btn.is-active .sidebar-btn__icon { color: var(--color-text-primary); }
+.sidebar-btn__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Unread: the count is neutral; accent is kept for the unread dot only
+   (rail + mail rows), so a folder never shows two orange signals. */
+.sidebar-btn__badge {
+  min-width: var(--space-5);
+  color: var(--color-text-secondary);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.sidebar-btn__dot {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+}
+.sidebar-group-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  min-height: var(--control-sm);
+  margin-top: var(--space-1);
+  padding: 0 var(--space-2);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  text-align: left;
+  cursor: pointer;
+}
+.sidebar-group-header:hover { background: var(--color-fill-hover); }
+.sidebar-group-header:active { background: var(--color-fill-pressed); }
+
+/* ─── Collapsed rail (48px) ───
+   Fixed top group (search, overview, starred) / divider / scrolling middle
+   (account badges, or the classic account switcher + its folders) / divider /
+   fixed bottom group (tools). Every entry is a 32px square centred in the
+   rail; dividers get the same 8px above and below. */
+/* Narrow window, sidebar expanded: a rail-wide strip stays in the layout and
+   the full sidebar floats over the content (below menus, --z-menu). */
+.sidebar-drawer-host {
+  position: relative;
+  width: 48px;
+  height: 100%;
+  flex-shrink: 0;
+  border-right: 1px solid var(--color-border);
+  background-color: var(--color-chrome-bg);
+}
+.sidebar-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-menu) - 2);
+  background: color-mix(in srgb, var(--color-text-primary) 12%, transparent);
+}
+.sidebar-drawer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: calc(var(--z-menu) - 1);
+  display: flex;
+  box-shadow: var(--shadow-popover);
+}
+
+.app-sidebar--rail {
+  width: 48px;
+  flex-shrink: 0;
+  align-items: center;
+}
+.sidebar-rail__section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-1) 0;
+}
+.sidebar-rail__section--top { flex: none; padding-top: var(--space-2); }
+.sidebar-rail__section--bottom { flex: none; padding-bottom: var(--space-2); }
+/* Only the middle scrolls when the window is short. The scrollbar is hidden
+   so the 32px column stays centred; wheel, trackpad and focus still scroll. */
+.sidebar-rail__section--middle {
+  flex: 1 1 auto;
+  /* Always room for at least one account button. */
+  min-height: calc(var(--control-md) + var(--space-2));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+.sidebar-rail__section--middle::-webkit-scrollbar { display: none; }
+.sidebar-rail__divider {
+  flex: none;
+  width: var(--space-6);
+  height: 1px;
+  margin: var(--space-1) 0;
+  background-color: var(--color-divider);
+}
+/* Account buttons: the badge is the face; selection is the badge ring, so the
+   button itself never takes the selected fill. */
+.sidebar-btn--account.is-active,
+.sidebar-btn--account.is-active:hover { background: transparent; }
+.sidebar-btn--account .account-badge.is-selected {
+  box-shadow: 0 0 0 2px var(--color-chrome-bg), 0 0 0 3px color-mix(in srgb, var(--account-color) 80%, var(--color-text-primary));
+}
+.sidebar-btn--rail .sidebar-btn__dot { top: var(--space-1); right: var(--space-1); }
+
+/* Rail menus (account folders, account switcher, more folders). */
+.sidebar-rail-menu { max-width: 280px; }
+.sidebar-rail-menu__header {
+  display: flex;
+  min-width: 0;
+}
+.sidebar-rail-menu__header-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-rail-menu__icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--color-text-secondary);
+}
+.sidebar-rail-menu__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-rail-menu__count {
+  margin-left: auto;
+  padding-left: var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.sidebar-rail-menu__item.is-current,
+.sidebar-rail-menu__item.is-current:hover { background: var(--color-fill-selected); font-weight: var(--weight-medium); }
+.sidebar-rail-menu__item.is-current .sidebar-rail-menu__icon { color: var(--color-text-primary); }
+.sidebar-rail-menu__empty {
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-sm);
+}
+
+/* ─── Status bar ─── */
+.status-bar {
+  height: var(--control-sm);
+  flex-shrink: 0;
+  padding: 0 var(--space-1) 0 var(--space-3);
+  border-top: 1px solid var(--color-border);
+  background-color: var(--color-chrome-bg);
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.status-bar__spin { animation: spin 1s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .status-bar__spin { animation: none; }
+}
+
+/* ─── Compose FAB ─── */
+/* `.app-shell > .compose-fab` outranks `.app-shell > :not(.app-background-layer)`,
+   which would otherwise make the FAB position: relative. */
+.app-shell > .compose-fab,
+.compose-fab {
+  position: fixed;
+  right: var(--space-6);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--color-accent-strong);
+  color: var(--color-on-accent);
+  box-shadow: var(--shadow-toast);
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+}
+.compose-fab:hover {
+  background: var(--color-accent-strong-hover);
+  box-shadow: var(--shadow-popover);
+  transform: scale(1.06);
+}
+.compose-fab:active {
+  background: var(--color-accent-strong-active);
+  transform: scale(.97);
+}
+@media (prefers-reduced-motion: reduce) {
+  .compose-fab, .compose-fab:hover, .compose-fab:active { transform: none; }
+}
+
+/* ─── Offline banner (fixed slot above the content row) ─── */
+.offline-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  padding: var(--space-1) var(--space-4);
+  background: var(--color-danger-bg);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-danger);
+  font-size: var(--font-sm);
+}
+
+.offline-banner__title { font-weight: var(--weight-semibold); }
+
+/* ─── View loading fallback (shown only after a short delay) ─── */
+.view-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: 100%;
+  color: var(--color-text-secondary);
+  font-size: var(--font-base);
+}
+
+/* ─── List / reader splitter ─── */
+.pane-splitter {
+  flex: 0 0 auto;
+  width: 6px;
+  margin: 0 -3px;
+  position: relative;
+  z-index: 2;
+  cursor: col-resize;
+  background: transparent;
+  border: none;
+  padding: 0;
+  touch-action: none;
+}
+.pane-splitter::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: transparent;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.pane-splitter:hover::after,
+.pane-splitter[data-dragging="true"]::after { width: 2px; background: var(--color-border-strong); }
+.pane-splitter:focus-visible { outline: none; }
+.pane-splitter:focus-visible::after { width: 2px; background: var(--color-focus-ring); }
+
+/* Over a background image the account switcher stays translucent (the chrome
+   behind it is translucent too). Chevron is kept via background-image. */
+.app-shell--with-background .sidebar-account-switcher .select {
+  background-color: var(--color-fill-hover);
+}

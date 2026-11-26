@@ -1,10 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Copy, Languages, LayoutGrid, MoreHorizontal, Search, ShieldCheck, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import Popover, { handleMenuKeyDown } from "./ui/Popover";
+import Button from "./ui/Button";
+import IconButton from "./ui/IconButton";
+import "./message-reader.css";
 
 interface Props {
   text: string;
   position: { x: number; y: number };
+  open?: boolean;
   onTranslate: (text: string, position: { x: number; y: number }) => void;
   onSearch: (text: string) => void;
   onCreateRule: (text: string) => void;
@@ -12,9 +17,14 @@ interface Props {
   onClose: () => void;
 }
 
+/**
+ * Floating toolbar for selected message text. Escape closes the "more" menu
+ * first, then the toolbar; focus returns to where it was before opening.
+ */
 export default function SelectionActionPopover({
   text,
   position,
+  open = true,
   onTranslate,
   onSearch,
   onCreateRule,
@@ -24,6 +34,7 @@ export default function SelectionActionPopover({
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const [showSecondaryActions, setShowSecondaryActions] = useState(false);
+  const moreRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!copied) return;
@@ -31,166 +42,102 @@ export default function SelectionActionPopover({
     return () => clearTimeout(timer);
   }, [copied]);
 
+  useEffect(() => {
+    if (!open) setShowSecondaryActions(false);
+  }, [open]);
+
   async function handleCopy() {
     await navigator.clipboard.writeText(text);
     setCopied(true);
   }
 
-  const left = Math.min(position.x, window.innerWidth - 260);
-  const top = Math.min(position.y + 10, window.innerHeight - 120);
+  const copyLabel = copied
+    ? t("selection.copiedSelectedText", "Copied selected text")
+    : t("selection.copySelectedText", "Copy selected text");
 
   return (
-    <div
+    <Popover
+      open={open}
+      onClose={onClose}
+      point={position}
+      placement="bottom-start"
       role="toolbar"
       aria-label={t("selection.actions", "Selected text actions")}
-      style={{
-        position: "fixed",
-        left,
-        top,
-        display: "flex",
-        alignItems: "center",
-        gap: "4px",
-        padding: "6px",
-        borderRadius: "8px",
-        border: "1px solid var(--color-border)",
-        backgroundColor: "var(--color-bg)",
-        boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-        zIndex: 1000,
-        color: "var(--color-text-primary)",
-      }}
-      onClick={(e) => e.stopPropagation()}
+      className="selection-actions"
     >
-      <button
+      <Button
+        variant="primary"
+        size="sm"
         onClick={handleCopy}
-        aria-label={copied
-          ? t("selection.copiedSelectedText", "Copied selected text")
-          : t("selection.copySelectedText", "Copy selected text")}
-        title={copied
-          ? t("selection.copiedSelectedText", "Copied selected text")
-          : t("selection.copySelectedText", "Copy selected text")}
-        style={primaryButtonStyle}
+        aria-label={copyLabel}
+        title={copyLabel}
+        icon={copied ? <Check size={14} /> : <Copy size={14} />}
       >
-        {copied ? <Check size={14} /> : <Copy size={14} />}
-        <span>{copied ? t("common.copied", "Copied") : t("common.copy", "Copy")}</span>
-      </button>
+        {copied ? t("common.copied", "Copied") : t("common.copy", "Copy")}
+      </Button>
 
-      <div style={{ position: "relative" }}>
+      <IconButton
+        ref={moreRef}
+        label={t("selection.moreActions", "More selected-text actions")}
+        icon={<MoreHorizontal size={14} />}
+        aria-haspopup="menu"
+        aria-expanded={showSecondaryActions}
+        onClick={() => setShowSecondaryActions((value) => !value)}
+      />
+
+      <IconButton label={t("common.close", "Close")} icon={<X size={14} />} onClick={onClose} />
+
+      <Popover
+        open={open && showSecondaryActions}
+        onClose={() => setShowSecondaryActions(false)}
+        anchorRef={moreRef}
+        placement="bottom-end"
+        role="menu"
+        aria-label={t("selection.moreActions", "More selected-text actions")}
+        className="menu"
+        onKeyDown={handleMenuKeyDown}
+      >
         <button
-          onClick={() => setShowSecondaryActions((value) => !value)}
-          aria-expanded={showSecondaryActions}
-          aria-label={t("selection.moreActions", "More selected-text actions")}
-          title={t("selection.moreActions", "More selected-text actions")}
-          style={iconButtonStyle}
+          type="button"
+          role="menuitem"
+          className="menu-item"
+          onClick={() => onTranslate(text, position)}
+          aria-label={t("selection.translateSelectedText", "Translate selected text")}
         >
-          <MoreHorizontal size={16} />
+          <Languages size={14} aria-hidden="true" />
+          <span>{t("selection.translate", "Translate")}</span>
         </button>
-
-        {showSecondaryActions && (
-          <div
-            role="menu"
-            style={{
-              position: "absolute",
-              top: "calc(100% + 6px)",
-              right: 0,
-              minWidth: "140px",
-              padding: "4px",
-              borderRadius: "8px",
-              border: "1px solid var(--color-border)",
-              backgroundColor: "var(--color-bg)",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-            }}
-          >
-            <button
-              role="menuitem"
-              onClick={() => onTranslate(text, position)}
-              aria-label={t("selection.translateSelectedText", "Translate selected text")}
-              style={menuButtonStyle}
-            >
-              <Languages size={14} />
-              <span>{t("selection.translate", "Translate")}</span>
-            </button>
-            <button
-              role="menuitem"
-              onClick={() => onSearch(text)}
-              aria-label={t("selection.searchSelectedText", "Search selected text")}
-              style={menuButtonStyle}
-            >
-              <Search size={14} />
-              <span>{t("selection.search", "Search")}</span>
-            </button>
-            <button
-              role="menuitem"
-              onClick={() => onCreateRule(text)}
-              aria-label={t("selection.createRuleFromSelection", "Create rule from selected text")}
-              style={menuButtonStyle}
-            >
-              <ShieldCheck size={14} />
-              <span>{t("selection.createRule", "Create rule")}</span>
-            </button>
-            <button
-              role="menuitem"
-              onClick={() => onAddToKanbanNote(text)}
-              aria-label={t("selection.addToKanbanNote", "Add selected text as kanban note")}
-              style={menuButtonStyle}
-            >
-              <LayoutGrid size={14} />
-              <span>{t("selection.addToKanbanNoteLabel", "Add to Kanban note")}</span>
-            </button>
-          </div>
-        )}
-      </div>
-
-      <button
-        onClick={onClose}
-        aria-label={t("common.close", "Close")}
-        title={t("common.close", "Close")}
-        style={iconButtonStyle}
-      >
-        <X size={15} />
-      </button>
-    </div>
+        <button
+          type="button"
+          role="menuitem"
+          className="menu-item"
+          onClick={() => onSearch(text)}
+          aria-label={t("selection.searchSelectedText", "Search selected text")}
+        >
+          <Search size={14} aria-hidden="true" />
+          <span>{t("selection.search", "Search")}</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className="menu-item"
+          onClick={() => onCreateRule(text)}
+          aria-label={t("selection.createRuleFromSelection", "Create rule from selected text")}
+        >
+          <ShieldCheck size={14} aria-hidden="true" />
+          <span>{t("selection.createRule", "Create rule")}</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className="menu-item"
+          onClick={() => onAddToKanbanNote(text)}
+          aria-label={t("selection.addToKanbanNote", "Add selected text as kanban note")}
+        >
+          <LayoutGrid size={14} aria-hidden="true" />
+          <span>{t("selection.addToKanbanNoteLabel", "Add to Kanban note")}</span>
+        </button>
+      </Popover>
+    </Popover>
   );
 }
-
-const primaryButtonStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: "5px",
-  padding: "5px 9px",
-  border: "none",
-  borderRadius: "6px",
-  backgroundColor: "var(--color-accent)",
-  color: "#fff",
-  cursor: "pointer",
-  fontSize: "12px",
-  fontWeight: 600,
-};
-
-const iconButtonStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  width: "28px",
-  height: "28px",
-  padding: 0,
-  border: "none",
-  borderRadius: "6px",
-  backgroundColor: "transparent",
-  color: "var(--color-text-secondary)",
-  cursor: "pointer",
-};
-
-const menuButtonStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: "8px",
-  width: "100%",
-  padding: "7px 8px",
-  border: "none",
-  borderRadius: "6px",
-  backgroundColor: "transparent",
-  color: "var(--color-text-primary)",
-  cursor: "pointer",
-  fontSize: "12px",
-  textAlign: "left",
-};

@@ -24,6 +24,9 @@ const mocks = vi.hoisted(() => ({
   archiveMessage: vi.fn(),
   patchMessagesCache: vi.fn(),
   findCachedMessage: vi.fn(),
+  runMailAction: vi.fn(),
+  toastError: vi.fn(),
+  getMessage: vi.fn(),
 }));
 
 vi.mock("@/stores/mail.store", () => ({
@@ -48,6 +51,11 @@ vi.mock("@/stores/toast.store", () => ({
   useToastStore: {
     getState: () => mocks.toastState,
   },
+  toastError: mocks.toastError,
+}));
+
+vi.mock("@/hooks/mutations/mailActions", () => ({
+  runMailAction: mocks.runMailAction,
 }));
 
 vi.mock("@/lib/query-client", () => ({
@@ -57,6 +65,7 @@ vi.mock("@/lib/query-client", () => ({
 vi.mock("@/lib/api", () => ({
   updateMessageFlags: mocks.updateMessageFlags,
   archiveMessage: mocks.archiveMessage,
+  getMessage: mocks.getMessage,
 }));
 
 vi.mock("@/hooks/queries", () => ({
@@ -104,11 +113,29 @@ describe("command palette mail commands", () => {
     expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
   });
 
-  it("refreshes folder unread counts after archive", async () => {
+  it("archives through the shared undoable mail action", async () => {
     await command("mail:archive").execute();
 
-    expect(mocks.archiveMessage).toHaveBeenCalledWith("message-1");
-    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
+    expect(mocks.runMailAction).toHaveBeenCalledWith(
+      mocks.queryClient,
+      "archive",
+      [expect.objectContaining({ id: "message-1" })],
+      expect.anything(),
+    );
+  });
+
+  it("shows the user's current binding instead of a hardcoded shortcut", async () => {
+    const { useShortcutStore } = await import("@/stores/shortcut.store");
+    useShortcutStore.setState({ bindings: { ...useShortcutStore.getState().bindings, "archive-message": "Shift+A" } });
+    expect(command("mail:archive").shortcut).toBe("Shift+A");
+    const { commandShortcut } = await import("@/features/command-palette/commands");
+    expect(commandShortcut("nav:inbox")).toBe("Ctrl+Shift+I");
+  });
+
+  it("shows an error toast when marking read fails", async () => {
+    mocks.updateMessageFlags.mockRejectedValueOnce({ kind: "Network", message: "offline" });
+    await command("mail:mark-read").execute();
+    expect(mocks.toastError).toHaveBeenCalledWith({ kind: "Network", message: "offline" }, "messageActions.updateReadFailed");
   });
 
   it("does not refresh folder unread counts for star-only changes", async () => {

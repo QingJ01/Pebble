@@ -355,6 +355,12 @@ impl TantivySearch {
                 .get_first(ss.from_address)
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
+            let from_name = doc
+                .get_first(ss.from_name)
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
             let date = doc
                 .get_first(ss.date)
                 .and_then(|v| v.as_datetime())
@@ -366,7 +372,9 @@ impl TantivySearch {
                 snippet,
                 subject,
                 from_address,
+                from_name,
                 date,
+                account_id: None,
             });
         }
 
@@ -498,6 +506,12 @@ impl TantivySearch {
                 .get_first(ss.from_address)
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
+            let from_name = doc
+                .get_first(ss.from_name)
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
             let date = doc
                 .get_first(ss.date)
                 .and_then(|v| v.as_datetime())
@@ -509,7 +523,9 @@ impl TantivySearch {
                 snippet,
                 subject,
                 from_address,
+                from_name,
                 date,
+                account_id: None,
             });
         }
 
@@ -615,6 +631,18 @@ mod tests {
         let hits = engine.search("Invoice", 10).unwrap();
         assert!(!hits.is_empty(), "expected at least one hit");
         assert_eq!(hits[0].message_id, "msg-1");
+    }
+
+    #[test]
+    fn search_hits_carry_the_sender_name() {
+        let engine = TantivySearch::open_in_memory().unwrap();
+        let msg = make_test_message("msg-name", "Quarterly plan", "body", "eve@example.test");
+        engine.index_message(&msg, &["inbox".to_string()]).unwrap();
+        engine.commit().unwrap();
+
+        let hits = engine.search("Quarterly", 10).unwrap();
+        assert_eq!(hits[0].from_name.as_deref(), Some("Test Sender"));
+        assert_eq!(hits[0].from_address.as_deref(), Some("eve@example.test"));
     }
 
     #[test]

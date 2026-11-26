@@ -43,9 +43,7 @@ describe("PrivacyTab", () => {
     render(<PrivacyTab />);
 
     expect(screen.getByText("Load external images by default. Trackers are still blocked.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Relaxed" }).getAttribute("style")).toContain(
-      "var(--color-accent)",
-    );
+    expect(screen.getByRole("button", { name: "Relaxed" }).getAttribute("aria-pressed")).toBe("true");
   });
 
   it("clears trusted senders when there is no active account", async () => {

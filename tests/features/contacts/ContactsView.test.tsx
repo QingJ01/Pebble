@@ -27,7 +27,9 @@ vi.mock("react-i18next", () => ({
         return `translated count ${fallbackOrOptions.count}`;
       }
       if (typeof fallbackOrOptions === "string") return fallbackOrOptions;
-      return fallbackOrOptions?.defaultValue ?? key;
+      const opts = (fallbackOrOptions ?? {}) as Record<string, unknown>;
+      const template = typeof opts.defaultValue === "string" ? opts.defaultValue : key;
+      return template.replace(/\{\{(\w+)\}\}/g, (_m: string, n: string) => String(opts[n] ?? ""));
     },
   }),
 }));

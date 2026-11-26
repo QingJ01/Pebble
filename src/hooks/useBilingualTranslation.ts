@@ -2,8 +2,7 @@ import { useState } from "react";
 import { translateText } from "@/lib/api";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
 import type { Message, RenderedHtml, TranslateResult } from "@/lib/api";
-import { useToastStore } from "@/stores/toast.store";
-import { extractErrorMessage } from "@/lib/extractErrorMessage";
+import { toastError } from "@/stores/toast.store";
 import { profileLocalStorage } from "@/lib/profileStorage";
 
 // Translation cache: avoids re-translating on toggle or revisit (capped at 20 entries)
@@ -16,7 +15,6 @@ export function useBilingualTranslation(
   rendered: RenderedHtml | null,
   message: Message | null,
 ) {
-  const addToast = useToastStore((s) => s.addToast);
   const [bilingualMode, setBilingualMode] = useState(false);
   const [bilingualResult, setBilingualResult] = useState<TranslateResult | null>(null);
   const [bilingualLoading, setBilingualLoading] = useState(false);
@@ -103,7 +101,7 @@ export function useBilingualTranslation(
       }
     } catch (err) {
       console.error("Translation failed:", err);
-      addToast({ message: `Translation failed: ${extractErrorMessage(err)}`, type: "error" });
+      toastError(err, "errors.translate");
     } finally {
       setBilingualLoading(false);
     }

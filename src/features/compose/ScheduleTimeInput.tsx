@@ -4,10 +4,10 @@ import { scheduledInstant, timezoneLabel } from "./send-control-time";
 export default function ScheduleTimeInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const { t, i18n } = useTranslation();
   const instant = scheduledInstant(value);
-  return <label className="send-controls-time">
-    <span>{t("sendControls.localTime", { zone: timezoneLabel() })}</span>
-    <input aria-label={t("sendControls.localTime", { zone: timezoneLabel() })} type="datetime-local" value={value} onChange={(event) => onChange(event.target.value)} />
-    {instant !== null && <small>{t("sendControls.exactTime", { time: new Date(instant * 1000).toLocaleString(i18n.language, { timeZoneName: "longOffset" }) })}</small>}
-    <small>{t("sendControls.dst")}</small>
+  return <label className="field send-controls-time">
+    <span className="field__label">{t("sendControls.localTime", { zone: timezoneLabel() })}</span>
+    <input className="input" aria-label={t("sendControls.localTime", { zone: timezoneLabel() })} type="datetime-local" value={value} onChange={(event) => onChange(event.target.value)} />
+    {instant !== null && <small className="field__hint">{t("sendControls.exactTime", { time: new Date(instant * 1000).toLocaleString(i18n.language, { timeZoneName: "longOffset" }) })}</small>}
+    <small className="field__hint">{t("sendControls.dst")}</small>
   </label>;
 }

@@ -231,3 +231,29 @@ fn thread_subject_strips_reply_prefix_when_the_original_is_not_in_view() {
     let threads = store.list_threads_by_folder(&folder, 50, 0).unwrap();
     assert_eq!(threads[0].subject, "Quarterly plan");
 }
+
+#[test]
+fn list_threads_shows_sender_names_once_per_address() {
+    let store = Store::open_in_memory().unwrap();
+    let (account_id, folder_id) = seed_account_and_folder(&store);
+    let thread_id = new_id();
+    let base = now_timestamp();
+
+    let mut m1 = make_msg(&account_id, &thread_id, "dave@example.test", base - 200);
+    m1.from_name = "Dave Second".to_string();
+    // Same sender, different case, no name: still one participant.
+    let m2 = make_msg(&account_id, &thread_id, "Dave@Example.test", base - 100);
+    // No display name: falls back to the address.
+    let m3 = make_msg(&account_id, &thread_id, "carol@example.test", base);
+    for m in [&m1, &m2, &m3] {
+        store
+            .insert_message(m, std::slice::from_ref(&folder_id))
+            .unwrap();
+    }
+
+    let threads = store.list_threads_by_folder(&folder_id, 50, 0).unwrap();
+    assert_eq!(
+        threads[0].participants,
+        vec!["Dave Second".to_string(), "carol@example.test".to_string()]
+    );
+}

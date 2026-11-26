@@ -14,14 +14,28 @@ describe("Tauri startup window config", () => {
     expect(mainWindow.backgroundColor).toBe("#1a1a1a");
   });
 
-  it("pins the macOS traffic lights to the top-left corner", () => {
-    const configPath = resolve(process.cwd(), "src-tauri", "tauri.conf.json");
-    const config = JSON.parse(readFileSync(configPath, "utf8"));
-    const mainWindow = config.app.windows.find((windowConfig: { label?: string }) => {
-      return windowConfig.label === "main";
-    });
+  it("creates the macOS window with the overlay title bar from the start", () => {
+    const read = (file: string) =>
+      JSON.parse(readFileSync(resolve(process.cwd(), "src-tauri", file), "utf8"));
+    const main = (config: { app: { windows: { label?: string }[] } }) =>
+      config.app.windows.find((windowConfig) => windowConfig.label === "main") as Record<string, unknown>;
+    const base = main(read("tauri.conf.json"));
+    const mac = main(read("tauri.macos.conf.json"));
 
-    expect(mainWindow.trafficLightPosition).toEqual({ x: 12, y: 12 });
+    // Native title hidden and traffic lights centred on the 36px title bar
+    // (y is roughly the buttons' centre from the window top).
+    expect(mac).toMatchObject({
+      decorations: true,
+      titleBarStyle: "Overlay",
+      hiddenTitle: true,
+      trafficLightPosition: { x: 12, y: 18 },
+    });
+    // The platform file replaces the whole windows array: everything else
+    // must stay in step with the main config.
+    const macOnly = ["decorations", "titleBarStyle", "hiddenTitle", "trafficLightPosition"];
+    const strip = (w: Record<string, unknown>) =>
+      Object.fromEntries(Object.entries(w).filter(([key]) => !macOnly.includes(key)));
+    expect(strip(mac)).toEqual(strip(base));
   });
 
   it("allows the frontend to show the hidden main window", () => {

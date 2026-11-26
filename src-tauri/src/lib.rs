@@ -465,11 +465,11 @@ pub fn run() {
                 tracing::warn!("Failed to create system tray icon: {e}");
             }
 
-            // macOS: enable native traffic-light window controls with overlay titlebar
+            // macOS: the overlay title bar, hidden native title and traffic-light
+            // position come from tauri.macos.conf.json, so the window is created
+            // that way (switching at runtime left the native title showing).
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("main") {
-                let _ = window.set_decorations(true);
-                let _ = window.set_title_bar_style(tauri::TitleBarStyle::Overlay);
                 let _ = window
                     .set_background_color(Some(tauri::window::Color(0xf8, 0xf7, 0xf5, 0xff)));
             }
@@ -814,6 +814,7 @@ pub fn run() {
             commands::notifications::get_notification_status,
             commands::notifications::show_test_notification,
             commands::notifications::clear_notification_attention,
+            commands::notifications::set_notification_labels,
             commands::pending_mail_ops::get_pending_mail_ops_summary,
             commands::pending_mail_ops::list_pending_mail_ops,
             commands::pending_mail_ops::dismiss_failed_pending_mail_ops,

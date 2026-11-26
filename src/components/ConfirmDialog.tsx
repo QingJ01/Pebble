@@ -1,7 +1,16 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { useOverlayLayer } from "@/hooks/useOverlayLayer";
+import { usePresence } from "@/hooks/usePresence";
+import OverlayPortal from "./ui/OverlayPortal";
+import Button from "./ui/Button";
 
 interface Props {
+  /**
+   * Keep the dialog mounted and toggle this for an exit animation. Callers that
+   * mount it conditionally can omit it (always open; no exit animation).
+   */
+  open?: boolean;
   title: string;
   message: string;
   confirmLabel?: string;
@@ -12,23 +21,20 @@ interface Props {
   busyConfirmLabel?: string;
   onConfirm: () => void;
   onCancel: () => void;
+  /** Optional third action, rendered left of Cancel as a secondary button. */
   extraActionLabel?: string;
   onExtraAction?: () => void;
+  /** Error shown under the message (role=alert), e.g. when onConfirm failed. */
+  error?: ReactNode;
 }
 
-function getFocusableElements(container: HTMLElement | null): HTMLElement[] {
-  if (!container) {
-    return [];
-  }
-
-  return Array.from(
-    container.querySelectorAll<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-    ),
-  ).filter((element) => !element.hasAttribute("disabled"));
-}
-
+/**
+ * Modal confirm dialog. Portaled to document.body (z: --z-modal), registered on
+ * the overlay stack: Escape cancels (unless busy) and Tab is trapped only while
+ * this dialog is the top-most overlay; handled keys never reach global shortcuts.
+ */
 export default function ConfirmDialog({
+  open = true,
   title,
   message,
   confirmLabel,
@@ -39,21 +45,35 @@ export default function ConfirmDialog({
   busyConfirmLabel,
   onConfirm,
   onCancel,
-  extraActionLabel, onExtraAction,
+  extraActionLabel,
+  onExtraAction,
+  error,
 }: Props) {
   const { t } = useTranslation();
+  const titleId = useId();
+  const messageId = useId();
+  const errorId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
-  const onConfirmRef = useRef(onConfirm);
-  const onCancelRef = useRef(onCancel);
   const busyRef = useRef(busy);
   busyRef.current = busy;
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
 
-  useEffect(() => { onConfirmRef.current = onConfirm; }, [onConfirm]);
-  useEffect(() => { onCancelRef.current = onCancel; }, [onCancel]);
+  const { mounted, exiting } = usePresence(open);
+
+  useOverlayLayer({
+    open,
+    modal: true,
+    containerRef: dialogRef,
+    onEscape: () => {
+      if (!busyRef.current) onCancelRef.current();
+    },
+  });
 
   useEffect(() => {
+    if (!open) return;
     const previousFocus =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
@@ -64,131 +84,70 @@ export default function ConfirmDialog({
       confirmRef.current?.focus();
     }
 
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        if (!busyRef.current) {
-          onCancelRef.current();
-        }
-        return;
-      }
-
-      if (e.key !== "Tab") {
-        return;
-      }
-
-      const focusable = getFocusableElements(dialogRef.current);
-      if (focusable.length === 0) {
-        return;
-      }
-
-      const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
-      const nextIndex = e.shiftKey
-        ? (currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1)
-        : (currentIndex === focusable.length - 1 ? 0 : currentIndex + 1);
-
-      e.preventDefault();
-      focusable[nextIndex]?.focus();
-    }
-
-    document.addEventListener("keydown", handleKey);
-
     return () => {
-      document.removeEventListener("keydown", handleKey);
-      previousFocus?.focus();
+      if (previousFocus?.isConnected) previousFocus.focus();
     };
-  }, [destructive]);
+  }, [open, destructive]);
+
+  const confirmText = busy
+    ? busyConfirmLabel || confirmLabel || t("common.confirm", "Confirm")
+    : confirmLabel || t("common.confirm", "Confirm");
+
+  if (!mounted) return null;
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-busy={busy || undefined}
-      aria-labelledby="confirm-dialog-title"
-      aria-describedby="confirm-dialog-message"
-      style={{
-        position: "fixed",
-        inset: 0,
-        backgroundColor: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1100,
-      }}
-    >
+    <OverlayPortal>
       <div
-        ref={dialogRef}
-        style={{
-          width: "380px",
-          backgroundColor: "var(--color-sidebar-bg)",
-          color: "var(--color-text-primary)",
-          border: "1px solid var(--color-border)",
-          borderRadius: "8px",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
-          padding: "24px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "16px",
-        }}
+        className={`overlay-backdrop ${exiting ? "anim-backdrop-out" : "anim-backdrop-in"}`}
+        aria-hidden={exiting || undefined}
       >
-        <h3
-          id="confirm-dialog-title"
-          style={{ margin: 0, fontSize: "15px", fontWeight: 600, color: "var(--color-text-primary)" }}
+        <div
+          ref={dialogRef}
+          inert={exiting || undefined}
+          role="dialog"
+          aria-modal="true"
+          aria-busy={busy || undefined}
+          aria-labelledby={titleId}
+          aria-describedby={error ? `${messageId} ${errorId}` : messageId}
+          className={`dialog-panel ${exiting ? "anim-dialog-out" : "anim-dialog-in"}`}
         >
-          {title}
-        </h3>
-        <p
-          id="confirm-dialog-message"
-          style={{ margin: 0, fontSize: "13px", color: "var(--color-text-secondary)", lineHeight: 1.5, whiteSpace: "pre-wrap" }}
-        >
-          {message}
-        </p>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-          {extraActionLabel && onExtraAction && (
-            <button disabled={busy || confirmDisabled} onClick={onExtraAction}>
-              {extraActionLabel}
-            </button>
+          <h3 id={titleId} className="dialog-title">{title}</h3>
+          <p id={messageId} className="dialog-message">{message}</p>
+          {error && (
+            <p id={errorId} role="alert" className="dialog-error">{error}</p>
           )}
-          <button
-            ref={cancelRef}
-            onClick={() => { if (!busy) onCancel(); }}
-            aria-disabled={busy || undefined}
-            style={{
-              padding: "7px 16px",
-              borderRadius: "6px",
-              border: "1px solid var(--color-border)",
-              backgroundColor: "transparent",
-              color: "var(--color-text-primary)",
-              fontSize: "13px",
-              cursor: busy ? "wait" : "pointer",
-              opacity: busy ? 0.65 : 1,
-            }}
-          >
-            {cancelLabel || t("common.cancel", "Cancel")}
-          </button>
-          <button
-            ref={confirmRef}
-            onClick={() => { if (!busy && !confirmDisabled) onConfirm(); }}
-            disabled={confirmDisabled}
-            aria-disabled={busy || confirmDisabled || undefined}
-            style={{
-              padding: "7px 16px",
-              borderRadius: "6px",
-              border: "none",
-              backgroundColor: destructive ? "#ef4444" : "var(--color-accent)",
-              color: "#fff",
-              fontSize: "13px",
-              fontWeight: 600,
-              cursor: busy ? "wait" : confirmDisabled ? "not-allowed" : "pointer",
-              opacity: busy || confirmDisabled ? 0.65 : 1,
-            }}
-          >
-            {busy
-              ? busyConfirmLabel || confirmLabel || t("common.confirm", "Confirm")
-              : confirmLabel || t("common.confirm", "Confirm")}
-          </button>
+          <div className="dialog-actions">
+            {extraActionLabel && onExtraAction && (
+              <Button
+                variant="secondary"
+                className="dialog-actions__extra"
+                disabled={confirmDisabled}
+                aria-disabled={busy || undefined}
+                onClick={onExtraAction}
+              >
+                {extraActionLabel}
+              </Button>
+            )}
+            <Button
+              ref={cancelRef}
+              variant="secondary"
+              aria-disabled={busy || undefined}
+              onClick={() => { if (!busy && open) onCancel(); }}
+            >
+              {cancelLabel || t("common.cancel", "Cancel")}
+            </Button>
+            <Button
+              ref={confirmRef}
+              variant={destructive ? "danger" : "primary"}
+              disabled={confirmDisabled}
+              loading={busy}
+              onClick={() => { if (!busy && !confirmDisabled && open) onConfirm(); }}
+            >
+              {confirmText}
+            </Button>
+          </div>
         </div>
       </div>
-    </div>
+    </OverlayPortal>
   );
 }

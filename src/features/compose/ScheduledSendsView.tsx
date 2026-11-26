@@ -1,4 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
+import Button from "@/components/ui/Button";
+import Select from "@/components/ui/Select";
+import { SettingsNotice, StatusChip, type NoticeTone } from "@/features/settings/SettingsLayout";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
@@ -38,6 +41,14 @@ export function openSendSnapshot(snapshot: SendSnapshot) {
   return true;
 }
 
+const STATE_TONE: Record<ControlledSend["state"], NoticeTone> = {
+  pending: "info",
+  dispatching: "info",
+  review: "warning",
+  draft: "neutral",
+  sent: "success",
+};
+
 function ScheduledRow({ job }: { job: ControlledSend }) {
   const { t, i18n } = useTranslation();
   const client = useQueryClient();
@@ -52,50 +63,85 @@ function ScheduledRow({ job }: { job: ControlledSend }) {
     try { await action(); } catch { setError(true); }
     finally { setBusy(false); await client.invalidateQueries({ queryKey: SEND_CONTROLS_QUERY }); }
   }
-  return <article aria-label={job.subject || t("sendControls.noSubject")}>
-    <strong>{job.subject || t("sendControls.noSubject")}</strong>
-    <p>{new Date(job.dueAt * 1000).toLocaleString(i18n.language, { timeZoneName: "longOffset" })}</p>
-    <p role="status">{t(`sendControls.${job.state}`)}</p>
-    {job.state === "review" && <p>{t("sendControls.reviewWarning")}</p>}
-    {job.state === "draft" && <p>{t("sendControls.restored")}</p>}
+  const subject = job.subject || t("sendControls.noSubject");
+  return <article className="settings-list__row settings-list__row--stacked send-controls-job" aria-label={subject}>
+    <div className="send-controls-job__head">
+      <div className="settings-list__main">
+        <strong className="settings-list__title">{subject}</strong>
+        <span className="settings-list__meta">{new Date(job.dueAt * 1000).toLocaleString(i18n.language, { timeZoneName: "longOffset" })}</span>
+      </div>
+      <StatusChip tone={STATE_TONE[job.state] ?? "neutral"} role="status">{t(`sendControls.${job.state}`)}</StatusChip>
+    </div>
+    {job.state === "review" && <SettingsNotice tone="warning">{t("sendControls.reviewWarning")}</SettingsNotice>}
+    {job.state === "draft" && <p className="settings-hint">{t("sendControls.restored")}</p>}
     {mutable && <ScheduleTimeInput value={date} onChange={setDate} />}
-    <div className="send-controls-actions">
-      {mutable && <button disabled={busy || dateInstant === null} onClick={() => void run(() => rescheduleControlledSend(job, dateInstant!))}>{t("sendControls.reschedule")}</button>}
-      {job.state !== "dispatching" && job.state !== "sent" && <button disabled={busy} onClick={() => void run(async () => {
-        if (!(await useConfirmStore.getState().confirm({ title: t("sendControls.edit"), message: t("sendControls.restoreWarning") }))) return;
+    <div className="settings-actions">
+      {mutable && <Button size="sm" disabled={busy || dateInstant === null} onClick={() => void run(() => rescheduleControlledSend(job, dateInstant!))}>{t("sendControls.reschedule")}</Button>}
+      {job.state !== "dispatching" && job.state !== "sent" && <Button size="sm" disabled={busy} onClick={() => void run(async () => {
+        if (!(await useConfirmStore.getState().confirm({ title: t("sendControls.edit"), message: t("sendControls.restoreWarning"), confirmLabel: t("sendControls.edit") }))) return;
         if (isComposeDirty()) throw new Error("Existing compose is dirty");
         const snapshot = await restoreControlledSend(job);
         if (!openSendSnapshot(snapshot)) throw new Error("Existing compose is dirty");
-      })}>{t("sendControls.edit")}</button>}
-      {(job.state === "draft" || job.state === "sent") && <button disabled={busy} onClick={() => void run(async () => {
-        if (await useConfirmStore.getState().confirm({ title: t("sendControls.remove"), message: t("sendControls.removeWarning"), destructive: true })) await deleteControlledSend(job);
-      })}>{t("sendControls.remove")}</button>}
+      })}>{t("sendControls.edit")}</Button>}
+      {(job.state === "draft" || job.state === "sent") && <Button size="sm" variant="danger-ghost" disabled={busy} onClick={() => void run(async () => {
+        if (await useConfirmStore.getState().confirm({ title: t("sendControls.remove"), message: t("sendControls.removeWarning"), confirmLabel: t("sendControls.remove"), destructive: true })) await deleteControlledSend(job);
+      })}>{t("sendControls.remove")}</Button>}
     </div>
-    {error && <p role="alert">{t("sendControls.error")}</p>}
+    {error && <p role="alert" className="settings-error">{t("sendControls.error")}</p>}
   </article>;
 }
 
 export function UndoSendPreference() {
   const { t } = useTranslation();
+  const id = useId();
   const [seconds, setSeconds] = useState(loadUndoSeconds);
-  return <div className="send-controls-options">
-    <label>{t("sendControls.undoLabel")} <select aria-label={t("sendControls.undoLabel")} value={seconds} onChange={(e) => { const value = Number(e.target.value); setSeconds(value); saveUndoSeconds(value); }}>
+  return <div className="field send-controls-undo">
+    <label className="field__label" htmlFor={id}>{t("sendControls.undoLabel")}</label>
+    <Select id={id} aria-label={t("sendControls.undoLabel")} aria-describedby={`${id}-hint`} value={seconds} onChange={(e) => { const value = Number(e.target.value); setSeconds(value); saveUndoSeconds(value); }}>
       {UNDO_OPTIONS.map((value) => <option key={value} value={value}>{value === 0 ? t("sendControls.off") : t("sendControls.seconds", { count: value })}</option>)}
-    </select></label>
-    <small>{t("sendControls.undoHint")}</small>
+    </Select>
+    <p id={`${id}-hint`} className="field__hint">{t("sendControls.undoHint")}</p>
   </div>;
 }
 
-export default function ScheduledSendsView() {
+/**
+ * Scheduled sends + Undo-send preference.
+ * - variant "section" (Settings → General): a .settings-section.
+ * - variant "page" (default, standalone): padded panel with a page header.
+ */
+export default function ScheduledSendsView({ variant = "page" }: { variant?: "page" | "section" }) {
   const { t } = useTranslation();
   const query = useControlledSends();
-  return <section className="send-controls-panel" aria-label={t("sendControls.title")}>
-    <h3>{t("sendControls.title")}</h3>
-    <p>{t("sendControls.policy")}</p>
+  const headingId = useId();
+  const refresh = <Button size="sm" onClick={() => void query.refetch()}>{t("sendControls.refresh")}</Button>;
+  const body = <>
     <UndoSendPreference />
-    <button onClick={() => void query.refetch()}>{t("sendControls.refresh")}</button>
-    {query.isError && <p role="alert">{t("sendControls.loadError")}</p>}
-    {query.data?.length === 0 && <p>{t("sendControls.empty")}</p>}
-    {query.data?.map((job) => <ScheduledRow key={`${job.id}:${job.revision}`} job={job} />)}
+    {query.isError && <p role="alert" className="settings-error">{t("sendControls.loadError")}</p>}
+    {query.data?.length === 0 && <p className="settings-empty">{t("sendControls.empty")}</p>}
+    {query.data && query.data.length > 0 && <div className="settings-list">
+      {query.data.map((job) => <ScheduledRow key={`${job.id}:${job.revision}`} job={job} />)}
+    </div>}
+  </>;
+  if (variant === "section") {
+    return <section className="settings-section" aria-labelledby={headingId}>
+      <div className="settings-section__header">
+        <div className="settings-section__heading">
+          <h3 id={headingId} className="settings-section__title">{t("sendControls.title")}</h3>
+          <p className="settings-section__description">{t("sendControls.policy")}</p>
+        </div>
+        <div className="settings-section__actions">{refresh}</div>
+      </div>
+      <div className="settings-section__body">{body}</div>
+    </section>;
+  }
+  return <section className="send-controls-panel" aria-labelledby={headingId}>
+    <header className="page-header page-header--flush">
+      <div className="page-header__text">
+        <h2 id={headingId} className="page-header__title">{t("sendControls.title")}</h2>
+        <p className="page-header__description">{t("sendControls.policy")}</p>
+      </div>
+      <div className="page-header__actions">{refresh}</div>
+    </header>
+    <div className="send-controls-panel__body">{body}</div>
   </section>;
 }

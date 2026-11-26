@@ -86,6 +86,11 @@ function folder(id: string, accountId: string, role: Folder["role"]): Folder {
   };
 }
 
+/** Visible label of a sidebar row, without the decorative account badge. */
+function buttonLabel(button: HTMLElement) {
+  return button.querySelector(".sidebar-btn__label")?.textContent ?? button.textContent;
+}
+
 function mailNav() {
   return screen.getByRole("navigation", { name: "Mail folders" });
 }
@@ -128,7 +133,7 @@ describe("Sidebar account groups", () => {
 
     const labels = within(mailNav())
       .getAllByRole("button")
-      .map((button) => button.textContent);
+      .map(buttonLabel);
 
     expect(labels).toEqual([
       "Overview",
@@ -192,7 +197,7 @@ describe("Sidebar account groups", () => {
 
     render(<Sidebar />);
 
-    const labels = within(mailNav()).getAllByRole("button").map((button) => button.textContent);
+    const labels = within(mailNav()).getAllByRole("button").map(buttonLabel);
     expect(labels.slice(labels.indexOf("second@example.com"))).toEqual([
       "second@example.com", "Inbox", "Sent", "Drafts", "Trash", "Spam", "Projects",
     ]);
@@ -222,12 +227,47 @@ describe("Sidebar account groups", () => {
     mocks.folders.push(folder("Projects", "account-2", null));
 
     render(<Sidebar />);
-    fireEvent.click(screen.getByRole("button", { name: "second@example.com · Projects" }));
+    fireEvent.click(screen.getByRole("button", { name: "second@example.com" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Projects" }));
 
     await waitFor(() => {
       expect(useMailStore.getState().activeAccountId).toBe("account-2");
       expect(useMailStore.getState().activeFolderId).toBe("Projects");
     });
+  });
+
+  it("collapses to the icon rail automatically in a narrow window", () => {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query.includes("max-width"),
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })) as unknown as typeof window.matchMedia;
+    try {
+      const { container } = render(<Sidebar />);
+      expect(useUIStore.getState().sidebarCollapsed).toBe(false);
+      // Rail mode: group headers disappear, accounts become menu buttons and
+      // labels move into accessible names/tooltips.
+      expect(container.querySelector(".sidebar-group-header")).toBeNull();
+      expect(screen.getByRole("button", { name: "user@example.com" }).getAttribute("aria-haspopup")).toBe("menu");
+      expect(screen.getByRole("button", { name: "Settings" }).getAttribute("title")).toBe("Settings");
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+
+  it("adds a tooltip only to truncated folder names", () => {
+    render(<Sidebar />);
+    const button = screen.getByRole("button", { name: "Settings" });
+    const label = button.querySelector(".sidebar-btn__label") as HTMLElement;
+    Object.defineProperty(label, "scrollWidth", { configurable: true, value: 300 });
+    Object.defineProperty(label, "clientWidth", { configurable: true, value: 120 });
+    fireEvent.mouseEnter(button);
+    expect(button.getAttribute("title")).toBe("Settings");
+    Object.defineProperty(label, "scrollWidth", { configurable: true, value: 100 });
+    fireEvent.mouseEnter(button);
+    expect(button.getAttribute("title")).toBeNull();
   });
 
   it("collapses an account group via its header and persists the state", async () => {

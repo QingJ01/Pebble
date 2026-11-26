@@ -5,20 +5,24 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listFolders, type Account, type Folder } from "@/lib/api";
 import { createMailFolder, renameMailFolder, renameMailFolderNamespace, getMailFolderParents } from "@/lib/folders-api";
 import { folderTree, invalidateFolderViews, renameDisabledReason } from "@/lib/folderManagement";
-import { extractErrorMessage } from "@/lib/extractErrorMessage";
+import { formatError } from "@/lib/extractErrorMessage";
+import Button from "./ui/Button";
+import IconButton from "./ui/IconButton";
 import { accountOptionLabel } from "@/lib/accountIdentity";
 import FolderModal from "./FolderModal";
+import { usePresence } from "@/hooks/usePresence";
 
 interface Props { accounts: Account[]; folders: Folder[]; accountId: string | null; collapsed?: boolean }
 export default function FolderManagementButton(props: Props) {
   const [open,setOpen] = useState(false);
   const { t } = useTranslation();
+  const presence = usePresence(open);
   if (!props.accounts.length) return null;
   return <>
-    <button className="folder-action-button" title={t("folderManagement.manage", "Manage folders")} aria-label={t("folderManagement.manage", "Manage folders")} onClick={() => setOpen(true)}>
-      <FolderCog size={16}/>{!props.collapsed && t("folderManagement.manage", "Manage folders")}
-    </button>
-    {open && <FolderManager {...props} onClose={() => setOpen(false)}/>}
+    {props.collapsed
+      ? <IconButton label={t("folderManagement.manage", "Manage folders")} icon={<FolderCog size={14}/>} onClick={() => setOpen(true)}/>
+      : <Button variant="ghost" size="sm" icon={<FolderCog size={14}/>} onClick={() => setOpen(true)}>{t("folderManagement.manage", "Manage folders")}</Button>}
+    {presence.mounted && <FolderManager {...props} open={open} onClose={() => setOpen(false)}/>}
   </>;
 }
 
@@ -26,7 +30,7 @@ export function FolderManagementModal(props: Props & { onClose: () => void }) {
   return <FolderManager {...props} />;
 }
 
-function FolderManager({accounts,folders,accountId,onClose}: Props & {onClose: () => void}) {
+function FolderManager({accounts,folders,accountId,onClose,open = true}: Props & {onClose: () => void; open?: boolean}) {
   const {t} = useTranslation();
   const client = useQueryClient();
   const [account,setAccount] = useState(accountId ?? accounts[0].id);
@@ -45,7 +49,7 @@ function FolderManager({accounts,folders,accountId,onClose}: Props & {onClose: (
   const disabledReason=mode==="rename" ? namespace ? namespace.is_system ? "folderManagement.systemProtected" : null : renameDisabledReason(selected,accountFolders,provider) : null;
   const parentFolders = accountFolders.filter((f) => f.folder_type!=="category" && (provider !== "gmail" || !f.is_system) && (provider === "pop3" || !f.remote_id.startsWith("__local_")));
   const entries = folderTree(accountFolders);
-  return <FolderModal title={t("folderManagement.manage", "Manage folders")} busy={busy} onClose={onClose}>
+  return <FolderModal open={open} title={t("folderManagement.manage", "Manage folders")} busy={busy} onClose={onClose}>
     <form onSubmit={async (e) => {
       e.preventDefault(); if (busy || disabledReason || !name.trim()) return;
       setBusy(true);setError("");
@@ -57,30 +61,30 @@ function FolderManager({accounts,folders,accountId,onClose}: Props & {onClose: (
         else if(namespace) await renameMailFolderNamespace(account,namespace.remote_id,name);
         else await renameMailFolder(account,folderId,name);
         invalidateFolderViews(client); onClose();
-      } catch (e) { setError(`${t("folderManagement.failed", "Folder operation failed")}: ${extractErrorMessage(e)}`); }
+      } catch (e) { setError(formatError(e, { fallbackKey: "folderManagement.failed", fallback: "Folder operation failed" })); }
       finally {setBusy(false);}
     }}>
-      <label>{t("folderManagement.account", "Account")}<select disabled={busy} value={account} onChange={(e) => {setAccount(e.target.value);setFolderId("");setParentId("");setName("");setError("");}}>
+      <label>{t("folderManagement.account", "Account")}<select className="select" disabled={busy} value={account} onChange={(e) => {setAccount(e.target.value);setFolderId("");setParentId("");setName("");setError("");}}>
         {accounts.map((a) => <option key={a.id} value={a.id}>{accountOptionLabel(a)}</option>)}
       </select></label>
       {provider === "pop3" && <p>{t("folderManagement.pop3Local", "POP3 folders and moves are stored on this device only.")}</p>}
-      <label>{t("folderManagement.action", "Action")}<select disabled={busy} value={mode} onChange={(e) => {setMode(e.target.value);setName("");setError("");}}>
+      <label>{t("folderManagement.action", "Action")}<select className="select" disabled={busy} value={mode} onChange={(e) => {setMode(e.target.value);setName("");setError("");}}>
         <option value="create">{t("folderManagement.create", "New folder")}</option>
         <option value="rename">{t("folderManagement.rename", "Rename folder")}</option>
       </select></label>
-      {mode === "create" ? <label>{t("folderManagement.parent", "Parent folder")}<select disabled={busy} value={parentId} onChange={(e) => setParentId(e.target.value)}>
+      {mode === "create" ? <label>{t("folderManagement.parent", "Parent folder")}<select className="select" disabled={busy} value={parentId} onChange={(e) => setParentId(e.target.value)}>
         <option value="">{t("folderManagement.root", "Account root")}</option>
         {provider==="imap" ? serverParents.filter((p)=>p.delimiter).map((p)=><option key={p.remote_id} value={p.remote_id}>{p.name}</option>) : folderTree(parentFolders).map(({folder,path,depth}) => <option key={folder.id} value={folder.id}>{"　".repeat(depth)}{path}</option>)}
-      </select></label> : <label>{t("folderManagement.folder", "Folder")}<select disabled={busy} value={folderId} onChange={(e) => {setFolderId(e.target.value);const f=accountFolders.find((f) => f.id===e.target.value);const p=serverParents.find((p)=>p.remote_id===f?.remote_id||`namespace:${p.remote_id}`===e.target.value);setName(p ? p.name.split(p.delimiter||"/").pop()??"" : provider==="gmail" ? f?.name.split('/').pop()??"" : f?.name??"");setError("");}}>
+      </select></label> : <label>{t("folderManagement.folder", "Folder")}<select className="select" disabled={busy} value={folderId} onChange={(e) => {setFolderId(e.target.value);const f=accountFolders.find((f) => f.id===e.target.value);const p=serverParents.find((p)=>p.remote_id===f?.remote_id||`namespace:${p.remote_id}`===e.target.value);setName(p ? p.name.split(p.delimiter||"/").pop()??"" : provider==="gmail" ? f?.name.split('/').pop()??"" : f?.name??"");setError("");}}>
         <option value="">{t("folderManagement.chooseFolder", "Choose a folder")}</option>
         {entries.map(({folder,path}) => <option key={folder.id} value={folder.id}>{path}</option>)}
         {serverParents.filter((p)=>!p.selectable).map((p)=><option key={p.remote_id} value={`namespace:${p.remote_id}`}>{p.name}</option>)}
       </select></label>}
-      <label>{t("folderManagement.name", "Name")}<input disabled={busy || !!disabledReason} value={name} onChange={(e) => setName(e.target.value)} maxLength={255} autoComplete="off"/></label>
+      <label>{t("folderManagement.name", "Name")}<input className="input" required aria-required="true" disabled={busy || !!disabledReason} value={name} onChange={(e) => setName(e.target.value)} maxLength={255} autoComplete="off"/></label>
       {disabledReason && <p>{t(disabledReason)}</p>}
       {(parentError || foldersError) && <p role="alert">{t("folderManagement.loadFailed", "Could not load folders. Check your account and try again.")}</p>}
       {error && <p role="alert">{error}</p>}
-      <div className="folder-modal-actions"><button type="button" disabled={busy} onClick={onClose}>{t("folderManagement.cancel", "Cancel")}</button><button type="submit" disabled={busy || !!disabledReason || !name.trim()}>{busy ? t("folderManagement.working", "Working…") : t("folderManagement.save", "Save")}</button></div>
+      <div className="folder-modal-actions"><Button variant="secondary" disabled={busy} onClick={onClose}>{t("folderManagement.cancel", "Cancel")}</Button><Button type="submit" variant="primary" loading={busy} disabled={!!disabledReason || !name.trim()}>{busy ? t("folderManagement.working", "Working…") : t("folderManagement.save", "Save")}</Button></div>
     </form>
   </FolderModal>;
 }

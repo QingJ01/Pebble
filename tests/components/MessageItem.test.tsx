@@ -13,9 +13,15 @@ const mocks = vi.hoisted(() => ({
   archiveMessage: vi.fn(),
   moveToFolder: vi.fn(),
   addToast: vi.fn(),
+  toastError: vi.fn(),
+  runMailAction: vi.fn(),
+  getMessage: vi.fn(),
+  restoreMessage: vi.fn(),
+  openCompose: vi.fn(),
 }));
 
 vi.mock("react-i18next", () => ({
+  initReactI18next: { type: "3rdParty", init: () => {} },
   useTranslation: () => ({
     t: (key: string, fallback?: string) => {
       const labels: Record<string, string> = {
@@ -29,6 +35,8 @@ vi.mock("react-i18next", () => ({
         "messageActions.markRead": "Mark as read",
         "messageActions.updateReadFailed": "Failed to update read state",
         "messageActions.contextMenu": "Message actions",
+        "messageActions.reply": "Reply",
+        "messageActions.delete": "Delete",
       };
       return labels[key] ?? fallback ?? key;
     },
@@ -49,6 +57,17 @@ vi.mock("../../src/lib/api", () => ({
   updateMessageFlags: mocks.updateMessageFlags,
   archiveMessage: mocks.archiveMessage,
   moveToFolder: mocks.moveToFolder,
+  getMessage: mocks.getMessage,
+  restoreMessage: mocks.restoreMessage,
+}));
+
+vi.mock("../../src/hooks/mutations/mailActions", () => ({
+  runMailAction: mocks.runMailAction,
+  trashConfirmCopy: () => ({ title: "t", message: "m", confirmLabel: "c" }),
+}));
+
+vi.mock("../../src/stores/compose.store", () => ({
+  useComposeStore: { getState: () => ({ openCompose: mocks.openCompose }) },
 }));
 
 vi.mock("../../src/hooks/queries/useKanbanCardsQuery", () => ({
@@ -63,6 +82,7 @@ vi.mock("../../src/stores/toast.store", () => ({
   useToastStore: {
     getState: () => ({ addToast: mocks.addToast }),
   },
+  toastError: mocks.toastError,
 }));
 
 import MessageItem from "../../src/components/MessageItem";
@@ -104,6 +124,8 @@ describe("MessageItem", () => {
     mocks.updateMessageFlags.mockResolvedValue(undefined);
     mocks.archiveMessage.mockResolvedValue("archived");
     mocks.moveToFolder.mockResolvedValue(undefined);
+    mocks.runMailAction.mockResolvedValue({ ok: true, count: 1 });
+    mocks.getMessage.mockResolvedValue({ id: "message-1", account_id: "account-1" });
   });
 
   it("labels the archive action as unarchive in the archive folder", () => {
@@ -122,11 +144,7 @@ describe("MessageItem", () => {
     expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
   });
 
-  it("restores message lists when archive optimistic update fails", async () => {
-    const snapshot = { messages: "before-archive" };
-    mocks.snapshotMessagesCache.mockReturnValueOnce(snapshot);
-    mocks.archiveMessage.mockRejectedValueOnce(new Error("archive failed"));
-
+  it("archives through the shared undoable mail action", async () => {
     render(
       <MessageItem
         message={makeMessage()}
@@ -135,19 +153,17 @@ describe("MessageItem", () => {
       />,
     );
 
-    fireEvent.mouseEnter(screen.getByRole("option"));
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
 
-    expect(mocks.snapshotMessagesCache).toHaveBeenCalledWith(mocks.queryClient);
-    expect(mocks.patchMessagesCache).toHaveBeenCalledWith(mocks.queryClient, expect.any(Function));
-    await waitFor(() => expect(mocks.restoreMessagesCache).toHaveBeenCalledWith(mocks.queryClient, snapshot));
+    await waitFor(() => expect(mocks.runMailAction).toHaveBeenCalledWith(
+      mocks.queryClient,
+      "archive",
+      [expect.objectContaining({ id: "message-1" })],
+      expect.objectContaining({ onRemoved: expect.any(Function), confirm: expect.any(Function) }),
+    ));
   });
 
-  it("restores message lists when spam optimistic update fails", async () => {
-    const snapshot = { messages: "before-spam" };
-    mocks.snapshotMessagesCache.mockReturnValueOnce(snapshot);
-    mocks.moveToFolder.mockRejectedValueOnce(new Error("spam failed"));
-
+  it("reports spam through the shared undoable mail action with the spam folder", async () => {
     render(
       <MessageItem
         message={makeMessage()}
@@ -157,15 +173,56 @@ describe("MessageItem", () => {
       />,
     );
 
-    fireEvent.mouseEnter(screen.getByRole("option"));
     fireEvent.click(screen.getByRole("button", { name: "Report spam" }));
 
-    expect(mocks.snapshotMessagesCache).toHaveBeenCalledWith(mocks.queryClient);
-    expect(mocks.patchMessagesCache).toHaveBeenCalledWith(mocks.queryClient, expect.any(Function));
-    await waitFor(() => expect(mocks.restoreMessagesCache).toHaveBeenCalledWith(mocks.queryClient, snapshot));
+    await waitFor(() => expect(mocks.runMailAction).toHaveBeenCalledWith(
+      mocks.queryClient,
+      "spam",
+      [expect.objectContaining({ id: "message-1" })],
+      expect.objectContaining({ spamFolderId: "folder-spam" }),
+    ));
   });
 
-  it("refreshes folder unread counts after a successful archive action", async () => {
+  it("does not open the message when Enter or Space is pressed on a row action button", () => {
+    const onClick = vi.fn();
+    render(
+      <MessageItem
+        message={makeMessage()}
+        isSelected={false}
+        onClick={onClick}
+      />,
+    );
+
+    const archive = screen.getByRole("button", { name: "Archive" });
+    fireEvent.keyDown(archive, { key: "Enter" });
+    fireEvent.keyDown(archive, { key: " " });
+    expect(onClick).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(screen.getByRole("option"), { key: "Enter" });
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("toggles batch selection with Space and opens with Enter in batch mode", () => {
+    const onOpen = vi.fn();
+    const onToggleBatchSelect = vi.fn();
+    render(
+      <MessageItem
+        message={makeMessage()}
+        isSelected={false}
+        onClick={vi.fn()}
+        onOpen={onOpen}
+        batchMode
+        onToggleBatchSelect={onToggleBatchSelect}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByRole("option"), { key: " " });
+    expect(onToggleBatchSelect).toHaveBeenCalledWith("message-1");
+    fireEvent.keyDown(screen.getByRole("option"), { key: "Enter" });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers reply, archive and delete in the context menu and opens it with Shift+F10", async () => {
     render(
       <MessageItem
         message={makeMessage()}
@@ -174,28 +231,66 @@ describe("MessageItem", () => {
       />,
     );
 
-    fireEvent.mouseEnter(screen.getByRole("option"));
-    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    fireEvent.keyDown(screen.getByRole("option"), { key: "F10", shiftKey: true });
+    const menu = screen.getByRole("menu", { name: "Message actions" });
+    expect(menu).toBeTruthy();
+    expect(document.activeElement?.getAttribute("role")).toBe("menuitem");
 
-    await waitFor(() => expect(mocks.archiveMessage).toHaveBeenCalledWith("message-1"));
-    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    expect(document.activeElement?.textContent).toContain("Reply All");
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    await waitFor(() => expect(mocks.runMailAction).toHaveBeenCalledWith(
+      mocks.queryClient, "trash", [expect.objectContaining({ id: "message-1" })], expect.anything(),
+    ));
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it("refreshes folder unread counts after a successful spam action", async () => {
+  it("closes the context menu on Escape and returns focus to the row", () => {
     render(
       <MessageItem
         message={makeMessage()}
         isSelected={false}
         onClick={vi.fn()}
-        spamFolderId="folder-spam"
       />,
     );
+    const row = screen.getByRole("option");
+    row.focus();
+    fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
+    expect(screen.getByRole("menu")).toBeTruthy();
 
-    fireEvent.mouseEnter(screen.getByRole("option"));
-    fireEvent.click(screen.getByRole("button", { name: "Report spam" }));
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
 
-    await waitFor(() => expect(mocks.moveToFolder).toHaveBeenCalledWith("message-1", "folder-spam"));
-    expect(mocks.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["folder-unread-counts"] });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(row);
+  });
+
+  it("offers Move to… in the context menu, disabled for drafts", () => {
+    const { unmount } = render(<MessageItem message={makeMessage()} isSelected={false} onClick={vi.fn()} />);
+    fireEvent.contextMenu(screen.getByRole("option"), { clientX: 10, clientY: 10 });
+    const item = screen.getByRole("menuitem", { name: /Move to/ });
+    expect(item.getAttribute("aria-disabled")).toBeNull();
+    unmount();
+
+    render(<MessageItem message={{ ...makeMessage(), is_draft: true }} isSelected={false} onClick={vi.fn()} />);
+    fireEvent.contextMenu(screen.getByRole("option"), { clientX: 10, clientY: 10 });
+    expect(screen.getByRole("menuitem", { name: /Move to/ }).getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("closes the context menu when the page scrolls", () => {
+    render(
+      <MessageItem
+        message={makeMessage()}
+        isSelected={false}
+        onClick={vi.fn()}
+      />,
+    );
+    fireEvent.contextMenu(screen.getByRole("option"), { clientX: 10, clientY: 10 });
+    expect(screen.getByRole("menu")).toBeTruthy();
+
+    fireEvent.scroll(document);
+
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it("refreshes derived queries after starring from row actions", async () => {
@@ -238,10 +333,7 @@ describe("MessageItem", () => {
     expect(onToggleStar).toHaveBeenCalledWith("message-1", true);
     await waitFor(() => expect(onToggleStar).toHaveBeenLastCalledWith("message-1", false));
     expect(mocks.restoreMessagesCache).toHaveBeenCalledWith(mocks.queryClient, snapshot);
-    expect(mocks.addToast).toHaveBeenCalledWith({
-      message: "Failed to star message",
-      type: "error",
-    });
+    expect(mocks.toastError).toHaveBeenCalledWith(expect.any(Error), "messageActions.starFailed");
   });
 
 
@@ -319,23 +411,39 @@ describe("MessageItem", () => {
     expect(onToggleBatchSelect).toHaveBeenCalledWith("message-1");
   });
 
-  it("shows the source account color marker when an account color is provided", () => {
-    render(
+  it("shows the account badge right before the date, named once for screen readers", () => {
+    const { container } = render(
       <MessageItem
         message={makeMessage()}
         isSelected={false}
         onClick={vi.fn()}
-        {...({
-          accountColor: "#22c55e",
-          accountLabel: "Work <work@example.com>",
-        } as Record<string, unknown>)}
+        account={{
+          id: "work",
+          email: "work@example.com",
+          display_name: "Work",
+          color: "#10b981",
+          account_label: "Work",
+        }}
       />,
     );
 
-    const marker = screen.getByTitle("Work <work@example.com>");
+    const badge = screen.getByRole("img", { name: "Work" });
+    expect(badge.className).toContain("account-badge--xs");
+    expect(badge.getAttribute("title")).toBe("Work");
+    expect(badge.textContent).toBe("W");
+    // Badge sits right before the date in the meta area.
+    expect(badge.nextElementSibling?.className).toContain("mail-row__date");
+    // No leftover colour strip, and the account is not named twice.
+    expect(container.querySelectorAll('[aria-label="Work"]')).toHaveLength(1);
+    expect(container.querySelector('[style*="width: 3px"]')).toBeNull();
+  });
 
-    expect(marker.getAttribute("aria-label")).toBe("Work <work@example.com>");
-    expect(marker.style.backgroundColor).toBe("rgb(34, 197, 94)");
+  it("renders no account badge without an account", () => {
+    const { container } = render(
+      <MessageItem message={makeMessage()} isSelected={false} onClick={vi.fn()} />,
+    );
+
+    expect(container.querySelector(".account-badge")).toBeNull();
   });
 
   it("marks unread rows with a row class", () => {
@@ -350,7 +458,7 @@ describe("MessageItem", () => {
     expect(screen.getByRole("option").className).toContain("message-list-row--unread");
   });
 
-  it("keeps the sender line semibold regardless of read state", () => {
+  it("puts read and unread weight on the row class with titles for truncated text", () => {
     render(
       <MessageItem
         message={makeMessage({ is_read: true })}
@@ -359,33 +467,11 @@ describe("MessageItem", () => {
       />,
     );
 
-    const senderLine = screen.getByText("Sender").parentElement;
-
-    expect(senderLine?.style.fontWeight).toBe("600");
-  });
-
-  it("renders read subjects regular and unread subjects semibold", () => {
-    const { unmount } = render(
-      <MessageItem
-        message={makeMessage({ is_read: true })}
-        isSelected={false}
-        onClick={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByText("Archived message").style.fontWeight).toBe("400");
-
-    unmount();
-
-    render(
-      <MessageItem
-        message={makeMessage({ is_read: false })}
-        isSelected={false}
-        onClick={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByText("Archived message").style.fontWeight).toBe("600");
+    expect(screen.getByText("Sender").closest(".mail-row__primary")).toBeTruthy();
+    expect(screen.getByText("Sender").getAttribute("title")).toBe("Sender");
+    expect(screen.getByText("Archived message").className).toContain("mail-row__subject");
+    expect(screen.getByText("Archived message").getAttribute("title")).toBe("Archived message");
+    expect(screen.getByRole("option").className).not.toContain("message-list-row--unread");
   });
 
   it("shows recipients as the primary contact in the sent folder", () => {

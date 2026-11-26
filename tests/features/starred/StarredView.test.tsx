@@ -39,6 +39,16 @@ vi.mock("../../../src/hooks/queries/useStarredMessagesQuery", () => ({
   useStarredMessagesQuery: (...args: unknown[]) => useStarredMessagesQuery(...args),
 }));
 
+vi.mock("../../../src/hooks/queries", () => ({
+  useStarredMessagesQuery: (...args: unknown[]) => useStarredMessagesQuery(...args),
+  useAccountsQuery: () => ({
+    data: [
+      { id: "account-1", email: "one@example.com", display_name: "One", color: "#0ea5e9", account_label: null },
+      { id: "account-2", email: "two@example.com", display_name: "Two", color: "#ec4899", account_label: null },
+    ],
+  }),
+}));
+
 vi.mock("../../../src/lib/api", () => ({
   listStarredMessages: (...args: unknown[]) => listStarredMessages(...args),
 }));
@@ -52,14 +62,16 @@ vi.mock("../../../src/components/MessageItem", () => ({
     message,
     onClick,
     onToggleStar,
+    account,
   }: {
     message: MessageSummary;
     onClick: () => void;
     onToggleStar?: (messageId: string, newStarred: boolean) => void;
+    account?: { id: string };
   }) => {
     latestToggleStar = onToggleStar;
     return (
-      <div data-testid={`message-${message.id}`}>
+      <div data-testid={`message-${message.id}`} data-account-id={account?.id ?? ""}>
         <button onClick={onClick}>{message.subject}</button>
         <button onClick={() => onToggleStar?.(message.id, false)}>unstar</button>
       </div>
@@ -239,5 +251,22 @@ describe("StarredView", () => {
 
     expect(screen.getByTestId("message-m-1")).toBeTruthy();
     expect(screen.queryByText("Failed to load starred messages")).toBeNull();
+  });
+
+  it("badges starred mail by account only when it spans several accounts", () => {
+    mockMailState.activeAccountId = null as unknown as string;
+    const base = { loading: false, error: null, hasNextPage: false, isFetchingNextPage: false, fetchNextPage };
+    useStarredMessagesQuery.mockReturnValue({ ...base, data: [makeMessage("m-1"), makeMessage("m-2")] });
+    const { unmount } = render(<StarredView />);
+    expect(screen.getByTestId("message-m-1").getAttribute("data-account-id")).toBe("");
+    unmount();
+
+    useStarredMessagesQuery.mockReturnValue({
+      ...base,
+      data: [makeMessage("m-1"), { ...makeMessage("m-2"), account_id: "account-2" }],
+    });
+    render(<StarredView />);
+    expect(screen.getByTestId("message-m-1").getAttribute("data-account-id")).toBe("account-1");
+    expect(screen.getByTestId("message-m-2").getAttribute("data-account-id")).toBe("account-2");
   });
 });

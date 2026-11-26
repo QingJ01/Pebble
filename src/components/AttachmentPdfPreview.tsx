@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import { loadAttachmentPdf, previewAnnotationMode } from "@/lib/attachment-pdf";
+import Button from "./ui/Button";
 
 export default function AttachmentPdfPreview({ base64, onError }: { base64: string; onError: () => void }) {
   const { t } = useTranslation();
@@ -49,9 +50,9 @@ export default function AttachmentPdfPreview({ base64, onError }: { base64: stri
 
   return <div className="attachment-pdf-preview">
     <nav aria-label={t("attachmentViewer.pdfPages")} className="attachment-preview-actions">
-      <button disabled={!document || page <= 1} onClick={() => setPage((value) => value - 1)}>{t("attachmentViewer.previousPage")}</button>
+      <Button size="sm" disabled={!document || page <= 1} onClick={() => setPage((value) => value - 1)}>{t("attachmentViewer.previousPage")}</Button>
       <span aria-live="polite">{document ? t("attachmentViewer.pageCount", { page, count: document.numPages }) : t("attachmentViewer.loading")}</span>
-      <button disabled={!document || page >= document.numPages} onClick={() => setPage((value) => value + 1)}>{t("attachmentViewer.nextPage")}</button>
+      <Button size="sm" disabled={!document || page >= document.numPages} onClick={() => setPage((value) => value + 1)}>{t("attachmentViewer.nextPage")}</Button>
     </nav>
     {loading && <p role="status">{t("attachmentViewer.loading")}</p>}
     <canvas ref={canvasRef} role="img" aria-label={t("attachmentViewer.pdfPage", { page })} hidden={loading} />

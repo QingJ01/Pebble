@@ -1,4 +1,5 @@
 import { Star } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { Contact } from "@/lib/api";
 
 interface ContactListItemProps {
@@ -14,14 +15,15 @@ function initialsFor(contact: Contact) {
 }
 
 export default function ContactListItem({ contact, selected, onSelect }: ContactListItemProps) {
+  const { t } = useTranslation();
   const primaryEmail = contact.emails.find((email) => email.is_primary) ?? contact.emails[0];
-  const title = contact.display_name.trim() || primaryEmail?.address || "Unknown contact";
+  const title = contact.display_name.trim() || primaryEmail?.address || t("contacts.unknown", "Unknown contact");
   const address = primaryEmail?.address ?? "";
 
   return (
     <button
       type="button"
-      className={`contact-list-item${selected ? " contact-list-item--selected" : ""}`}
+      className={`list-row contact-list-item${selected ? " is-selected" : ""}`}
       aria-label={`${title} ${address}`.trim()}
       aria-pressed={selected}
       onClick={onSelect}

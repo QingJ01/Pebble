@@ -1,0 +1,54 @@
+/* AccountBadge: monogram on a tint of --account-color (set inline per account). */
+.account-badge {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--account-color) 18%, transparent);
+  color: color-mix(in srgb, var(--account-color) 50%, var(--color-text-primary)); /* ≥ 4.5:1 for every preset */
+  font-weight: var(--weight-semibold);
+  line-height: 1;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+[data-theme="dark"] .account-badge {
+  background: color-mix(in srgb, var(--account-color) 26%, transparent);
+  color: color-mix(in srgb, var(--account-color) 45%, var(--color-text-primary));
+}
+
+.account-badge--xs {
+  width: 16px;
+  height: 16px;
+  font-size: 10px;
+}
+
+.account-badge--sm {
+  width: 20px;
+  height: 20px;
+  font-size: var(--font-xs);
+}
+
+.account-badge--md {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-base);
+}
+
+.account-badge.is-selected {
+  box-shadow: 0 0 0 2px var(--color-canvas), 0 0 0 3px color-mix(in srgb, var(--account-color) 80%, var(--color-text-primary));
+}
+
+.account-badge__dot {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--color-chrome-bg);
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+}

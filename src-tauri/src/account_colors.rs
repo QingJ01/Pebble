@@ -1,9 +1,12 @@
 use pebble_core::Account;
 use std::collections::HashSet;
 
+// Keep in sync with src/lib/accountColors.ts and the copy in
+// crates/pebble-store/src/migrations/mod.rs. No orange, amber or red: those
+// read as brand, star/warning and danger.
 const ACCOUNT_COLOR_PRESETS: [&str; 12] = [
-    "#0ea5e9", "#22c55e", "#f59e0b", "#8b5cf6", "#f43f5e", "#14b8a6", "#6366f1", "#f97316",
-    "#06b6d4", "#ec4899", "#84cc16", "#3b82f6",
+    "#0ea5e9", "#10b981", "#8b5cf6", "#ec4899", "#65a30d", "#6366f1", "#14b8a6", "#c026d3",
+    "#3b82f6", "#64748b", "#06b6d4", "#1e40af",
 ];
 
 fn is_valid_hex_color(color: &str) -> bool {
@@ -58,12 +61,12 @@ mod tests {
     fn default_account_color_uses_the_first_unused_preset() {
         let accounts = vec![
             account("one", Some("#0ea5e9")),
-            account("two", Some("#22c55e")),
+            account("two", Some("#10b981")),
         ];
 
         assert_eq!(
             super::default_account_color(&accounts, "three@example.com"),
-            "#f59e0b"
+            "#8b5cf6"
         );
     }
 
@@ -75,5 +78,32 @@ mod tests {
             super::default_account_color(&accounts, "two@example.com"),
             "#0ea5e9"
         );
+    }
+
+    #[test]
+    fn presets_avoid_brand_warning_and_danger_hues() {
+        for color in super::ACCOUNT_COLOR_PRESETS {
+            let hex = u32::from_str_radix(&color[1..], 16).expect("valid hex");
+            let [r, g, b] =
+                [(hex >> 16) & 0xff, (hex >> 8) & 0xff, hex & 0xff].map(|c| c as f64 / 255.0);
+            let max = r.max(g).max(b);
+            let min = r.min(g).min(b);
+            let delta = max - min;
+            if delta < 0.15 {
+                continue; // near-neutral (slate)
+            }
+            let hue = if max == r {
+                60.0 * ((g - b) / delta).rem_euclid(6.0)
+            } else if max == g {
+                60.0 * ((b - r) / delta + 2.0)
+            } else {
+                60.0 * ((r - g) / delta + 4.0)
+            };
+            // Red (danger), orange (brand) and amber (star/warning) live in 345°..60°.
+            assert!(
+                (60.0..345.0).contains(&hue),
+                "{color} (hue {hue:.0}) is in the red/orange/amber family"
+            );
+        }
     }
 }

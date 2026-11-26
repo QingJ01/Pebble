@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
-import { Download, Loader, Check } from "lucide-react";
+import { Download, Check } from "lucide-react";
 import { listAttachments, downloadAttachment } from "@/lib/api";
 import type { Attachment } from "@/lib/api";
 import { sanitizeFilename } from "@/lib/sanitizeFilename";
@@ -9,6 +9,9 @@ import { attachmentVisual } from "./attachmentVisual";
 import { useToastStore } from "@/stores/toast.store";
 import { canPreviewAttachment, saveAllAttachments, type AttachmentSaveResult } from "@/lib/attachments-api";
 import AttachmentPreview from "./AttachmentPreview";
+import Button from "./ui/Button";
+import IconButton from "./ui/IconButton";
+import { describeError } from "@/lib/extractErrorMessage";
 
 interface Props {
   messageId: string;
@@ -20,13 +23,12 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** Raw backend reason (localised kind titles are too generic here), or null. */
 function getErrorMessage(err: unknown): string | null {
-  if (typeof err === "string") return err;
-  if (!err || typeof err !== "object") return null;
-  const record = err as Record<string, unknown>;
-  if (typeof record.message === "string") return record.message;
-  if (typeof record.error === "string") return record.error;
-  return null;
+  if (err && typeof err === "object" && !("message" in err) && typeof (err as { error?: unknown }).error === "string") {
+    return (err as { error: string }).error;
+  }
+  return describeError(err).detail || null;
 }
 
 export default function AttachmentList({ messageId }: Props) {
@@ -130,66 +132,59 @@ function MessageAttachments({ messageId }: Props) {
     }
   }
 
-  if (loading) return <p role="status">{t("attachmentViewer.loadingAttachments")}</p>;
-  if (loadError) return <div role="alert">{t("attachmentViewer.listFailed")} <button onClick={() => setLoadAttempt((value) => value + 1)}>{t("attachmentViewer.retry")}</button></div>;
+  if (loading) return <p role="status" className="attachment-section attachment-section__status">{t("attachmentViewer.loadingAttachments")}</p>;
+  if (loadError) return <div role="alert" className="attachment-section attachment-section__status">{t("attachmentViewer.listFailed")} <Button size="sm" variant="secondary" onClick={() => setLoadAttempt((value) => value + 1)}>{t("attachmentViewer.retry")}</Button></div>;
   if (attachments.length === 0) return null;
 
   return (
-    <div
-      style={{
-        padding: "12px 16px",
-        borderTop: "1px solid var(--color-border)",
-        backgroundColor: "var(--color-bg)",
-      }}
-    >
-      <div className="attachment-list-heading"><div
-        style={{
-          fontSize: "12px",
-          fontWeight: "600",
-          color: "var(--color-text-secondary)",
-          textTransform: "uppercase",
-          letterSpacing: "0.5px",
-        }}
-      >
-        {t("attachments.title")} ({attachments.length})
-      </div><button className="attachment-save-all" onClick={handleSaveAll} disabled={savingAll || downloadingId !== null}>{t(savingAll ? "attachmentViewer.savingAll" : "attachmentViewer.saveAll")}</button></div>
+    <div className="attachment-section">
+      <div className="attachment-list-heading">
+        <div className="attachment-list-title">
+          {t("attachments.title")} <span className="attachment-list-count">{attachments.length}</span>
+        </div>
+        <Button size="sm" variant="ghost" onClick={handleSaveAll} disabled={savingAll || downloadingId !== null}>
+          {t(savingAll ? "attachmentViewer.savingAll" : "attachmentViewer.saveAll")}
+        </Button>
+      </div>
       <div className="attachment-list">
         {attachments.map((attachment) => {
           const { Icon, color } = attachmentVisual(attachment.mime_type, attachment.filename);
           const isDownloading = downloadingId === attachment.id || (savingAll && downloadProgress[attachment.id] != null && downloadProgress[attachment.id] < 100);
+          const downloadedPath = downloadedPaths[attachment.id];
 
           return (
             <div key={attachment.id} className="attachment-card">
-              <div className="attachment-icon-tile" style={{ backgroundColor: `${color}1f` }}>
-                <Icon size={17} color={color} />
+              <div className="attachment-icon-tile">
+                <Icon size={16} color={color} />
               </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="attachment-card__text">
                 <div className="attachment-name" title={attachment.filename}>
-                  {canPreviewAttachment(attachment.mime_type) ? <button className="attachment-open-preview" onClick={() => setPreviewIndex(previewable.findIndex((item) => item.id === attachment.id))} aria-label={t("attachmentViewer.preview") + ": " + attachment.filename}>{attachment.filename}</button> : attachment.filename}
+                  {canPreviewAttachment(attachment.mime_type) ? (
+                    <Button
+                      variant="link"
+                      className="attachment-open-preview"
+                      onClick={() => setPreviewIndex(previewable.findIndex((item) => item.id === attachment.id))}
+                      aria-label={t("attachmentViewer.previewNamed", { name: attachment.filename })}
+                    >
+                      {attachment.filename}
+                    </Button>
+                  ) : attachment.filename}
                 </div>
                 <div className="attachment-meta">{formatFileSize(attachment.size)}</div>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
+              <div className="attachment-card__actions">
                 {isDownloading && downloadProgress[attachment.id] != null && (
-                  <span style={{ fontSize: "10px", color: "var(--color-accent)", minWidth: "28px", textAlign: "right" }}>
-                    {downloadProgress[attachment.id]}%
-                  </span>
+                  <span className="attachment-progress">{downloadProgress[attachment.id]}%</span>
                 )}
-                <button
-                  onClick={() => handleDownload(attachment)}
-                  disabled={downloadingId !== null || savingAll}
-                  aria-label={t("attachments.download") + ": " + attachment.filename}
-                  title={isDownloading ? t("attachments.downloading") : downloadedPaths[attachment.id] ? downloadedPaths[attachment.id] : t("attachments.download")}
+                <IconButton
                   className="attachment-download"
-                >
-                  {isDownloading ? (
-                    <Loader size={14} className="spinner" />
-                  ) : downloadedPaths[attachment.id] ? (
-                    <Check size={14} style={{ color: "var(--color-accent)" }} />
-                  ) : (
-                    <Download size={14} />
-                  )}
-                </button>
+                  label={t("attachments.downloadNamed", { name: attachment.filename })}
+                  tooltip={isDownloading ? t("attachments.downloading") : downloadedPath ? downloadedPath : t("attachments.download")}
+                  disabled={downloadingId !== null || savingAll}
+                  loading={isDownloading}
+                  onClick={() => handleDownload(attachment)}
+                  icon={downloadedPath ? <Check size={14} className="attachment-download__done" /> : <Download size={14} />}
+                />
               </div>
             </div>
           );

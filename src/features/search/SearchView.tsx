@@ -1,14 +1,24 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { MAIL_ROW_HEIGHT } from "@/components/mailRowMetrics";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTranslation } from "react-i18next";
-import { Search, SlidersHorizontal, Loader } from "lucide-react";
+import { Search, SlidersHorizontal } from "lucide-react";
 import type { AdvancedSearchQuery, SearchHit } from "@/lib/api";
 import { advancedSearch, searchMessages } from "@/lib/api";
 import { useUIStore } from "@/stores/ui.store";
 import SearchFilters from "./SearchFilters";
 import SearchResultItem from "./SearchResultItem";
 import MessageDetail from "@/components/MessageDetail";
+import Button from "@/components/ui/Button";
+import IconButton from "@/components/ui/IconButton";
+import "@/components/mail-list.css";
+import Spinner from "@/components/Spinner";
+import PaneSplitter, { usePaneWidth } from "@/components/PaneSplitter";
+import { useRovingList } from "@/hooks/useRovingList";
+import { useAccountBadges } from "@/hooks/useAccountBadges";
+import { LOADING_INDICATOR_DELAY_MS } from "@/hooks/useDelayedVisible";
+import { extractErrorMessage } from "@/lib/extractErrorMessage";
 
 const emptyFilters: AdvancedSearchQuery = {};
 
@@ -51,12 +61,26 @@ export default function SearchView() {
   });
 
   const resultsParentRef = useRef<HTMLDivElement>(null);
+  const listPane = usePaneWidth("pebble-search-list-width", 340, 260, 560);
   const virtualizer = useVirtualizer({
     count: results.length,
     getScrollElement: () => resultsParentRef.current,
-    estimateSize: () => 76,
+    estimateSize: () => MAIL_ROW_HEIGHT,
     measureElement: (el) => el.getBoundingClientRect().height,
     overscan: 5,
+  });
+
+  const resultIds = useMemo(() => results.map((hit) => hit.message_id), [results]);
+  const resultAccountIds = useMemo(() => results.map((hit) => hit.account_id), [results]);
+  const badgeAccounts = useAccountBadges(resultAccountIds);
+  const virtualItems = virtualizer.getVirtualItems();
+  const roving = useRovingList({
+    ids: resultIds,
+    selectedId,
+    onSelect: setSelectedId,
+    containerRef: resultsParentRef,
+    scrollToIndex: (index) => virtualizer.scrollToIndex(index, { align: "auto" }),
+    renderedIds: virtualItems.map((item) => resultIds[item.index]).filter(Boolean),
   });
 
   const doSearch = useCallback(() => {
@@ -123,24 +147,17 @@ export default function SearchView() {
             className="search-input"
           />
         </div>
-        <button
-          type="submit"
-          className="search-toolbar-button search-toolbar-button--primary"
-        >
-          <Search size={14} aria-hidden="true" />
+        <Button type="submit" icon={<Search size={14} />}>
           {t("search.searchButton")}
-        </button>
-        <button
-          type="button"
+        </Button>
+        <IconButton
+          size="md"
+          label={t("search.filters")}
+          icon={<SlidersHorizontal size={16} />}
+          aria-expanded={showFilters}
+          className={showFilters || filtersActive ? "is-active" : undefined}
           onClick={() => setShowFilters(!showFilters)}
-          title={t("search.filters")}
-          aria-label={t("search.filters")}
-          className={`search-toolbar-button search-toolbar-icon-button ${
-            showFilters || hasActiveFilters(filters) ? "is-active" : ""
-          }`}
-        >
-          <SlidersHorizontal size={16} />
-        </button>
+        />
       </form>
 
       {/* Filters panel */}
@@ -157,102 +174,42 @@ export default function SearchView() {
         {/* Results list */}
         <div
           ref={resultsParentRef}
+          id="search-results-pane"
           className="scroll-region search-results-scroll"
           style={{
-            width: selectedId ? "clamp(260px, 32%, 360px)" : "100%",
+            width: selectedId ? `${listPane.width}px` : "100%",
+            maxWidth: "55%",
             flexShrink: 0,
             overflow: "auto",
             borderRight: selectedId ? "1px solid var(--color-border)" : "none",
-            transition: "width 0.15s ease",
           }}
         >
           {loading && (
-            <div
-              className="fade-in"
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: "40px",
-                color: "var(--color-text-secondary)",
-                fontSize: "13px",
-                gap: "10px",
-              }}
-            >
-              <Loader size={20} className="spinner" />
-              <span>{t("common.loading")}</span>
-            </div>
+            <Spinner delayMs={LOADING_INDICATOR_DELAY_MS} label={t("common.loading")} />
           )}
 
           {!loading && queryError && (
-            <div
-              className="fade-in"
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: "40px",
-                color: "var(--color-text-secondary)",
-                fontSize: "14px",
-                gap: "8px",
-              }}
-            >
-              <p style={{ color: "var(--color-error, #e53e3e)", margin: 0 }}>
+            <div className="fade-in mail-empty-state">
+              <p role="alert" className="mail-empty-state__error">
                 {t("search.error", "Search failed")}
               </p>
-              <p style={{ fontSize: "13px", margin: 0 }}>{queryError?.message}</p>
-              <button
-                onClick={() => refetch()}
-                style={{
-                  marginTop: "8px",
-                  padding: "6px 16px",
-                  borderRadius: "4px",
-                  border: "1px solid var(--color-border)",
-                  backgroundColor: "transparent",
-                  color: "var(--color-accent)",
-                  fontSize: "13px",
-                  cursor: "pointer",
-                }}
-              >
+              <p className="mail-empty-state__detail">{extractErrorMessage(queryError)}</p>
+              <Button onClick={() => refetch()}>
                 {t("common.retry", "Retry")}
-              </button>
+              </Button>
             </div>
           )}
 
           {!loading && !queryError && hasSearched && results.length === 0 && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: "40px",
-                color: "var(--color-text-secondary)",
-                fontSize: "14px",
-                gap: "8px",
-              }}
-            >
+            <div className="mail-empty-state">
               <Search size={28} strokeWidth={1.2} />
               {t("search.noResults")}
             </div>
           )}
 
           {!loading && !hasSearched && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: "60px 20px",
-                color: "var(--color-text-tertiary)",
-                fontSize: "14px",
-                gap: "8px",
-              }}
-            >
-              <Search size={32} />
+            <div className="mail-empty-state mail-empty-state--muted">
+              <Search size={32} strokeWidth={1.2} />
               <span>{t("search.title")}</span>
             </div>
           )}
@@ -261,15 +218,17 @@ export default function SearchView() {
             <div
               role="listbox"
               aria-label={t("search.results", "Search results")}
-              style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}
+              {...roving.containerProps}
+              style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative", outline: "none" }}
             >
-              {virtualizer.getVirtualItems().map((virtualItem) => {
+              {virtualItems.map((virtualItem) => {
                 const hit = results[virtualItem.index];
                 return (
                   <div
                     key={hit.message_id}
                     ref={virtualizer.measureElement}
                     data-index={virtualItem.index}
+                    role="presentation"
                     style={{
                       position: "absolute",
                       top: 0,
@@ -281,8 +240,14 @@ export default function SearchView() {
                     <SearchResultItem
                       hit={hit}
                       isSelected={hit.message_id === selectedId}
-                      onClick={() => setSelectedId(hit.message_id)}
+                      onClick={() => {
+                        roving.setActiveId(hit.message_id);
+                        setSelectedId(hit.message_id);
+                      }}
                       query={query}
+                      tabIndex={roving.tabIndexFor(hit.message_id)}
+                      onRowFocus={roving.setActiveId}
+                      account={hit.account_id ? badgeAccounts?.get(hit.account_id) : undefined}
                     />
                   </div>
                 );
@@ -293,10 +258,21 @@ export default function SearchView() {
 
         {/* Detail panel */}
         {selectedId && (
-          <div style={{ flex: 1, overflow: "hidden" }}>
+          <PaneSplitter
+            width={listPane.width}
+            min={listPane.min}
+            max={listPane.max}
+            onChange={listPane.setWidth}
+            onReset={listPane.reset}
+            controls="search-results-pane"
+          />
+        )}
+        {selectedId && (
+          <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
             <MessageDetail
               messageId={selectedId}
               onBack={() => setSelectedId(null)}
+              onReopen={(id) => setSelectedId((current) => current ?? id)}
             />
           </div>
         )}

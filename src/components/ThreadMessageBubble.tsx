@@ -5,27 +5,29 @@ import { getRenderedHtml } from "@/lib/api";
 import type { Message, RenderedHtml } from "@/lib/api";
 import { defaultPrivacyMode } from "@/lib/privacyMode";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
+import { formatDateTime } from "@/lib/formatDate";
 import { ShadowDomEmail } from "./ShadowDomEmail";
 import ContactAddressAction from "./ContactAddressAction";
 import MessageParticipants from "./MessageParticipants";
 import AttachmentList from "./AttachmentList";
 import ResumeDraftButton from "./ResumeDraftButton";
 import MoveToButton from "./MoveToButton";
+import "./message-reader.css";
 
 interface Props {
   message: Message;
   defaultExpanded?: boolean;
 }
 
-function formatFullDate(timestamp: number): string {
-  return new Date(timestamp * 1000).toLocaleString([], {
+function formatFullDate(timestamp: number, language?: string): string {
+  return formatDateTime(timestamp, {
     year: "numeric", month: "short", day: "numeric",
     hour: "2-digit", minute: "2-digit",
-  });
+  }, language);
 }
 
 export default function ThreadMessageBubble({ message, defaultExpanded = false }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [rendered, setRendered] = useState<RenderedHtml | null>(null);
   const contactParticipantsGroups = [
@@ -42,72 +44,41 @@ export default function ThreadMessageBubble({ message, defaultExpanded = false }
   }, [expanded, rendered, message.id]);
 
   return (
-    <div
-      style={{
-        border: "1px solid var(--color-border)",
-        borderRadius: "8px",
-        marginBottom: "8px",
-        overflow: "hidden",
-        backgroundColor: "var(--color-bg)",
-      }}
-    >
-      {message.is_draft && <ResumeDraftButton messageId={message.id} />}
-      {/* Header - always visible */}
+    <div className="thread-bubble">
+      {message.is_draft && (
+        <div className="thread-bubble__draft">
+          <ResumeDraftButton messageId={message.id} />
+        </div>
+      )}
+      {/* Header - always visible (full-width disclosure row) */}
       <button
+        type="button"
+        className="thread-bubble__header"
         onClick={() => setExpanded(!expanded)}
         aria-expanded={expanded}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          padding: "10px 14px",
-          cursor: "pointer",
-          backgroundColor: expanded ? "var(--color-bg-hover)" : "transparent",
-          border: "none",
-          width: "100%",
-          textAlign: "left",
-          color: "inherit",
-          font: "inherit",
-        }}
       >
-        {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        <span style={{ fontSize: "13px", fontWeight: "600", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {expanded
+          ? <ChevronDown size={14} className="thread-bubble__chevron" aria-hidden="true" />
+          : <ChevronRight size={14} className="thread-bubble__chevron" aria-hidden="true" />}
+        <span className="thread-bubble__sender">
           {message.from_name || message.from_address}
         </span>
-        <span style={{ fontSize: "12px", color: "var(--color-text-secondary)", flexShrink: 0 }}>
-          {formatFullDate(message.date)}
+        <span className="thread-bubble__date">
+          {formatFullDate(message.date, i18n?.language)}
         </span>
       </button>
 
       {/* Body - only when expanded */}
       {expanded && (
-        <div style={{ padding: "12px 14px", borderTop: "1px solid var(--color-border)" }}>
+        <div className="thread-bubble__body">
           <MoveToButton messages={[message]} showLabel/>
-          {/* Sender + participants header card */}
-          <div
-            style={{
-              backgroundColor: "var(--color-bg-hover)",
-              borderRadius: "8px",
-              padding: "8px 12px",
-              color: "var(--color-text-primary)",
-              marginBottom: "8px",
-            }}
-          >
-            <div
-              style={{
-                fontSize: "13px",
-                marginBottom: "2px",
-                display: "flex",
-                alignItems: "center",
-                flexWrap: "wrap",
-                gap: "4px",
-              }}
-            >
-              <span style={{ fontWeight: "600" }}>
+          <div className="reader-sender-card">
+            <div className="reader-sender-card__line">
+              <span className="reader-sender-card__name">
                 {message.from_name || message.from_address}
               </span>
               {message.from_name && (
-                <span style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginLeft: "2px" }}>
+                <span className="reader-sender-card__address">
                   &lt;{message.from_address}&gt;
                 </span>
               )}
@@ -119,15 +90,10 @@ export default function ThreadMessageBubble({ message, defaultExpanded = false }
             </div>
             <MessageParticipants accountId={message.account_id} groups={contactParticipantsGroups} />
           </div>
-          {/* Body content */}
           {rendered?.html ? (
             <ShadowDomEmail html={rendered.html} />
           ) : (
-            <pre style={{
-              fontSize: "13px", color: "var(--color-text-primary)",
-              whiteSpace: "pre-wrap", wordBreak: "break-word",
-              margin: 0, fontFamily: "inherit",
-            }}>
+            <pre className="reader-plain-text">
               {message.body_text}
             </pre>
           )}

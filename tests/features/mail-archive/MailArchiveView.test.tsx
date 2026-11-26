@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MailArchiveView from "../../../src/features/mail-archive/MailArchiveView";
 import en from "../../../src/locales/mail-archive.en.json";
 import zh from "../../../src/locales/mail-archive.zh.json";
+import { resetArchiveJobStore, useArchiveJobStore } from "../../../src/features/mail-archive/archiveJob.store";
 
 const mocks = vi.hoisted(() => ({
   listMailArchives: vi.fn(), createMailArchive: vi.fn(), listArchiveFolders: vi.fn(), createArchiveFolder: vi.fn(),
@@ -34,6 +35,7 @@ async function renderView(language = "en") {
 describe("Local mail archive browser", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    resetArchiveJobStore();
     mocks.listMailArchives.mockResolvedValue([{ id: "archive", account_id: "account", account_label: "owner@example.com", name: "Imported mail" }, { id: "other", account_id: "account", account_label: "owner@example.com", name: "Other archive" }]);
     mocks.listArchiveFolders.mockResolvedValue([{ id: "local", archive_id: "archive", name: "Imported" }, { id: "local-other", archive_id: "archive", name: "Other local folder" }]);
     mocks.listArchiveMessages.mockResolvedValue([{ id: "message", folder_id: "local", subject: "Subject A", sender: "sender@example.com", date: 1, is_read: false, is_starred: false }]);
@@ -53,7 +55,7 @@ describe("Local mail archive browser", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Subject A — sender@example.com/ }));
     // Generous timeout: under a full parallel run this render can exceed the
     // 1s findBy default and flake.
-    const message = await screen.findByRole("article", { name: "Archived message" }, { timeout: 5000 });
+    const message = await screen.findByRole("article", { name: "Selected message" }, { timeout: 5000 });
     expect(message.querySelector("img,script,iframe")).toBeNull();
     expect(within(message).getByText(/<img src=/)).toBeTruthy();
     expect(within(message).getByText(/Bcc: hidden@example.com/)).toBeTruthy();
@@ -67,21 +69,21 @@ describe("Local mail archive browser", () => {
   it("does not close a message opened before the initial search debounce would have fired", async () => {
     await renderView();
     fireEvent.click(await screen.findByRole("button", { name: /Subject A — sender@example.com/ }));
-    await screen.findByRole("article", { name: "Archived message" });
+    await screen.findByRole("article", { name: "Selected message" });
 
     await new Promise((resolve) => setTimeout(resolve, 300));
 
-    expect(screen.getByRole("article", { name: "Archived message" })).toBeTruthy();
+    expect(screen.getByRole("article", { name: "Selected message" })).toBeTruthy();
   });
 
   it("requires validation and explicit confirmation before a local import, reporting duplicates and failures", async () => {
     await renderView();
-    const importButton = screen.getByRole("button", { name: "Import into local archive" }) as HTMLButtonElement;
+    const importButton = screen.getByRole("button", { name: "Import into library" }) as HTMLButtonElement;
     expect(importButton.disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Choose EML / MBOX files…" }));
     await screen.findByText("mail.mbox (1.0 KiB)");
-    fireEvent.click(screen.getByRole("button", { name: "Validate and summarize" }));
-    await screen.findByRole("heading", { name: "Validation only — nothing imported" });
+    fireEvent.click(screen.getByRole("button", { name: "Check and preview" }));
+    await screen.findByRole("heading", { name: "Check only — nothing imported" });
     expect(mocks.importMailArchive).toHaveBeenCalledWith(expect.any(String), "selection", "archive", "local", true);
     expect(mocks.confirm).not.toHaveBeenCalled();
     expect(screen.getByText("File 1, message 2: invalid MIME")).toBeTruthy();
@@ -98,29 +100,29 @@ describe("Local mail archive browser", () => {
   it("clears validation when destination changes and scopes archive exports separately from cached mailbox exports", async () => {
     await renderView();
     fireEvent.click(screen.getByRole("checkbox", { name: "Select Subject A" }));
-    fireEvent.click(screen.getByRole("button", { name: "Export selected archive messages…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export selected…" }));
     await waitFor(() => expect(mocks.exportMailArchive).toHaveBeenCalledWith(expect.any(String), { kind: "archive", archive_id: "archive", folder_id: null, message_ids: ["message"] }, "eml"));
     fireEvent.change(screen.getByLabelText("Export format"), { target: { value: "mbox" } });
-    fireEvent.click(screen.getByRole("button", { name: "Export entire archive folder…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export entire folder…" }));
     await waitFor(() => expect(mocks.exportMailArchive).toHaveBeenLastCalledWith(expect.any(String), { kind: "archive", archive_id: "archive", folder_id: "local", message_ids: [] }, "mbox"));
-    fireEvent.click(screen.getByRole("button", { name: "Export mailbox selection (1) as mbox…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export selected (1) as mbox…" }));
     await waitFor(() => expect(mocks.exportMailArchive).toHaveBeenLastCalledWith(expect.any(String), { kind: "mailbox", account_id: "account", folder_id: null, message_ids: ["remote-selected"] }, "mbox"));
-    fireEvent.change(screen.getByLabelText("Local archive"), { target: { value: "other" } });
-    expect((screen.getByRole("button", { name: "Export selected archive messages…" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Local library"), { target: { value: "other" } });
+    expect((screen.getByRole("button", { name: "Export selected…" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("performs local flags/moves, confirms deletion, and clears deleted message selection", async () => {
     await renderView();
     fireEvent.click(await screen.findByRole("button", { name: /Subject A — sender@example.com/ }));
-    await screen.findByRole("article", { name: "Archived message" });
-    fireEvent.change(screen.getByLabelText("Move within this local archive"), { target: { value: "local-other" } });
+    await screen.findByRole("article", { name: "Selected message" });
+    fireEvent.change(screen.getByLabelText("Move to folder in this library"), { target: { value: "local-other" } });
     await waitFor(() => expect(mocks.updateArchiveMessage).toHaveBeenCalledWith("archive", "message", "local-other", false, false));
     await waitFor(() => expect(screen.queryByRole("article")).toBeNull());
-    const browsePanel = screen.getByRole("group", { name: "Browse local archive" }) as HTMLFieldSetElement;
+    const browsePanel = screen.getByRole("group", { name: "Browse library" }) as HTMLFieldSetElement;
     await waitFor(() => expect(browsePanel.disabled).toBe(false));
     fireEvent.click(await screen.findByRole("button", { name: /Subject A — sender@example.com/ }));
-    await screen.findByRole("article", { name: "Archived message" });
-    fireEvent.click(screen.getByRole("button", { name: "Delete archived message" }));
+    await screen.findByRole("article", { name: "Selected message" });
+    fireEvent.click(screen.getByRole("button", { name: "Delete message" }));
     await waitFor(() => expect(mocks.deleteArchiveMessage).toHaveBeenCalledWith("archive", "message"));
     await waitFor(() => expect(screen.queryByRole("article")).toBeNull());
     expect(mocks.confirm).toHaveBeenCalledWith(expect.objectContaining({ destructive: true, message: en.mailArchive.deleteWarning }));
@@ -134,16 +136,33 @@ describe("Local mail archive browser", () => {
     await screen.findByText("mail.mbox (1.0 KiB)");
     let finish!: (report: object) => void;
     mocks.importMailArchive.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
-    fireEvent.click(screen.getByRole("button", { name: "验证并查看摘要" }));
+    fireEvent.click(screen.getByRole("button", { name: "检查并预览" }));
     await waitFor(() => expect(mocks.importMailArchive).toHaveBeenCalled());
     const jobId = mocks.importMailArchive.mock.calls[0][0];
     act(() => mocks.listener?.({ payload: { job_id: jobId, processed: 37, imported: 35, duplicates: 2, failed: 0 } }));
-    await screen.findByText(/正在处理邮件… 37/);
+    await screen.findByText(/已处理 37 封/);
+    expect(screen.getByText(zh.mailArchive.keepsRunning)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "当前邮件完成后取消" }));
     expect(mocks.cancelArchiveJob).toHaveBeenCalledWith(jobId);
     await act(async () => finish({ processed: 37, imported: 35, duplicates: 2, failed: 0, cancelled: true, errors: [] }));
     await screen.findByText(zh.mailArchive.cancelled);
-    expect((screen.getByRole("button", { name: "导入本地归档" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "导入到邮件库" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("keeps a running import alive when the page unmounts and reports completion", async () => {
+    await renderView();
+    fireEvent.click(screen.getByRole("button", { name: /Choose EML/ }));
+    await screen.findByText("mail.mbox (1.0 KiB)");
+    let finish!: (report: object) => void;
+    mocks.importMailArchive.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    fireEvent.click(screen.getByRole("button", { name: /Check and preview/ }));
+    await waitFor(() => expect(mocks.importMailArchive).toHaveBeenCalled());
+    cleanup();
+    expect(mocks.cancelArchiveJob).not.toHaveBeenCalled();
+    expect(useArchiveJobStore.getState().busy).toBe(true);
+    await act(async () => finish({ processed: 3, imported: 3, duplicates: 0, failed: 0, cancelled: false, errors: [] }));
+    expect(useArchiveJobStore.getState().busy).toBe(false);
+    expect(useArchiveJobStore.getState().report).toEqual(expect.objectContaining({ imported: 3 }));
   });
 
   it("has matching EN/ZH namespaces without missing or untranslated keys", () => {

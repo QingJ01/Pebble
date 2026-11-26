@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { BatchMarkReadResult } from "./ipc-types";
+import type { NotificationLabels } from "./generated/ipc";
 
 // Re-export all IPC types so existing `import { Foo } from "@/lib/api"` keeps working.
 export type {
@@ -494,6 +495,10 @@ export async function clearNotificationAttention(): Promise<void> {
 
 export async function setTrayMenuLabels(showLabel: string, hideLabel: string, quitLabel: string): Promise<void> {
   return invoke<void>("set_tray_menu_labels", { showLabel, hideLabel, quitLabel });
+}
+
+export async function setNotificationLabels(labels: NotificationLabels): Promise<void> {
+  return invoke<void>("set_notification_labels", { labels });
 }
 
 export async function stopSync(accountId: string): Promise<void> {

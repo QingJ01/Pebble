@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { Keyboard, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useShortcutStore } from "@/stores/shortcut.store";
+import { formatShortcut, useShortcutStore } from "@/stores/shortcut.store";
 import { eventToKeyString } from "@/hooks/useKeyboard";
+import Button from "@/components/ui/Button";
+import { SettingsList, SettingsListRow, SettingsNotice, SettingsSection } from "./SettingsLayout";
 
 const ACTION_I18N_MAP: Record<string, string> = {
   "command-palette": "shortcuts.openCommandPalette",
@@ -32,6 +34,26 @@ const SHORTCUT_GROUPS = [
   { categoryKey: "shortcuts.mailActions", actions: ["compose-new", "reply", "reply-all", "forward", "toggle-star", "archive-message", "toggle-view-inbox", "toggle-view-kanban"] },
   { categoryKey: "shortcuts.translate", actions: ["translate-selection", "toggle-bilingual"] },
 ];
+
+
+/** Fixed (not rebindable) shortcuts that only apply inside a specific view. */
+const FIXED_SHORTCUTS: Array<{ id: string; labelKey: string; fallback: string; keys: string }> = [
+  { id: "compose-send", labelKey: "shortcuts.composeSend", fallback: "Send message (in compose)", keys: "Ctrl+Enter" },
+];
+
+function FixedShortcutRow({ labelKey, fallback, keys }: { labelKey: string; fallback: string; keys: string }) {
+  const { t } = useTranslation();
+  return (
+    <SettingsListRow
+      title={t(labelKey, fallback)}
+      actions={
+        <kbd className="settings-kbd" title={t("shortcuts.fixedBinding", "This shortcut can't be changed")}>
+          {formatShortcut(keys)}
+        </kbd>
+      }
+    />
+  );
+}
 
 function ShortcutRow({ actionId }: { actionId: string }) {
   const { t } = useTranslation();
@@ -99,76 +121,43 @@ function ShortcutRow({ actionId }: { actionId: string }) {
   }, [isRecording, actionId, stopRecording]);
 
   return (
-    <div data-action={actionId}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "10px 16px",
-          backgroundColor: "var(--color-bg)",
-        }}
-      >
-        <span
-          id={`shortcut-label-${actionId}`}
-          style={{ fontSize: "13px", color: "var(--color-text-primary)" }}
-        >
+    <div data-action={actionId} className="settings-list__row">
+      <div className="settings-list__main">
+        <span id={`shortcut-label-${actionId}`} className="settings-list__title">
           {t(ACTION_I18N_MAP[actionId] ?? actionId)}
         </span>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span
-            role="status"
-            aria-live="polite"
-            style={{
-              fontSize: "11px",
-              color: "var(--color-error, #e53e3e)",
-              minWidth: conflict ? undefined : 0,
-            }}
-          >
-            {conflict ? t("shortcuts.conflict", { action: conflict }) : ""}
-          </span>
-          <button
-            type="button"
-            aria-pressed={isRecording}
-            aria-labelledby={`shortcut-label-${actionId}`}
-            aria-label={
-              isRecording
-                ? t("shortcuts.recording")
-                : t("shortcuts.editBinding", { keys: currentKeys || t("shortcuts.unbound", "Unbound") })
+      </div>
+      <div className="settings-list__actions" style={{ gap: "var(--space-2)" }}>
+        <span
+          role="status"
+          aria-live="polite"
+          style={{ fontSize: "var(--font-xs)", color: "var(--color-danger)" }}
+        >
+          {conflict ? t("shortcuts.conflict", { action: conflict }) : ""}
+        </span>
+        <Button
+          size="sm"
+          pressed={isRecording}
+          aria-labelledby={`shortcut-label-${actionId}`}
+          aria-label={
+            isRecording
+              ? t("shortcuts.recording")
+              : t("shortcuts.editBinding", { keys: formatShortcut(currentKeys) || t("shortcuts.unbound", "Unbound") })
+          }
+          onClick={() => {
+            if (isRecording) {
+              stopRecording();
+              setConflict(null);
+            } else {
+              setConflict(null);
+              startRecording(actionId);
             }
-            onClick={() => {
-              if (isRecording) {
-                stopRecording();
-                setConflict(null);
-              } else {
-                setConflict(null);
-                startRecording(actionId);
-              }
-            }}
-            title={t("shortcuts.edit")}
-            style={{
-              padding: "3px 8px",
-              borderRadius: "4px",
-              border: isRecording
-                ? "1px solid var(--color-accent, #3b82f6)"
-                : "1px solid var(--color-border)",
-              backgroundColor: isRecording
-                ? "var(--color-accent-bg, rgba(59,130,246,0.1))"
-                : "var(--color-bg-secondary)",
-              fontSize: "12px",
-              fontFamily: "monospace",
-              color: isRecording
-                ? "var(--color-accent, #3b82f6)"
-                : "var(--color-text-secondary)",
-              cursor: "pointer",
-              minWidth: "60px",
-              textAlign: "center",
-              userSelect: "none",
-            }}
-          >
-            {isRecording ? t("shortcuts.recording") : currentKeys}
-          </button>
-        </div>
+          }}
+          title={t("shortcuts.edit")}
+          style={{ minWidth: "64px", fontFamily: "var(--font-mono)", userSelect: "none" }}
+        >
+          {isRecording ? t("shortcuts.recording") : formatShortcut(currentKeys)}
+        </Button>
       </div>
     </div>
   );
@@ -187,91 +176,45 @@ export default function ShortcutsTab() {
 
   return (
     <div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: "20px",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <Keyboard size={18} />
-          <h3 style={{ margin: 0, fontSize: "14px", fontWeight: 600 }}>
+      <SettingsSection
+        title={
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-2)" }}>
+            <Keyboard size={16} aria-hidden="true" />
             {t("shortcuts.title")}
-          </h3>
+          </span>
+        }
+        actions={
+          <Button size="sm" onClick={handleReset} icon={<RotateCcw size={12} />}>
+            {t("shortcuts.resetDefaults")}
+          </Button>
+        }
+      >
+        <div role="status" aria-live="polite">
+          {resetMessage && <SettingsNotice tone="success">{t("shortcuts.resetConfirm")}</SettingsNotice>}
         </div>
-        <button
-          onClick={handleReset}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "4px",
-            padding: "4px 10px",
-            borderRadius: "6px",
-            border: "1px solid var(--color-border)",
-            backgroundColor: "var(--color-bg-secondary)",
-            color: "var(--color-text-secondary)",
-            fontSize: "12px",
-            cursor: "pointer",
-          }}
-        >
-          <RotateCcw size={12} />
-          {t("shortcuts.resetDefaults")}
-        </button>
-      </div>
 
-      <div role="status" aria-live="polite">
-        {resetMessage && (
-          <div
-            style={{
-              padding: "8px 12px",
-              marginBottom: "16px",
-              borderRadius: "6px",
-              backgroundColor: "var(--color-accent-bg, rgba(59,130,246,0.1))",
-              color: "var(--color-accent, #3b82f6)",
-              fontSize: "12px",
-            }}
-          >
-            {t("shortcuts.resetConfirm")}
-          </div>
-        )}
-      </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
+          {SHORTCUT_GROUPS.map((group) => (
+            <div key={group.categoryKey} style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+              <h4 className="settings-subheading">{t(group.categoryKey)}</h4>
+              <SettingsList>
+                {group.actions.map((actionId) => (
+                  <ShortcutRow key={actionId} actionId={actionId} />
+                ))}
+              </SettingsList>
+            </div>
+          ))}
 
-      {SHORTCUT_GROUPS.map((group) => (
-        <div key={group.categoryKey} style={{ marginBottom: "24px" }}>
-          <h4
-            style={{
-              fontSize: "12px",
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-              color: "var(--color-text-secondary)",
-              marginBottom: "10px",
-            }}
-          >
-            {t(group.categoryKey)}
-          </h4>
-          <div
-            style={{
-              borderRadius: "8px",
-              border: "1px solid var(--color-border)",
-              overflow: "hidden",
-            }}
-          >
-            {group.actions.map((actionId, index) => (
-              <div
-                key={actionId}
-                style={{
-                  borderTop: index > 0 ? "1px solid var(--color-border)" : "none",
-                }}
-              >
-                <ShortcutRow actionId={actionId} />
-              </div>
-            ))}
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+            <h4 className="settings-subheading">{t("shortcuts.compose", "Compose")}</h4>
+            <SettingsList>
+              {FIXED_SHORTCUTS.map((shortcut) => (
+                <FixedShortcutRow key={shortcut.id} labelKey={shortcut.labelKey} fallback={shortcut.fallback} keys={shortcut.keys} />
+              ))}
+            </SettingsList>
           </div>
         </div>
-      ))}
+      </SettingsSection>
     </div>
   );
 }

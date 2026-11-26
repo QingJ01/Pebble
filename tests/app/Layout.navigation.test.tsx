@@ -177,7 +177,8 @@ describe("Layout navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
 
     expect(screen.getByRole("button", { name: "Settings" }).getAttribute("aria-current")).toBe("page");
-    expect(screen.getByText("Loading...")).toBeTruthy();
+    // Stale content is gone immediately; the spinner itself is delayed so fast loads never flash it.
     expect(screen.queryByText("Inbox panel")).toBeNull();
+    expect(await screen.findByText("Loading...")).toBeTruthy();
   });
 });

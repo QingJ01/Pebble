@@ -17,12 +17,17 @@ import {
   Layers,
   ChevronDown,
   ChevronRight,
+  FolderCog,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import SidebarButton from "./SidebarButton";
+import SidebarRail, { RailMenuButton } from "./SidebarRail";
+import AccountBadge, { accountShortName } from "./ui/AccountBadge";
+import { useResolvedAccounts } from "../hooks/useAccountBadges";
 import { useUIStore } from "../stores/ui.store";
 import { isComposeDirty, useComposeStore } from "../stores/compose.store";
 import { useMailStore } from "../stores/mail.store";
-import { useAccountsQuery, useFoldersForAccountsQuery } from "../hooks/queries";
+import { useFoldersForAccountsQuery } from "../hooks/queries";
 import { useFolderUnreadCountsForAccounts } from "../hooks/queries/useFolderUnreadCounts";
 import {
   allAccountsFolderId,
@@ -32,9 +37,8 @@ import {
 } from "../lib/folderAggregation";
 import { profileLocalStorage } from "../lib/profileStorage";
 import { useSidebarFolderManagement } from "../hooks/useSidebarFolderManagement";
-import type { Account, Folder as FolderType } from "../lib/api";
+import type { Folder as FolderType } from "../lib/api";
 
-const EMPTY_ACCOUNTS: Account[] = [];
 const EMPTY_FOLDERS: FolderType[] = [];
 
 type AccountGroupRole = NonNullable<FolderType["role"]>;
@@ -62,11 +66,10 @@ function readCollapsedAccountIds(): Set<string> {
   }
 }
 
-export default function SidebarGrouped() {
+export default function SidebarGrouped({ collapsed: sidebarCollapsed }: { collapsed: boolean }) {
   const { t } = useTranslation();
   const activeView = useUIStore((s) => s.activeView);
   const setActiveView = useUIStore((s) => s.setActiveView);
-  const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
   const activeFolderId = useMailStore((s) => s.activeFolderId);
   const activeAccountId = useMailStore((s) => s.activeAccountId);
   const setActiveAccountId = useMailStore((s) => s.setActiveAccountId);
@@ -74,12 +77,12 @@ export default function SidebarGrouped() {
   const [collapsedAccountIds, setCollapsedAccountIds] = useState<Set<string>>(readCollapsedAccountIds);
 
   const showUnread = useUIStore((s) => s.showFolderUnreadCount);
-  const { data: accounts = EMPTY_ACCOUNTS } = useAccountsQuery();
+  const accounts = useResolvedAccounts();
   // The sidebar always renders every account group, so it needs all folders.
   const accountIds = useMemo(() => accounts.map((account) => account.id), [accounts]);
   const { data: folders = EMPTY_FOLDERS, isFetched: foldersFetched } = useFoldersForAccountsQuery(accountIds);
   const { data: unreadCounts = {} } = useFolderUnreadCountsForAccounts(accountIds);
-  const { handleContextMenu: handleSidebarContextMenu, overlay: folderManagementOverlay } = useSidebarFolderManagement({ accounts, folders, accountId: activeAccountId });
+  const { handleContextMenu: handleSidebarContextMenu, overlay: folderManagementOverlay, openManager } = useSidebarFolderManagement({ accounts, folders, accountId: activeAccountId });
 
   const ROLE_LABELS: Record<AccountGroupRole, string> = {
     inbox: t("sidebar.inbox"),
@@ -137,289 +140,207 @@ export default function SidebarGrouped() {
 
   const isOverviewActive = activeView === "inbox" && !activeAccountId;
 
-  const buttonBase: React.CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-    borderRadius: "6px",
-    padding: sidebarCollapsed ? "7px" : "6px 10px",
-    width: "100%",
-    border: "none",
-    cursor: "pointer",
-    fontSize: "13px",
-    textAlign: "left",
-    justifyContent: sidebarCollapsed ? "center" : "flex-start",
-  };
-  const childButtonBase: React.CSSProperties = sidebarCollapsed
-    ? buttonBase
-    : { ...buttonBase, paddingLeft: "26px" };
+  function folderLabel(folder: FolderType) {
+    if (folder.remote_id === "__local_outbox__") return t("sidebar.outbox", "Outbox");
+    return folder.role ? ROLE_LABELS[folder.role] : folder.name;
+  }
 
-  const groupHeaderBase: React.CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    gap: "5px",
-    borderRadius: "6px",
-    padding: "7px 8px",
-    marginTop: "4px",
-    width: "100%",
-    border: "none",
-    backgroundColor: "transparent",
-    cursor: "pointer",
-    fontSize: "11px",
-    fontWeight: 600,
-    color: "var(--color-text-secondary)",
-    letterSpacing: "0.3px",
-    textAlign: "left",
-  };
+  function folderIconFor(folder: FolderType) {
+    return folder.role ? ROLE_ICONS[folder.role] : <Folder size={16} />;
+  }
+
+  const toolsButtons = (
+    <>
+      <SidebarButton
+        icon={<ContactRound size={16} />}
+        label={t("sidebar.contacts", "Contacts")}
+        isActive={activeView === "contacts"}
+        collapsed={sidebarCollapsed}
+        onClick={() => safeSetActiveView("contacts")}
+      />
+      <SidebarButton
+        icon={<Clock size={16} />}
+        label={t("sidebar.snoozed", "Snoozed")}
+        isActive={activeView === "snoozed"}
+        collapsed={sidebarCollapsed}
+        onClick={() => safeSetActiveView("snoozed")}
+      />
+      <SidebarButton
+        icon={<LayoutGrid size={16} />}
+        label={t("sidebar.kanban", "Kanban")}
+        isActive={activeView === "kanban"}
+        collapsed={sidebarCollapsed}
+        onClick={() => safeSetActiveView("kanban")}
+      />
+      <SidebarButton
+        icon={<Settings size={16} />}
+        label={t("sidebar.settings", "Settings")}
+        isActive={activeView === "settings"}
+        collapsed={sidebarCollapsed}
+        onClick={() => safeSetActiveView("settings")}
+      />
+    </>
+  );
+
+  const searchButton = (
+    <SidebarButton
+      icon={<Search size={16} />}
+      label={t("search.title", "Search")}
+      isActive={activeView === "search"}
+      collapsed={sidebarCollapsed}
+      onClick={() => safeSetActiveView("search")}
+    />
+  );
+
+  const overviewAndStarred = accounts.length > 0 && (
+    <>
+      <SidebarButton
+        icon={<Layers size={16} />}
+        label={t("sidebar.overview", "Overview")}
+        badge={showUnread ? unreadCountForFolder(allAccountsFolderId("inbox"), folders, unreadCounts) : undefined}
+        isActive={isOverviewActive}
+        collapsed={sidebarCollapsed}
+        onClick={() => handleFolderSelect(null, allAccountsFolderId("inbox"))}
+      />
+      <SidebarButton
+        icon={<Star size={16} />}
+        label={t("sidebar.starred", "Starred")}
+        isActive={activeView === "starred"}
+        collapsed={sidebarCollapsed}
+        onClick={() => safeSetActiveView("starred")}
+      />
+    </>
+  );
+
+  if (sidebarCollapsed) {
+    return (
+      <SidebarRail
+        label={t("sidebar.navigation", "Sidebar")}
+        topLabel={t("sidebar.mail", "Mail")}
+        top={<>{searchButton}{overviewAndStarred}</>}
+        middleLabel={t("sidebar.accounts", "Accounts")}
+        middle={accounts.map((account) => {
+          const accountFolders = foldersByAccount.get(account.id) ?? EMPTY_FOLDERS;
+          const entries = sortFoldersForSidebar(accountFolders);
+          const inbox = entries.find((folder) => folder.role === "inbox");
+          // The dot and label follow "show folder unread counts" like the
+          // expanded sidebar (the filter bar may fetch counts regardless).
+          const inboxUnread = showUnread && inbox ? unreadCountForFolder(inbox.id, accountFolders, unreadCounts) : 0;
+          const name = accountShortName(account);
+          const buttonLabel = inboxUnread > 0
+            ? t("sidebar.accountUnread", "{{name}} · {{count}} unread", { name, count: inboxUnread })
+            : name;
+          const isAccountActive = activeView === "inbox" && activeAccountId === account.id;
+          return (
+            <RailMenuButton
+              key={account.id}
+              className="sidebar-btn--account"
+              face={<AccountBadge account={account} size="md" selected={isAccountActive} unread={inboxUnread > 0} />}
+              label={buttonLabel}
+              menuLabel={name}
+              menuHeader={<span className="sidebar-rail-menu__header-text" title={accountOptionLabel(account)}>{accountOptionLabel(account)}</span>}
+              emptyNote={foldersFetched ? t("sidebar.noFolders", "No folders yet") : undefined}
+              items={entries.map((folder) => ({
+                id: folder.id,
+                icon: folderIconFor(folder),
+                label: folderLabel(folder),
+                count: showUnread ? unreadCountForFolder(folder.id, accountFolders, unreadCounts) : undefined,
+                current: isAccountActive && activeFolderId === folder.id,
+                onSelect: () => handleFolderSelect(account.id, folder.id),
+              }))}
+              footerItems={[{
+                id: "__manage__",
+                icon: <FolderCog size={16} />,
+                label: t("folderManagement.manage", "Manage folders"),
+                onSelect: () => openManager(account.id),
+              }]}
+            />
+          );
+        })}
+        bottomLabel={t("sidebar.tools", "Tools")}
+        bottom={toolsButtons}
+        onContextMenu={handleSidebarContextMenu}
+      >
+        {folderManagementOverlay}
+      </SidebarRail>
+    );
+  }
+
 
   return (
     <aside
+      className="app-sidebar"
       aria-label={t("sidebar.navigation", "Sidebar")}
       onContextMenu={handleSidebarContextMenu}
-      style={{
-        width: sidebarCollapsed ? "48px" : "200px",
-        flexShrink: 0,
-        backgroundColor: "var(--color-sidebar-bg)",
-        borderRight: "1px solid var(--color-border)",
-        transition: "width 150ms ease",
-        display: "flex",
-        flexDirection: "column",
-        height: "100%",
-        overflow: "hidden",
-      }}
+      style={{ width: "200px", flexShrink: 0 }}
     >
-      {/* Search button */}
-      <nav aria-label={t("sidebar.search", "Search")} style={{ padding: "8px 6px 0", display: "flex", flexDirection: "column", gap: "1px" }}>
-        <SidebarButton
-          icon={<Search size={16} />}
-          label={t("search.title", "Search")}
-          isActive={activeView === "search"}
-          collapsed={sidebarCollapsed}
-          style={buttonBase}
-          onClick={() => safeSetActiveView("search")}
-        />
+      <nav aria-label={t("sidebar.search", "Search")} className="sidebar-nav sidebar-nav--top">
+        {searchButton}
       </nav>
 
-      {/* Section label */}
-      {!sidebarCollapsed && (
-        <div style={{
-          padding: "12px 10px 4px 10px",
-          fontSize: "11px",
-          fontWeight: 600,
-          color: "var(--color-text-secondary)",
-          textTransform: "uppercase",
-          letterSpacing: "0.5px",
-        }}>
-          {t("sidebar.mail", "Mail")}
-        </div>
-      )}
+      <div className="sidebar-section-label">
+        {t("sidebar.mail", "Mail")}
+      </div>
 
       {/* Overview + per-account folder groups */}
       <nav
-        className="scroll-region sidebar-folder-scroll"
+        className="scroll-region sidebar-folder-scroll sidebar-nav sidebar-nav--folders"
         aria-label={t("sidebar.mailFolders", "Mail folders")}
-        style={{
-          flex: 1,
-          overflowY: "auto",
-          padding: "0 6px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "1px",
-        }}
       >
-        {accounts.length > 0 && (
-          <>
-            <SidebarButton
-              icon={<Layers size={16} />}
-              label={t("sidebar.overview", "Overview")}
-              badge={showUnread ? unreadCountForFolder(allAccountsFolderId("inbox"), folders, unreadCounts) : undefined}
-              isActive={isOverviewActive}
-              collapsed={sidebarCollapsed}
-              style={buttonBase}
-              onClick={() => handleFolderSelect(null, allAccountsFolderId("inbox"))}
-            />
-            <SidebarButton
-              icon={<Star size={16} />}
-              label={t("sidebar.starred", "Starred")}
-              isActive={activeView === "starred"}
-              collapsed={sidebarCollapsed}
-              style={buttonBase}
-              onClick={() => safeSetActiveView("starred")}
-            />
-            {accounts.map((account) => {
-              const accountName = accountOptionLabel(account);
-              const accountFolders = foldersByAccount.get(account.id) ?? EMPTY_FOLDERS;
-              const entries = sortFoldersForSidebar(accountFolders);
-              const groupCollapsed = !sidebarCollapsed && collapsedAccountIds.has(account.id);
-              return (
-                <div
-                  key={account.id}
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "1px",
-                    marginTop: sidebarCollapsed ? "4px" : undefined,
-                  }}
-                >
-                  {!sidebarCollapsed && (
-                    <button
-                      type="button"
-                      aria-expanded={!groupCollapsed}
-                      title={accountName}
-                      style={groupHeaderBase}
-                      onClick={() => toggleAccountGroup(account.id)}
-                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--color-sidebar-hover)"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
-                    >
-                      {groupCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-                        {accountName}
-                      </span>
-                    </button>
-                  )}
-                  {!groupCollapsed && (entries.length > 0
-                    ? entries.map((folder) => {
-                        const label = folder.remote_id === "__local_outbox__" ? t("sidebar.outbox", "Outbox")
-                          : folder.role ? ROLE_LABELS[folder.role] : folder.name;
-                        return (
-                          <SidebarButton
-                            key={folder.id}
-                            icon={folder.role ? ROLE_ICONS[folder.role] : <Folder size={16} />}
-                            label={sidebarCollapsed ? `${accountName} · ${label}` : label}
-                            badge={showUnread ? unreadCountForFolder(folder.id, accountFolders, unreadCounts) : undefined}
-                            isActive={activeView === "inbox" && activeAccountId === account.id && activeFolderId === folder.id}
-                            collapsed={sidebarCollapsed}
-                            style={childButtonBase}
-                            onClick={() => handleFolderSelect(account.id, folder.id)}
-                          />
-                        );
-                      })
-                    : !sidebarCollapsed && foldersFetched && (
-                        <div style={{ padding: "4px 8px", fontSize: "12px", color: "var(--color-text-secondary)" }}>
-                          {t("sidebar.noFolders", "No folders yet")}
-                        </div>
-                      ))}
-                </div>
-              );
-            })}
-          </>
-        )}
+        {overviewAndStarred}
+        {accounts.map((account) => {
+          const accountName = accountOptionLabel(account);
+          const accountFolders = foldersByAccount.get(account.id) ?? EMPTY_FOLDERS;
+          const entries = sortFoldersForSidebar(accountFolders);
+          const groupCollapsed = collapsedAccountIds.has(account.id);
+          return (
+            <div key={account.id} className="sidebar-group">
+              <button
+                type="button"
+                aria-expanded={!groupCollapsed}
+                title={accountName}
+                className="sidebar-group-header"
+                onClick={() => toggleAccountGroup(account.id)}
+              >
+                {groupCollapsed ? <ChevronRight size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}
+                <AccountBadge account={account} size="xs" />
+                <span className="sidebar-btn__label">
+                  {accountName}
+                </span>
+              </button>
+              {!groupCollapsed && (entries.length > 0
+                ? entries.map((folder) => (
+                    <SidebarButton
+                      key={folder.id}
+                      icon={folderIconFor(folder)}
+                      label={folderLabel(folder)}
+                      badge={showUnread ? unreadCountForFolder(folder.id, accountFolders, unreadCounts) : undefined}
+                      isActive={activeView === "inbox" && activeAccountId === account.id && activeFolderId === folder.id}
+                      collapsed={false}
+                      indent
+                      onClick={() => handleFolderSelect(account.id, folder.id)}
+                    />
+                  ))
+                : foldersFetched && (
+                    <div className="sidebar-empty-note">
+                      {t("sidebar.noFolders", "No folders yet")}
+                    </div>
+                  ))}
+            </div>
+          );
+        })}
       </nav>
 
-      {/* Divider */}
-      <div
-        style={{
-          height: "1px",
-          backgroundColor: "var(--color-border)",
-          margin: "0 6px",
-        }}
-      />
+      <div className="sidebar-divider" />
 
       {/* Bottom nav: Contacts + Snoozed + Kanban + Settings */}
       <nav
         aria-label={t("sidebar.tools", "Tools")}
-        style={{
-          padding: "6px 6px 8px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "1px",
-        }}
+        className="sidebar-nav sidebar-nav--bottom"
       >
-        <SidebarButton
-          icon={<ContactRound size={16} />}
-          label={t("sidebar.contacts", "Contacts")}
-          isActive={activeView === "contacts"}
-          collapsed={sidebarCollapsed}
-          style={buttonBase}
-          onClick={() => safeSetActiveView("contacts")}
-        />
-        <SidebarButton
-          icon={<Clock size={16} />}
-          label={t("sidebar.snoozed", "Snoozed")}
-          isActive={activeView === "snoozed"}
-          collapsed={sidebarCollapsed}
-          style={buttonBase}
-          onClick={() => safeSetActiveView("snoozed")}
-        />
-        <SidebarButton
-          icon={<LayoutGrid size={16} />}
-          label={t("sidebar.kanban", "Kanban")}
-          isActive={activeView === "kanban"}
-          collapsed={sidebarCollapsed}
-          style={buttonBase}
-          onClick={() => safeSetActiveView("kanban")}
-        />
-        <SidebarButton
-          icon={<Settings size={16} />}
-          label={t("sidebar.settings", "Settings")}
-          isActive={activeView === "settings"}
-          collapsed={sidebarCollapsed}
-          style={buttonBase}
-          onClick={() => safeSetActiveView("settings")}
-        />
+        {toolsButtons}
       </nav>
       {folderManagementOverlay}
     </aside>
-  );
-}
-
-// Reusable sidebar button to avoid repetitive hover logic
-function SidebarButton({
-  icon, label, badge, isActive, collapsed, style, disabled, onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  badge?: number;
-  isActive: boolean;
-  collapsed: boolean;
-  style: React.CSSProperties;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={collapsed ? label : undefined}
-      aria-current={isActive ? "page" : undefined}
-      title={collapsed ? label : undefined}
-      disabled={disabled}
-      style={{
-        ...style,
-        backgroundColor: isActive
-          ? "var(--color-sidebar-active)"
-          : style.backgroundColor ?? "transparent",
-        color: style.color ?? "var(--color-text-primary)",
-        opacity: disabled ? 0.45 : 1,
-        cursor: disabled ? "default" : "pointer",
-        transition: "background-color 0.15s ease, opacity 0.15s ease",
-      }}
-      onMouseEnter={(e) => {
-        if (!isActive && !style.backgroundColor)
-          e.currentTarget.style.backgroundColor = "var(--color-sidebar-hover)";
-      }}
-      onMouseLeave={(e) => {
-        if (!isActive && !style.backgroundColor)
-          e.currentTarget.style.backgroundColor = "transparent";
-      }}
-    >
-      {icon}
-      {!collapsed && (
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-          {label}
-        </span>
-      )}
-      {!collapsed && badge != null && badge > 0 && (
-        <span style={{
-          fontSize: "11px",
-          fontWeight: 600,
-          color: "var(--color-accent)",
-          minWidth: "18px",
-          textAlign: "right",
-        }}>
-          {badge}
-        </span>
-      )}
-    </button>
   );
 }

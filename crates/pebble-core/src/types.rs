@@ -299,6 +299,7 @@ pub struct ThreadSummary {
     pub message_count: u32,
     pub unread_count: u32,
     pub is_starred: bool,
+    /// Distinct senders, oldest first: display name, else address.
     pub participants: Vec<String>,
     pub has_attachments: bool,
 }

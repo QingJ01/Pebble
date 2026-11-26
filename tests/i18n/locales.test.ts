@@ -32,8 +32,8 @@ describe("locale files", () => {
     const en = readLocale("en");
     const zh = readLocale("zh");
 
-    expect(en.tray.show).toBe("Show Window");
-    expect(en.tray.hide).toBe("Hide Window");
+    expect(en.tray.show).toBe("Show window");
+    expect(en.tray.hide).toBe("Hide window");
     expect(en.tray.quit).toBe("Quit Pebble");
     expect(zh.tray.show).toBe("显示窗口");
     expect(zh.tray.hide).toBe("隐藏窗口");
@@ -44,7 +44,7 @@ describe("locale files", () => {
     const en = readLocale("en");
     const zh = readLocale("zh");
 
-    expect(en.settings.folderCounts).toBe("Folder Counts");
+    expect(en.settings.folderCounts).toBe("Folder counts");
     expect(en.settings.showUnreadCount).toBe("Show unread count badges in sidebar");
     expect(zh.settings.folderCounts).toBe("文件夹计数");
     expect(zh.settings.showUnreadCount).toBe("在侧边栏显示未读数徽章");
@@ -88,19 +88,17 @@ describe("locale files", () => {
     expect(zh.selection.addToKanbanNote).toBe("加入看板备注");
   });
 
-  it("translates remote write status labels in English and Chinese", () => {
+  it("translates pending-change status labels in English and Chinese", () => {
     const en = readLocale("en");
     const zh = readLocale("zh");
 
-    expect(en.status.remoteWritesRetrying).toBe("{{count}} remote writes retrying");
-    expect(en.status.remoteWritesPending).toBe("{{count}} remote writes pending");
-    expect(en.status.remoteWritesQueued).toBe("{{count}} remote writes queued");
-    expect(zh.status.remoteWritesRetrying).toBeTruthy();
-    expect(zh.status.remoteWritesPending).toBeTruthy();
-    expect(zh.status.remoteWritesQueued).toBeTruthy();
-    expect(zh.status.remoteWritesRetrying).not.toBe(en.status.remoteWritesRetrying);
-    expect(zh.status.remoteWritesPending).not.toBe(en.status.remoteWritesPending);
-    expect(zh.status.remoteWritesQueued).not.toBe(en.status.remoteWritesQueued);
+    expect(en.status.remoteWritesRetrying_other).toBe("{{count}} changes retrying sync");
+    expect(en.status.remoteWritesPending_one).toBe("{{count}} change waiting to sync");
+    expect(en.status.remoteWritesPending_other).toBe("{{count}} changes waiting to sync");
+    expect(en.status.remoteWritesQueued_other).toBe("{{count}} changes queued to sync");
+    expect(zh.status.remoteWritesRetrying).toBe("{{count}} 项更改正在重试同步");
+    expect(zh.status.remoteWritesPending).toBe("{{count}} 项更改待同步到服务器");
+    expect(zh.status.remoteWritesQueued).toBe("{{count}} 项更改已排队待同步");
   });
 
   it("translates privacy settings failure and off-mode labels in English and Chinese", () => {

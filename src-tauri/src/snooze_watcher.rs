@@ -94,7 +94,9 @@ pub async fn run_snooze_watcher(
                         let _ = app_handle
                             .notification()
                             .builder()
-                            .title("Pebble - Snoozed Message")
+                            .title(
+                                crate::commands::notifications::notification_labels().snoozed_title,
+                            )
                             .body(&body)
                             .show();
                     }

@@ -1,6 +1,8 @@
 import { Shield } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { RenderedHtml } from "@/lib/api";
+import Button from "./ui/Button";
+import "./message-reader.css";
 
 interface Props {
   rendered: RenderedHtml;
@@ -8,6 +10,11 @@ interface Props {
   onTrustSender: (trustType: "images" | "all") => void;
 }
 
+/**
+ * Blocked-content notice above the message body. Text and actions wrap as two
+ * groups: at narrow widths the buttons move below the text instead of
+ * squeezing it into a one-character column.
+ */
 export default function PrivacyBanner({ rendered, onLoadImages, onTrustSender }: Props) {
   const { t } = useTranslation();
   const totalBlocked = rendered.trackers_blocked.length + rendered.images_blocked;
@@ -25,68 +32,27 @@ export default function PrivacyBanner({ rendered, onLoadImages, onTrustSender }:
   }
 
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "10px",
-        padding: "8px 14px",
-        backgroundColor: "rgba(245, 158, 11, 0.08)",
-        borderBottom: "1px solid var(--color-border)",
-        fontSize: "12px",
-        color: "var(--color-text-secondary)",
-      }}
-    >
-      <Shield size={14} color="#f59e0b" />
-      <span style={{ flex: 1 }}>
-        {t("privacy.blocked", { items: parts.join(` ${t("privacy.and")} `) })}
-      </span>
-      {rendered.images_blocked > 0 && (
-        <>
-          <button
-            onClick={onLoadImages}
-            style={{
-              fontSize: "12px",
-              padding: "2px 8px",
-              borderRadius: "4px",
-              border: "1px solid var(--color-border)",
-              backgroundColor: "transparent",
-              color: "var(--color-text-primary)",
-              cursor: "pointer",
-            }}
-          >
-            {t("privacy.loadImages")}
-          </button>
-          <button
-            onClick={() => onTrustSender("images")}
-            style={{
-              fontSize: "12px",
-              padding: "2px 8px",
-              borderRadius: "4px",
-              border: "1px solid var(--color-border)",
-              backgroundColor: "transparent",
-              color: "var(--color-text-primary)",
-              cursor: "pointer",
-            }}
-          >
-            {t("privacy.trustImages", "Trust images")}
-          </button>
-        </>
-      )}
-      <button
-        onClick={() => onTrustSender("all")}
-        style={{
-          fontSize: "12px",
-          padding: "2px 8px",
-          borderRadius: "4px",
-          border: "1px solid var(--color-border)",
-          backgroundColor: "transparent",
-          color: "var(--color-text-primary)",
-          cursor: "pointer",
-        }}
-      >
-        {t("privacy.trustSender", "Trust sender")}
-      </button>
+    <div role="region" aria-label={t("privacy.bannerLabel", "Blocked content")} className="privacy-banner">
+      <div className="privacy-banner__text">
+        <Shield size={14} aria-hidden="true" className="privacy-banner__icon" />
+        <span>{t("privacy.blocked", { items: parts.join(` ${t("privacy.and")} `) })}</span>
+      </div>
+      {/* Hierarchy: one secondary (show images once) + ghost trust options, all 28px. */}
+      <div className="privacy-banner__actions">
+        {rendered.images_blocked > 0 && (
+          <>
+            <Button size="sm" variant="secondary" onClick={onLoadImages}>
+              {t("privacy.loadImages")}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => onTrustSender("images")}>
+              {t("privacy.trustImages", "Trust images")}
+            </Button>
+          </>
+        )}
+        <Button size="sm" variant="ghost" onClick={() => onTrustSender("all")}>
+          {t("privacy.trustSender", "Trust sender")}
+        </Button>
+      </div>
     </div>
   );
 }
