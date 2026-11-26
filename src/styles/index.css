@@ -2001,7 +2001,8 @@ textarea:focus-visible {
   opacity: 0.6;
 }
 
-.contacts-mobile-back {
+/* .contact-detail prefix outranks .btn's display. */
+.contact-detail .contacts-mobile-back {
   display: none;
   margin-bottom: var(--space-5);
 }
@@ -2124,7 +2125,7 @@ textarea:focus-visible {
     display: none;
   }
 
-  .contacts-mobile-back {
+  .contact-detail .contacts-mobile-back {
     display: inline-flex;
   }
 
@@ -2617,9 +2618,9 @@ textarea:focus-visible {
    Simple dialog: .dialog-panel (padding 20, gap 16) > .dialog-title,
    .dialog-message, .dialog-actions.
    Sectioned dialog: .dialog-panel.dialog-panel--flush >
-     .dialog-panel__header (16 20, divider below; holds .dialog-title + close)
+     .dialog-panel__header (16 20, border below; holds .dialog-title + close)
      .dialog-panel__body   (20, scrolls)
-     .dialog-panel__footer (12 20, divider above; right-aligned buttons)
+     .dialog-panel__footer (12 20, border above; right-aligned buttons)
    Titles are 16/600. One outline: 1px --color-border + --shadow-dialog. */
 
 .overlay-backdrop {
@@ -2654,7 +2655,7 @@ textarea:focus-visible {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-4) var(--space-5);
-  border-bottom: 1px solid var(--color-divider);
+  border-bottom: 1px solid var(--color-border);
 }
 .dialog-panel__header .dialog-title { flex: 1; min-width: 0; }
 .dialog-panel__body {
@@ -2670,7 +2671,7 @@ textarea:focus-visible {
   flex-wrap: wrap;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-5);
-  border-top: 1px solid var(--color-divider);
+  border-top: 1px solid var(--color-border);
 }
 
 .dialog-title {
@@ -2684,20 +2685,20 @@ textarea:focus-visible {
 .dialog-message {
   margin: 0;
   font-size: var(--font-base);
-  line-height: 1.55;
+  line-height: var(--leading-normal);
   color: var(--color-text-secondary);
   white-space: pre-wrap;
 }
 
 .dialog-error {
-  margin: -6px 0 0;
+  margin: calc(var(--space-1) * -1) 0 0;
   padding: var(--space-2) var(--space-3);
   border-left: 3px solid var(--color-danger);
   border-radius: var(--radius-sm);
   background: var(--color-danger-bg);
   color: var(--color-danger);
   font-size: var(--font-sm);
-  line-height: 1.5;
+  line-height: var(--leading-normal);
   white-space: pre-wrap;
 }
 

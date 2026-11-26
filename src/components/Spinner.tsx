@@ -22,8 +22,8 @@ export default function Spinner({ size = 20, label, delayMs = 0 }: SpinnerProps)
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        gap: "10px",
-        padding: "40px",
+        gap: "var(--space-2)",
+        padding: "var(--space-8)",
         color: "var(--color-text-secondary)",
         fontSize: "var(--font-base)",
       }}

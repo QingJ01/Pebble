@@ -132,3 +132,4 @@
 .mail-archive [role=alert] { color: var(--color-danger); }
 .mail-archive-progress { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); margin-top: var(--space-4); }
 .mail-archive-progress p { margin: 0; }
+.mail-archive > .page-header + fieldset { margin-top: var(--space-2); }

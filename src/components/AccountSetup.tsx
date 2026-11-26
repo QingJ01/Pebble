@@ -374,7 +374,7 @@ export default function AccountSetup({ onClose }: Props) {
             <div className="account-setup__presets">
               {Object.keys(PRESETS).map((key) => (
                 <Button key={key} size="sm" onClick={() => applyPreset(key)}>
-                  {key === "163" ? "163" : key.charAt(0).toUpperCase() + key.slice(1)}
+                  {key === "163" ? "163" : key === "qq" ? "QQ" : key.charAt(0).toUpperCase() + key.slice(1)}
                 </Button>
               ))}
             </div>
