@@ -7,7 +7,8 @@ import iconUrl from "@/assets/app-icon.png";
 import { readAppLog, type AppLogSnapshot } from "@/lib/api";
 import { describeError, extractErrorMessage } from "@/lib/extractErrorMessage";
 import Dialog from "@/components/ui/Dialog";
-import Button from "@/components/ui/Button";
+import Button, { buttonClassName } from "@/components/ui/Button";
+import { SettingsNotice, SettingsSection } from "./SettingsLayout";
 import IconButton from "@/components/ui/IconButton";
 
 const REPO = "QingJ01/Pebble";
@@ -116,21 +117,9 @@ export default function AboutTab() {
 
   return (
     <div>
-      <h2
-        style={{
-          fontSize: "18px",
-          fontWeight: 600,
-          color: "var(--color-text-primary)",
-          marginTop: 0,
-          marginBottom: "24px",
-        }}
-      >
-        {t("about.title", "About")}
-      </h2>
-
-      {/* App info */}
-      <div style={{ marginBottom: "24px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "14px", marginBottom: "16px" }}>
+      <section className="settings-section">
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-4)", marginBottom: "var(--space-4)" }}>
+          {/* Hidden diagnostics trigger: 5 quick clicks on the icon open the log. */}
           <button
             type="button"
             onClick={handleDiagnosticIconClick}
@@ -141,7 +130,7 @@ export default function AboutTab() {
               height: "56px",
               padding: 0,
               border: "none",
-              borderRadius: "12px",
+              borderRadius: "var(--radius-xl)",
               background: "transparent",
               cursor: "default",
               lineHeight: 0,
@@ -151,51 +140,40 @@ export default function AboutTab() {
               src={iconUrl}
               alt=""
               draggable={false}
-              style={{ width: "56px", height: "56px", borderRadius: "12px" }}
+              style={{ width: "56px", height: "56px", borderRadius: "var(--radius-xl)" }}
             />
           </button>
           <div>
-            <div style={{ fontSize: "17px", fontWeight: 600, color: "var(--color-text-primary)" }}>
+            <div style={{ fontSize: "var(--font-lg)", fontWeight: "var(--weight-semibold)", color: "var(--color-text-primary)", lineHeight: "var(--leading-tight)" }}>
               Pebble
             </div>
-            <div style={{ fontSize: "13px", color: "var(--color-text-secondary)", marginTop: "2px" }}>
+            <div style={{ fontSize: "var(--font-base)", color: "var(--color-text-secondary)", marginTop: "var(--space-1)" }}>
               {t("about.version", "Version")} {appVersion || "..."}
             </div>
           </div>
         </div>
 
-        <p style={{ fontSize: "13px", color: "var(--color-text-secondary)", lineHeight: 1.7, margin: "0 0 8px" }}>
-          {t(
-            "about.description",
-            "A local-first desktop email client built with Rust and React. Mail, search index, and attachments stay on your device. No telemetry. Outbound traffic happens only when you use a feature that requires it: mail sync with your provider, translation (sends the selected text to the service you configure), or WebDAV settings backup (runs against the server you provide).",
-          )}
-        </p>
-        <p style={{ fontSize: "13px", color: "var(--color-text-secondary)", lineHeight: 1.7, margin: "0 0 8px" }}>
-          {t(
-            "about.features",
-            "Supports Gmail, Outlook (experimental), IMAP, and POP3 accounts. Includes Kanban board, full-text search, snooze, rules engine, built-in translation, and WebDAV settings backup.",
-          )}
-        </p>
-        <p style={{ fontSize: "12px", color: "var(--color-text-tertiary)", lineHeight: 1.5, margin: 0 }}>
-          {t("about.license", "Open source under AGPL-3.0 license.")}
-        </p>
-      </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)", fontSize: "var(--font-base)", color: "var(--color-text-secondary)", lineHeight: "var(--leading-relaxed)" }}>
+          <p style={{ margin: 0 }}>
+            {t(
+              "about.description",
+              "A local-first desktop email client built with Rust and React. Mail, search index, and attachments stay on your device. No telemetry. Outbound traffic happens only when you use a feature that requires it: mail sync with your provider, translation (sends the selected text to the service you configure), or WebDAV settings backup (runs against the server you provide).",
+            )}
+          </p>
+          <p style={{ margin: 0 }}>
+            {t(
+              "about.features",
+              "Supports Gmail, Outlook (experimental), IMAP, and POP3 accounts. Includes Kanban board, full-text search, snooze, rules engine, built-in translation, and WebDAV settings backup.",
+            )}
+          </p>
+          <p className="settings-hint">
+            {t("about.license", "Open source under AGPL-3.0 license.")}
+          </p>
+        </div>
+      </section>
 
-      {/* Check for updates */}
-      <div style={{ marginBottom: "24px" }}>
-        <h3
-          style={{
-            fontSize: "14px",
-            fontWeight: 600,
-            color: "var(--color-text-primary)",
-            marginTop: 0,
-            marginBottom: "12px",
-          }}
-        >
-          {t("about.updates", "Updates")}
-        </h3>
-
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+      <SettingsSection title={t("about.updates", "Updates")}>
+        <div className="settings-actions">
           <Button
             variant="secondary"
             onClick={handleCheckUpdate}
@@ -214,20 +192,9 @@ export default function AboutTab() {
         </div>
 
         {update.status === "available" && (
-          <div
-            style={{
-              marginTop: "12px",
-              padding: "12px 14px",
-              borderRadius: "6px",
-              gap: "12px",
-              backgroundColor: "var(--color-info-bg)",
-              border: "1px solid var(--color-border)",
-              fontSize: "var(--font-base)",
-              color: "var(--color-text-primary)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
+          <SettingsNotice
+            tone="info"
+            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--space-3)", fontSize: "var(--font-base)" }}
           >
             <span>
               {t("about.newVersion", "New version available: {{version}}", {
@@ -237,33 +204,21 @@ export default function AboutTab() {
             <Button variant="primary" size="sm" onClick={() => openUrl(update.releaseUrl || RELEASES_URL)}>
               {t("about.download", "Download")}
             </Button>
-          </div>
+          </SettingsNotice>
         )}
 
         {update.status === "error" && (
-          <div role="alert" className="dialog-error" style={{ marginTop: "12px" }} title={update.error || undefined}>
+          <div role="alert" className="dialog-error" title={update.error || undefined}>
             {t("about.checkFailed", "Failed to check for updates")}
             {update.error && (
-              <div style={{ marginTop: "2px", opacity: 0.85, overflowWrap: "anywhere" }}>{update.error}</div>
+              <div style={{ marginTop: "var(--space-1)", overflowWrap: "anywhere" }}>{update.error}</div>
             )}
           </div>
         )}
-      </div>
+      </SettingsSection>
 
-      {/* Links */}
-      <div>
-        <h3
-          style={{
-            fontSize: "14px",
-            fontWeight: 600,
-            color: "var(--color-text-primary)",
-            marginTop: 0,
-            marginBottom: "12px",
-          }}
-        >
-          {t("about.links", "Links")}
-        </h3>
-        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+      <SettingsSection title={t("about.links", "Links")}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "var(--space-1)" }}>
           {[
             { label: "GitHub Releases", url: RELEASES_URL },
             { label: t("about.sourceCode", "Source Code"), url: `https://github.com/${REPO}` },
@@ -272,19 +227,14 @@ export default function AboutTab() {
             <a
               key={link.url}
               href={link.url}
+              className={buttonClassName("link", "sm")}
               onClick={(e) => { e.preventDefault(); openUrl(link.url); }}
-              style={{
-                fontSize: "13px",
-                color: "var(--color-accent-text)",
-                textDecoration: "none",
-                cursor: "pointer",
-              }}
             >
               {link.label}
             </a>
           ))}
         </div>
-      </div>
+      </SettingsSection>
 
       {diagnosticDialog.current && (
         <DiagnosticLogDialog
@@ -355,14 +305,7 @@ function DiagnosticLogDialog({
         overflow: "hidden",
       }}
     >
-      <div
-        className="dialog-header"
-        style={{
-          gap: "12px",
-          padding: "16px 18px",
-          borderBottom: "1px solid var(--color-border)",
-        }}
-      >
+      <div className="dialog-panel__header">
         <div style={{ flex: 1, minWidth: 0 }}>
           <h2 id={titleId} className="dialog-title">
             {title}
@@ -371,7 +314,7 @@ function DiagnosticLogDialog({
             <div
               title={snapshot.path}
               style={{
-                marginTop: "4px",
+                marginTop: "var(--space-1)",
                 fontSize: "var(--font-sm)",
                 color: "var(--color-text-secondary)",
                 overflow: "hidden",
@@ -383,7 +326,7 @@ function DiagnosticLogDialog({
             </div>
           )}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-1)", flexShrink: 0 }}>
           <IconButton
             size="md"
             label={refreshLabel}
@@ -409,13 +352,13 @@ function DiagnosticLogDialog({
       </div>
 
       {state.status === "loading" && (
-        <div role="status" style={{ padding: "22px", fontSize: "var(--font-base)", color: "var(--color-text-secondary)" }}>
+        <div role="status" style={{ padding: "var(--space-5)", fontSize: "var(--font-base)", color: "var(--color-text-secondary)" }}>
           {loadingLabel}
         </div>
       )}
 
       {state.status === "error" && (
-        <div role="alert" className="dialog-error" style={{ margin: "18px" }}>
+        <div role="alert" className="dialog-error" style={{ margin: "var(--space-5)" }}>
           {state.error}
         </div>
       )}
@@ -425,11 +368,11 @@ function DiagnosticLogDialog({
           {snapshot.truncated && (
             <div
               style={{
-                padding: "8px 18px",
-                borderBottom: "1px solid var(--color-border)",
+                padding: "var(--space-2) var(--space-5)",
+                borderBottom: "1px solid var(--color-divider)",
                 fontSize: "var(--font-sm)",
                 color: "var(--color-text-secondary)",
-                backgroundColor: "var(--color-bg-hover)",
+                backgroundColor: "var(--color-surface-sunken)",
               }}
             >
               {truncatedLabel}
@@ -442,11 +385,11 @@ function DiagnosticLogDialog({
               minHeight: "260px",
               flex: 1,
               overflow: "auto",
-              padding: "18px",
+              padding: "var(--space-5)",
               fontSize: "var(--font-sm)",
-              lineHeight: 1.6,
+              lineHeight: "var(--leading-relaxed)",
               color: "var(--color-text-primary)",
-              backgroundColor: "var(--color-bg)",
+              backgroundColor: "var(--color-canvas)",
               whiteSpace: "pre-wrap",
               wordBreak: "break-word",
               fontFamily: "var(--font-mono)",
