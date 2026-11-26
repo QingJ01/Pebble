@@ -7,6 +7,7 @@ mod tests;
 mod v01_v10;
 mod v11_v16;
 mod v17_v22;
+mod v21;
 
 pub(crate) const CURRENT_VERSION: u32 = 22;
 /// How many pre-migration backups to keep next to the database file.
@@ -280,7 +281,10 @@ fn run_migrations_up_to(conn: &Connection, target: u32) -> Result<()> {
              ({CURRENT_VERSION}). Please update Pebble; the database was left untouched."
         )));
     }
-    if version > 0 && version < target {
+    // A staged migration that stopped part-way was backed up before its
+    // first stage; resuming must not snapshot the half-migrated file over
+    // the older good backups.
+    if version > 0 && version < target && !v21::migration_in_progress(conn)? {
         backup_before_migration(conn, version)?;
     }
 
@@ -381,9 +385,9 @@ fn run_migrations_up_to(conn: &Connection, target: u32) -> Result<()> {
         v17_v22::apply_v20(conn)?;
     }
 
-    // V21: storage layout for fast list pages.
+    // V21: storage layout for fast list pages (staged and resumable).
     if version < 21 && target >= 21 {
-        v17_v22::apply_v21(conn)?;
+        v21::apply_v21(conn)?;
     }
 
     // V22: foreign keys for pending_mail_ops.account_id and labels.rule_id.

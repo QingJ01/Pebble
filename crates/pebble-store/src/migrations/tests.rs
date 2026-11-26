@@ -943,9 +943,14 @@ fn v21_v22_move_bodies_denormalise_folders_and_add_foreign_keys() {
     run_migrations(&conn).unwrap();
     assert_eq!(get_schema_version(&conn), CURRENT_VERSION);
 
-    // Bodies moved out of `messages`.
-    assert!(!column_exists(&conn, "messages", "body_text").unwrap());
-    assert!(!column_exists(&conn, "messages", "body_html_raw").unwrap());
+    // Bodies moved out of `messages`; the legacy columns are left empty.
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM messages WHERE body_text != '' OR body_html_raw != ''"
+        ),
+        0
+    );
     let body: (String, String) = conn
         .query_row(
             "SELECT body_text, body_html_raw FROM message_bodies WHERE message_id = 'm1'",
@@ -1079,8 +1084,8 @@ fn failed_v21_rolls_back_body_move_and_keeps_version() {
     let conn = Connection::open_in_memory().unwrap();
     run_migrations_up_to(&conn, 20).unwrap();
     seed_v20_mailbox(&conn);
-    // A conflicting legacy table makes the correspondents backfill fail
-    // after the body columns were already dropped inside the transaction.
+    // A conflicting legacy table makes V21's setup stage fail; nothing of
+    // that stage (and no later stage) may be left behind.
     conn.execute_batch(
         "CREATE TABLE message_correspondents (sentinel TEXT);
              INSERT INTO message_correspondents VALUES ('preserve');",
@@ -1205,4 +1210,355 @@ fn pending_migrations_back_up_the_file_and_keep_the_newest_two() {
     assert_eq!(body, "plain one");
     drop(restored);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Insert `n` messages (with bodies, recipients and one or two folders each)
+/// into a v20 database that already holds `seed_v20_mailbox`.
+fn seed_bulk_v20(conn: &Connection, n: usize, body_bytes: usize) {
+    conn.execute_batch(
+        "INSERT INTO folders (id, account_id, remote_id, name, folder_type, role)
+             VALUES ('bulk-arch', 'acct', 'Archive', 'Archive', 'folder', 'archive');",
+    )
+    .unwrap();
+    let body: String = "lorem ipsum dolor sit amet ".repeat(body_bytes / 27 + 1);
+    let tx = conn.unchecked_transaction().unwrap();
+    {
+        let mut msg = tx
+            .prepare(
+                "INSERT INTO messages (id, account_id, remote_id, thread_id, subject, from_address,
+                     from_name, to_list, cc_list, body_text, body_html_raw, is_read, is_deleted,
+                     date, created_at, updated_at)
+                 VALUES (?1, 'acct', ?1, ?2, 'Bulk', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1, 1)",
+            )
+            .unwrap();
+        let mut folder = tx
+            .prepare("INSERT INTO message_folders (message_id, folder_id) VALUES (?1, ?2)")
+            .unwrap();
+        for i in 0..n {
+            let id = format!("bulk-{i}");
+            let thread = (i % 7 != 0).then(|| format!("bt-{}", i / 5));
+            let from = format!("sender{}@example.com", i % 97);
+            let to = format!(
+                r#"[{{"name":"Person {a}","address":"Person{a}@Example.com"}},{{"name":null,"address":"team@example.com"}}]"#,
+                a = i % 53
+            );
+            let cc = if i % 3 == 0 { "not json" } else { "[]" };
+            msg.execute(rusqlite::params![
+                id,
+                thread,
+                from,
+                format!("Sender {}", i % 97),
+                to,
+                cc,
+                &body[..body_bytes.min(body.len())],
+                format!("<p>{}</p>", &body[..body_bytes.min(body.len())]),
+                (i % 2) as i64,
+                (i % 11 == 0) as i64,
+                1_000 + i as i64,
+            ])
+            .unwrap();
+            folder.execute(rusqlite::params![id, "inbox"]).unwrap();
+            if i % 4 == 0 {
+                folder.execute(rusqlite::params![id, "bulk-arch"]).unwrap();
+            }
+        }
+    }
+    tx.commit().unwrap();
+}
+
+/// Everything V21 produces, in a comparable form.
+fn v21_snapshot(conn: &Connection) -> Vec<String> {
+    let mut out = Vec::new();
+    for sql in [
+        "SELECT message_id || '|' || length(body_text) || '|' || length(body_html_raw) || '|' || substr(body_text, 1, 20)
+             FROM message_bodies ORDER BY message_id",
+        "SELECT message_id || '|' || folder_id || '|' || date || '|' || is_read || '|' || is_deleted || '|' || thread_key
+             FROM message_folders ORDER BY message_id, folder_id",
+        "SELECT account_id || '|' || normalized_address || '|' || address || '|' || COALESCE(name, '<null>') || '|' || last_interaction_at
+             FROM message_correspondents ORDER BY account_id, normalized_address",
+        "SELECT type || '|' || name FROM sqlite_master
+             WHERE name NOT LIKE 'sqlite_%' AND name != 'schema_migration_progress' ORDER BY type, name",
+        "SELECT group_concat(name) FROM pragma_table_info('messages')",
+    ] {
+        let mut stmt = conn.prepare(sql).unwrap();
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0)).unwrap();
+        out.push(format!("-- {sql}"));
+        out.extend(rows.map(|row| row.unwrap()));
+    }
+    out
+}
+
+/// Every message's body must be readable at every point of an interrupted
+/// V21: still in `messages`, or already in `message_bodies`.
+fn assert_no_body_lost(conn: &Connection, expected: &[(String, String)]) {
+    let has_column = column_exists(conn, "messages", "body_text").unwrap();
+    let has_table = table_exists(conn, "message_bodies").unwrap();
+    for (id, body) in expected {
+        let in_messages: Option<String> = if has_column {
+            conn.query_row("SELECT body_text FROM messages WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .ok()
+            .filter(|b: &String| !b.is_empty())
+        } else {
+            None
+        };
+        let in_bodies: Option<String> = if has_table {
+            conn.query_row(
+                "SELECT body_text FROM message_bodies WHERE message_id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .ok()
+        } else {
+            None
+        };
+        assert_eq!(
+            in_bodies.or(in_messages).as_deref(),
+            Some(body.as_str()),
+            "body of {id} lost"
+        );
+    }
+}
+
+struct V21Hooks;
+impl V21Hooks {
+    fn set(fail: Option<(i64, u32)>, batch: Option<i64>) -> Self {
+        super::v21::FAIL_AFTER_BATCHES.with(|c| c.set(fail));
+        super::v21::BATCH_OVERRIDE.with(|c| c.set(batch));
+        Self
+    }
+}
+impl Drop for V21Hooks {
+    fn drop(&mut self) {
+        super::v21::FAIL_AFTER_BATCHES.with(|c| c.set(None));
+        super::v21::BATCH_OVERRIDE.with(|c| c.set(None));
+    }
+}
+
+fn bulk_v20_db(n: usize) -> (Connection, Vec<(String, String)>) {
+    let conn = Connection::open_in_memory().unwrap();
+    run_migrations_up_to(&conn, 20).unwrap();
+    seed_v20_mailbox(&conn);
+    seed_bulk_v20(&conn, n, 64);
+    let mut stmt = conn.prepare("SELECT id, body_text FROM messages").unwrap();
+    let bodies = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .map(|row| row.unwrap())
+        .collect();
+    drop(stmt);
+    (conn, bodies)
+}
+
+#[test]
+fn v21_resumes_after_interruption_at_any_stage_or_batch() {
+    let reference = {
+        let _hooks = V21Hooks::set(None, Some(4));
+        let (conn, _) = bulk_v20_db(23);
+        run_migrations(&conn).unwrap();
+        v21_snapshot(&conn)
+    };
+    // Batch size must not change the outcome either.
+    {
+        let (conn, _) = bulk_v20_db(23);
+        run_migrations(&conn).unwrap();
+        assert_eq!(v21_snapshot(&conn), reference);
+    }
+
+    // Stages: 0 setup, 1 bodies, 2 folders, 3 triggers, 4 correspondents.
+    for stage in 0..=4 {
+        // Setup and triggers are single transactions.
+        let batch_points: &[u32] = if matches!(stage, 0 | 3) {
+            &[0]
+        } else {
+            &[0, 1, 3]
+        };
+        for &batches in batch_points {
+            let (conn, bodies) = bulk_v20_db(23);
+            {
+                let _hooks = V21Hooks::set(Some((stage, batches)), Some(4));
+                let err = run_migrations(&conn).unwrap_err().to_string();
+                assert!(err.contains("injected failure"), "{err}");
+            }
+            assert_eq!(get_schema_version(&conn), 20, "stage {stage}/{batches}");
+            assert_no_body_lost(&conn, &bodies);
+            if stage > 0 || batches > 0 {
+                assert!(super::v21::migration_in_progress(&conn).unwrap());
+            }
+
+            // A second interruption later on, then a clean finish.
+            {
+                let _hooks = V21Hooks::set(Some((4, 1)), Some(4));
+                let _ = run_migrations(&conn);
+            }
+            assert_no_body_lost(&conn, &bodies);
+            {
+                let _hooks = V21Hooks::set(None, Some(4));
+                run_migrations(&conn).unwrap();
+            }
+            assert_eq!(get_schema_version(&conn), CURRENT_VERSION);
+            assert!(!super::v21::migration_in_progress(&conn).unwrap());
+            assert_eq!(
+                v21_snapshot(&conn),
+                reference,
+                "resume after stage {stage}, {batches} batches"
+            );
+        }
+    }
+}
+
+#[test]
+fn interrupted_v21_is_not_backed_up_again_on_resume() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pebble.db");
+    {
+        let conn = Connection::open(&path).unwrap();
+        run_migrations_up_to(&conn, 20).unwrap();
+        seed_v20_mailbox(&conn);
+        seed_bulk_v20(&conn, 10, 64);
+        let _hooks = V21Hooks::set(Some((2, 1)), Some(4));
+        assert!(run_migrations(&conn).is_err());
+    }
+    let backups = || {
+        std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".bak")
+            })
+            .count()
+    };
+    assert_eq!(backups(), 1);
+    let conn = Connection::open(&path).unwrap();
+    run_migrations(&conn).unwrap();
+    assert_eq!(get_schema_version(&conn), CURRENT_VERSION);
+    assert_eq!(
+        backups(),
+        1,
+        "the pre-migration backup must stay the only one"
+    );
+    // The kept backup is the untouched v20 database.
+    let backup = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.to_string_lossy().ends_with(".bak"))
+        .unwrap();
+    let old = Connection::open(backup).unwrap();
+    assert_eq!(get_schema_version(&old), 20);
+    assert!(column_exists(&old, "messages", "body_text").unwrap());
+}
+
+/// Real-scale upgrade benchmark. Run with
+/// `PEBBLE_MIGRATION_BENCH_MESSAGES=200000 cargo test -p pebble-store --release
+///  v21_large_mailbox_benchmark -- --ignored --nocapture`.
+/// Reports time, file sizes, the WAL high-water mark and peak RSS, and fails
+/// if the WAL grows beyond a fraction of the database (i.e. the rewrite was
+/// not batched).
+#[test]
+#[ignore = "benchmark: builds a large on-disk mailbox"]
+fn v21_large_mailbox_benchmark() {
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::Arc;
+
+    let n: usize = std::env::var("PEBBLE_MIGRATION_BENCH_MESSAGES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(100_000);
+    let body_bytes: usize = std::env::var("PEBBLE_MIGRATION_BENCH_BODY_BYTES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(6_000);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pebble.db");
+    let wal = dir.path().join("pebble.db-wal");
+    {
+        let conn = Connection::open(&path).unwrap();
+        run_migrations_up_to(&conn, 20).unwrap();
+        seed_v20_mailbox(&conn);
+        seed_bulk_v20(&conn, n, body_bytes);
+        conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))
+            .unwrap();
+    }
+    let db_before = std::fs::metadata(&path).unwrap().len();
+
+    fn rss_kib() -> u64 {
+        std::process::Command::new("ps")
+            .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0)
+    }
+    let stop = Arc::new(AtomicBool::new(false));
+    let wal_peak = Arc::new(AtomicU64::new(0));
+    let stage_peaks: Arc<Vec<AtomicU64>> = Arc::new((0..8).map(|_| AtomicU64::new(0)).collect());
+    let rss_peak = Arc::new(AtomicU64::new(rss_kib()));
+    let rss_start = rss_peak.load(Ordering::Relaxed);
+    let sampler = {
+        let (stop, wal_peak, rss_peak, wal) = (
+            stop.clone(),
+            wal_peak.clone(),
+            rss_peak.clone(),
+            wal.clone(),
+        );
+        let stage_peaks = stage_peaks.clone();
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                if let Ok(meta) = std::fs::metadata(&wal) {
+                    wal_peak.fetch_max(meta.len(), Ordering::Relaxed);
+                    let stage = super::v21::CURRENT_STAGE.load(Ordering::Relaxed);
+                    stage_peaks[(stage + 1).clamp(0, 7) as usize]
+                        .fetch_max(meta.len(), Ordering::Relaxed);
+                }
+                rss_peak.fetch_max(rss_kib(), Ordering::Relaxed);
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        })
+    };
+
+    let started = std::time::Instant::now();
+    let conn = Connection::open(&path).unwrap();
+    run_migrations(&conn).unwrap();
+    let elapsed = started.elapsed();
+    stop.store(true, Ordering::Relaxed);
+    sampler.join().unwrap();
+    assert_eq!(get_schema_version(&conn), CURRENT_VERSION);
+
+    let db_after = std::fs::metadata(&path).unwrap().len();
+    let backup_bytes: u64 = std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".bak"))
+        .map(|e| e.metadata().unwrap().len())
+        .sum();
+    let wal_peak = wal_peak.load(Ordering::Relaxed);
+    let mib = |b: u64| b as f64 / 1_048_576.0;
+    println!(
+        "V21 benchmark: {n} messages x {body_bytes} B bodies\n  time      {:.1}s\n  db        {:.0} MiB -> {:.0} MiB\n  backup    {:.0} MiB\n  WAL peak  {:.1} MiB\n  RSS       {:.0} MiB -> peak {:.0} MiB",
+        elapsed.as_secs_f64(),
+        mib(db_before),
+        mib(db_after),
+        mib(backup_bytes),
+        mib(wal_peak),
+        rss_start as f64 / 1024.0,
+        rss_peak.load(Ordering::Relaxed) as f64 / 1024.0,
+    );
+    for (index, peak) in stage_peaks.iter().enumerate() {
+        println!(
+            "  WAL peak in stage {:>2}: {:.1} MiB",
+            index as i64 - 1,
+            mib(peak.load(Ordering::Relaxed))
+        );
+    }
+    assert!(
+        wal_peak < db_before / 4,
+        "WAL peaked at {:.1} MiB for a {:.0} MiB database: the rewrite is not batched",
+        mib(wal_peak),
+        mib(db_before)
+    );
 }
