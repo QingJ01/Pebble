@@ -759,6 +759,7 @@ export default function RulesTab() {
         <ConfirmDialog
           title={t("rules.deleteRule")}
           message={t("rules.confirmDelete", { name: deleteTarget.name })}
+          confirmLabel={t("rules.deleteRule")}
           destructive
           onCancel={() => setDeleteTarget(null)}
           onConfirm={() => {

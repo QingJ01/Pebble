@@ -307,7 +307,7 @@ export default function ProxyTab() {
                 <div
                   key={account.id}
                   role="group"
-                  aria-label={`${account.email} ${t("settings.accountProxy", "Account Proxy")}`}
+                  aria-label={t("settings.accountProxyFor", { email: account.email, defaultValue: "Proxy for {{email}}" })}
                   style={{
                     border: "1px solid var(--color-border)",
                     borderRadius: "8px",

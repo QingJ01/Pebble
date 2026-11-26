@@ -166,7 +166,7 @@ function MessageAttachments({ messageId }: Props) {
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="attachment-name" title={attachment.filename}>
-                  {canPreviewAttachment(attachment.mime_type) ? <button className="attachment-open-preview" onClick={() => setPreviewIndex(previewable.findIndex((item) => item.id === attachment.id))} aria-label={t("attachmentViewer.preview") + ": " + attachment.filename}>{attachment.filename}</button> : attachment.filename}
+                  {canPreviewAttachment(attachment.mime_type) ? <button className="attachment-open-preview" onClick={() => setPreviewIndex(previewable.findIndex((item) => item.id === attachment.id))} aria-label={t("attachmentViewer.previewNamed", { name: attachment.filename })}>{attachment.filename}</button> : attachment.filename}
                 </div>
                 <div className="attachment-meta">{formatFileSize(attachment.size)}</div>
               </div>
@@ -179,7 +179,7 @@ function MessageAttachments({ messageId }: Props) {
                 <button
                   onClick={() => handleDownload(attachment)}
                   disabled={downloadingId !== null || savingAll}
-                  aria-label={t("attachments.download") + ": " + attachment.filename}
+                  aria-label={t("attachments.downloadNamed", { name: attachment.filename })}
                   title={isDownloading ? t("attachments.downloading") : downloadedPaths[attachment.id] ? downloadedPaths[attachment.id] : t("attachments.download")}
                   className="attachment-download"
                 >

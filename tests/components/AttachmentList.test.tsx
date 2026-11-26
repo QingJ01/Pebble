@@ -4,7 +4,8 @@ import AttachmentList from "../../src/components/AttachmentList";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: string) => fallback ?? key,
+    t: (key: string, options?: unknown) =>
+      typeof options === "string" ? options : options && typeof options === "object" && "name" in options ? `${key}: ${String((options as { name: unknown }).name)}` : key,
   }),
 }));
 
@@ -41,7 +42,7 @@ describe("AttachmentList", () => {
   it("labels download buttons with the file name", async () => {
     render(<AttachmentList messageId="m1" />);
 
-    expect(await screen.findByRole("button", { name: "attachments.download: photo.png" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "attachments.download: report.xlsx" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "attachments.downloadNamed: photo.png" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "attachments.downloadNamed: report.xlsx" })).toBeTruthy();
   });
 });

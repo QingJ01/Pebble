@@ -21,8 +21,14 @@ import {
 } from "../../lib/api";
 import { extractErrorMessage as errorMessage } from "@/lib/extractErrorMessage";
 import { profileLocalStorage } from "@/lib/profileStorage";
+import { formatDateTime } from "@/lib/formatDate";
 
 const LAST_BACKUP_KEY = "pebble-cloud-sync-last-backup";
+
+/** Last-backup time is stored as ISO; older builds stored a preformatted string. */
+function displayLastBackup(value: string): string {
+  return /^\d{4}-\d{2}-\d{2}T/.test(value) ? formatDateTime(new Date(value)) : value;
+}
 /** Must match `MIN_PASSPHRASE_CHARS` in pebble-crypto. */
 const MIN_SECRET_PASSPHRASE_CHARS = 12;
 
@@ -186,10 +192,10 @@ export default function CloudSyncTab() {
       setStatusType("success");
     } catch (err: unknown) {
       setStatusMsg(
-        t(
-          "cloudSync.autoBackupConfigSaveFailed",
-          `Failed to save automatic backup configuration: ${errorMessage(err)}`,
-        ),
+        t("cloudSync.autoBackupConfigSaveFailed", {
+          error: errorMessage(err),
+          defaultValue: "Couldn't save automatic backup settings: {{error}}",
+        }),
       );
       setStatusType("error");
     } finally {
@@ -225,7 +231,7 @@ export default function CloudSyncTab() {
         password,
         includeSecrets ? secretPassphrase : undefined,
       );
-      const now = new Date().toLocaleString();
+      const now = new Date().toISOString();
       profileLocalStorage.setItem(LAST_BACKUP_KEY, now);
       setLastBackup(now);
       setStatusMsg(t("cloudSync.backupSuccess"));
@@ -313,7 +319,7 @@ export default function CloudSyncTab() {
       requireSecretPassphrase();
       const data = await exportBackupFile(includeSecrets ? secretPassphrase : undefined);
       downloadBackupJson(data);
-      const now = new Date().toLocaleString();
+      const now = new Date().toISOString();
       profileLocalStorage.setItem(LAST_BACKUP_KEY, now);
       setLastBackup(now);
       setStatusMsg(t("cloudSync.exportSuccess", "Backup file exported"));
@@ -401,7 +407,7 @@ export default function CloudSyncTab() {
       t("cloudSync.restorePreviewHeader", "Backup contents to restore:"),
       t("cloudSync.restorePreviewSchema", "Schema version: {{version}}", { version: preview.version }),
       t("cloudSync.restorePreviewExported", "Exported: {{date}}", {
-        date: new Date(preview.exported_at * 1000).toLocaleString(),
+        date: formatDateTime(preview.exported_at),
       }),
       t("cloudSync.restorePreviewAccounts", "Accounts: {{count}}", { count: preview.account_count }),
       t("cloudSync.restorePreviewRules", "Rules: {{count}}", { count: preview.rule_count }),
@@ -715,7 +721,7 @@ export default function CloudSyncTab() {
             color: "var(--color-text-secondary)",
           }}
         >
-          {t("cloudSync.lastBackup")}: {lastBackup}
+          {t("cloudSync.lastBackupAt", { time: displayLastBackup(lastBackup) })}
         </div>
       )}
 
@@ -777,7 +783,7 @@ export default function CloudSyncTab() {
               ? t("common.saving")
               : t(
                   "cloudSync.saveAutoBackupConfig",
-                  "Save Auto-Backup Configuration",
+                  "Save automatic backup settings",
                 )}
           </button>
         </div>

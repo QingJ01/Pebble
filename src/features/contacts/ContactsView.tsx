@@ -298,13 +298,13 @@ export default function ContactsView() {
           <div>
             <strong>{t("contacts.importSummary", "Import summary")}</strong>
             <p>
-              {importResult.created} {t("contacts.importCreated", "created")}
+              {t("contacts.importCreated", { count: importResult.created, defaultValue: "{{count}} created" })}
               {" · "}
-              {importResult.merged} {t("contacts.importMerged", "merged")}
+              {t("contacts.importMerged", { count: importResult.merged, defaultValue: "{{count}} merged" })}
               {" · "}
-              {importResult.skipped} {t("contacts.importSkipped", "skipped")}
+              {t("contacts.importSkipped", { count: importResult.skipped, defaultValue: "{{count}} skipped" })}
               {" · "}
-              {importResult.invalid} {t("contacts.importInvalid", "invalid")}
+              {t("contacts.importInvalid", { count: importResult.invalid, defaultValue: "{{count}} invalid" })}
             </p>
             {importResult.errors.length > 0 && (
               <ul>
@@ -436,7 +436,7 @@ function ContactDetail({
 }: ContactDetailProps) {
   const { t } = useTranslation();
   const primary = primaryEmailFor(contact);
-  const name = contact.display_name.trim() || primary?.address || "Unknown contact";
+  const name = contact.display_name.trim() || primary?.address || t("contacts.unknown", "Unknown contact");
 
   return (
     <article className="contact-detail">
@@ -502,7 +502,7 @@ function ContactDetail({
               <button
                 type="button"
                 className="contact-icon-button"
-                aria-label={`${t("contacts.copy", "Copy email address")}: ${email.address}`}
+                aria-label={t("contacts.copyNamed", { address: email.address, defaultValue: "Copy email address {{address}}" })}
                 onClick={() => onCopy(email.address)}
               >
                 <Clipboard size={15} />

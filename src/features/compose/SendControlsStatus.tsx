@@ -62,7 +62,7 @@ export default function SendControlsStatus() {
   }
   return <>
     {pending.filter((job) => job.id !== composeUndoId).map((job) => <div className="send-controls-banner" role="status" key={job.id}>
-      <span>{job.subject || t("sendControls.noSubject")}: {t("sendControls.countdown", { count: countdownSeconds(job.dueAt, now) })}</span>
+      <span>{t("sendControls.countdownFor", { subject: job.subject || t("sendControls.noSubject"), count: countdownSeconds(job.dueAt, now) })}</span>
       <Button size="sm" variant="primary" loading={busy} onClick={() => void undo(job)}>{t("sendControls.undo")}</Button>
     </div>)}
     {query.data?.some((job) => job.state === "review") && <div className="send-controls-banner" role="status">{t("sendControls.reviewNotice")}</div>}

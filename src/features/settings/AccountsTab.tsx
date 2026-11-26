@@ -652,7 +652,10 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
                 }}
               >
                 {ACCOUNT_COLOR_PRESETS.map((preset) => {
-                  const presetLabel = `${t("settings.useAccountColorPreset", "Use color")} ${preset.color}`;
+                  const presetLabel = t("settings.useAccountColorPreset", {
+                    color: t(`settings.accountColorName.${preset.name.toLowerCase()}`, preset.name),
+                    defaultValue: "Use {{color}}",
+                  });
                   const selected = accountColor.toLowerCase() === preset.color;
                   return (
                     <button
