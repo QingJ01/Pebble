@@ -283,7 +283,8 @@
     "accountProxyMode": "代理模式",
     "accountProxyModeInherit": "继承全局代理",
     "accountProxyModeDisabled": "不使用代理",
-    "accountProxyModeCustom": "使用自定义代理"
+    "accountProxyModeCustom": "使用自定义代理",
+    "confirmRemoveAccountDetail": "要从 Pebble 中移除 {{email}} 吗？此设备上的本地邮件、附件和尚未同步的更改都会被删除，服务器上的邮件不受影响。"
   },
   "cloudSync": {
     "title": "设置备份",
@@ -334,7 +335,8 @@
     "autoBackupFillFields": "请先填写上方的 WebDAV 连接信息以启用自动备份。",
     "secretPassphraseTooShort": "备份加密密码至少需要 12 个字符。",
     "savedSecretPlaceholder": "已保存 — 留空则保持不变",
-    "weakPassphraseHint": "已保存的备份加密密码少于 12 个字符。备份仍可正常进行，但建议设置更强的密码。"
+    "weakPassphraseHint": "已保存的备份加密密码少于 12 个字符。备份仍可正常进行，但建议设置更强的密码。",
+    "restoreConfirmAction": "恢复并覆盖"
   },
   "pendingOps": {
     "retrySend": "重试发送",
@@ -536,7 +538,11 @@
     "oneHour": "1 小时后",
     "tonight": "今晚 (8 PM)",
     "tomorrow": "明天 (9 AM)",
-    "nextMonday": "下周一 (9 AM)"
+    "nextMonday": "下周一 (9 AM)",
+    "menuLabel": "选择提醒时间",
+    "tonightShort": "今晚",
+    "tomorrowShort": "明天",
+    "nextMondayShort": "下周一"
   },
   "snoozed": {
     "title": "稍后提醒邮件",
@@ -627,7 +633,9 @@
     "senderNotice": "更新后，发件人姓名会写入外发邮件。请核对这些姓名，并把内部描述填写在“账户备注”中。",
     "senderPreview": "预览发件身份",
     "reviewNames": "前往账户设置核对",
-    "senderNoticeDismiss": "知道了"
+    "senderNoticeDismiss": "知道了",
+    "senderPreviewLabel": "外发邮件将显示为",
+    "discardAction": "放弃"
   },
   "contacts": {
     "title": "联系人",
@@ -689,7 +697,13 @@
     "importMerged": "个已合并",
     "importSkipped": "个已跳过",
     "importInvalid": "个无效",
-    "closeImportSummary": "关闭导入摘要"
+    "closeImportSummary": "关闭导入摘要",
+    "saveFailed": "无法保存联系人，请重试。",
+    "favoriteFailed": "无法更新收藏状态，请重试。",
+    "deleteFailed": "无法删除联系人，请重试。",
+    "copyFailed": "无法复制邮箱地址。",
+    "importFailed": "无法导入 vCard 文件，请检查文件后重试。",
+    "exportFailed": "无法导出联系人，请重试。"
   },
   "commands": {
     "navigation": "导航",
@@ -744,7 +758,9 @@
     "loadTrustedFailed": "加载受信任发件人失败",
     "removeTrustFailed": "移除受信任发件人失败",
     "trustedSenders": "受信任的发件人",
-    "noTrustedSenders": "暂无受信任的发件人。可在邮件的隐私横幅中信任发件人。"
+    "noTrustedSenders": "暂无受信任的发件人。可在邮件的隐私横幅中信任发件人。",
+    "bannerLabel": "已拦截的内容",
+    "trustSenderFailed": "无法将此发件人设为信任，请重试。"
   },
   "rules": {
     "title": "规则",
@@ -823,7 +839,8 @@
     "testFailed": "测试失败: {{error}}",
     "privacyNotice": "翻译功能将把选中的文本发送给第三方翻译服务，您的邮件内容将离开本设备。",
     "acceptAndContinue": "我已了解，继续",
-    "savedApiKeyPlaceholder": "已保存 — 留空则保持不变"
+    "savedApiKeyPlaceholder": "已保存 — 留空则保持不变",
+    "targetLanguage": "目标语言"
   },
   "selection": {
     "actions": "选中文本操作",

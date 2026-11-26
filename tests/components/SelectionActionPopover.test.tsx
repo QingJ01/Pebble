@@ -18,6 +18,9 @@ describe("SelectionActionPopover", () => {
       await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Copy selected text" })); });
       expect(vi.getTimerCount()).toBeGreaterThan(0);
       view.unmount();
+      // Flush jsdom's own 0ms selectionchange timers (from focus moves); the
+      // 1500ms "copied" timer must already be gone.
+      act(() => { vi.advanceTimersByTime(0); });
       expect(vi.getTimerCount()).toBe(0);
     } finally { vi.useRealTimers(); }
   });

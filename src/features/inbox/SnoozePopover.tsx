@@ -1,22 +1,34 @@
-import { useState } from "react";
+import { useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { snoozeMessage } from "@/lib/api";
 import { useUIStore } from "@/stores/ui.store";
+import { describeError } from "@/lib/extractErrorMessage";
+import Popover, { handleMenuKeyDown } from "@/components/ui/Popover";
 
 interface Props {
   messageId: string;
+  open?: boolean;
+  anchorRef?: RefObject<HTMLElement | null>;
   onClose: () => void;
   onSnoozed: () => void;
 }
 
-function getPresets(t: (key: string, fallback: string) => string): { label: string; getTimestamp: () => number }[] {
+interface Preset {
+  key: string;
+  label: string;
+  getTimestamp: () => number;
+}
+
+function getPresets(t: (key: string, fallback: string) => string): Preset[] {
   return [
     {
+      key: "hour",
       label: t("snooze.oneHour", "1 hour"),
       getTimestamp: () => Math.floor(Date.now() / 1000) + 3600,
     },
     {
-      label: t("snooze.tonight", "Tonight (8 PM)"),
+      key: "tonight",
+      label: t("snooze.tonightShort", "Tonight"),
       getTimestamp: () => {
         const d = new Date();
         d.setHours(20, 0, 0, 0);
@@ -25,7 +37,8 @@ function getPresets(t: (key: string, fallback: string) => string): { label: stri
       },
     },
     {
-      label: t("snooze.tomorrow", "Tomorrow (9 AM)"),
+      key: "tomorrow",
+      label: t("snooze.tomorrowShort", "Tomorrow"),
       getTimestamp: () => {
         const d = new Date();
         d.setDate(d.getDate() + 1);
@@ -34,7 +47,8 @@ function getPresets(t: (key: string, fallback: string) => string): { label: stri
       },
     },
     {
-      label: t("snooze.nextMonday", "Next Monday (9 AM)"),
+      key: "monday",
+      label: t("snooze.nextMondayShort", "Next Monday"),
       getTimestamp: () => {
         const d = new Date();
         const day = d.getDay();
@@ -47,95 +61,72 @@ function getPresets(t: (key: string, fallback: string) => string): { label: stri
   ];
 }
 
-export default function SnoozePopover({ messageId, onClose, onSnoozed }: Props) {
-  const { t } = useTranslation();
+function formatHint(timestamp: number, language: string | undefined) {
+  try {
+    return new Date(timestamp * 1000).toLocaleTimeString(language || undefined, { hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return "";
+  }
+}
+
+/** Snooze presets as an ARIA menu (↑/↓/Home/End, Escape closes, focus returns to the trigger). */
+export default function SnoozePopover({ messageId, open = true, anchorRef, onClose, onSnoozed }: Props) {
+  const { t, i18n } = useTranslation();
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<{ title: string; detail: string } | null>(null);
 
   async function handleSnooze(getTimestamp: () => number) {
     setLoading(true);
+    setError(null);
     try {
       const returnTo = useUIStore.getState().activeView;
       await snoozeMessage(messageId, getTimestamp(), returnTo);
       onSnoozed();
     } catch (err) {
       console.error("Snooze failed:", err);
-      setError(true);
-      setTimeout(() => {
-        setError(false);
-        onClose();
-      }, 2000);
+      const described = describeError(err, { fallbackKey: "snooze.failed", fallback: "Snooze failed" });
+      setError({ title: described.title, detail: described.detail });
     } finally {
       setLoading(false);
     }
   }
 
+  const menuLabel = t("snooze.menuLabel", "Snooze until");
+
   return (
-    <div
-      role="dialog"
-      aria-label={t("snooze.until", "Snooze until...")}
-      style={{
-        position: "absolute",
-        top: "100%",
-        right: 0,
-        marginTop: "4px",
-        backgroundColor: "var(--color-bg)",
-        border: "1px solid var(--color-border)",
-        borderRadius: "8px",
-        boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-        padding: "4px 0",
-        zIndex: 100,
-        minWidth: "200px",
-      }}
+    <Popover
+      open={open}
+      onClose={onClose}
+      anchorRef={anchorRef}
+      placement="bottom-end"
+      role="menu"
+      aria-label={menuLabel}
+      aria-busy={loading || undefined}
+      className="menu"
+      onKeyDown={handleMenuKeyDown}
     >
-      <div
-        style={{
-          padding: "8px 12px",
-          fontSize: "12px",
-          fontWeight: 600,
-          color: "var(--color-text-secondary)",
-          borderBottom: "1px solid var(--color-border)",
-        }}
-      >
-        {t("snooze.until", "Snooze until...")}
-      </div>
-      {getPresets(t).map((preset) => (
-        <button
-          key={preset.label}
-          disabled={loading}
-          onClick={() => handleSnooze(preset.getTimestamp)}
-          style={{
-            display: "block",
-            width: "100%",
-            textAlign: "left",
-            padding: "8px 12px",
-            border: "none",
-            background: "none",
-            cursor: loading ? "wait" : "pointer",
-            fontSize: "13px",
-            color: "var(--color-text-primary)",
-          }}
-          onMouseEnter={(e) =>
-            (e.currentTarget.style.backgroundColor =
-              "var(--color-bg-hover, rgba(0,0,0,0.05))")
-          }
-          onMouseLeave={(e) =>
-            (e.currentTarget.style.backgroundColor = "transparent")
-          }
-        >
-          {preset.label}
-        </button>
-      ))}
+      <div className="menu-label" aria-hidden="true">{menuLabel}</div>
+      {getPresets(t).map((preset) => {
+        const hint = preset.key === "hour" ? "" : formatHint(preset.getTimestamp(), i18n?.language);
+        return (
+          <button
+            key={preset.key}
+            type="button"
+            role="menuitem"
+            className="menu-item"
+            disabled={loading}
+            onClick={() => handleSnooze(preset.getTimestamp)}
+          >
+            <span>{preset.label}</span>
+            {hint && <span className="menu-item__hint">{hint}</span>}
+          </button>
+        );
+      })}
       {error && (
-        <div role="alert" aria-live="assertive" style={{
-          padding: "6px 10px",
-          fontSize: "12px",
-          color: "#ef4444",
-          textAlign: "center",
-        }}>
-          {t("snooze.failed", "Snooze failed")}
+        <div role="alert" className="popover-error" title={error.detail || undefined}>
+          {error.title}
         </div>
       )}
-    </div>
+    </Popover>
   );
 }

@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import i18n from "@/lib/i18n";
 import { useConfirmStore } from "@/stores/confirm.store";
 import { X } from "lucide-react";
+import Dialog from "./ui/Dialog";
+import Button from "./ui/Button";
+import IconButton from "./ui/IconButton";
 import { useTranslation } from "react-i18next";
 import { parseProxyPort, PROXY_PORT_ERROR_KEY } from "@/lib/proxy-port";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
@@ -109,7 +112,6 @@ export default function AccountSetup({ onClose }: Props) {
   const [testLoading, setTestLoading] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
-  const dialogRef = useRef<HTMLDivElement>(null);
   const formRef = useRef(form);
   formRef.current = form;
 
@@ -126,6 +128,7 @@ export default function AccountSetup({ onClose }: Props) {
     const confirmed = await useConfirmStore.getState().confirm({
       title: i18n.t("accountSetup.discardTitle", "Discard form"),
       message: i18n.t("accountSetup.discardConfirm", "Discard this form?"),
+      confirmLabel: i18n.t("accountSetup.discardAction", "Discard"),
       destructive: true,
     });
     if (confirmed) onClose();
@@ -133,43 +136,6 @@ export default function AccountSetup({ onClose }: Props) {
   const requestCloseRef = useRef(requestClose);
   requestCloseRef.current = requestClose;
 
-  useEffect(() => {
-    const previousFocus =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-
-    emailInputRef.current?.focus();
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        void requestCloseRef.current();
-        return;
-      }
-      // Focus trap: keep Tab within the dialog
-      if (event.key === "Tab" && dialogRef.current) {
-        const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-        );
-        if (focusable.length === 0) return;
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-        if (event.shiftKey && document.activeElement === first) {
-          event.preventDefault();
-          last.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first.focus();
-        }
-      }
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      previousFocus?.focus();
-    };
-  }, [onClose]);
 
   function validatedProxyPort() {
     return parseProxyPort(String(form.proxy_port ?? ""), t(PROXY_PORT_ERROR_KEY, "Port must be an integer between 1 and 65535."));
@@ -347,7 +313,7 @@ export default function AccountSetup({ onClose }: Props) {
           id="setup-proxy-port"
           aria-label={t("accountSetup.proxyPort", "Port")}
           style={{ ...inputStyle, width: "80px" }}
-          type="number"
+          type="number" inputMode="numeric"
           value={form.proxy_port ?? ""}
           onChange={(e) => setForm((prev) => ({ ...prev, proxy_port: e.target.value ? Number(e.target.value) : undefined }))}
           placeholder="7890"
@@ -357,70 +323,27 @@ export default function AccountSetup({ onClose }: Props) {
   );
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="account-setup-title"
-      style={{
-        position: "fixed",
-        inset: 0,
-        backgroundColor: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-      }}
+    <Dialog
+      onClose={() => void requestClose()}
+      closeOnBackdrop={false}
+      labelledBy="account-setup-title"
+      initialFocus={emailInputRef}
+      busy={loading || oauthLoading}
+      panelClassName="dialog-panel dialog-panel--flush"
+      style={{ width: "min(480px, 100%)", maxHeight: "90vh", overflow: "hidden" }}
     >
-      <div
-        ref={dialogRef}
-        style={{
-          width: "min(480px, calc(100vw - 32px))",
-          backgroundColor: "var(--color-bg)",
-          borderRadius: "10px",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
-          display: "flex",
-          flexDirection: "column",
-          maxHeight: "90vh",
-          overflow: "hidden",
-        }}
-      >
         {/* Header */}
         <div
+          className="dialog-header"
           style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
             padding: "16px 20px",
             borderBottom: "1px solid var(--color-border)",
           }}
         >
-          <h2
-            id="account-setup-title"
-            style={{
-              margin: 0,
-              fontSize: "15px",
-              fontWeight: 600,
-              color: "var(--color-text-primary)",
-            }}
-          >
+          <h2 id="account-setup-title" className="dialog-title">
             {t("accountSetup.title", "Add Email Account")}
           </h2>
-          <button
-            onClick={() => void requestClose()}
-            aria-label={t("common.close", "Close")}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              padding: "4px",
-              borderRadius: "4px",
-              color: "var(--color-text-secondary)",
-              display: "flex",
-              alignItems: "center",
-            }}
-          >
-            <X size={18} />
-          </button>
+          <IconButton label={t("common.close", "Close")} icon={<X size={16} />} onClick={() => void requestClose()} />
         </div>
 
         {/* Scrollable body */}
@@ -519,7 +442,7 @@ export default function AccountSetup({ onClose }: Props) {
           <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
             {/* Email */}
             <div style={fieldStyle}>
-              <label htmlFor="setup-email" style={labelStyle}>{t("accountSetup.emailAddress", "Email address")}</label>
+              <label htmlFor="setup-email" className="label-required" style={labelStyle}>{t("accountSetup.emailAddress", "Email address")}</label>
                 <input
                   ref={emailInputRef}
                   id="setup-email"
@@ -570,7 +493,7 @@ export default function AccountSetup({ onClose }: Props) {
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "12px" }}>
               <div style={fieldStyle}>
-                <label htmlFor="setup-imap-host" style={labelStyle}>{incomingHostLabel}</label>
+                <label htmlFor="setup-imap-host" className="label-required" style={labelStyle}>{incomingHostLabel}</label>
                 <input
                   id="setup-imap-host"
                   name="imap_host"
@@ -583,12 +506,12 @@ export default function AccountSetup({ onClose }: Props) {
                 />
               </div>
               <div style={fieldStyle}>
-                <label htmlFor="setup-imap-port" style={labelStyle}>{incomingPortLabel}</label>
+                <label htmlFor="setup-imap-port" className="label-required" style={labelStyle}>{incomingPortLabel}</label>
                 <input
                   id="setup-imap-port"
                   name="imap_port"
                   style={{ ...inputStyle, width: "70px" }}
-                  type="number"
+                  type="number" min={1} max={65535} step={1} inputMode="numeric"
                   required
                   value={form.imap_port}
                   onChange={(e) => handleChange("imap_port", parseInt(e.target.value, 10))}
@@ -612,7 +535,7 @@ export default function AccountSetup({ onClose }: Props) {
             {/* SMTP */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "12px" }}>
               <div style={fieldStyle}>
-                <label htmlFor="setup-smtp-host" style={labelStyle}>{t("accountSetup.smtpHost", "SMTP host")}</label>
+                <label htmlFor="setup-smtp-host" className="label-required" style={labelStyle}>{t("accountSetup.smtpHost", "SMTP host")}</label>
                 <input
                   id="setup-smtp-host"
                   name="smtp_host"
@@ -625,12 +548,12 @@ export default function AccountSetup({ onClose }: Props) {
                 />
               </div>
               <div style={fieldStyle}>
-                <label htmlFor="setup-smtp-port" style={labelStyle}>{t("accountSetup.smtpPort", "SMTP port")}</label>
+                <label htmlFor="setup-smtp-port" className="label-required" style={labelStyle}>{t("accountSetup.smtpPort", "SMTP port")}</label>
                 <input
                   id="setup-smtp-port"
                   name="smtp_port"
                   style={{ ...inputStyle, width: "70px" }}
-                  type="number"
+                  type="number" min={1} max={65535} step={1} inputMode="numeric"
                   required
                   value={form.smtp_port}
                   onChange={(e) => handleChange("smtp_port", parseInt(e.target.value, 10))}
@@ -715,7 +638,7 @@ export default function AccountSetup({ onClose }: Props) {
 
             {/* Password */}
             <div style={fieldStyle}>
-              <label htmlFor="setup-password" style={labelStyle}>{t("accountSetup.password", "Password / App password")}</label>
+              <label htmlFor="setup-password" className="label-required" style={labelStyle}>{t("accountSetup.password", "Password / App password")}</label>
               <input
                 id="setup-password"
                 name="password"
@@ -736,9 +659,9 @@ export default function AccountSetup({ onClose }: Props) {
                 style={{
                   padding: "10px 12px",
                   borderRadius: "6px",
-                  backgroundColor: testResult.ok ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
-                  border: `1px solid ${testResult.ok ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
-                  color: testResult.ok ? "#22c55e" : "#ef4444",
+                  backgroundColor: testResult.ok ? "var(--color-success-bg)" : "var(--color-danger-bg)",
+                  border: "1px solid var(--color-border)",
+                  color: testResult.ok ? "var(--color-success)" : "var(--color-danger)",
                   fontSize: "12px",
                   whiteSpace: "pre-wrap",
                   fontFamily: "monospace",
@@ -751,64 +674,33 @@ export default function AccountSetup({ onClose }: Props) {
 
             {/* Error */}
             {error && (
-              <div
-                role="alert"
-                aria-live="assertive"
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: "6px",
-                  backgroundColor: "rgba(239,68,68,0.1)",
-                  border: "1px solid rgba(239,68,68,0.3)",
-                  color: "#ef4444",
-                  fontSize: "13px",
-                }}
-              >
+              <div role="alert" aria-live="assertive" className="dialog-error" style={{ margin: 0 }}>
                 {error}
               </div>
             )}
 
             {/* Buttons */}
             <div style={{ display: "flex", gap: "10px", marginTop: "4px" }}>
-              <button
-                type="button"
-                disabled={testLoading || !canTestConnection}
+              <Button
+                variant="secondary"
+                loading={testLoading}
+                disabled={!canTestConnection}
                 onClick={handleTestConnection}
-                style={{
-                  padding: "9px 16px",
-                  borderRadius: "6px",
-                  border: "1px solid var(--color-border)",
-                  backgroundColor: "transparent",
-                  color: "var(--color-text-primary)",
-                  fontSize: "13px",
-                  fontWeight: 500,
-                  cursor: testLoading || !canTestConnection ? "not-allowed" : "pointer",
-                  opacity: testLoading || !canTestConnection ? 0.6 : 1,
-                }}
               >
                 {testLoading ? t("accountSetup.testing", "Testing...") : t("accountSetup.testConnection", "Test Connection")}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="submit"
-                disabled={loading || oauthLoading || (!isPop3 && syncRangeDays(syncRange) === undefined)}
-                style={{
-                  flex: 1,
-                  padding: "9px 16px",
-                  borderRadius: "6px",
-                  border: "none",
-                  backgroundColor: "var(--color-accent)",
-                  color: "#fff",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  cursor: loading ? "not-allowed" : "pointer",
-                  opacity: loading ? 0.7 : 1,
-                }}
+                variant="primary"
+                loading={loading}
+                disabled={oauthLoading || (!isPop3 && syncRangeDays(syncRange) === undefined)}
+                style={{ flex: 1 }}
               >
                 {loading ? t("accountSetup.adding", "Adding account…") : t("accountSetup.submit", "Add Account & Sync")}
-              </button>
+              </Button>
             </div>
           </form>
         </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { Plus, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type {
@@ -7,7 +7,10 @@ import type {
   ContactEmailLabel,
   ContactInput,
 } from "@/lib/api";
-import { extractErrorMessage } from "@/lib/extractErrorMessage";
+import { formatError } from "@/lib/extractErrorMessage";
+import Dialog from "@/components/ui/Dialog";
+import Button from "@/components/ui/Button";
+import IconButton from "@/components/ui/IconButton";
 import { isValidEmailAddress } from "@/features/compose/recipient-utils";
 import { fieldGroupStyle, inputStyle, labelStyle } from "@/styles/form";
 
@@ -32,15 +35,6 @@ interface FormError {
 let draftEmailId = 0;
 const CONTACT_EDITOR_ERROR_ID = "contact-editor-error";
 
-function getFocusableElements(container: HTMLElement | null): HTMLElement[] {
-  if (!container) return [];
-  return Array.from(
-    container.querySelectorAll<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-    ),
-  ).filter((element) => !element.hasAttribute("disabled"));
-}
-
 function makeDraftEmail(email?: Contact["emails"][number], initialAddress = ""): DraftEmail {
   return {
     key: email?.id ?? `new-email-${++draftEmailId}`,
@@ -58,10 +52,7 @@ export default function ContactEditorDialog({
   onSave,
 }: ContactEditorDialogProps) {
   const { t } = useTranslation();
-  const dialogRef = useRef<HTMLElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
-  const onCloseRef = useRef(onClose);
-  const isSavingRef = useRef(false);
   const [displayName, setDisplayName] = useState(
     contact?.display_name ?? initialValue?.displayName ?? "",
   );
@@ -79,40 +70,7 @@ export default function ContactEditorDialog({
     ? t("contacts.edit", "Edit contact")
     : t("contacts.new", "New contact");
 
-  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
-  useEffect(() => { isSavingRef.current = isSaving; }, [isSaving]);
 
-  useEffect(() => {
-    const previousFocus =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    nameRef.current?.focus();
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        if (!isSavingRef.current) {
-          event.preventDefault();
-          onCloseRef.current();
-        }
-        return;
-      }
-      if (event.key !== "Tab") return;
-
-      const focusable = getFocusableElements(dialogRef.current);
-      if (focusable.length === 0) return;
-
-      const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
-      const nextIndex = event.shiftKey
-        ? (currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1)
-        : (currentIndex === focusable.length - 1 ? 0 : currentIndex + 1);
-      event.preventDefault();
-      focusable[nextIndex]?.focus();
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      previousFocus?.focus();
-    };
-  }, []);
 
   const updateEmail = (key: string, patch: Partial<DraftEmail>) => {
     setEmails((current) => current.map((email) => (
@@ -209,37 +167,33 @@ export default function ContactEditorDialog({
         })),
       });
     } catch (saveError) {
-      setError({ field: "form", message: extractErrorMessage(saveError) });
+      setError({ field: "form", message: formatError(saveError, { fallbackKey: "contacts.saveFailed", fallback: "Couldn't save the contact. Try again." }) });
     } finally {
       setIsSaving(false);
     }
   };
 
   return (
-    <div className="contact-dialog-backdrop" role="presentation" onMouseDown={(event) => {
-      if (event.target === event.currentTarget && !isSaving) onClose();
-    }}>
-      <section
-        ref={dialogRef}
-        className="contact-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="contact-editor-title"
-      >
+    <Dialog
+      onClose={onClose}
+      dismissible={!isSaving}
+      busy={isSaving}
+      labelledBy="contact-editor-title"
+      initialFocus={nameRef}
+      panelClassName="contact-dialog"
+    >
         <header className="contact-dialog-header">
           <div>
             <span className="contact-dialog-kicker">{t("contacts.title", "Contacts")}</span>
             <h2 id="contact-editor-title">{title}</h2>
           </div>
-          <button
-            type="button"
-            className="contact-icon-button"
-            aria-label={t("common.close", "Close")}
+          <IconButton
+            size="md"
+            label={t("common.close", "Close")}
+            icon={<X size={16} />}
             onClick={onClose}
             disabled={isSaving}
-          >
-            <X size={17} />
-          </button>
+          />
         </header>
 
         <form onSubmit={handleSubmit} noValidate>
@@ -374,15 +328,14 @@ export default function ContactEditorDialog({
           </div>
 
           <footer className="contact-dialog-footer">
-            <button type="button" className="contact-secondary-button" onClick={onClose} disabled={isSaving}>
+            <Button variant="secondary" onClick={onClose} disabled={isSaving}>
               {t("common.cancel", "Cancel")}
-            </button>
-            <button type="submit" className="contact-primary-button" disabled={isSaving}>
+            </Button>
+            <Button type="submit" variant="primary" loading={isSaving}>
               {isSaving ? t("common.saving", "Saving...") : t("contacts.save", "Save contact")}
-            </button>
+            </Button>
           </footer>
         </form>
-      </section>
-    </div>
+    </Dialog>
   );
 }

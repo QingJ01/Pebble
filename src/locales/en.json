@@ -283,7 +283,8 @@
     "syncFoldersCleanupWarning": "Saving removes locally stored data for folders you uncheck. It does not delete mail from the server.",
     "oauthAccountNote": "This account uses OAuth. Provider sign-in, password, and IMAP/SMTP settings are managed by the provider. Leave the proxy blank to inherit the global SOCKS5 proxy.",
     "deleteAccountSuccess": "Account removed successfully",
-    "deleteAccountFailed": "Failed to remove account"
+    "deleteAccountFailed": "Failed to remove account",
+    "confirmRemoveAccountDetail": "Remove {{email}} from Pebble? Local mail, attachments and changes that haven't synced yet are deleted from this device. Mail on the server is not affected."
   },
   "cloudSync": {
     "title": "Settings Backup",
@@ -334,7 +335,8 @@
     "autoBackupFillFields": "Fill in WebDAV credentials above to enable auto-backup.",
     "secretPassphraseTooShort": "The backup encryption password must be at least 12 characters.",
     "savedSecretPlaceholder": "Saved — leave blank to keep",
-    "weakPassphraseHint": "Your saved backup encryption password is shorter than 12 characters. Backups still work, but please set a stronger password."
+    "weakPassphraseHint": "Your saved backup encryption password is shorter than 12 characters. Backups still work, but please set a stronger password.",
+    "restoreConfirmAction": "Restore and overwrite"
   },
   "pendingOps": {
     "retrySend": "Retry send",
@@ -537,7 +539,11 @@
     "oneHour": "1 hour",
     "tonight": "Tonight (8 PM)",
     "tomorrow": "Tomorrow (9 AM)",
-    "nextMonday": "Next Monday (9 AM)"
+    "nextMonday": "Next Monday (9 AM)",
+    "menuLabel": "Snooze until",
+    "tonightShort": "Tonight",
+    "tomorrowShort": "Tomorrow",
+    "nextMondayShort": "Next Monday"
   },
   "snoozed": {
     "title": "Snoozed Messages",
@@ -628,7 +634,9 @@
     "senderNotice": "Sender names now appear in outgoing mail. Review these names, and use Account label for private account descriptions.",
     "senderPreview": "Preview sender identities",
     "reviewNames": "Review in account settings",
-    "senderNoticeDismiss": "Got it"
+    "senderNoticeDismiss": "Got it",
+    "senderPreviewLabel": "Outgoing mail will show",
+    "discardAction": "Discard"
   },
   "contacts": {
     "title": "Contacts",
@@ -690,7 +698,13 @@
     "importMerged": "merged",
     "importSkipped": "skipped",
     "importInvalid": "invalid",
-    "closeImportSummary": "Close import summary"
+    "closeImportSummary": "Close import summary",
+    "saveFailed": "Couldn't save the contact. Try again.",
+    "favoriteFailed": "Couldn't update the favorite. Try again.",
+    "deleteFailed": "Couldn't delete the contact. Try again.",
+    "copyFailed": "Couldn't copy the email address.",
+    "importFailed": "Couldn't import the vCard file. Check the file and try again.",
+    "exportFailed": "Couldn't export contacts. Try again."
   },
   "commands": {
     "navigation": "Navigation",
@@ -745,7 +759,9 @@
     "loadTrustedFailed": "Failed to load trusted senders",
     "removeTrustFailed": "Failed to remove trusted sender",
     "trustedSenders": "Trusted Senders",
-    "noTrustedSenders": "No trusted senders yet. Trust a sender from the privacy banner in a message."
+    "noTrustedSenders": "No trusted senders yet. Trust a sender from the privacy banner in a message.",
+    "bannerLabel": "Blocked content",
+    "trustSenderFailed": "Couldn't save this sender as trusted. Try again."
   },
   "rules": {
     "title": "Rules",
@@ -824,7 +840,8 @@
     "testFailed": "Test failed: {{error}}",
     "privacyNotice": "Translation will send the selected text to a third-party translation service. Your email content will leave this device.",
     "acceptAndContinue": "I understand, continue",
-    "savedApiKeyPlaceholder": "Saved — leave blank to keep"
+    "savedApiKeyPlaceholder": "Saved — leave blank to keep",
+    "targetLanguage": "Target language"
   },
   "selection": {
     "actions": "Selected text actions",

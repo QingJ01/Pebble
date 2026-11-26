@@ -695,6 +695,7 @@ export default function CloudSyncTab() {
         <ConfirmDialog
           title={t("cloudSync.restore", "Restore Settings Backup")}
           message={restorePreviewMessage(restoreRequest.preview)}
+          confirmLabel={t("cloudSync.restoreConfirmAction", "Restore and overwrite")}
           destructive
           onCancel={() => setRestoreRequest(null)}
           onConfirm={() => {

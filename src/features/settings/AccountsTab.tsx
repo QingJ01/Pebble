@@ -2,7 +2,10 @@ import { accountLabel } from "@/lib/accountIdentity";
 import { parseProxyPort, PROXY_PORT_ERROR_KEY } from "@/lib/proxy-port";
 import OAuthIdentityPanel from "./OAuthIdentityPanel";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Plus, Trash2, Mail, Pencil, Plug, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Mail, Pencil, Plug, RefreshCw, X } from "lucide-react";
+import Dialog from "@/components/ui/Dialog";
+import Button from "@/components/ui/Button";
+import IconButton from "@/components/ui/IconButton";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -28,7 +31,7 @@ import type {
 import { useAccountsQuery, accountsQueryKey } from "@/hooks/queries";
 import { useMailStore } from "@/stores/mail.store";
 import { realtimePreferenceToPollInterval, useUIStore, type RealtimeStatus } from "@/stores/ui.store";
-import { useToastStore } from "@/stores/toast.store";
+import { toastError, useToastStore } from "@/stores/toast.store";
 import AccountSetup from "@/components/AccountSetup";
 import SyncRangeFields, { syncRangeDays, syncRangeDraft } from "@/components/SyncRangeFields";
 import { extractErrorMessage } from "@/lib/extractErrorMessage";
@@ -74,11 +77,7 @@ export default function AccountsTab() {
         type: "success",
       });
     } catch (err) {
-      const msg = extractErrorMessage(err);
-      useToastStore.getState().addToast({
-        message: t("settings.deleteAccountFailed", "Failed to remove account: {{error}}", { error: msg }),
-        type: "error",
-      });
+      toastError(err, "settings.deleteAccountFailed");
     }
   }
 
@@ -230,87 +229,23 @@ export default function AccountsTab() {
                   )}
                 </div>
                 <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-                  <button
+                  <IconButton
+                    label={t("accountSetup.testConnection", "Test Connection")}
+                    icon={<Plug size={15} />}
+                    loading={testingId === account.id}
                     onClick={() => doTestConnection(account.id)}
-                    disabled={testingId === account.id}
-                    title={t("accountSetup.testConnection", "Test Connection")}
-                    aria-label={t("accountSetup.testConnection", "Test Connection")}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      padding: "6px",
-                      borderRadius: "6px",
-                      border: "none",
-                      backgroundColor: "transparent",
-                      color: testingId === account.id ? "var(--color-accent)" : "var(--color-text-secondary)",
-                      cursor: testingId === account.id ? "wait" : "pointer",
-                      opacity: testingId === account.id ? 0.6 : 1,
-                    }}
-                    onMouseEnter={(e) => {
-                      if (testingId !== account.id) {
-                        e.currentTarget.style.color = "var(--color-accent)";
-                        e.currentTarget.style.backgroundColor = "var(--color-bg-hover)";
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (testingId !== account.id) {
-                        e.currentTarget.style.color = "var(--color-text-secondary)";
-                        e.currentTarget.style.backgroundColor = "transparent";
-                      }
-                    }}
-                  >
-                    <Plug size={15} />
-                  </button>
-                  <button
+                  />
+                  <IconButton
+                    label={t("settings.editAccount", "Edit account")}
+                    icon={<Pencil size={15} />}
                     onClick={() => setEditingAccount(account)}
-                    title={t("settings.editAccount", "Edit account")}
-                    aria-label={t("settings.editAccount", "Edit account")}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      padding: "6px",
-                      borderRadius: "6px",
-                      border: "none",
-                      backgroundColor: "transparent",
-                      color: "var(--color-text-secondary)",
-                      cursor: "pointer",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.color = "var(--color-accent)";
-                      e.currentTarget.style.backgroundColor = "var(--color-bg-hover)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.color = "var(--color-text-secondary)";
-                      e.currentTarget.style.backgroundColor = "transparent";
-                    }}
-                  >
-                    <Pencil size={15} />
-                  </button>
-                  <button
+                  />
+                  <IconButton
+                    label={t("settings.removeAccount")}
+                    icon={<Trash2 size={15} />}
                     onClick={() => setDeleteTarget({ id: account.id, email: account.email })}
-                    title={t("settings.removeAccount")}
-                    aria-label={t("settings.removeAccount")}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      padding: "6px",
-                      borderRadius: "6px",
-                      border: "none",
-                      backgroundColor: "transparent",
-                      color: "var(--color-text-secondary)",
-                      cursor: "pointer",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.color = "#ef4444";
-                      e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.08)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.color = "var(--color-text-secondary)";
-                      e.currentTarget.style.backgroundColor = "transparent";
-                    }}
-                  >
-                    <Trash2 size={15} />
-                  </button>
+                    style={{ marginLeft: "4px" }}
+                  />
                 </div>
               </div>
             );
@@ -325,9 +260,9 @@ export default function AccountsTab() {
             marginTop: "10px",
             padding: "10px 12px",
             borderRadius: "6px",
-            backgroundColor: testResult.ok ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
-            border: `1px solid ${testResult.ok ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
-            color: testResult.ok ? "#22c55e" : "#ef4444",
+            backgroundColor: testResult.ok ? "var(--color-success-bg)" : "var(--color-danger-bg)",
+            border: "1px solid var(--color-border)",
+            color: testResult.ok ? "var(--color-success)" : "var(--color-danger)",
             fontSize: "12px",
             whiteSpace: "pre-wrap",
             fontFamily: "monospace",
@@ -342,7 +277,11 @@ export default function AccountsTab() {
       {deleteTarget && (
         <ConfirmDialog
           title={t("settings.removeAccount", "Remove Account")}
-          message={t("settings.confirmDeleteAccount", { email: deleteTarget.email })}
+          message={t("settings.confirmRemoveAccountDetail", {
+            email: deleteTarget.email,
+            defaultValue: "Remove {{email}} from Pebble? Local mail, attachments and changes that haven't synced yet are deleted from this device. Mail on the server is not affected.",
+          })}
+          confirmLabel={t("settings.removeAccount", "Remove account")}
           destructive
           onCancel={() => setDeleteTarget(null)}
           onConfirm={() => {
@@ -407,7 +346,6 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const dialogRef = useRef<HTMLDivElement>(null);
   const emailInputRef = useRef<HTMLInputElement>(null);
   const [displayName, setDisplayName] = useState(account.display_name);
   const [accountLabelValue, setAccountLabelValue] = useState(account.account_label || "");
@@ -497,41 +435,6 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
     };
   }, [account.id, isOAuth]);
 
-  useEffect(() => {
-    const previousFocus =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-
-    emailInputRef.current?.focus();
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-        return;
-      }
-      if (event.key === "Tab" && dialogRef.current) {
-        const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-        );
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-        if (event.shiftKey && document.activeElement === first) {
-          event.preventDefault();
-          last.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first.focus();
-        }
-      }
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      previousFocus?.focus();
-    };
-  }, [onClose]);
 
   async function loadImapFolders() {
     setFolderLoading(true);
@@ -654,58 +557,33 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
       </div>
       <div style={fieldStyle}>
         <label style={labelStyle}>{t("accountSetup.proxyPort", "Port")}</label>
-        <input aria-label={t("accountSetup.proxyPort", "Port")} style={{ ...inputStyle, width: "80px" }} type="number" value={proxyPort} onChange={(e) => setProxyPort(e.target.value)} placeholder="7890" />
+        <input aria-label={t("accountSetup.proxyPort", "Port")} style={{ ...inputStyle, width: "80px" }} type="number" inputMode="numeric" value={proxyPort} onChange={(e) => setProxyPort(e.target.value)} placeholder="7890" />
       </div>
     </div>
   );
 
   return (
-    <div
-      ref={dialogRef}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="edit-account-title"
-      style={{
-        position: "fixed",
-        inset: 0,
-        backgroundColor: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-      }}
+    <Dialog
+      onClose={onClose}
+      dismissible={!loading}
+      closeOnBackdrop={false}
+      labelledBy="edit-account-title"
+      initialFocus={emailInputRef}
+      busy={loading}
+      panelClassName="dialog-panel dialog-panel--flush"
+      style={{ width: "min(480px, 100%)", maxHeight: "90vh", overflow: "hidden" }}
     >
-      <div
-        style={{
-          width: "480px",
-          backgroundColor: "var(--color-bg)",
-          borderRadius: "10px",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
-          display: "flex",
-          flexDirection: "column",
-          maxHeight: "90vh",
-          overflow: "hidden",
-        }}
-      >
         <div
+          className="dialog-header"
           style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
             padding: "16px 20px",
             borderBottom: "1px solid var(--color-border)",
           }}
         >
-          <h2 id="edit-account-title" style={{ margin: 0, fontSize: "15px", fontWeight: 600, color: "var(--color-text-primary)" }}>
+          <h2 id="edit-account-title" className="dialog-title">
             {t("settings.editAccount", "Edit Account")}
           </h2>
-          <button
-            onClick={onClose}
-            aria-label={t("common.close")}
-            style={{ backgroundColor: "transparent", backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 6 6 18'/%3E%3Cpath d='m6 6 12 12'/%3E%3C/svg%3E\")", backgroundPosition: "center", backgroundRepeat: "no-repeat", backgroundSize: "18px 18px", border: "none", cursor: "pointer", padding: "4px", borderRadius: "4px", color: "var(--color-text-secondary)", display: "flex", fontSize: 0 }}
-          >
-            ×
-          </button>
+          <IconButton label={t("common.close", "Close")} icon={<X size={16} />} onClick={onClose} />
         </div>
 
         <div className="scroll-region edit-account-scroll" style={{ overflowY: "auto", padding: "20px" }}>
@@ -830,7 +708,7 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
                   </div>
                   <div style={fieldStyle}>
                     <label style={labelStyle}>{incomingPortLabel}</label>
-                    <input aria-label={incomingPortLabel} style={{ ...inputStyle, width: "70px" }} type="number" value={imapPort} onChange={(e) => setImapPort(e.target.value)} />
+                    <input aria-label={incomingPortLabel} style={{ ...inputStyle, width: "70px" }} type="number" min={1} max={65535} step={1} inputMode="numeric" value={imapPort} onChange={(e) => setImapPort(e.target.value)} />
                   </div>
                   <div style={fieldStyle}>
                     <label htmlFor="accountsetup-imap-security" style={labelStyle}>{t("accountSetup.security", "Security")}</label>
@@ -850,7 +728,7 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
                   </div>
                   <div style={fieldStyle}>
                     <label style={labelStyle}>{t("accountSetup.smtpPort")}</label>
-                    <input aria-label={t("accountSetup.smtpPort")} style={{ ...inputStyle, width: "70px" }} type="number" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} />
+                    <input aria-label={t("accountSetup.smtpPort")} style={{ ...inputStyle, width: "70px" }} type="number" min={1} max={65535} step={1} inputMode="numeric" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} />
                   </div>
                   <div style={fieldStyle}>
                     <label htmlFor="accountsetup-smtp-security" style={labelStyle}>{t("accountSetup.security", "Security")}</label>
@@ -1031,32 +909,26 @@ function EditAccountModal({ account, initialColor, onClose, onSaved }: {
             </div>
 
             {error && (
-              <div role="alert" aria-live="assertive" style={{ padding: "10px 12px", borderRadius: "6px", backgroundColor: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", color: "#ef4444", fontSize: "13px" }}>
+              <div role="alert" aria-live="assertive" className="dialog-error" style={{ margin: 0 }}>
                 {error}
               </div>
             )}
 
-            <button
-              type="submit"
-              disabled={loading || folderLoading || rangeLoading || !!rangeError || (!isPop3 && syncRangeDays(syncRange) === undefined)}
-              style={{
-                padding: "9px 16px",
-                borderRadius: "6px",
-                border: "none",
-                backgroundColor: "var(--color-accent)",
-                color: "#fff",
-                fontSize: "13px",
-                fontWeight: 600,
-                cursor: loading || folderLoading ? "not-allowed" : "pointer",
-                opacity: loading || folderLoading ? 0.7 : 1,
-                marginTop: "4px",
-              }}
-            >
-              {loading ? t("common.saving") : t("common.save")}
-            </button>
+            <div className="dialog-actions" style={{ marginTop: "4px" }}>
+              <Button variant="secondary" disabled={loading} onClick={onClose}>
+                {t("common.cancel", "Cancel")}
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                loading={loading}
+                disabled={folderLoading || rangeLoading || !!rangeError || (!isPop3 && syncRangeDays(syncRange) === undefined)}
+              >
+                {loading ? t("common.saving") : t("common.save")}
+              </Button>
+            </div>
           </form>
         </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }
