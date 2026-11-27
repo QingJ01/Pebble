@@ -23,6 +23,7 @@ import Button from "./ui/Button";
 import { MessageListSkeleton } from "./Skeleton";
 import { prefetchMessage } from "@/hooks/useMessageLoader";
 import { trackMailDrag } from "@/lib/mailDrag";
+import { BATCH_MOVE_EVENT } from "@/lib/vimKeys";
 import { canDropOnFolder, dropMessagesOnFolder } from "@/lib/mailDragMove";
 import { defaultPrivacyMode } from "@/lib/privacyMode";
 import "./mail-list.css";
@@ -89,6 +90,7 @@ export default function MessageList({
   const selectAllMessages = useMailStore((s) => s.selectAllMessages);
   const clearSelection = useMailStore((s) => s.clearSelection);
   const [batchLoading, setBatchLoading] = useState(false);
+  const batchBusyRef = useRef(false);
   const confirm = useConfirmStore((s) => s.confirm);
   const activeAccountId = useMailStore((s) => s.activeAccountId);
   const activeFolderId = useMailStore((s) => s.activeFolderId);
@@ -320,8 +322,11 @@ export default function MessageList({
   }
 
   async function handleMoveAction(kind: "archive" | "trash") {
+    // A ref, not batchLoading: keyboard requests can arrive before a re-render.
+    if (batchBusyRef.current) return;
     const targets = selectedMessages();
     if (targets.length === 0) return;
+    batchBusyRef.current = true;
     setBatchLoading(true);
     try {
       const result = await runMailAction(queryClient, kind, targets, {
@@ -337,9 +342,23 @@ export default function MessageList({
         else clearSelection();
       }
     } finally {
+      batchBusyRef.current = false;
       setBatchLoading(false);
     }
   }
+  const handleMoveActionRef = useRef(handleMoveAction);
+  useEffect(() => {
+    handleMoveActionRef.current = handleMoveAction;
+  });
+  // Vim keys (e / Delete / dd on a bulk selection) run the toolbar's action.
+  useEffect(() => {
+    const onBatchMove = (event: Event) => {
+      const kind = (event as CustomEvent<unknown>).detail;
+      if (kind === "archive" || kind === "trash") void handleMoveActionRef.current(kind);
+    };
+    document.addEventListener(BATCH_MOVE_EVENT, onBatchMove);
+    return () => document.removeEventListener(BATCH_MOVE_EVENT, onBatchMove);
+  }, []);
 
   async function handleFlagAction(action: FlagAction) {
     const ids = selectedMessages().map((m) => m.id);

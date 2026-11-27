@@ -9,6 +9,9 @@ export interface ShortcutBinding {
 interface ShortcutState {
   bindings: Record<string, string>;
   recording: string | null;
+  /** Vim-style keys (dd, gg, G, gi, h, l…) layered on top of the bindings */
+  vimMode: boolean;
+  setVimMode: (enabled: boolean) => void;
   updateShortcut: (actionId: string, keys: string) => void;
   resetToDefaults: () => void;
   startRecording: (actionId: string) => void;
@@ -24,6 +27,8 @@ const DEFAULT_BINDINGS: Record<string, string> = {
   "open-message": "Enter",
   "toggle-star": "S",
   "archive-message": "E",
+  // The Mac "delete" key sends Backspace; Delete is Fn+delete there.
+  "delete-message": isMacPlatform() ? "Backspace" : "Delete",
   "compose-new": "C",
   "reply": "R",
   "reply-all": "A",
@@ -39,11 +44,35 @@ const DEFAULT_BINDINGS: Record<string, string> = {
 };
 
 const STORAGE_KEY = "pebble-shortcuts";
+const VIM_MODE_STORAGE_KEY = "pebble-vim-mode";
+
+function loadVimMode(): boolean {
+  try {
+    return profileLocalStorage.getItem(VIM_MODE_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
 
 function loadBindings(): Record<string, string> {
   try {
     const saved = profileLocalStorage.getItem(STORAGE_KEY);
-    if (saved) return { ...DEFAULT_BINDINGS, ...JSON.parse(saved) };
+    if (saved) {
+      const raw: unknown = JSON.parse(saved);
+      if (!raw || typeof raw !== "object") return { ...DEFAULT_BINDINGS };
+      // Skip anything that isn't a string rather than losing every saved binding
+      const parsed = Object.fromEntries(
+        Object.entries(raw).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+      );
+      // A default added after the user saved their shortcuts must not take a
+      // key they already use (the later action would win it): leave it unset.
+      const used = new Set(Object.values(parsed).map((keys) => keys.toLowerCase()));
+      const merged = { ...DEFAULT_BINDINGS };
+      for (const [action, keys] of Object.entries(DEFAULT_BINDINGS)) {
+        if (!(action in parsed) && used.has(keys.toLowerCase())) merged[action] = "";
+      }
+      return { ...merged, ...parsed };
+    }
   } catch {
     // ignore parse errors
   }
@@ -53,6 +82,15 @@ function loadBindings(): Record<string, string> {
 export const useShortcutStore = create<ShortcutState>((set, get) => ({
   bindings: loadBindings(),
   recording: null,
+  vimMode: loadVimMode(),
+  setVimMode: (enabled) => {
+    try {
+      profileLocalStorage.setItem(VIM_MODE_STORAGE_KEY, String(enabled));
+    } catch {
+      // storage unavailable: keep the in-memory setting
+    }
+    set({ vimMode: enabled });
+  },
   updateShortcut: (actionId, keys) => {
     const newBindings = { ...get().bindings, [actionId]: keys };
     profileLocalStorage.setItem(STORAGE_KEY, JSON.stringify(newBindings));

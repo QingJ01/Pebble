@@ -38,6 +38,8 @@ export interface Toast {
   mergeable?: boolean;
   /** Number of merged identical toasts (≥ 1). */
   count: number;
+  /** The action undoes a mail move (the `u` vim key runs the latest one). */
+  undoable?: boolean;
   /** True while the exit animation runs. */
   exiting?: boolean;
 }
