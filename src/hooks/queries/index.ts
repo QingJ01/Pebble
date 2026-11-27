@@ -4,6 +4,7 @@ export {
   useMessagesQuery,
   messagesQueryKey,
   patchMessagesCache,
+  onMessagesCachePatched,
   findCachedMessage,
   readFirstCachedMessages,
   snapshotMessagesCache,

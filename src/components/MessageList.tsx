@@ -22,6 +22,8 @@ import IconButton from "./ui/IconButton";
 import Button from "./ui/Button";
 import { MessageListSkeleton } from "./Skeleton";
 import { prefetchMessage } from "@/hooks/useMessageLoader";
+import { trackMailDrag } from "@/lib/mailDrag";
+import { canDropOnFolder, dropMessagesOnFolder } from "@/lib/mailDragMove";
 import { defaultPrivacyMode } from "@/lib/privacyMode";
 import "./mail-list.css";
 
@@ -53,6 +55,8 @@ interface Props {
    * so rows carry an account badge even when one page holds a single account.
    */
   spansAccounts?: boolean;
+  /** Text for the empty list (defaults to "No messages"). */
+  emptyLabel?: string;
 }
 
 type FlagAction = "markRead" | "markUnread" | "star" | "unstar";
@@ -72,6 +76,7 @@ export default function MessageList({
   hasNextPage = false,
   isFetchingNextPage = false,
   spansAccounts = false,
+  emptyLabel,
 }: Props) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -270,7 +275,7 @@ export default function MessageList({
     return (
       <div className="fade-in mail-empty-state">
         <Inbox size={32} strokeWidth={1.2} />
-        {t("common.noMessages")}
+        {emptyLabel ?? t("common.noMessages")}
       </div>
     );
   }
@@ -284,6 +289,34 @@ export default function MessageList({
 
   function selectedMessages() {
     return messages.filter((m) => selectedMessageIds.has(m.id));
+  }
+
+  /** Drag rows onto a sidebar folder to move them (#80). */
+  function handleRowPointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    const target = event.target as Element;
+    if (target.closest("button, input, a, select, textarea, [role='menu']")) return;
+    const rowId = target.closest<HTMLElement>("[data-row-id]")?.dataset.rowId;
+    if (!rowId) return;
+    trackMailDrag<MessageSummary>(event, {
+      getPayload: () => {
+        const row = messages.find((m) => m.id === rowId);
+        if (!row) return null;
+        // In batch mode, dragging a selected row carries the whole selection.
+        const items = batchMode && selectedMessageIds.has(rowId) ? selectedMessages() : [row];
+        const label = items.length === 1
+          ? (items[0].subject || t("inbox.noSubject", "(no subject)"))
+          : t("inbox.dragCount", { count: items.length, defaultValue: "{{count}} messages" });
+        return { items, label };
+      },
+      canDrop: (items, folderId) => canDropOnFolder(
+        items,
+        folderId,
+        folders,
+        accounts.find((account) => account.id === items[0]?.account_id)?.provider,
+        activeFolderId,
+      ),
+      onDrop: (items, folderId) => void dropMessagesOnFolder(queryClient, items, folderId),
+    });
   }
 
   async function handleMoveAction(kind: "archive" | "trash") {
@@ -379,6 +412,7 @@ export default function MessageList({
         data-shortcut-scope="list"
         tabIndex={activeRowRendered ? -1 : 0}
         onKeyDown={handleListKeyDown}
+        onPointerDown={handleRowPointerDown}
         onFocus={(event) => {
           if (event.target === event.currentTarget && effectiveActiveId) focusRow(effectiveActiveId);
         }}

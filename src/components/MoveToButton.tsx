@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listFolders } from "@/lib/api";
 import { getMailMoveContext, type MailMoveResult } from "@/lib/folders-api";
-import { clearMovedSelection, folderTree, invalidateFolderViews } from "@/lib/folderManagement";
+import { clearMovedSelection, crossesLocalBoundary, folderTree, gmailMutableFolder, invalidateFolderViews, isMoveDestination } from "@/lib/folderManagement";
 import { folderIdsForSelection } from "@/lib/folderAggregation";
 import { formatError } from "@/lib/extractErrorMessage";
 import { moveMessagesWithUndo } from "@/hooks/mutations/mailActions";
@@ -75,12 +75,11 @@ function MovePicker({messages,onMoved,onClose,open = true}: {messages: MoveMessa
   const sourceId = source ?? current ?? (commonSources.length === 1 ? commonSources[0].id : "");
   const needsSource = ids.some((id) => (memberships[id]?.length ?? 0) > 1);
   const sourceFolder = folders.find((f) => f.id === sourceId);
-  const gmailMutable = (folder: typeof folders[number]) => !folder.is_system || folder.remote_id.startsWith("__local_") || ["inbox","spam","trash"].includes(folder.role ?? "");
-  const unsupportedSource = context?.provider === "gmail" && sourceFolder && !gmailMutable(sourceFolder);
+  const unsupportedSource = context?.provider === "gmail" && sourceFolder && !gmailMutableFolder(sourceFolder);
   const loading = foldersLoading || contextLoading;
   const hasError = folderError || contextError;
-  const destinations = folderTree(folders.filter((f) => f.role !== "drafts" && f.remote_id !== "__local_outbox__" && f.folder_type !== "category" && (context?.provider !== "gmail" || gmailMutable(f))));
-  const targetDisabled = (folder: typeof folders[number]) => ids.some((id) => memberships[id]?.includes(folder.id)) || (context?.provider !== "pop3" && !!sourceFolder && sourceFolder.remote_id.startsWith("__local_") !== folder.remote_id.startsWith("__local_"));
+  const destinations = folderTree(folders.filter((f) => isMoveDestination(f, context?.provider)));
+  const targetDisabled = (folder: typeof folders[number]) => ids.some((id) => memberships[id]?.includes(folder.id)) || crossesLocalBoundary(sourceFolder, folder, context?.provider);
   const targetFolder = folders.find((f) => f.id === target);
   return <FolderModal open={open} title={t("folderManagement.moveTo", "Move to folder")} busy={busy} onClose={onClose}>
     <form onSubmit={async (e) => {

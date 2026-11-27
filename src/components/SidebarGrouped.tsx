@@ -201,6 +201,7 @@ export default function SidebarGrouped({ collapsed: sidebarCollapsed }: { collap
         isActive={isOverviewActive}
         collapsed={sidebarCollapsed}
         onClick={() => handleFolderSelect(null, allAccountsFolderId("inbox"))}
+        dropFolderId={allAccountsFolderId("inbox")}
       />
       <SidebarButton
         icon={<Star size={16} />}
@@ -247,6 +248,7 @@ export default function SidebarGrouped({ collapsed: sidebarCollapsed }: { collap
                 count: showUnread ? unreadCountForFolder(folder.id, accountFolders, unreadCounts) : undefined,
                 current: isAccountActive && activeFolderId === folder.id,
                 onSelect: () => handleFolderSelect(account.id, folder.id),
+                dropFolderId: folder.id,
               }))}
               footerItems={[{
                 id: "__manage__",
@@ -319,6 +321,7 @@ export default function SidebarGrouped({ collapsed: sidebarCollapsed }: { collap
                       collapsed={false}
                       indent
                       onClick={() => handleFolderSelect(account.id, folder.id)}
+                      dropFolderId={folder.id}
                     />
                   ))
                 : foldersFetched && (

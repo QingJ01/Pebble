@@ -35,6 +35,11 @@
     "loading": "Loading folders…",
     "loadFailed": "Could not load folders. Check your account and try again.",
     "moveFailed": "Move failed",
-    "partial": "{{moved}} moved; {{failed}} failed. Failed messages remain selected."
+    "partial": "{{moved}} moved; {{failed}} failed. Failed messages remain selected.",
+    "dragOtherAccount": "Drop on a folder of the same account",
+    "dragNotDestination": "Mail can't be moved into this folder",
+    "dragAlreadyThere": "Already in this folder",
+    "dragChooseSource": "These messages are in several folders; use Move to folder to choose which one to leave",
+    "dragLocalBoundary": "Mail can't move between server folders and device-only folders"
   }
 }

@@ -15,6 +15,21 @@ import { extractErrorMessage } from "@/lib/extractErrorMessage";
 import { realtimePreferenceToPollInterval, useUIStore } from "@/stores/ui.store";
 import { useToastStore } from "@/stores/toast.store";
 import SyncRangeFields, { syncRangeDays, syncRangeDraft } from "./SyncRangeFields";
+import {
+  providerById,
+  providerForEmail,
+  QUICK_SETUP_PROVIDER_IDS,
+  type MailProvider,
+  type ServerSettings,
+} from "@/lib/mailProviders";
+
+const SERVER_FIELDS = [
+  "imap_host", "imap_port", "imap_security", "smtp_host", "smtp_port", "smtp_security",
+] as const satisfies ReadonlyArray<keyof ServerSettings>;
+
+function serverFieldsMatch(form: AddAccountRequest, settings: ServerSettings): boolean {
+  return SERVER_FIELDS.every((field) => form[field] === settings[field]);
+}
 
 const FOLDER_REFRESH_ATTEMPTS = 5;
 const FOLDER_REFRESH_INTERVAL_MS = 2000;
@@ -33,47 +48,6 @@ function refreshFoldersAfterSyncStart(queryClient: QueryClient, accountId: strin
   };
   pollFolders(FOLDER_REFRESH_ATTEMPTS);
 }
-
-const PRESETS: Record<
-  string,
-  Pick<
-    AddAccountRequest,
-    "imap_host" | "imap_port" | "smtp_host" | "smtp_port" | "imap_security" | "smtp_security"
-  >
-> = {
-  gmail: {
-    imap_host: "imap.gmail.com",
-    imap_port: 993,
-    imap_security: "tls",
-    smtp_host: "smtp.gmail.com",
-    smtp_port: 587,
-    smtp_security: "starttls",
-  },
-  outlook: {
-    imap_host: "outlook.office365.com",
-    imap_port: 993,
-    imap_security: "tls",
-    smtp_host: "smtp.office365.com",
-    smtp_port: 587,
-    smtp_security: "starttls",
-  },
-  qq: {
-    imap_host: "imap.qq.com",
-    imap_port: 993,
-    imap_security: "tls",
-    smtp_host: "smtp.qq.com",
-    smtp_port: 465,
-    smtp_security: "tls",
-  },
-  "163": {
-    imap_host: "imap.163.com",
-    imap_port: 993,
-    imap_security: "tls",
-    smtp_host: "smtp.163.com",
-    smtp_port: 465,
-    smtp_security: "tls",
-  },
-};
 
 interface Props {
   onClose: () => void;
@@ -208,10 +182,38 @@ export default function AccountSetup({ onClose }: Props) {
     }
   }
 
+  /** Server settings last filled in by a preset or the email domain. */
+  const autoFilledRef = useRef<ServerSettings | null>(null);
+  const [detectedProvider, setDetectedProvider] = useState<MailProvider | null>(null);
+  // The note only shows while the fields still hold that provider's settings.
+  const providerNote = detectedProvider && form.provider === "imap"
+    && serverFieldsMatch(form, detectedProvider.settings) ? detectedProvider : null;
+
   function applyPreset(key: string) {
-    const preset = PRESETS[key];
+    const preset = providerById(key);
     if (!preset) return;
-    setForm((prev) => ({ ...prev, provider: "imap", ...preset }));
+    autoFilledRef.current = preset.settings;
+    setDetectedProvider(preset);
+    setForm((prev) => ({ ...prev, provider: "imap", ...preset.settings }));
+  }
+
+  /**
+   * Fill the server settings from the email's domain, unless the user has
+   * typed their own (only blank or previously auto-filled fields change).
+   */
+  function autoFillFromEmail(email: string) {
+    const prev = formRef.current;
+    if (prev.provider !== "imap") return;
+    const provider = providerForEmail(email);
+    const untouched = (!prev.imap_host && !prev.smtp_host)
+      || (autoFilledRef.current !== null && serverFieldsMatch(prev, autoFilledRef.current));
+    if (!provider || !untouched) {
+      setDetectedProvider(null);
+      return;
+    }
+    autoFilledRef.current = provider.settings;
+    setDetectedProvider(provider);
+    setForm((current) => ({ ...current, ...provider.settings }));
   }
 
   function handleChange(field: keyof AddAccountRequest, value: string | number | boolean) {
@@ -372,9 +374,9 @@ export default function AccountSetup({ onClose }: Props) {
           <div className="field">
             <span className="field__label">{t("accountSetup.quickSetup", "Quick setup")}</span>
             <div className="account-setup__presets">
-              {Object.keys(PRESETS).map((key) => (
+              {QUICK_SETUP_PROVIDER_IDS.map((key) => (
                 <Button key={key} size="sm" onClick={() => applyPreset(key)}>
-                  {key === "163" ? "163" : key === "qq" ? "QQ" : key.charAt(0).toUpperCase() + key.slice(1)}
+                  {providerById(key)?.name ?? key}
                 </Button>
               ))}
             </div>
@@ -394,8 +396,17 @@ export default function AccountSetup({ onClose }: Props) {
                 required
                 value={form.email}
                 onChange={(e) => handleChange("email", e.target.value)}
+                onBlur={(e) => autoFillFromEmail(e.target.value)}
                 placeholder={t("accountSetup.emailPlaceholder", "you@example.com")}
+                aria-describedby={providerNote ? "setup-email-provider" : undefined}
               />
+              {providerNote && (
+                <p id="setup-email-provider" className="field__hint" role="status">
+                  {t("accountSetup.providerDetected", "Server settings filled in for {{name}}.", { name: providerNote.name })}
+                  {providerNote.auth === "app-password" && " " + t("accountSetup.providerAppPassword", "{{name}} usually needs an app password (authorization code), not your sign-in password.", { name: providerNote.name })}
+                  {(providerNote.auth === "google-oauth" || providerNote.auth === "microsoft-oauth") && " " + t("accountSetup.providerOAuth", "For {{name}}, the sign-in button above is easier; manual setup needs an app password.", { name: providerNote.name })}
+                </p>
+              )}
             </div>
 
             {/* Display name */}

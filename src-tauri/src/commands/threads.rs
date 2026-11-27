@@ -24,11 +24,20 @@ pub async fn list_threads(
     folder_ids: Option<Vec<String>>,
     limit: u32,
     offset: u32,
+    unread_only: Option<bool>,
 ) -> std::result::Result<Vec<ThreadSummary>, PebbleError> {
     let store = state.store.clone();
-    tokio::task::spawn_blocking(move || match folder_ids {
-        Some(ids) if !ids.is_empty() => store.list_threads_by_folders(&ids, limit, offset),
-        _ => store.list_threads_by_folder(&folder_id, limit, offset),
+    tokio::task::spawn_blocking(move || {
+        let folders = match folder_ids {
+            Some(ids) if !ids.is_empty() => ids,
+            _ => vec![folder_id],
+        };
+        store.list_threads_by_folders_filtered(
+            &folders,
+            limit,
+            offset,
+            unread_only.unwrap_or(false),
+        )
     })
     .await
     .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))?

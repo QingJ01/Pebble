@@ -28,6 +28,7 @@ pub async fn list_messages(
     limit: u32,
     offset: u32,
     before: Option<MessageCursor>,
+    unread_only: Option<bool>,
 ) -> std::result::Result<Vec<MessageSummary>, PebbleError> {
     let store = state.store.clone();
     tokio::task::spawn_blocking(move || {
@@ -35,7 +36,13 @@ pub async fn list_messages(
             Some(ids) if !ids.is_empty() => ids,
             _ => vec![folder_id],
         };
-        store.list_messages_page(&folders, before.as_ref(), limit, offset)
+        store.list_messages_page_filtered(
+            &folders,
+            before.as_ref(),
+            limit,
+            offset,
+            unread_only.unwrap_or(false),
+        )
     })
     .await
     .map_err(|e| PebbleError::Internal(format!("Task join error: {e}")))?

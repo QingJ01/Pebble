@@ -124,7 +124,11 @@
     "messageView": "Message view",
     "threadView": "Thread view",
     "messageList": "Message list",
-    "threadList": "Threads"
+    "threadList": "Threads",
+    "showUnreadOnly": "Show unread only",
+    "showAll": "Show all mail",
+    "noUnread": "No unread mail",
+    "dragCount": "{{count}} messages"
   },
   "compose": {
     "sendDisabledNoAccount": "Add an account to send mail",
@@ -340,7 +344,15 @@
       "slate": "Slate",
       "cyan": "Cyan",
       "navy": "Navy"
-    }
+    },
+    "htmlMailDark": "HTML mail in dark theme",
+    "htmlMailDarkDesc": "Plain-text mail always follows the theme.",
+    "htmlMailDarkOff": "Light card",
+    "htmlMailDarkOffDesc": "Show HTML mail as its sender designed it",
+    "htmlMailDarkAuto": "Darken simple mail",
+    "htmlMailDarkAutoDesc": "Darken mail without designed backgrounds; keep the rest on a light card",
+    "htmlMailDarkForce": "Always dark",
+    "htmlMailDarkForceDesc": "Invert every HTML mail; brand colors may shift"
   },
   "cloudSync": {
     "title": "Settings backup",
@@ -730,7 +742,10 @@
     "reviewNames": "Review in account settings",
     "senderNoticeDismiss": "Got it",
     "senderPreviewLabel": "Outgoing mail will show",
-    "discardAction": "Discard"
+    "discardAction": "Discard",
+    "providerDetected": "Server settings filled in for {{name}}.",
+    "providerAppPassword": "{{name}} usually needs an app password (authorization code), not your sign-in password.",
+    "providerOAuth": "For {{name}}, the sign-in button above is easier; manual setup needs an app password."
   },
   "contacts": {
     "title": "Contacts",

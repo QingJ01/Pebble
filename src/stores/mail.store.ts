@@ -36,6 +36,8 @@ export interface MailState {
   /** Account owning the selected thread (null when unknown). */
   selectedThreadAccountId: string | null;
   threadView: boolean;
+  /** Show only unread messages / threads with unread messages. */
+  unreadOnly: boolean;
   // ─── Batch Selection ───────────────────────────────────────────────────────
   selectedMessageIds: Set<string>;
   batchMode: boolean;
@@ -48,6 +50,7 @@ export interface MailState {
   /** Select a thread row by its (account_id, thread_id) key. */
   selectThread: (thread: ThreadKey | null) => void;
   toggleThreadView: () => void;
+  toggleUnreadOnly: () => void;
   toggleBatchMode: () => void;
   toggleMessageSelection: (messageId: string) => void;
   selectAllMessages: (messageIds: string[]) => void;
@@ -62,6 +65,7 @@ export const useMailStore = create<MailState>((set, get) => ({
   selectedThreadId: null,
   selectedThreadAccountId: null,
   threadView: false,
+  unreadOnly: false,
   selectedMessageIds: new Set<string>(),
   batchMode: false,
 
@@ -123,6 +127,14 @@ export const useMailStore = create<MailState>((set, get) => ({
       selectedThreadId: null,
       selectedThreadAccountId: null,
       selectedMessageId: null,
+      selectedMessageIds: new Set(),
+      batchMode: false,
+    });
+  },
+
+  toggleUnreadOnly: () => {
+    set({
+      unreadOnly: !get().unreadOnly,
       selectedMessageIds: new Set(),
       batchMode: false,
     });

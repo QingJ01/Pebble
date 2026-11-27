@@ -45,6 +45,18 @@ const DEFAULT_BACKGROUND_IMAGE_OPACITY = 0.35;
 const MIN_BACKGROUND_IMAGE_OPACITY = 0.05;
 const MAX_BACKGROUND_IMAGE_OPACITY = 1;
 const SIDEBAR_STYLE_KEY = "pebble-sidebar-style";
+const HTML_MAIL_DARK_MODE_KEY = "pebble-html-mail-dark-mode";
+
+/**
+ * How HTML mail looks in the dark theme: "off" keeps it on a light card,
+ * "auto" darkens mail that only uses plain backgrounds, "force" inverts it.
+ */
+export type HtmlMailDarkMode = "off" | "auto" | "force";
+
+function readHtmlMailDarkMode(): HtmlMailDarkMode {
+  const stored = profileLocalStorage.getItem(HTML_MAIL_DARK_MODE_KEY);
+  return stored === "auto" || stored === "force" ? stored : "off";
+}
 
 function readSidebarStyle(): SidebarStyle {
   return profileLocalStorage.getItem(SIDEBAR_STYLE_KEY) === "classic" ? "classic" : "grouped";
@@ -170,6 +182,8 @@ interface UIState {
   clearBackgroundImage: () => void;
   sidebarStyle: SidebarStyle;
   setSidebarStyle: (style: SidebarStyle) => void;
+  htmlMailDarkMode: HtmlMailDarkMode;
+  setHtmlMailDarkMode: (mode: HtmlMailDarkMode) => void;
   setLanguage: (lang: Language) => void;
   setSyncStatus: (status: "idle" | "syncing" | "error") => void;
   setNetworkStatus: (status: NetworkStatus) => void;
@@ -308,6 +322,11 @@ export const useUIStore = create<UIState>((set) => ({
   setSidebarStyle: (style) => {
     profileLocalStorage.setItem(SIDEBAR_STYLE_KEY, style);
     set({ sidebarStyle: style });
+  },
+  htmlMailDarkMode: readHtmlMailDarkMode(),
+  setHtmlMailDarkMode: (mode) => {
+    profileLocalStorage.setItem(HTML_MAIL_DARK_MODE_KEY, mode);
+    set({ htmlMailDarkMode: mode });
   },
   setLanguage: (lang) => {
     i18n.changeLanguage(lang);

@@ -124,6 +124,22 @@
 .sidebar-btn.is-active,
 .sidebar-btn.is-active:hover { background: var(--color-fill-selected); }
 .sidebar-btn.is-active { font-weight: var(--weight-medium); }
+/* Dragged mail hovering a folder (lib/mailDrag). */
+.sidebar-btn.is-drop-target,
+.sidebar-btn.is-drop-target:hover,
+.sidebar-rail-menu__item.is-drop-target,
+.sidebar-rail-menu__item.is-drop-target:hover {
+  background: var(--color-fill-selected);
+  box-shadow: inset 0 0 0 2px var(--color-focus-ring);
+}
+.sidebar-btn.is-drop-invalid,
+.sidebar-btn.is-drop-invalid:hover,
+.sidebar-rail-menu__item.is-drop-invalid,
+.sidebar-rail-menu__item.is-drop-invalid:hover {
+  background: transparent;
+  cursor: not-allowed;
+  opacity: var(--opacity-disabled);
+}
 .sidebar-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 .sidebar-btn__icon { display: inline-flex; flex-shrink: 0; color: var(--color-text-secondary); }
 .sidebar-btn.is-active .sidebar-btn__icon { color: var(--color-text-primary); }

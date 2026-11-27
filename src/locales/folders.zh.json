@@ -35,6 +35,11 @@
     "loading": "正在加载文件夹…",
     "loadFailed": "无法加载文件夹，请检查账户后重试。",
     "moveFailed": "移动失败",
-    "partial": "已移动 {{moved}} 封，{{failed}} 封失败。失败邮件仍保持选中。"
+    "partial": "已移动 {{moved}} 封，{{failed}} 封失败。失败邮件仍保持选中。",
+    "dragOtherAccount": "请拖到同一账户的文件夹",
+    "dragNotDestination": "邮件不能移动到这个文件夹",
+    "dragAlreadyThere": "邮件已经在这个文件夹里",
+    "dragChooseSource": "这些邮件同时在多个文件夹里，请用「移动到文件夹」选择要移出的那个",
+    "dragLocalBoundary": "邮件不能在服务器文件夹和本机文件夹之间移动"
   }
 }

@@ -1,6 +1,6 @@
 import { isThreadSelected, useMailStore } from "@/stores/mail.store";
 import { MAIL_ROW_HEIGHT } from "@/components/mailRowMetrics";
-import { useAccountsQuery, useMessagesQuery, useThreadsQuery, useFoldersForAccountsQuery, patchMessagesCache } from "@/hooks/queries";
+import { useAccountsQuery, useMessagesQuery, useThreadsQuery, useFoldersForAccountsQuery, patchMessagesCache, onMessagesCachePatched } from "@/hooks/queries";
 import { useUIStore } from "@/stores/ui.store";
 import { toastError, useToastStore } from "@/stores/toast.store";
 import MessageList from "@/components/MessageList";
@@ -24,7 +24,8 @@ import { emptyTrash } from "@/lib/api";
 import { folderIdsForSelection, isAllAccountsFolderId, roleForSelection } from "@/lib/folderAggregation";
 import { useAccountBadges, withResolvedColors } from "@/hooks/useAccountBadges";
 import AccountFilterBar from "./AccountFilterBar";
-import type { ThreadSummary } from "@/lib/api";
+import type { MessageSummary, ThreadSummary } from "@/lib/api";
+import { useStickyRows } from "./stickyRows";
 import { clearActiveMailList, setActiveMailList } from "@/lib/activeMailList";
 import { revalidateMessage } from "@/hooks/useMessageLoader";
 
@@ -39,6 +40,8 @@ export default function InboxView() {
   const setSelectedMessage = useMailStore((s) => s.setSelectedMessage);
   const threadView = useMailStore((s) => s.threadView);
   const toggleThreadView = useMailStore((s) => s.toggleThreadView);
+  const unreadOnly = useMailStore((s) => s.unreadOnly);
+  const toggleUnreadOnly = useMailStore((s) => s.toggleUnreadOnly);
   const selectedThreadId = useMailStore((s) => s.selectedThreadId);
   const selectedThreadAccountId = useMailStore((s) => s.selectedThreadAccountId);
   const selectThread = useMailStore((s) => s.selectThread);
@@ -74,7 +77,7 @@ export default function InboxView() {
   const queryFolderIds = selectedFolderIds.length > 1 ? selectedFolderIds : undefined;
 
   const {
-    data: messages,
+    data: serverMessages,
     isLoading: loadingMessages,
     hasNextPage,
     isFetchingNextPage,
@@ -83,13 +86,37 @@ export default function InboxView() {
   } = useMessagesQuery(
     threadView ? null : queryFolderId,
     threadView ? undefined : queryFolderIds,
+    unreadOnly,
   );
-  const { data: threads = EMPTY_THREADS, isLoading: loadingThreads } = useThreadsQuery(
+  const { data: serverThreads = EMPTY_THREADS, isLoading: loadingThreads } = useThreadsQuery(
     threadView ? queryFolderId : null,
     50,
     0,
     threadView ? queryFolderIds : undefined,
+    unreadOnly,
   );
+  // Unread-only: the open row stays listed (now read) while it is open,
+  // instead of vanishing under the reader.
+  const listResetKey = `${threadView}|${activeFolderId}|${accountFilter}|${unreadOnly}`;
+  const messages = useStickyRows<MessageSummary>({
+    rows: serverMessages,
+    enabled: unreadOnly && !threadView,
+    resetKey: listResetKey,
+    openedKey: selectedMessageId,
+    keyOf: (m) => m.id,
+    markRead: (m) => (m.is_read ? m : { ...m, is_read: true }),
+    compareNewestFirst: (a, b) => b.date - a.date || (b.id < a.id ? -1 : b.id > a.id ? 1 : 0),
+    subscribePatches: onMessagesCachePatched,
+  });
+  const threads = useStickyRows<ThreadSummary>({
+    rows: serverThreads,
+    enabled: unreadOnly && threadView,
+    resetKey: listResetKey,
+    openedKey: selectedThreadId ? `${selectedThreadAccountId ?? ""}:${selectedThreadId}` : null,
+    keyOf: (thread) => `${thread.account_id}:${thread.thread_id}`,
+    markRead: (thread) => (thread.unread_count === 0 ? thread : { ...thread, unread_count: 0 }),
+    compareNewestFirst: (a, b) => b.last_date - a.last_date,
+  });
   // Global J/K walks the list on screen, not whichever list was cached first.
   useEffect(() => {
     setActiveMailList(threadView ? { messages: null, threads } : { messages, threads: null });
@@ -174,6 +201,15 @@ export default function InboxView() {
             )}
           </>
         )}
+        <IconButton
+          size="md"
+          label={unreadOnly
+            ? t("inbox.showAll", "Show all mail")
+            : t("inbox.showUnreadOnly", "Show unread only")}
+          icon={<Mail size={16} />}
+          pressed={unreadOnly}
+          onClick={toggleUnreadOnly}
+        />
         {!threadView && (
           <IconButton
             size="md"
@@ -223,6 +259,7 @@ export default function InboxView() {
               onSelectThread={selectThread}
               loading={loadingThreads}
               spansAccounts={spansAccounts}
+              emptyLabel={unreadOnly ? t("inbox.noUnread", "No unread mail") : undefined}
             />
           ) : (
             <MessageList
@@ -235,6 +272,7 @@ export default function InboxView() {
               isFetchingNextPage={isFetchingNextPage}
               onToggleStar={handleToggleStar}
               spansAccounts={spansAccounts}
+              emptyLabel={unreadOnly ? t("inbox.noUnread", "No unread mail") : undefined}
             />
           )}
         </div>
@@ -285,7 +323,7 @@ export default function InboxView() {
 
 // Inline ThreadList component using virtualizer
 function ThreadList({
-  threads, folderIds, folderRole, selectedThreadId, selectedThreadAccountId, onSelectThread, loading, spansAccounts = false,
+  threads, folderIds, folderRole, selectedThreadId, selectedThreadAccountId, onSelectThread, loading, spansAccounts = false, emptyLabel,
 }: {
   threads: ThreadSummary[];
   folderIds: string[];
@@ -296,6 +334,8 @@ function ThreadList({
   loading: boolean;
   /** The unfiltered unified view: badge rows by account even on a one-account page. */
   spansAccounts?: boolean;
+  /** Text for the empty list (defaults to "No threads"). */
+  emptyLabel?: string;
 }) {
   const { t } = useTranslation();
   const parentRef = useRef<HTMLDivElement>(null);
@@ -362,7 +402,7 @@ function ThreadList({
     return (
       <div className="fade-in mail-empty-state">
         <Inbox size={32} strokeWidth={1.2} />
-        {t("common.noThreads")}
+        {emptyLabel ?? t("common.noThreads")}
       </div>
     );
   }

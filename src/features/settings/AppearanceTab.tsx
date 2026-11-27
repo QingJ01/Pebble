@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Image, Trash2, Upload } from "lucide-react";
 import { useUIStore } from "@/stores/ui.store";
-import type { BackgroundImageFit, Language, SidebarStyle, Theme } from "@/stores/ui.store";
+import type { BackgroundImageFit, HtmlMailDarkMode, Language, SidebarStyle, Theme } from "@/stores/ui.store";
 import { backgroundImageUrl, deleteBackgroundImage, importBackgroundImage } from "@/lib/backgroundImage";
 import { formatError } from "@/lib/extractErrorMessage";
 import Button from "@/components/ui/Button";
@@ -12,6 +12,30 @@ const THEMES: { id: Theme; labelKey: string; descKey: string }[] = [
   { id: "light", labelKey: "settings.themeLight", descKey: "settings.themeLightDesc" },
   { id: "dark", labelKey: "settings.themeDark", descKey: "settings.themeDarkDesc" },
   { id: "system", labelKey: "settings.themeSystem", descKey: "settings.themeSystemDesc" },
+];
+
+const HTML_MAIL_DARK_MODES: { id: HtmlMailDarkMode; labelKey: string; label: string; descKey: string; desc: string }[] = [
+  {
+    id: "off",
+    labelKey: "settings.htmlMailDarkOff",
+    label: "Light card",
+    descKey: "settings.htmlMailDarkOffDesc",
+    desc: "Show HTML mail as its sender designed it",
+  },
+  {
+    id: "auto",
+    labelKey: "settings.htmlMailDarkAuto",
+    label: "Darken simple mail",
+    descKey: "settings.htmlMailDarkAutoDesc",
+    desc: "Darken mail without designed backgrounds; keep the rest on a light card",
+  },
+  {
+    id: "force",
+    labelKey: "settings.htmlMailDarkForce",
+    label: "Always dark",
+    descKey: "settings.htmlMailDarkForceDesc",
+    desc: "Invert every HTML mail; brand colors may shift",
+  },
 ];
 
 const LANGUAGES: { id: Language; label: string }[] = [
@@ -41,6 +65,8 @@ export default function AppearanceTab() {
   const [error, setError] = useState<string | null>(null);
   const theme = useUIStore((s) => s.theme);
   const setTheme = useUIStore((s) => s.setTheme);
+  const htmlMailDarkMode = useUIStore((s) => s.htmlMailDarkMode);
+  const setHtmlMailDarkMode = useUIStore((s) => s.setHtmlMailDarkMode);
   const language = useUIStore((s) => s.language);
   const setLanguage = useUIStore((s) => s.setLanguage);
   const backgroundImage = useUIStore((s) => s.backgroundImage);
@@ -98,6 +124,23 @@ export default function AppearanceTab() {
               onClick={() => setTheme(th.id)}
               title={t(th.labelKey)}
               description={t(th.descKey)}
+            />
+          ))}
+        </OptionCardGroup>
+      </SettingsSection>
+
+      <SettingsSection
+        title={t("settings.htmlMailDark", "HTML mail in dark theme")}
+        description={t("settings.htmlMailDarkDesc", "Plain-text mail always follows the theme.")}
+      >
+        <OptionCardGroup label={t("settings.htmlMailDark", "HTML mail in dark theme")} columns={3}>
+          {HTML_MAIL_DARK_MODES.map((mode) => (
+            <OptionCard
+              key={mode.id}
+              selected={htmlMailDarkMode === mode.id}
+              onClick={() => setHtmlMailDarkMode(mode.id)}
+              title={t(mode.labelKey, mode.label)}
+              description={t(mode.descKey, mode.desc)}
             />
           ))}
         </OptionCardGroup>

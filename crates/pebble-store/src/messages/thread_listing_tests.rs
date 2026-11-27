@@ -257,3 +257,85 @@ fn list_threads_shows_sender_names_once_per_address() {
         vec!["Dave Second".to_string(), "carol@example.test".to_string()]
     );
 }
+
+#[test]
+fn unread_only_listing_keeps_unread_messages_and_whole_unread_threads() {
+    let store = Store::open_in_memory().unwrap();
+    let (account, folder) = seed_account_and_folder(&store);
+    let mut read_old = make_msg(&account, "t-mixed", "a@example.com", 10);
+    read_old.is_read = true;
+    let unread_new = make_msg(&account, "t-mixed", "b@example.com", 20);
+    let mut read_only = make_msg(&account, "t-read", "c@example.com", 30);
+    read_only.is_read = true;
+    for msg in [&read_old, &unread_new, &read_only] {
+        store
+            .insert_message(msg, std::slice::from_ref(&folder))
+            .unwrap();
+    }
+    let folders = std::slice::from_ref(&folder);
+
+    let all = store
+        .list_messages_page_filtered(folders, None, 50, 0, false)
+        .unwrap();
+    assert_eq!(all.len(), 3);
+    let unread = store
+        .list_messages_page_filtered(folders, None, 50, 0, true)
+        .unwrap();
+    assert_eq!(
+        unread.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        vec![unread_new.id.as_str()]
+    );
+
+    let threads = store
+        .list_threads_by_folders_filtered(folders, 50, 0, true)
+        .unwrap();
+    assert_eq!(threads.len(), 1);
+    assert_eq!(threads[0].thread_id, "t-mixed");
+    // The matching thread is still shown whole, read messages included.
+    assert_eq!(threads[0].message_count, 2);
+    assert_eq!(threads[0].unread_count, 1);
+
+    // Reading the last unread message drops it from the unread views.
+    store
+        .update_message_flags(&unread_new.id, Some(true), None)
+        .unwrap();
+    assert!(store
+        .list_messages_page_filtered(folders, None, 50, 0, true)
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .list_threads_by_folders_filtered(folders, 50, 0, true)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn unread_threads_rank_by_newest_message_not_newest_unread() {
+    let store = Store::open_in_memory().unwrap();
+    let (account, folder) = seed_account_and_folder(&store);
+    // Thread A: unread on day 1, read reply on day 5.
+    let a_unread = make_msg(&account, "t-a", "a@example.com", 100);
+    let mut a_reply = make_msg(&account, "t-a", "b@example.com", 500);
+    a_reply.is_read = true;
+    // Thread B: unread on day 3.
+    let b_unread = make_msg(&account, "t-b", "c@example.com", 300);
+    for msg in [&a_unread, &a_reply, &b_unread] {
+        store
+            .insert_message(msg, std::slice::from_ref(&folder))
+            .unwrap();
+    }
+
+    let threads = store
+        .list_threads_by_folders_filtered(std::slice::from_ref(&folder), 50, 0, true)
+        .unwrap();
+    let order: Vec<_> = threads.iter().map(|t| t.thread_id.as_str()).collect();
+    assert_eq!(order, vec!["t-a", "t-b"]);
+    assert_eq!(threads[0].last_date, 500);
+    assert_eq!(
+        store
+            .list_threads_by_folders_filtered(std::slice::from_ref(&folder), 1, 1, true)
+            .unwrap()[0]
+            .thread_id,
+        "t-b"
+    );
+}

@@ -219,6 +219,7 @@ export default function SidebarClassic({ collapsed: sidebarCollapsed }: { collap
       count: showUnread ? unreadCountForFolder(folder.id, folders, unreadCounts) : undefined,
       current: folder.id === activeFolderId && activeView === "inbox",
       onSelect: () => handleFolderClick(folder.id),
+      dropFolderId: folder.id,
     });
     const switcherItems: RailMenuItem[] = accounts.map((account) => ({
       id: account.id,
@@ -278,6 +279,7 @@ export default function SidebarClassic({ collapsed: sidebarCollapsed }: { collap
                 isActive={folder.id === activeFolderId && activeView === "inbox"}
                 collapsed
                 onClick={() => handleFolderClick(folder.id)}
+                dropFolderId={folder.id}
               />
             ))}
             {(otherFolders.length > 0 || hasRealFolders) && (
@@ -368,6 +370,7 @@ export default function SidebarClassic({ collapsed: sidebarCollapsed }: { collap
                   isActive={folder.id === activeFolderId && activeView === "inbox"}
                   collapsed={false}
                   onClick={() => handleFolderClick(folder.id)}
+                  dropFolderId={folder.id}
                 />
               );
               return items;
