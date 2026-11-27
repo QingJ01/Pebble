@@ -21,6 +21,7 @@ import { toastError, useToastStore } from "@/stores/toast.store";
 import { useUIStore } from "@/stores/ui.store";
 import SelectionActionPopover from "./SelectionActionPopover";
 import ContactAddressAction from "./ContactAddressAction";
+import SenderNotifyAction from "@/features/notify/SenderNotifyAction";
 import MessageParticipants from "./MessageParticipants";
 import IconButton from "./ui/IconButton";
 import { useDelayedFlag } from "@/hooks/useDelayedFlag";
@@ -337,6 +338,7 @@ export default function MessageDetail({ messageId, onBack, onReopen, folderRole 
               name={message.from_name}
               address={message.from_address}
             />
+            <SenderNotifyAction accountId={message.account_id} address={message.from_address} />
             <span className="reader-sender-card__date">
               {formatFullDate(message.date, i18n?.language)}
             </span>

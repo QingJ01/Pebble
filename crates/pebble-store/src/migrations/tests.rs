@@ -1587,3 +1587,74 @@ fn upgrade_reports_progress_and_is_detected_beforehand() {
     assert_eq!(pending_migration_from(&path).unwrap(), None);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn v24_backfills_who_each_account_has_written_to() {
+    let conn = Connection::open_in_memory().unwrap();
+    run_migrations_up_to(&conn, 23).unwrap();
+    conn.execute_batch(
+        r#"INSERT INTO accounts (id, email, provider, created_at, updated_at)
+               VALUES ('acct', 'Me@Example.com', 'imap', 1, 1);
+           INSERT INTO messages (id, account_id, remote_id, from_address, to_list, cc_list,
+                                 date, is_deleted, created_at, updated_at) VALUES
+             ('s1', 'acct', 'r1', 'me@example.com',
+              '[{"name":"Ann","address":"Ann@Example.com"}]',
+              '[{"name":null,"address":"bob@example.com"}]', 10, 0, 1, 1),
+             ('s2', 'acct', 'r2', 'ME@example.com',
+              '[{"name":null,"address":"ann@example.com"}]', '[]', 20, 0, 1, 1),
+             ('in', 'acct', 'r3', 'carol@example.com',
+              '[{"name":null,"address":"me@example.com"}]', '[]', 30, 0, 1, 1),
+             ('gone', 'acct', 'r4', 'me@example.com',
+              '[{"name":null,"address":"dave@example.com"}]', '[]', 40, 1, 1, 1),
+             ('bad', 'acct', 'r5', 'me@example.com', 'not json', '[]', 50, 0, 1, 1);"#,
+    )
+    .unwrap();
+    run_migrations(&conn).unwrap();
+    assert_eq!(get_schema_version(&conn), CURRENT_VERSION);
+    let rows: Vec<(String, i64, i64)> = conn
+        .prepare(
+            "SELECT normalized_address, sent_count, last_sent_at FROM sent_recipients ORDER BY 1",
+        )
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            ("ann@example.com".to_string(), 2, 20),
+            ("bob@example.com".to_string(), 1, 10),
+        ]
+    );
+    for table in [
+        "message_signals",
+        "sender_prefs",
+        "notify_prefs",
+        "notification_log",
+    ] {
+        assert!(table_exists(&conn, table).unwrap(), "{table}");
+    }
+    let default_prefs: String = conn
+        .query_row(
+            "SELECT prefs_json FROM notify_prefs WHERE account_id = ''",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        default_prefs, r#"{"mode":"all"}"#,
+        "existing installs keep notifying for all mail"
+    );
+
+    let fresh = Connection::open_in_memory().unwrap();
+    run_migrations(&fresh).unwrap();
+    let fresh_prefs: String = fresh
+        .query_row(
+            "SELECT prefs_json FROM notify_prefs WHERE account_id = ''",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(fresh_prefs, r#"{"mode":"smart"}"#);
+}

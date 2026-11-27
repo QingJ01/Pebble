@@ -1,0 +1,72 @@
+/* Smart notifications (#107): settings tab and shared chips. */
+
+.notify-account-list {
+  margin-top: var(--space-3);
+}
+
+.notify-quiet-range {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: var(--space-3) 0;
+}
+
+.notify-quiet-range .field {
+  min-width: 140px;
+}
+
+.notify-sender-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  margin-bottom: var(--space-3);
+}
+
+.notify-sender-form .input {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.notify-chip {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  min-width: 56px;
+  justify-content: center;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  background: var(--color-fill-selected);
+  color: var(--color-text-secondary);
+}
+
+.notify-chip--vip,
+.notify-chip--interrupt {
+  background: color-mix(in srgb, var(--color-accent-strong) 14%, transparent);
+  color: var(--color-accent-strong);
+}
+
+.notify-chip--mute,
+.notify-chip--silent {
+  color: var(--color-text-tertiary);
+}
+
+.notify-why {
+  font-style: italic;
+}
+
+.notify-log .settings-list__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sender-notify-action.is-vip {
+  color: var(--color-accent-strong);
+}
+
+.sender-notify-action.is-mute {
+  color: var(--color-text-tertiary);
+}

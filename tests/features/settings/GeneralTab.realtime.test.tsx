@@ -1,7 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import GeneralTab from "../../../src/features/settings/GeneralTab";
-import { showTestNotification } from "../../../src/lib/api";
 import { useUIStore } from "../../../src/stores/ui.store";
 
 vi.mock("../../../src/features/compose/ScheduledSendsView", () => ({ default: () => null }));
@@ -84,28 +83,6 @@ describe("GeneralTab realtime mode", () => {
 
     expect(useUIStore.getState().realtimeMode).toBe("battery");
     expect(localStorage.getItem("pebble-realtime-mode")).toBe("battery");
-  });
-
-  it("shows the persisted desktop notification state and updates it through the UI store", () => {
-    render(<GeneralTab />);
-
-    const checkbox = screen.getByRole("checkbox", { name: "Enable desktop notifications" });
-    expect((checkbox as HTMLInputElement).checked).toBe(true);
-
-    fireEvent.click(checkbox);
-
-    expect(useUIStore.getState().notificationsEnabled).toBe(false);
-    expect(localStorage.getItem("pebble-notifications-enabled")).toBe("false");
-  });
-
-  it("sends a desktop test notification from the notifications section", async () => {
-    render(<GeneralTab />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Send test notification" }));
-
-    await waitFor(() => {
-      expect(showTestNotification).toHaveBeenCalledTimes(1);
-    });
   });
 
   it("shows close-window behavior and persists quit-on-close through the UI store", () => {

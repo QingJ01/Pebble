@@ -188,6 +188,8 @@ pub struct StoredMessage {
     /// Reconciliation updates refresh search only. They must not be surfaced
     /// as new mail or run user rules again.
     pub reconciliation: bool,
+    /// Bulk / auto-reply markers seen at sync time (notification triage).
+    pub signals: pebble_core::MailSignals,
 }
 
 /// Stored messages of an account moved to another thread. Listeners refresh

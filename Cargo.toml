@@ -7,6 +7,7 @@ members = [
     "crates/pebble-mail",
     "crates/pebble-search",
     "crates/pebble-rules",
+    "crates/pebble-notify",
     "crates/pebble-translate",
     "crates/pebble-crypto",
     "crates/pebble-oauth",

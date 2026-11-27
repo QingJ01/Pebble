@@ -1,0 +1,9 @@
+[package]
+name = "pebble-notify"
+version = "0.2.1"
+edition = "2021"
+
+[dependencies]
+pebble-core = { path = "../pebble-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }

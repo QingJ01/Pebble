@@ -11,13 +11,15 @@ import ShortcutsTab from "./ShortcutsTab";
 import TranslateTab from "./TranslateTab";
 import PrivacyTab from "./PrivacyTab";
 import AboutTab from "./AboutTab";
+import NotificationsTab from "../notify/NotificationsTab";
 import MailArchiveView from "../mail-archive/MailArchiveView";
 
-const TAB_IDS = ["accounts", "general", "proxy", "appearance", "privacy", "rules", "remoteWrites", "mailArchive", "translation", "shortcuts", "cloudSync", "about"] as const;
+const TAB_IDS = ["accounts", "general", "notifications", "proxy", "appearance", "privacy", "rules", "remoteWrites", "mailArchive", "translation", "shortcuts", "cloudSync", "about"] as const;
 
 const TAB_LABEL_KEYS: Record<SettingsTab, string> = {
   accounts: "settings.accounts",
   general: "settings.general",
+  notifications: "settings.notifications",
   proxy: "settings.proxy",
   appearance: "settings.appearance",
   privacy: "settings.privacy",
@@ -101,6 +103,7 @@ export default function SettingsView() {
         )}
         {activeTab === "accounts" && <AccountsTab />}
         {activeTab === "general" && <GeneralTab />}
+        {activeTab === "notifications" && <NotificationsTab />}
         {activeTab === "proxy" && <ProxyTab />}
         {activeTab === "appearance" && <AppearanceTab />}
         {activeTab === "rules" && <RulesTab />}

@@ -417,6 +417,7 @@ impl SyncWorker {
                     message,
                     notify: false,
                     reconciliation: true,
+                    signals: Default::default(),
                 });
             }
         }
@@ -426,6 +427,7 @@ impl SyncWorker {
                 folder_ids: Vec::new(),
                 notify: false,
                 reconciliation: true,
+                signals: Default::default(),
             });
         }
 
@@ -658,6 +660,7 @@ impl SyncWorker {
                         folder_ids,
                         notify: notify_new && !repairing_incomplete,
                         reconciliation: repairing_incomplete,
+                        signals: parsed.signals,
                     });
                 }
                 Err(e) => {

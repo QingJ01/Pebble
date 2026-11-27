@@ -4018,6 +4018,7 @@ dependencies = [
  "pebble-core",
  "pebble-crypto",
  "pebble-mail",
+ "pebble-notify",
  "pebble-oauth",
  "pebble-privacy",
  "pebble-rules",
@@ -4106,6 +4107,15 @@ dependencies = [
  "ts-rs",
  "utf7-imap",
  "webpki-roots 0.26.11",
+]
+
+[[package]]
+name = "pebble-notify"
+version = "0.2.1"
+dependencies = [
+ "pebble-core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

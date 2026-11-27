@@ -7,8 +7,11 @@
 use crate::commands::messages::queue_mail_op;
 use crate::commands::notifications;
 use crate::events;
+use crate::smart_notify;
 use crate::state::AppState;
-use pebble_core::{FolderRole, PebbleError};
+#[cfg(test)]
+use pebble_core::FolderRole;
+use pebble_core::PebbleError;
 use pebble_rules::RuleEngine;
 use pebble_search::TantivySearch;
 use pebble_store::Store;
@@ -124,11 +127,13 @@ fn should_send_new_mail_notification(
 
 /// Inbox folder ids per account, loaded once per flush instead of calling
 /// `list_folders` for every stored message.
+#[cfg(test)]
 #[derive(Default)]
 struct InboxFolderCache {
     inboxes: HashMap<String, HashSet<String>>,
 }
 
+#[cfg(test)]
 impl InboxFolderCache {
     fn inboxes(
         &mut self,
@@ -148,6 +153,7 @@ impl InboxFolderCache {
     }
 }
 
+#[cfg(test)]
 fn should_notify_with_cache(
     store: &Store,
     cache: &mut InboxFolderCache,
@@ -387,6 +393,8 @@ const MAX_INDIVIDUAL_NOTIFICATIONS: usize = 3;
 struct NotifyItem {
     account_id: String,
     message_id: String,
+    /// Decision-log key; marked delivered once shown.
+    message_key: String,
     body: String,
     date: i64,
 }
@@ -442,6 +450,10 @@ fn send_planned_notifications(app: &tauri::AppHandle, items: Vec<NotifyItem>) {
     if notifications::main_window_has_focus(app) {
         return;
     }
+    let delivered: Vec<(String, String)> = items
+        .iter()
+        .map(|item| (item.account_id.clone(), item.message_key.clone()))
+        .collect();
     let labels = notifications::notification_labels();
     for (body, account_id, message_id) in plan_notifications(items, &labels) {
         if let Err(e) = show_new_mail_notification(app, &body, &account_id, &message_id) {
@@ -449,6 +461,13 @@ fn send_planned_notifications(app: &tauri::AppHandle, items: Vec<NotifyItem>) {
         }
     }
     notifications::mark_attention_indicator(app);
+    if let Some(state) = app.try_state::<AppState>() {
+        for (account_id, key) in delivered {
+            if let Err(e) = state.store.mark_notification_delivered(&account_id, &key) {
+                warn!("Failed to mark notification delivered: {e}");
+            }
+        }
+    }
 }
 
 /// Replay crash-recovery search operations. Only operations that were applied
@@ -506,6 +525,8 @@ struct FlushOutcome {
     /// One coalesced `mail:new` payload per account.
     events: Vec<serde_json::Value>,
     notifications: Vec<NotifyItem>,
+    /// Every new message decided in this window (logged once each).
+    triaged: Vec<smart_notify::Triaged>,
 }
 
 /// Receive newly stored messages from the sync worker, apply rules, index
@@ -598,6 +619,9 @@ pub async fn index_new_messages(
             for payload in outcome.events {
                 let _ = app.emit(events::MAIL_NEW, payload);
             }
+            if !outcome.triaged.is_empty() {
+                let _ = app.emit(events::NOTIFY_CHANGED, ());
+            }
             send_planned_notifications(app, outcome.notifications);
         }
     }
@@ -613,7 +637,9 @@ fn process_flush_window(
     reconciliation_pending_ids: &mut Vec<String>,
 ) -> FlushOutcome {
     let mut outcome = FlushOutcome::default();
-    let mut inbox_cache = InboxFolderCache::default();
+    let mut triage = smart_notify::TriageCache::default();
+    let minute_of_day = smart_notify::local_minute_of_day();
+    let now = pebble_core::now_timestamp();
     let labels = notifications::notification_labels();
     // account_id -> (newest stored message, union of folder ids)
     let mut per_account: Vec<(String, usize, Vec<String>)> = Vec::new();
@@ -640,27 +666,71 @@ fn process_flush_window(
             None => per_account.push((account_id.clone(), idx, stored.folder_ids.clone())),
         }
 
-        match should_notify_with_cache(store, &mut inbox_cache, stored) {
-            Ok(true) => outcome.notifications.push(NotifyItem {
-                account_id: account_id.clone(),
-                message_id: stored.message.id.clone(),
-                body: new_mail_notification_body(stored, &labels),
-                date: stored.message.date,
-            }),
-            Ok(false) => {}
-            Err(e) => warn!(
-                "Failed to evaluate new mail notification eligibility for message {}: {e}",
-                stored.message.id
-            ),
+        // Rules run first so the notification decision sees what they did
+        // (a rule that marks read or files the message away must not notify).
+        let actions = engine
+            .map(|engine| engine.evaluate(&stored.message))
+            .unwrap_or_default();
+        for action in &actions {
+            if let Err(e) = apply_rule_action(store, account_id, &stored.message.id, action) {
+                warn!("Rule action failed for message {}: {e}", stored.message.id);
+            }
         }
 
-        if let Some(engine) = engine {
-            for action in engine.evaluate(&stored.message) {
-                if let Err(e) = apply_rule_action(store, account_id, &stored.message.id, &action) {
-                    warn!("Rule action failed for message {}: {e}", stored.message.id);
+        if let Err(e) = store.record_message_signals(&stored.message.id, stored.signals) {
+            warn!(
+                "Failed to record signals for message {}: {e}",
+                stored.message.id
+            );
+        }
+        if let Some(account) = triage.account(store, account_id) {
+            if smart_notify::is_from_account(&stored.message, &account) {
+                if let Err(e) = store.note_sent_recipients(&stored.message) {
+                    warn!(
+                        "Failed to note recipients of sent message {}: {e}",
+                        stored.message.id
+                    );
                 }
             }
         }
+
+        if !stored.notify {
+            // First sync, backfill and repairs are never notified or logged.
+            continue;
+        }
+        let facts = smart_notify::gather_facts(
+            store,
+            &mut triage,
+            stored,
+            smart_notify::RuleEffect::from_actions(&actions),
+            false,
+        );
+        let prefs = triage.prefs(store, account_id);
+        let decision = pebble_notify::decide(&facts, &prefs.to_prefs(), minute_of_day);
+        let triaged = smart_notify::Triaged {
+            account_id: account_id.clone(),
+            message_id: stored.message.id.clone(),
+            message_key: pebble_store::notify::notification_message_key(&stored.message),
+            decision,
+        };
+        if triaged.decision.tier == pebble_notify::Tier::Silent
+            && matches!(triaged.decision.reason, pebble_notify::Reason::Backfill)
+        {
+            continue;
+        }
+        if !smart_notify::record(store, &triaged, now) {
+            continue;
+        }
+        if triaged.decision.tier == pebble_notify::Tier::Interrupt {
+            outcome.notifications.push(NotifyItem {
+                account_id: account_id.clone(),
+                message_id: stored.message.id.clone(),
+                message_key: triaged.message_key.clone(),
+                body: new_mail_notification_body(stored, &labels),
+                date: stored.message.date,
+            });
+        }
+        outcome.triaged.push(triaged);
     }
 
     for (_, newest, folders) in per_account {
@@ -1007,6 +1077,7 @@ mod rule_writeback_tests {
             folder_ids: vec!["folder-inbox".to_string()],
             notify: true,
             reconciliation: false,
+            signals: Default::default(),
         };
 
         let payload = new_mail_event_payload(&stored);
@@ -1140,6 +1211,7 @@ mod rule_writeback_tests {
             folder_ids: vec![folder.id],
             notify: false,
             reconciliation: false,
+            signals: Default::default(),
         };
 
         assert!(!should_send_new_mail_notification(&store, &stored).unwrap());
@@ -1158,6 +1230,7 @@ mod rule_writeback_tests {
             folder_ids: vec![folder.id],
             notify: true,
             reconciliation: false,
+            signals: Default::default(),
         };
 
         assert!(should_send_new_mail_notification(&store, &stored).unwrap());
@@ -1168,6 +1241,7 @@ mod rule_writeback_tests {
         let item = |account: &str, id: &str, date: i64| NotifyItem {
             account_id: account.to_string(),
             message_id: id.to_string(),
+            message_key: format!("id:{id}"),
             body: format!("body {id}"),
             date,
         };
@@ -1208,6 +1282,7 @@ mod rule_writeback_tests {
                 folder_ids: vec![folder.id.clone()],
                 notify: false,
                 reconciliation: false,
+                signals: Default::default(),
             });
         }
         let newest = batch.last().unwrap().message.id.clone();
@@ -1317,6 +1392,155 @@ mod rule_writeback_tests {
             payload["remove_labels"],
             serde_json::json!(["Label_A"]),
             "payload: {payload}"
+        );
+    }
+
+    fn new_inbox_message(
+        store: &Store,
+        account: &Account,
+        folder: &Folder,
+        from: &str,
+    ) -> pebble_mail::StoredMessage {
+        let mut message = test_message(&account.id);
+        message.remote_id = new_id();
+        message.message_id_header = Some(format!("<{}@example.com>", message.remote_id));
+        message.from_address = from.to_string();
+        message.to_list = vec![pebble_core::EmailAddress {
+            name: None,
+            address: account.email.clone(),
+        }];
+        store
+            .insert_message(&message, std::slice::from_ref(&folder.id))
+            .unwrap();
+        pebble_mail::StoredMessage {
+            message,
+            folder_ids: vec![folder.id.clone()],
+            notify: true,
+            reconciliation: false,
+            signals: Default::default(),
+        }
+    }
+
+    fn triage_setup(mode: &str) -> (Store, TantivySearch, Account, Folder) {
+        let store = Store::open_in_memory().unwrap();
+        let search = TantivySearch::open_in_memory().unwrap();
+        let account = test_account();
+        store.insert_account(&account).unwrap();
+        let folder = test_folder(&account.id);
+        store.insert_folder(&folder).unwrap();
+        store
+            .set_notify_prefs_json("", &format!(r#"{{"mode":"{mode}"}}"#), 1)
+            .unwrap();
+        (store, search, account, folder)
+    }
+
+    #[test]
+    fn rules_run_before_the_notification_decision() {
+        let (store, search, account, folder) = triage_setup("all");
+        let rule = pebble_core::Rule {
+            id: "r".into(),
+            name: "read".into(),
+            priority: 0,
+            conditions: r#"{"operator":"and","conditions":[{"field":"from","op":"contains","value":"robot"}]}"#.into(),
+            actions: r#"[{"type":"MarkRead"}]"#.into(),
+            is_enabled: true,
+            created_at: 0,
+            updated_at: 0,
+        };
+        let engine = pebble_rules::RuleEngine::new(&[rule]);
+        let robot = new_inbox_message(&store, &account, &folder, "robot@example.com");
+        let person = new_inbox_message(&store, &account, &folder, "ann@example.com");
+        let person_id = person.message.id.clone();
+        let outcome = process_flush_window(
+            &store,
+            &search,
+            Some(&engine),
+            vec![robot, person],
+            &mut Vec::new(),
+        );
+        let notified: Vec<_> = outcome
+            .notifications
+            .iter()
+            .map(|n| n.message_id.clone())
+            .collect();
+        assert_eq!(
+            notified,
+            vec![person_id],
+            "a rule that marks read must not notify"
+        );
+        let log = store.list_notification_log(10).unwrap();
+        assert!(log
+            .iter()
+            .any(|row| row.reason == "rule_read" && row.tier == "silent"));
+    }
+
+    #[test]
+    fn muted_senders_and_repeats_are_not_notified() {
+        let (store, search, account, folder) = triage_setup("all");
+        store
+            .set_sender_pref("", "@noisy.example", "mute", 1)
+            .unwrap();
+        let muted = new_inbox_message(&store, &account, &folder, "a@noisy.example");
+        let person = new_inbox_message(&store, &account, &folder, "ann@example.com");
+        let repeat = person.clone();
+        let outcome =
+            process_flush_window(&store, &search, None, vec![muted, person], &mut Vec::new());
+        assert_eq!(outcome.notifications.len(), 1);
+        let again = process_flush_window(&store, &search, None, vec![repeat], &mut Vec::new());
+        assert!(
+            again.notifications.is_empty(),
+            "the same message is notified at most once"
+        );
+        assert!(again.triaged.is_empty());
+    }
+
+    #[test]
+    fn smart_mode_sends_strangers_to_the_digest_and_known_people_through() {
+        let (store, search, account, folder) = triage_setup("smart");
+        let mut sent = test_message(&account.id);
+        sent.remote_id = "sent".into();
+        sent.from_address = account.email.clone();
+        sent.to_list = vec![pebble_core::EmailAddress {
+            name: None,
+            address: "ann@example.com".into(),
+        }];
+        store.insert_message(&sent, &[]).unwrap();
+        store.note_sent_recipients(&sent).unwrap();
+
+        let known = new_inbox_message(&store, &account, &folder, "ann@example.com");
+        let stranger = new_inbox_message(&store, &account, &folder, "zed@example.com");
+        let mut newsletter = new_inbox_message(&store, &account, &folder, "news@shop.example");
+        newsletter.signals.bulk = true;
+        let known_id = known.message.id.clone();
+        let outcome = process_flush_window(
+            &store,
+            &search,
+            None,
+            vec![known, stranger, newsletter],
+            &mut Vec::new(),
+        );
+        let notified: Vec<_> = outcome
+            .notifications
+            .iter()
+            .map(|n| n.message_id.clone())
+            .collect();
+        assert_eq!(notified, vec![known_id]);
+        assert_eq!(store.list_unseen_digest(10).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn mail_from_the_account_is_remembered_as_sent_and_not_notified() {
+        let (store, search, account, folder) = triage_setup("all");
+        let mut own = new_inbox_message(&store, &account, &folder, "TEST@example.com");
+        own.message.to_list = vec![pebble_core::EmailAddress {
+            name: None,
+            address: "bob@example.com".into(),
+        }];
+        let outcome = process_flush_window(&store, &search, None, vec![own], &mut Vec::new());
+        assert!(outcome.notifications.is_empty());
+        assert_eq!(
+            store.sent_count_to(&account.id, "bob@example.com").unwrap(),
+            1
         );
     }
 }

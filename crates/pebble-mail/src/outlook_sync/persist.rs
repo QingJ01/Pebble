@@ -196,6 +196,7 @@ impl OutlookSyncWorker {
                     folder_ids: folder_ids.clone(),
                     notify: false,
                     reconciliation: true,
+                    signals: Default::default(),
                 });
                 self.base.emit_list_refresh(folder_ids, vec![updated_id]);
                 continue;
@@ -248,6 +249,7 @@ impl OutlookSyncWorker {
                 folder_ids,
                 notify: notify_new,
                 reconciliation: false,
+                signals: Default::default(),
             });
         }
 

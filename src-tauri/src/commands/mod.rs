@@ -26,6 +26,7 @@ pub mod oauth;
 pub mod pending_mail_ops;
 pub mod rules;
 pub mod search;
+pub mod smart_notify;
 pub mod snooze;
 pub mod sync_cmd;
 pub mod threads;

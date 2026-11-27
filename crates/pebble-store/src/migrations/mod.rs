@@ -9,8 +9,9 @@ mod v11_v16;
 mod v17_v22;
 mod v21;
 mod v23;
+mod v24;
 
-pub(crate) const CURRENT_VERSION: u32 = 23;
+pub(crate) const CURRENT_VERSION: u32 = 24;
 /// How many pre-migration backups to keep next to the database file.
 const MIGRATION_BACKUPS_TO_KEEP: usize = 2;
 // Keep in sync with src/lib/accountColors.ts and src-tauri/src/account_colors.rs
@@ -473,6 +474,12 @@ fn run_migrations_reporting(
     if version < 23 && target >= 23 {
         v23::apply_v23(conn)?;
         step(23);
+    }
+
+    // V24: smart-notification tables (signals, sender prefs, decision log).
+    if version < 24 && target >= 24 {
+        v24::apply_v24(conn)?;
+        step(24);
     }
 
     Ok(())

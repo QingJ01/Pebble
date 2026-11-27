@@ -86,6 +86,7 @@ vi.mock("../../src/hooks/queries", () => ({
   }),
 }));
 
+vi.mock("../../src/features/notify/SenderNotifyAction", () => ({ default: () => null }));
 vi.mock("../../src/hooks/useBilingualTranslation", () => ({
   useBilingualTranslation: () => ({
     bilingualMode: false,
