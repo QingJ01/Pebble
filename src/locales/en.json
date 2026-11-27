@@ -83,6 +83,8 @@
     "quit": "Quit Pebble"
   },
   "sidebar": {
+    "collapseFolder": "Collapse {{name}}",
+    "expandFolder": "Expand {{name}}",
     "outbox": "Outbox",
     "inbox": "Inbox",
     "sent": "Sent",

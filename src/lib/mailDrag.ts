@@ -9,7 +9,13 @@
  */
 
 const DRAG_THRESHOLD_PX = 6;
-const TARGET_SELECTOR = "[data-drop-folder-id]";
+/**
+ * `data-drop-expand` marks a collapsed group: hovering it this long announces
+ * its key with MAIL_DRAG_EXPAND_EVENT so its children can become targets.
+ */
+const EXPAND_HOVER_MS = 600;
+const TARGET_SELECTOR = "[data-drop-folder-id], [data-drop-expand]";
+export const MAIL_DRAG_EXPAND_EVENT = "pebble:mail-drag-expand";
 
 export interface MailDragOptions<T> {
   /** Called once the press turns into a drag; null cancels it. */
@@ -36,17 +42,29 @@ export function trackMailDrag<T>(event: React.PointerEvent, options: MailDragOpt
   let ghost: HTMLDivElement | null = null;
   let hovered: HTMLElement | null = null;
   let hoveredValid = false;
+  let expandTimer: ReturnType<typeof setTimeout> | undefined;
   /** A drag began (and may since have been cancelled with Escape). */
   let dragStarted = false;
 
   const setHovered = (next: HTMLElement | null) => {
     if (next === hovered) return;
     hovered?.classList.remove("is-drop-target", "is-drop-invalid");
+    clearTimeout(expandTimer);
     hovered = next;
+    hoveredValid = false;
     if (!hovered || !items) return;
-    const folderId = hovered.dataset.dropFolderId!;
-    hoveredValid = options.canDrop?.(items, folderId) ?? true;
-    hovered.classList.add(hoveredValid ? "is-drop-target" : "is-drop-invalid");
+    const folderId = hovered.dataset.dropFolderId;
+    if (folderId) {
+      hoveredValid = options.canDrop?.(items, folderId) ?? true;
+      hovered.classList.add(hoveredValid ? "is-drop-target" : "is-drop-invalid");
+    }
+    const expandKey = hovered.dataset.dropExpand;
+    if (expandKey) {
+      expandTimer = setTimeout(
+        () => document.dispatchEvent(new CustomEvent(MAIL_DRAG_EXPAND_EVENT, { detail: expandKey })),
+        EXPAND_HOVER_MS,
+      );
+    }
   };
 
   const begin = () => {
@@ -93,7 +111,8 @@ export function trackMailDrag<T>(event: React.PointerEvent, options: MailDragOpt
       window.addEventListener("click", suppressClick, { capture: true, once: true });
       window.setTimeout(() => window.removeEventListener("click", suppressClick, { capture: true }), 0);
     }
-    if (dragged && target && valid) options.onDrop(dragged, target.dataset.dropFolderId!);
+    const folderId = target?.dataset.dropFolderId;
+    if (dragged && folderId && valid) options.onDrop(dragged, folderId);
   };
 
   const keydown = (e: KeyboardEvent) => {
