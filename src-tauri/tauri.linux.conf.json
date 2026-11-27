@@ -3,7 +3,11 @@
   "mainBinaryName": "pebble-mail",
   "bundle": {
     "linux": {
+      "rpm": {
+        "desktopTemplate": "linux/pebble.desktop"
+      },
       "deb": {
+        "desktopTemplate": "linux/pebble.desktop",
         "replaces": ["pebble (<< 1)"],
         "conflicts": ["pebble (<< 1)"]
       }
