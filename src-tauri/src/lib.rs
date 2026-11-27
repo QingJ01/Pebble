@@ -7,6 +7,7 @@ mod profile;
 mod realtime;
 mod send_controls;
 mod snooze_watcher;
+mod startup;
 mod state;
 
 use serde::Serialize;
@@ -335,6 +336,200 @@ fn navigation_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
         .build()
 }
 
+/// Everything in setup that needs the opened database: services, app state
+/// and background workers. Runs inline when no upgrade is pending, else on
+/// the main thread once the background migration has finished.
+fn finish_setup(
+    app: &AppHandle,
+    store: pebble_store::Store,
+    app_data: &std::path::Path,
+    startup_start: Instant,
+    mut startup_phase: Instant,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // `PRAGMA quick_check` reads the whole file; it runs in the
+    // background after startup (see below) instead of delaying the
+    // first window.
+
+    let index_path = get_index_path(app_data)?;
+    tracing::info!("Search index path: {}", index_path.display());
+    let search = pebble_search::TantivySearch::open(&index_path)?;
+    let search_needs_reindex = search.needs_reindex();
+    tracing::info!("Search index initialized successfully");
+    log_startup_phase(startup_start, &mut startup_phase, "search index opened");
+
+    // The full `SELECT COUNT(*) FROM messages` consistency check used
+    // to run here and block the main window from appearing. It now
+    // runs inside the background reindex task below, so startup can
+    // proceed without waiting on a full-table scan.
+
+    let crypto = pebble_crypto::CryptoService::init()?;
+    tracing::info!("Crypto service initialized successfully");
+    log_startup_phase(
+        startup_start,
+        &mut startup_phase,
+        "crypto service initialized",
+    );
+
+    let attachments_dir = app_data.join("attachments");
+    std::fs::create_dir_all(&attachments_dir)?;
+    tracing::info!("Attachments directory: {}", attachments_dir.display());
+    log_startup_phase(
+        startup_start,
+        &mut startup_phase,
+        "attachments directory ready",
+    );
+
+    let (snooze_stop_tx, snooze_stop_rx) = std::sync::mpsc::channel::<()>();
+    app.manage(AppState::new(
+        store,
+        search,
+        crypto,
+        snooze_stop_tx,
+        attachments_dir,
+    ));
+    send_controls::setup(app)?;
+    log_startup_phase(startup_start, &mut startup_phase, "app state registered");
+
+    // Start snooze watcher on the Tauri async runtime
+    let state: tauri::State<AppState> = app.state();
+    let store_clone = state.store.clone();
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn(snooze_watcher::run_snooze_watcher(
+        store_clone,
+        app_handle.clone(),
+        snooze_stop_rx,
+    ));
+
+    // Legacy (AAD-less) ciphertext: once a previous run re-encrypted
+    // everything, reject it immediately; otherwise migrate in the
+    // background (idempotent, compare-and-swap per record).
+    if commands::encrypted_store::legacy_ciphertext_migration_done(&state.crypto, &state.store) {
+        state.crypto.reject_legacy_ciphertext();
+    } else {
+        let crypto_for_migration = state.crypto.clone();
+        let store_for_migration = state.store.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            match commands::encrypted_store::migrate_legacy_ciphertexts(
+                &crypto_for_migration,
+                &store_for_migration,
+            ) {
+                Ok(outcome) => tracing::info!(
+                    migrated = outcome.migrated,
+                    failed = outcome.failed,
+                    completed = outcome.completed,
+                    "Legacy ciphertext migration finished"
+                ),
+                Err(error) => tracing::warn!("Legacy ciphertext migration failed: {error}"),
+            }
+        });
+    }
+
+    // Decide whether to rebuild the search index, and do it in the
+    // background so startup never waits on the DB count query. The
+    // task itself performs the consistency check (comparing the
+    // index doc count to the live DB row count) — the main thread
+    // only needs the cheap schema-version flag.
+    let store_for_reindex = state.store.clone();
+    let search_for_reindex = state.search.clone();
+    let app_for_reindex = app_handle.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        // 1. Process any pending search ops left over from a previous crash.
+        match commands::indexing::recover_pending_search_operations(
+            &store_for_reindex,
+            &search_for_reindex,
+        ) {
+            Ok(recovered) if recovered > 0 => tracing::info!(
+                "Recovered {recovered} pending search operations from previous session"
+            ),
+            Ok(_) => {}
+            Err(error) => tracing::warn!(
+                "Search recovery did not commit; pending operations were retained: {error}"
+            ),
+        }
+
+        // 2. Full rebuild if schema changed or counts diverge.
+        let needs_rebuild = if search_needs_reindex {
+            tracing::info!("Search index schema changed, rebuild required");
+            true
+        } else {
+            let idx_count = search_for_reindex.doc_count();
+            let db_count = store_for_reindex.count_all_messages().unwrap_or(0);
+            if idx_count == 0 && db_count > 0 {
+                tracing::info!(
+                    "Search index empty but DB has {db_count} messages, rebuild required"
+                );
+                true
+            } else if idx_count > 0 && idx_count != db_count {
+                tracing::warn!(
+                    "SQLite/Tantivy count mismatch (db={db_count}, index={idx_count}), rebuilding"
+                );
+                true
+            } else {
+                false
+            }
+        };
+
+        if needs_rebuild {
+            tracing::info!("Starting background search index rebuild...");
+            match commands::indexing::do_reindex(&store_for_reindex, &search_for_reindex) {
+                Ok(n) => {
+                    tracing::info!("Background reindex complete: {n} messages indexed");
+                    if let Err(error) = store_for_reindex.clear_all_search_pending() {
+                        tracing::warn!(
+                            "Search rebuild committed but recovery markers could not be cleared: {error}"
+                        );
+                    }
+                    let _ = app_for_reindex.emit("search:reindex-complete", n);
+                }
+                Err(e) => tracing::error!("Background reindex failed: {e}"),
+            }
+        }
+    });
+
+    // Long-lived workers start immediately: do_reindex is safe to run
+    // concurrently with the live indexer (it walks a rowid cursor and
+    // serialises each read+index batch with the indexer through
+    // `indexing::search_write_guard`), so a schema-upgrade rebuild no
+    // longer delays sync.
+    let app_for_sync = app_handle.clone();
+    tauri::async_runtime::spawn(async move {
+        commands::sync_cmd::resume_all_syncs(app_for_sync).await;
+    });
+    let app_for_pending_ops = app_handle.clone();
+    tauri::async_runtime::spawn(async move {
+        commands::pending_mail_ops::run_pending_mail_ops_worker(app_for_pending_ops).await;
+    });
+    let app_for_backup = app_handle.clone();
+    tauri::async_runtime::spawn(async move {
+        commands::cloud_sync::run_auto_backup_worker(app_for_backup).await;
+    });
+
+    // Background integrity check, once the UI and sync are up.
+    let store_for_check = state.store.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        match tokio::task::spawn_blocking(move || store_for_check.quick_check()).await {
+            Ok(Ok(result)) if result == "ok" => {
+                tracing::info!("Database integrity check passed")
+            }
+            Ok(Ok(result)) => tracing::warn!("Database integrity check warning: {}", result),
+            Ok(Err(e)) => tracing::warn!("Database integrity check failed: {}", e),
+            Err(e) => tracing::warn!("Database integrity check task failed: {}", e),
+        }
+    });
+    log_startup_phase(
+        startup_start,
+        &mut startup_phase,
+        "background workers scheduled",
+    );
+    tracing::info!(
+        "[startup] tauri setup complete: {}ms total",
+        startup_start.elapsed().as_millis()
+    );
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Prefer native Wayland when a Wayland compositor is available.
@@ -474,201 +669,96 @@ pub fn run() {
                     .set_background_color(Some(tauri::window::Color(0xf8, 0xf7, 0xf5, 0xff)));
             }
             app.manage(PendingMailtoUrls::default());
-
-            let db_path = get_db_path(&app_data)?;
-            tracing::info!("Database path: {}", db_path.display());
-            log_startup_phase(startup_start, &mut startup_phase, "app data paths resolved");
-
-            let store = pebble_store::Store::open(&db_path)?;
-            tracing::info!("Database initialized successfully");
-            log_startup_phase(
-                startup_start,
-                &mut startup_phase,
-                "database opened and migrations complete",
-            );
-
-            // `PRAGMA quick_check` reads the whole file; it runs in the
-            // background after startup (see below) instead of delaying the
-            // first window.
-
-            let index_path = get_index_path(&app_data)?;
-            tracing::info!("Search index path: {}", index_path.display());
-            let search = pebble_search::TantivySearch::open(&index_path)?;
-            let search_needs_reindex = search.needs_reindex();
-            tracing::info!("Search index initialized successfully");
-            log_startup_phase(startup_start, &mut startup_phase, "search index opened");
-
-            // The full `SELECT COUNT(*) FROM messages` consistency check used
-            // to run here and block the main window from appearing. It now
-            // runs inside the background reindex task below, so startup can
-            // proceed without waiting on a full-table scan.
-
-            let crypto = pebble_crypto::CryptoService::init()?;
-            tracing::info!("Crypto service initialized successfully");
-            log_startup_phase(startup_start, &mut startup_phase, "crypto service initialized");
-
-            let attachments_dir = app_data.join("attachments");
-            std::fs::create_dir_all(&attachments_dir)?;
-            tracing::info!("Attachments directory: {}", attachments_dir.display());
-            log_startup_phase(startup_start, &mut startup_phase, "attachments directory ready");
-
-            let (snooze_stop_tx, snooze_stop_rx) = std::sync::mpsc::channel::<()>();
-            app.manage(AppState::new(store, search, crypto, snooze_stop_tx, attachments_dir));
-            send_controls::setup(app.handle())?;
-            #[cfg(target_os = "macos")]
-            setup_application_menu(app.handle())?;
-            log_startup_phase(startup_start, &mut startup_phase, "app state registered");
-
-            // Start snooze watcher on the Tauri async runtime
-            let state: tauri::State<AppState> = app.state();
-            let store_clone = state.store.clone();
-            let app_handle = app.handle().clone();
-            let app_for_deep_link = app_handle.clone();
+            // mailto: links only need the pending queue, so listen before any
+            // database work: links opened during a background upgrade are
+            // queued and opened once the app mounts.
+            let app_for_deep_link = app.handle().clone();
             app.listen(DEEP_LINK_NEW_URL_EVENT, move |event| {
                 let urls = mailto_urls_from_deep_link_payload(event.payload());
                 record_mailto_urls(&app_for_deep_link, urls);
             });
             record_mailto_urls(
-                &app_handle,
+                app.handle(),
                 mailto_urls_from_args(&std::env::args().collect::<Vec<_>>()),
             );
-            tauri::async_runtime::spawn(snooze_watcher::run_snooze_watcher(
-                store_clone,
-                app_handle.clone(),
-                snooze_stop_rx,
-            ));
+            // macOS: replace the default menu (whose predefined Quit bypasses
+            // the cancellable exit) before any database work, so Cmd-Q is
+            // guarded during a background upgrade too.
+            #[cfg(target_os = "macos")]
+            setup_application_menu(app.handle())?;
 
-            // Legacy (AAD-less) ciphertext: once a previous run re-encrypted
-            // everything, reject it immediately; otherwise migrate in the
-            // background (idempotent, compare-and-swap per record).
-            if commands::encrypted_store::legacy_ciphertext_migration_done(
-                &state.crypto,
-                &state.store,
-            ) {
-                state.crypto.reject_legacy_ciphertext();
-            } else {
-                let crypto_for_migration = state.crypto.clone();
-                let store_for_migration = state.store.clone();
-                tauri::async_runtime::spawn_blocking(move || {
-                    match commands::encrypted_store::migrate_legacy_ciphertexts(
-                        &crypto_for_migration,
-                        &store_for_migration,
-                    ) {
-                        Ok(outcome) => tracing::info!(
-                            migrated = outcome.migrated,
-                            failed = outcome.failed,
-                            completed = outcome.completed,
-                            "Legacy ciphertext migration finished"
-                        ),
-                        Err(error) => tracing::warn!("Legacy ciphertext migration failed: {error}"),
-                    }
-                });
-            }
+            let db_path = get_db_path(&app_data)?;
+            tracing::info!("Database path: {}", db_path.display());
+            log_startup_phase(startup_start, &mut startup_phase, "app data paths resolved");
 
-            // Decide whether to rebuild the search index, and do it in the
-            // background so startup never waits on the DB count query. The
-            // task itself performs the consistency check (comparing the
-            // index doc count to the live DB row count) — the main thread
-            // only needs the cheap schema-version flag.
-            let store_for_reindex = state.store.clone();
-            let search_for_reindex = state.search.clone();
-            let app_for_reindex = app_handle.clone();
-            tauri::async_runtime::spawn_blocking(move || {
-                // 1. Process any pending search ops left over from a previous crash.
-                match commands::indexing::recover_pending_search_operations(
-                    &store_for_reindex,
-                    &search_for_reindex,
-                ) {
-                    Ok(recovered) if recovered > 0 => tracing::info!(
-                        "Recovered {recovered} pending search operations from previous session"
-                    ),
-                    Ok(_) => {}
-                    Err(error) => tracing::warn!(
-                        "Search recovery did not commit; pending operations were retained: {error}"
-                    ),
-                }
-
-                // 2. Full rebuild if schema changed or counts diverge.
-                let needs_rebuild = if search_needs_reindex {
-                    tracing::info!("Search index schema changed, rebuild required");
-                    true
-                } else {
-                    let idx_count = search_for_reindex.doc_count();
-                    let db_count = store_for_reindex.count_all_messages().unwrap_or(0);
-                    if idx_count == 0 && db_count > 0 {
-                        tracing::info!("Search index empty but DB has {db_count} messages, rebuild required");
-                        true
-                    } else if idx_count > 0 && idx_count != db_count {
-                        tracing::warn!(
-                            "SQLite/Tantivy count mismatch (db={db_count}, index={idx_count}), rebuilding"
-                        );
-                        true
-                    } else {
-                        false
-                    }
-                };
-
-                if needs_rebuild {
-                    tracing::info!("Starting background search index rebuild...");
-                    match commands::indexing::do_reindex(&store_for_reindex, &search_for_reindex) {
-                        Ok(n) => {
-                            tracing::info!("Background reindex complete: {n} messages indexed");
-                            if let Err(error) = store_for_reindex.clear_all_search_pending() {
-                                tracing::warn!(
-                                    "Search rebuild committed but recovery markers could not be cleared: {error}"
+            app.manage(startup::StartupStatus::default());
+            match pebble_store::migrations::pending_migration_from(&db_path) {
+                Ok(Some(from_version)) => {
+                    // Upgrade in the background so the window can show the
+                    // splash with a progress bar instead of hanging here.
+                    tracing::info!("Database schema v{from_version} needs upgrading; migrating in the background");
+                    startup::set_stage(app.handle(), startup::StartupStage::Migrating { done: 0, total: 0 });
+                    let handle = app.handle().clone();
+                    let app_data = app_data.clone();
+                    std::thread::Builder::new()
+                        .name("db-migration".into())
+                        .spawn(move || {
+                            let progress_handle = handle.clone();
+                            let opened = pebble_store::Store::open_with_progress(&db_path, &mut |p| {
+                                startup::set_stage(
+                                    &progress_handle,
+                                    startup::StartupStage::Migrating { done: p.done, total: p.total },
                                 );
+                            });
+                            let store = match opened {
+                                Ok(store) => store,
+                                Err(error) => {
+                                    tracing::error!("Database upgrade failed: {error}");
+                                    startup::set_stage(&handle, startup::StartupStage::Failed { message: error.to_string() });
+                                    return;
+                                }
+                            };
+                            tracing::info!("Database upgrade complete");
+                            let main_handle = handle.clone();
+                            let scheduled = handle.run_on_main_thread(move || {
+                                let phase = Instant::now();
+                                match finish_setup(&main_handle, store, &app_data, startup_start, phase) {
+                                    Ok(()) => startup::set_stage(&main_handle, startup::StartupStage::Ready),
+                                    Err(error) => {
+                                        tracing::error!("Startup failed after the database upgrade: {error}");
+                                        startup::set_stage(&main_handle, startup::StartupStage::Failed { message: error.to_string() });
+                                    }
+                                }
+                            });
+                            if let Err(error) = scheduled {
+                                startup::set_stage(&handle, startup::StartupStage::Failed { message: error.to_string() });
                             }
-                            let _ = app_for_reindex.emit("search:reindex-complete", n);
-                        }
-                        Err(e) => tracing::error!("Background reindex failed: {e}"),
-                    }
+                        })?;
+                    Ok(())
                 }
-            });
-
-            // Long-lived workers start immediately: do_reindex is safe to run
-            // concurrently with the live indexer (it walks a rowid cursor and
-            // serialises each read+index batch with the indexer through
-            // `indexing::search_write_guard`), so a schema-upgrade rebuild no
-            // longer delays sync.
-            let app_for_sync = app_handle.clone();
-            tauri::async_runtime::spawn(async move {
-                commands::sync_cmd::resume_all_syncs(app_for_sync).await;
-            });
-            let app_for_pending_ops = app_handle.clone();
-            tauri::async_runtime::spawn(async move {
-                commands::pending_mail_ops::run_pending_mail_ops_worker(app_for_pending_ops).await;
-            });
-            let app_for_backup = app_handle.clone();
-            tauri::async_runtime::spawn(async move {
-                commands::cloud_sync::run_auto_backup_worker(app_for_backup).await;
-            });
-
-            // Background integrity check, once the UI and sync are up.
-            let store_for_check = state.store.clone();
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-                match tokio::task::spawn_blocking(move || store_for_check.quick_check()).await {
-                    Ok(Ok(result)) if result == "ok" => {
-                        tracing::info!("Database integrity check passed")
+                pending => {
+                    if let Err(error) = pending {
+                        tracing::warn!("Could not read the database version before opening: {error}");
                     }
-                    Ok(Ok(result)) => tracing::warn!("Database integrity check warning: {}", result),
-                    Ok(Err(e)) => tracing::warn!("Database integrity check failed: {}", e),
-                    Err(e) => tracing::warn!("Database integrity check task failed: {}", e),
+                    let store = pebble_store::Store::open(&db_path)?;
+                    tracing::info!("Database initialized successfully");
+                    log_startup_phase(
+                        startup_start,
+                        &mut startup_phase,
+                        "database opened and migrations complete",
+                    );
+                    finish_setup(app.handle(), store, &app_data, startup_start, startup_phase)?;
+                    startup::set_stage(app.handle(), startup::StartupStage::Ready);
+                    Ok(())
                 }
-            });
-            log_startup_phase(startup_start, &mut startup_phase, "background workers scheduled");
-            tracing::info!(
-                "[startup] tauri setup complete: {}ms total",
-                startup_start.elapsed().as_millis()
-            );
-
-            Ok(())
+            }
         })
         .invoke_handler(tauri::generate_handler![
             set_tray_menu_labels,
             take_pending_mailto_urls,
             set_keep_running_in_background,
             profile::get_profile_storage_namespace,
+            startup::get_startup_status,
             commands::autostart::get_autostart_enabled,
             commands::autostart::set_autostart_enabled,
             commands::health::health_check,

@@ -7,22 +7,16 @@
   </head>
   <body>
     <style id="splash-style">
-      @keyframes splash-fade-in {
-        from { opacity: 0; transform: translateY(8px); }
-        to   { opacity: 1; transform: translateY(0); }
-      }
-      @keyframes splash-draw {
-        to { stroke-dashoffset: 0; }
-      }
-      @keyframes splash-fill {
-        from { fill-opacity: 0; }
-        to   { fill-opacity: 1; }
-      }
-      @keyframes splash-fade-out {
-        from { opacity: 1; }
-        to   { opacity: 0; }
-      }
+      /* Boot splash: the Pebble logo and name in the middle, a thin loading
+         line along the bottom. When startup is done the line fills and the
+         splash fades into the app (App.tsx dismissSplash). During a database
+         upgrade the line shows real progress with a short status above it
+         (src/main.tsx via window.__pebbleSplash). */
       #splash {
+        --splash-bg: #191919;
+        --splash-text: #e6e6e6;
+        --splash-muted: #8c8c8c;
+        --splash-track: rgba(255, 255, 255, .08);
         position: fixed;
         inset: 0;
         z-index: 99999;
@@ -30,85 +24,117 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        background: #1a1a1a;
+        gap: 16px;
+        background: var(--splash-bg);
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
         user-select: none;
+        -webkit-user-select: none;
         overflow: hidden;
-        transition: opacity .2s cubic-bezier(.4, 0, 1, 1);
+        transition: opacity .3s cubic-bezier(.4, 0, .2, 1);
       }
-      /* Follow the app theme applied below (falls back to the OS scheme). */
-      html[data-theme="light"] #splash { background: #f8f7f5; }
-      html[data-theme="light"] #splash .app-name { color: #333; }
-      html[data-theme="light"] #splash .loading-bar { background: rgba(0,0,0,.08); }
+      /* Same surface as the app chrome. */
+      html[data-theme="light"] #splash {
+        --splash-bg: #f5f4f2;
+        --splash-text: #1a1a1a;
+        --splash-muted: #737373;
+        --splash-track: rgba(0, 0, 0, .06);
+      }
       @media (prefers-color-scheme: light) {
-        html:not([data-theme]) #splash { background: #f8f7f5; }
-        html:not([data-theme]) #splash .app-name { color: #333; }
-        html:not([data-theme]) #splash .loading-bar { background: rgba(0,0,0,.08); }
+        html:not([data-theme]) #splash {
+          --splash-bg: #f5f4f2;
+          --splash-text: #1a1a1a;
+          --splash-muted: #737373;
+          --splash-track: rgba(0, 0, 0, .06);
+        }
       }
-      #splash.fade-out {
+      #splash .splash-icon {
+        width: 88px;
+        height: 88px;
+        filter: drop-shadow(0 8px 18px rgba(0, 0, 0, .12)) drop-shadow(0 1px 3px rgba(0, 0, 0, .08));
+        animation: splash-rise .5s cubic-bezier(.2, .8, .2, 1) both;
+      }
+      #splash .splash-name {
+        color: var(--splash-text);
+        font-size: 22px;
+        font-weight: 600;
+        letter-spacing: .01em;
+        animation: splash-rise .5s cubic-bezier(.2, .8, .2, 1) .06s both;
+      }
+
+      /* Bottom loading line. */
+      #splash .splash-line {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 2px;
+        background: var(--splash-track);
+      }
+      #splash .splash-line-fill {
+        height: 100%;
+        width: 0;
+        background: #d4714e;
+        border-radius: 0 1px 1px 0;
+        /* Moves on its own toward ~85% while startup runs. */
+        animation: splash-load 1.6s cubic-bezier(.1, .7, .3, 1) .05s forwards;
+      }
+      #splash.is-done .splash-line-fill {
+        width: 100% !important;
+        animation: none;
+        transition: width .16s ease-out;
+      }
+      #splash.is-migrating .splash-line-fill {
+        animation: none;
+        transition: width .35s cubic-bezier(.2, .8, .2, 1);
+      }
+      /* Unknown total during an upgrade: a sliding segment. */
+      #splash.is-migrating.is-indeterminate .splash-line-fill {
+        width: 30%;
+        animation: splash-slide 1.2s cubic-bezier(.4, 0, .2, 1) infinite;
+      }
+
+      /* Upgrade / failure status, just above the line. */
+      #splash .splash-status {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 24px;
+        display: grid;
+        gap: 4px;
+        justify-items: center;
+        padding: 0 24px;
+        text-align: center;
+        opacity: 0;
+        transition: opacity .25s ease-out;
+      }
+      #splash.is-migrating .splash-status,
+      #splash.is-failed .splash-status { opacity: 1; }
+      #splash .splash-status-label { color: var(--splash-text); font-size: 13px; font-weight: 500; }
+      #splash .splash-status-hint { color: var(--splash-muted); font-size: 12px; }
+      #splash.is-failed .splash-line { display: none; }
+
+      #splash.is-leaving {
         opacity: 0;
         pointer-events: none;
       }
-      #splash svg {
-        width: 64px;
-        height: 64px;
-        margin-bottom: 20px;
+
+      @keyframes splash-rise {
+        from { opacity: 0; transform: translateY(6px); }
+        to   { opacity: 1; transform: none; }
       }
-      #splash .pebble-outline {
-        fill: none;
-        stroke: #d4714e;
-        stroke-width: 2;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-        stroke-dasharray: 200;
-        stroke-dashoffset: 200;
-        animation: splash-draw 1.2s ease-out forwards;
-      }
-      #splash .pebble-fill {
-        fill: #d4714e;
-        fill-opacity: 0;
-        animation: splash-fill .6s ease-out .8s forwards;
-      }
-      #splash .app-name {
-        font-size: 18px;
-        font-weight: 600;
-        letter-spacing: 3px;
-        color: #e0e0e0;
-        text-transform: uppercase;
-        opacity: 0;
-        animation: splash-fade-in .6s ease-out .6s forwards;
-      }
-      #splash .loading-bar {
-        margin-top: 24px;
-        width: 120px;
-        height: 2px;
-        border-radius: 1px;
-        background: rgba(255,255,255,.08);
-        overflow: hidden;
-        opacity: 0;
-        animation: splash-fade-in .4s ease-out 1s forwards;
-      }
-      #splash .loading-bar::after {
-        content: '';
-        display: block;
-        width: 40%;
-        height: 100%;
-        border-radius: 1px;
-        background: #d4714e;
-        animation: splash-slide 1.2s ease-in-out .8s infinite;
+      @keyframes splash-load {
+        from { width: 0; }
+        to   { width: 85%; }
       }
       @keyframes splash-slide {
-        0%   { transform: translateX(-100%); }
-        100% { transform: translateX(350%); }
+        from { transform: translateX(-100%); }
+        to   { transform: translateX(340%); }
       }
       @media (prefers-reduced-motion: reduce) {
-        #splash { transition: none; }
-        #splash .pebble-outline { animation: none; stroke-dashoffset: 0; }
-        #splash .pebble-fill { animation: none; fill-opacity: 1; }
-        #splash .app-name,
-        #splash .loading-bar { animation: none; opacity: 1; }
-        #splash .loading-bar::after { animation: none; transform: translateX(75%); }
-        #splash svg ellipse { animation: none !important; opacity: 1 !important; }
+        #splash .splash-icon,
+        #splash .splash-name { animation: none; }
+        #splash .splash-line-fill { animation: none; width: 60%; }
+        #splash.is-migrating.is-indeterminate .splash-line-fill { animation: none; width: 100%; opacity: .5; }
       }
     </style>
     <script>
@@ -116,16 +142,40 @@
       // Apply saved theme immediately to avoid flash of wrong theme
       try{var t=localStorage.getItem('pebble-theme')||'light';var d=t==='system'?matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light':t;document.documentElement.setAttribute('data-theme',d)}catch(e){}
     </script>
-    <div id="splash">
-      <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-        <path class="pebble-fill" d="M32 8C18 8 8 20 10 34c2 12 12 22 22 22s20-10 22-22C56 20 46 8 32 8z"/>
-        <path class="pebble-outline" d="M32 8C18 8 8 20 10 34c2 12 12 22 22 22s20-10 22-22C56 20 46 8 32 8z"/>
-        <ellipse cx="24" cy="22" rx="8" ry="5" fill="rgba(255,255,255,.15)" transform="rotate(-20 24 22)"
-          style="opacity:0; animation: splash-fill .4s ease-out 1.2s forwards;"/>
-      </svg>
-      <div class="app-name">Pebble</div>
-      <div class="loading-bar"></div>
+    <div id="splash" aria-hidden="true">
+      <img class="splash-icon" src="/src/assets/app-icon@2x.png" alt="" width="88" height="88" draggable="false">
+      <div class="splash-name">Pebble</div>
+      <div class="splash-status" role="status" aria-live="polite">
+        <div class="splash-status-label"></div>
+        <div class="splash-status-hint"></div>
+      </div>
+      <div class="splash-line"><div class="splash-line-fill"></div></div>
     </div>
+    <script>
+      // Startup gate API (src/main.tsx): database-upgrade progress / failure.
+      window.__pebbleSplash = {
+        progress: function (fraction, label, hint) {
+          var s = document.getElementById('splash');
+          if (!s) return;
+          s.classList.add('is-migrating');
+          s.classList.toggle('is-indeterminate', fraction == null);
+          s.removeAttribute('aria-hidden');
+          s.querySelector('.splash-status-label').textContent = label;
+          s.querySelector('.splash-status-hint').textContent = hint;
+          var fill = s.querySelector('.splash-line-fill');
+          fill.style.width = fraction == null ? '' : Math.max(2, Math.round(fraction * 100)) + '%';
+        },
+        fail: function (title, detail) {
+          var s = document.getElementById('splash');
+          if (!s) return;
+          s.classList.remove('is-migrating');
+          s.classList.add('is-failed');
+          s.removeAttribute('aria-hidden');
+          s.querySelector('.splash-status-label').textContent = title;
+          s.querySelector('.splash-status-hint').textContent = detail;
+        }
+      };
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

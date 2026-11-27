@@ -318,6 +318,79 @@ Object.assign(i18n.zh, {
   termsSummaryThree: "Pebble 基于 GNU Affero General Public License v3.0 按现状提供。",
 });
 
+// -- Current product copy (overrides the original strings above) --
+Object.assign(i18n.en, {
+  heroNote: "Windows, macOS and Linux · Gmail, Outlook, IMAP and POP3 · Self-hosted web via Docker",
+  heroShotAlt: "Pebble's unified inbox with three accounts and a message open",
+  privacyDesc: "Mail, search index and attachments stay on your device. No telemetry. Pebble only connects to your mail servers and the optional services you turn on.",
+  privacyEncTitle: "Encrypted Credentials",
+  privacyEncDesc: "Passwords and OAuth tokens are encrypted with AES-256-GCM and a per-device key.",
+  privacyTrackTitle: "Trackers Blocked",
+  privacyTrackDesc: "Remote images and tracking pixels stay blocked until you allow them, per message or per sender.",
+  featInboxTitle: "Unified Inbox",
+  featInboxDesc: "Every account in one list, each message marked with its account. Narrow it to one account in a click.",
+  featMultiTitle: "Your Providers",
+  featMultiDesc: "Sign in to Gmail and Outlook, or use IMAP and POP3. Server settings fill in for about 30 common providers.",
+  featKanbanTitle: "Kanban Board",
+  featKanbanDesc: "Turn mail into tasks across To do, Waiting and Done, with a note on each card.",
+  featSendTitle: "Undo Send & Scheduling",
+  featSendDesc: "Take a message back within seconds or schedule it for later. Queued mail survives restarts.",
+  featFoldersTitle: "Folders & Drag-and-Drop",
+  featFoldersDesc: "Create folders and move mail by dragging it onto the sidebar. Every move can be undone.",
+  featSearchTitle: "Fast Local Search",
+  featSearchDesc: "Full-text search on your device, filtered by sender, recipient, date, attachments or folder.",
+  featRulesTitle: "Rules & Snooze",
+  featRulesDesc: "Rules sort new mail as it arrives; snooze brings a message back when you need it.",
+  featTransTitle: "Translation",
+  featTransDesc: "A bilingual reading view with DeepL or an LLM of your choice.",
+  featKeyboardTitle: "Keyboard & Themes",
+  featKeyboardDesc: "Customizable shortcuts, light and dark themes, and dark mode for HTML mail.",
+  previewInbox: "<strong>Unified inbox</strong> — every account, clearly marked",
+  previewKanban: "<strong>Kanban board</strong> — track what needs doing",
+  previewDark: "<strong>Dark mode</strong> — HTML mail darkened, trackers blocked",
+  previewSettings: "<strong>Settings</strong> — make Pebble yours",
+  previewInboxAlt: "Unified inbox screenshot",
+  previewKanbanAlt: "Kanban board screenshot",
+  previewDarkAlt: "Dark mode screenshot",
+  previewSettingsAlt: "Appearance settings screenshot",
+});
+
+Object.assign(i18n.zh, {
+  heroNote: "支持 Windows、macOS 和 Linux · Gmail、Outlook、IMAP 和 POP3 · 网页版可通过 Docker 自托管",
+  heroShotAlt: "Pebble 聚合收件箱：三个账户，右侧打开一封邮件",
+  privacyDesc: "邮件、搜索索引和附件都保存在你的设备上，没有遥测。Pebble 只连接你的邮件服务器和你主动开启的可选服务。",
+  privacyEncTitle: "凭据加密",
+  privacyEncDesc: "密码和 OAuth 令牌使用 AES-256-GCM 和设备专属密钥加密保存。",
+  privacyTrackTitle: "拦截追踪器",
+  privacyTrackDesc: "远程图片和追踪像素默认拦截，可按邮件或按发件人放行。",
+  featInboxTitle: "统一收件箱",
+  featInboxDesc: "所有账户的邮件在一个列表里，每封都标出所属账户，一键筛选到单个账户。",
+  featMultiTitle: "多种邮箱",
+  featMultiDesc: "Gmail、Outlook 直接登录，也支持 IMAP 和 POP3；约 30 家常见邮箱自动填好服务器设置。",
+  featKanbanTitle: "看板",
+  featKanbanDesc: "把邮件变成待办：待办、等待中、已完成，每张卡片都能写备注。",
+  featSendTitle: "撤销发送与定时发送",
+  featSendDesc: "几秒内可以撤回刚发出的邮件，也能定时发送；待发邮件重启后依然有效。",
+  featFoldersTitle: "文件夹与拖拽",
+  featFoldersDesc: "新建文件夹，把邮件拖到侧栏即可移动，每次移动都能撤销。",
+  featSearchTitle: "本地全文搜索",
+  featSearchDesc: "在本机全文搜索，可按发件人、收件人、日期、附件或文件夹筛选。",
+  featRulesTitle: "规则与稍后提醒",
+  featRulesDesc: "规则在新邮件到达时自动整理；稍后提醒让邮件在你需要时重新出现。",
+  featTransTitle: "翻译",
+  featTransDesc: "双语对照阅读，可使用 DeepL 或你选择的大模型。",
+  featKeyboardTitle: "快捷键与主题",
+  featKeyboardDesc: "快捷键可自定义，支持浅色和深色主题，HTML 邮件也能转暗色。",
+  previewInbox: "<strong>统一收件箱</strong> — 多个账户一目了然",
+  previewKanban: "<strong>看板</strong> — 跟进需要处理的邮件",
+  previewDark: "<strong>深色模式</strong> — HTML 邮件转暗色，追踪器已拦截",
+  previewSettings: "<strong>设置</strong> — 按你的习惯调整",
+  previewInboxAlt: "统一收件箱截图",
+  previewKanbanAlt: "看板截图",
+  previewDarkAlt: "深色模式截图",
+  previewSettingsAlt: "外观设置截图",
+});
+
 // -- Language switching --
 let currentLang = localStorage.getItem('pebble-site-lang') || 'en';
 
@@ -338,6 +411,16 @@ function setLang(lang) {
         el.textContent = t[key];
       }
     }
+  });
+
+  // Screenshots and their alt text follow the language.
+  document.querySelectorAll('img[data-src-zh]').forEach(img => {
+    if (!img.dataset.srcEn) img.dataset.srcEn = img.getAttribute('src');
+    img.setAttribute('src', lang === 'zh' ? img.dataset.srcZh : img.dataset.srcEn);
+  });
+  document.querySelectorAll('[data-i18n-alt]').forEach(el => {
+    const key = el.getAttribute('data-i18n-alt');
+    if (t[key] !== undefined) el.setAttribute('alt', t[key]);
   });
 
   // Update lang switcher active state

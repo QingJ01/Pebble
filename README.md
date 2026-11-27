@@ -13,6 +13,8 @@
   ·
   <a href="https://github.com/QingJ01/Pebble/releases">Releases</a>
   ·
+  <a href="CHANGELOG.md">Changelog</a>
+  ·
   <a href="LICENSE">License</a>
 </p>
 
@@ -23,77 +25,200 @@
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey?style=flat-square" alt="Platform">
 </p>
 
+<p align="center">
+  <img src="site/screenshots/inbox.png" alt="Pebble's unified inbox with three accounts, account filter chips and a message open in the reader">
+</p>
+
 ## Overview
 
-Pebble is a desktop mail client built with Rust, Tauri, and React. It keeps mail data, the search index, attachments, rules, and application settings on your device by default.
+Pebble is a desktop mail client built with Rust, Tauri and React. Your mail, search index, attachments, rules and settings stay on your device; nothing is sent anywhere except to the mail servers and services you set up.
 
-The app is designed around a few practical ideas:
+- **One inbox for every account.** Gmail, Outlook, IMAP and POP3 side by side, with each account's colour and initial on every row.
+- **Quiet by default.** Remote images and trackers are blocked until you allow them, per message or per sender.
+- **Mail as a to-do list.** Snooze, rules, a Kanban board and undoable actions work together.
+- **Fast on big mailboxes.** Cursor-paged lists, streamed first syncs and a local full-text index.
 
-- Your mailbox should stay readable, fast, and quiet.
-- Email workflows should be local-first instead of cloud-dashboard-first.
-- Privacy controls should be explicit, visible, and easy to override per message.
-- Search, snooze, rules, and a Kanban board should work together instead of living in separate tools.
+> Sample data in the screenshots is made up.
 
-Pebble currently supports Gmail, IMAP, POP3, and experimental Outlook accounts.
+## Features
 
-## Highlights
+### Reading and organizing
 
-### Local-first privacy
+- Unified inbox across accounts, with filter chips to narrow it to one account and unread counts per account.
+- Message and conversation views; conversations keep each account's copies apart.
+- **Show unread only** filter for the message and conversation lists.
+- Archive, delete, mark as spam, star and mark read, one at a time or in batches, each with **Undo**.
+- Create and rename folders, move messages with **Move to folder** or by **dragging them onto a folder** in the sidebar. Gmail labels are kept.
+- Snooze messages until later, and a Kanban board (To do, Waiting, Done) for mail you need to act on.
+- Rules that label, move, mark read, archive or file messages to the board as they arrive.
+- Full-text search with filters for sender, recipient, subject, date range, attachments and folder.
+- Right-click menu on message rows; keyboard shortcuts for everything common.
 
-- Local SQLite database for messages, folders, labels, rules, and settings.
-- Local Tantivy full-text index for fast search.
-- Attachments are stored on disk under the app data directory.
-- OAuth tokens and credentials are encrypted with a per-device key.
-- No telemetry.
-- Network requests are limited to features you configure: mail sync, translation, and optional WebDAV settings backup.
+### Writing
 
-### Mail workflow
+- Compose in rich text, Markdown or HTML source; drafts keep recipients, Bcc and attachments, and reply quotes sit inside the editor.
+- **Undo Send** and **scheduled sending**. Queued mail is encrypted on disk and survives restarts.
+- Recipient autocomplete from your address book and recent correspondents.
+- `mailto:` links from other apps open a new message; on Windows, Pebble can register as the default mail app (Settings → General).
 
-- Unified inbox across multiple accounts.
-- Gmail, IMAP, POP3, and experimental Outlook support.
-- Threaded and message-list views.
-- Archive, delete, star, mark read, batch actions, and restore flows.
-- Snooze messages and bring them back later.
-- Full-text search and advanced filters.
-- Rules engine for automatic organization.
-- Email CSS rendering with embedded style support.
-- Option to allow invalid TLS certificates for self-hosted mail servers.
+### Privacy and local-first
 
-### Productivity tools
+- SQLite database, Tantivy search index and attachments stored in your profile folder.
+- Remote images and tracking pixels blocked by default, with one-click **Load images**, **Trust images** or **Trust sender**.
+- HTML mail is sanitized and its CSS confined to the message area.
+- Passwords and OAuth tokens encrypted with a per-device key and never handed to the interface.
+- No telemetry. Network access is limited to mail sync and the optional translation, proxy and WebDAV backup features you configure.
 
-- Local address book with search, favorites, notes, multiple labeled email addresses, and one-click contact actions from message participants.
-- Recipient autocomplete that prioritizes saved contacts and falls back to recent correspondents.
-- vCard (`.vcf`) import and export for moving contacts between Pebble and other address books. Re-imports merge by normalized email; existing non-empty local names and notes take precedence over imported values.
-- Kanban board with Todo, Waiting, and Done columns.
-- Command palette and keyboard-first navigation.
-- Built-in translation providers with bilingual reading and customizable shortcuts (`T` to translate selection, `Ctrl+Shift+T` to toggle bilingual view).
-- Dark and light themes with wallpaper background support.
-- English and Chinese UI.
-- Optional local file export/import and WebDAV backup for contacts, settings, rules, Kanban cards, Kanban notes, and separately encrypted account secrets.
-- Automatic scheduled WebDAV backup with configurable interval.
+### Comfort
 
-### Platform integration
+- Light, dark and system themes, an optional wallpaper, and a choice for **HTML mail in the dark theme**: keep the sender's light design, darken simple mail, or darken everything.
+- Grouped-by-account or classic sidebar; narrow windows switch to a compact rail.
+- Built-in translation with a bilingual reading view.
+- Image and PDF attachment preview, and Save all.
+- English and Simplified Chinese interface.
+- Tray mode keeps mail syncing while the window is closed; optional start hidden in the tray.
 
-- Native macOS traffic-light window controls.
-- Register as default email client on Windows (Settings > General).
-- Tray mode keeps mail sync running while the window is hidden.
-- Start hidden to system tray option.
-- `mailto:` protocol handler for composing mail from external apps.
+### Accounts, backup and data
+
+- Gmail and Outlook sign-in with OAuth; IMAP/SMTP and POP3 for everything else.
+- **Server settings fill in automatically** for about 30 common providers (Outlook, iCloud, Yahoo, QQ, NetEase 163/126, 139, Sina, Aliyun and more) as soon as you type the address.
+- Per-account sync range, HTTP proxy, and an option for self-signed certificates on self-hosted servers.
+- Local address book with favourites, notes and vCard (`.vcf`) import/export.
+- Local mail archive with EML and mbox import/export.
+- Encrypted backup of settings, rules, contacts and Kanban cards to a file or to WebDAV, optionally on a schedule.
 
 ## Screenshots
 
 <table>
   <tr>
-    <td><img src="site/screenshots/inbox.png" alt="Inbox"><br><b>Inbox</b></td>
-    <td><img src="site/screenshots/kanban.png" alt="Kanban board"><br><b>Kanban</b></td>
+    <td><img src="site/screenshots/threads.png" alt="Conversation view"><br><b>Conversations</b></td>
+    <td><img src="site/screenshots/kanban.png" alt="Kanban board"><br><b>Kanban board</b></td>
   </tr>
   <tr>
-    <td><img src="site/screenshots/dark.png" alt="Dark mode"><br><b>Dark Mode</b></td>
-    <td><img src="site/screenshots/settings.png" alt="Settings"><br><b>Settings</b></td>
+    <td><img src="site/screenshots/dark.png" alt="Dark theme with HTML mail darkened and trackers blocked"><br><b>Dark theme</b></td>
+    <td><img src="site/screenshots/settings.png" alt="Appearance settings"><br><b>Settings</b></td>
   </tr>
 </table>
 
-## Tech Stack
+## Install
+
+Download the latest build from [Releases](https://github.com/QingJ01/Pebble/releases):
+
+| Platform | File |
+| --- | --- |
+| Windows | `Pebble_<version>_x64-setup.exe` |
+| macOS (Apple silicon) | `Pebble_<version>_aarch64-arm64.dmg` |
+| macOS (Intel) | `Pebble_<version>_x64-x64.dmg` |
+| Linux | `.AppImage`, `.deb` or `.rpm` |
+
+Each file has a matching `.sha256` checksum.
+
+macOS builds are not signed. After copying Pebble to `/Applications`, run this once before opening it:
+
+```bash
+sudo xattr -cr /Applications/Pebble.app
+```
+
+On Arch Linux, Pebble is in the AUR as `pebble-bin`:
+
+```bash
+yay -S pebble-bin
+```
+
+### Adding an account
+
+- **Gmail / Outlook:** use the sign-in buttons. If Google blocks the sign-in for your account, add the account manually with an [app password](https://myaccount.google.com/apppasswords) instead (see [#86](https://github.com/QingJ01/Pebble/issues/86)).
+- **Other providers:** type your address and Pebble fills in the server settings for common providers. Most Chinese providers (QQ, 163, 126, 139, Sina…) and iCloud need an authorization code or app password from the provider's web settings, not your sign-in password.
+
+### Where your data lives
+
+Pebble keeps its database, search index, attachments, logs and preferences in the system app-data folder. To keep them somewhere else, before starting Pebble:
+
+- set `PEBBLE_PROFILE_DIR` to an absolute path, or
+- put `pebble-profile.txt` next to the executable, with an absolute path or a path relative to the executable on its first line, or
+- create a `pebble-profile` folder next to the executable to keep the data beside the app.
+
+The new location is used from the next launch.
+
+## Development
+
+### Prerequisites
+
+- Rust (stable)
+- Node.js 22 (18 or newer works)
+- pnpm 9
+- The [Tauri system dependencies](https://tauri.app/start/prerequisites/) for your platform
+
+### Run from source
+
+```bash
+git clone https://github.com/QingJ01/Pebble.git
+cd Pebble
+pnpm install
+cp .env.example .env   # optional: OAuth client IDs for Gmail / Outlook
+pnpm dev
+```
+
+`pnpm dev` starts the Vite frontend and the Tauri app together.
+
+### OAuth configuration
+
+Gmail and Outlook sign-in need your own OAuth client IDs in `.env`. IMAP and POP3 accounts work without them.
+
+| Variable | Description |
+| --- | --- |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID (a "Desktop app" client). |
+| `GOOGLE_CLIENT_SECRET` | Optional. Set it if Google rejects the token exchange with `client_secret is missing`. |
+| `MICROSOFT_CLIENT_ID` | Microsoft public/native client ID, redirect URI `http://localhost`. |
+| `MICROSOFT_CLIENT_SECRET` | Optional; leave empty for public clients (PKCE). |
+
+In development the values are read from `.env`; release builds take them from the build environment and ignore `.env`.
+
+### Scripts
+
+| Command | Purpose |
+| --- | --- |
+| `pnpm dev` | Run the desktop app in development mode. |
+| `pnpm dev:frontend` | Run only the Vite frontend. |
+| `pnpm test` | Frontend tests (Vitest). |
+| `pnpm check:i18n` | Check that English and Chinese strings match. |
+| `pnpm build:frontend` | Type-check and build the frontend. |
+| `pnpm build` | Build the desktop app for the current platform. |
+| `pnpm build:windows` / `build:macos` / `build:linux` | Build installers for one platform (NSIS; `.app` + `.dmg`; AppImage, deb and rpm). |
+| `cargo test --workspace` | Rust tests. |
+
+Bundles are written to `target/release/bundle/`.
+
+### Project structure
+
+```text
+Pebble/
+|-- src/                    React frontend
+|   |-- app/                App shell, title bar, startup hooks
+|   |-- components/         Shared UI (lists, reader, sidebar, dialogs)
+|   |-- features/           Inbox, compose, search, Kanban, contacts,
+|   |                       snoozed, starred, mail archive, settings
+|   |-- hooks/              React hooks, queries and mutations
+|   |-- lib/                IPC API, i18n, helpers
+|   |-- locales/            English and Chinese strings
+|   `-- stores/             Zustand stores
+|-- src-tauri/              Tauri app and IPC commands
+|-- crates/
+|   |-- pebble-core/        Shared types and errors
+|   |-- pebble-store/       SQLite storage and migrations
+|   |-- pebble-mail/        IMAP, SMTP, POP3, Gmail and Outlook sync
+|   |-- pebble-search/      Tantivy search index
+|   |-- pebble-privacy/     HTML sanitizing and tracker blocking
+|   |-- pebble-crypto/      Credential encryption
+|   |-- pebble-oauth/       OAuth 2.0 with PKCE
+|   |-- pebble-rules/       Rules engine
+|   |-- pebble-translate/   Translation providers
+|   `-- pebble-webdav/      WebDAV backup
+|-- tests/                  Frontend tests
+`-- site/                   Project website and screenshots
+```
+
+### Tech stack
 
 | Layer | Technology |
 | --- | --- |
@@ -101,172 +226,52 @@ Pebble currently supports Gmail, IMAP, POP3, and experimental Outlook accounts.
 | Backend | Rust |
 | Frontend | React 19, TypeScript |
 | State | Zustand, TanStack Query |
-| Database | SQLite via rusqlite |
+| Database | SQLite (rusqlite) |
 | Search | Tantivy |
-| Styling | Tailwind CSS and app CSS |
+| Styling | Tailwind CSS 4 and app CSS |
 | Localization | i18next |
 
-## Getting Started
-
-### Install
-
-Download prebuilt desktop packages from the [Releases](https://github.com/QingJ01/Pebble/releases) page.
-
-On Arch Linux, Pebble is available from the AUR as `pebble-bin`:
-
-```bash
-yay -S pebble-bin
-# or
-paru -S pebble-bin
-```
-
-### Prerequisites
-
-- Rust stable
-- Node.js 18 or newer
-- pnpm 8 or newer
-- Tauri system dependencies for your platform
-
-### Profile Storage
-
-By default, Pebble stores the database, search index, attachments, logs, imported backgrounds, and local interface preferences under the system app data directory.
-
-You can opt into a custom or portable profile directory before Pebble starts:
-
-- Set `PEBBLE_PROFILE_DIR` to an absolute path.
-- Put `pebble-profile.txt` next to `pebble.exe`; the first line can be an absolute path or a path relative to the executable directory.
-- Create a `pebble-profile` directory next to `pebble.exe` to store Pebble data beside the app.
-
-The selected directory is used on the next app launch.
-
-### Development Setup
-
-```bash
-git clone https://github.com/QingJ01/Pebble.git
-cd Pebble
-
-pnpm install
-cp .env.example .env
-
-pnpm dev
-```
-
-The development command starts the Vite frontend and the Tauri desktop app.
-
-### Build
-
-```bash
-pnpm build
-pnpm build:windows
-pnpm build:macos
-pnpm build:linux
-```
-
-Desktop bundles are written under `target/release/` and `target/release/bundle/`.
-On Linux, install the Tauri system dependencies first; `pnpm build:linux` produces AppImage, deb, and rpm packages under `target/release/bundle/`.
-macOS bundles are unsigned unless you provide your own signing setup.
-After copying an unsigned macOS build to `/Applications`, run the following command before opening it:
-
-```bash
-sudo xattr -cr /Applications/Pebble.app
-```
-
-## OAuth Configuration
-
-Pebble can connect to Gmail and Outlook through OAuth. IMAP accounts use the IMAP/SMTP credentials configured in the app.
-
-Copy `.env.example` to `.env`, then fill the provider values you need.
-
-| Variable | Description |
-| --- | --- |
-| `GOOGLE_CLIENT_ID` | Google OAuth client ID. Use a Desktop app client when possible. |
-| `GOOGLE_CLIENT_SECRET` | Optional for PKCE flows. Add it if Google rejects token exchange with `client_secret is missing`. |
-| `MICROSOFT_CLIENT_ID` | Microsoft public/native app client ID. |
-| `MICROSOFT_CLIENT_SECRET` | Optional. Leave empty for public/native Microsoft apps. |
-
-## Useful Scripts
-
-| Command | Purpose |
-| --- | --- |
-| `pnpm dev` | Run the Tauri desktop app in development mode. |
-| `pnpm dev:frontend` | Run only the Vite frontend dev server. |
-| `pnpm test` | Run frontend tests with Vitest. |
-| `pnpm build:frontend` | Type-check and build the frontend. |
-| `pnpm build` | Build the desktop app for the current platform. |
-| `pnpm build:windows` | Build the Windows NSIS installer. |
-| `pnpm build:macos` | Build unsigned macOS `.app` and `.dmg` bundles. |
-| `pnpm build:linux` | Build Linux `.AppImage`, `.deb`, and `.rpm` packages. |
-| `cargo test -p pebble-mail` | Run the mail crate tests. |
-| `cargo check` | Check the Rust workspace. |
-
-## Project Structure
-
-```text
-Pebble/
-|-- src/                    React frontend
-|   |-- components/         Shared UI components
-|   |-- features/           Inbox, compose, search, Kanban, settings
-|   |-- hooks/              React hooks and query helpers
-|   |-- lib/                IPC API, i18n, utilities
-|   `-- stores/             Zustand stores
-|-- src-tauri/              Tauri application and IPC commands
-|-- crates/                 Rust workspace crates
-|   |-- pebble-core/        Shared types and errors
-|   |-- pebble-store/       SQLite persistence
-|   |-- pebble-mail/        Mail providers and sync
-|   |-- pebble-search/      Tantivy search index
-|   |-- pebble-crypto/      Credential encryption
-|   |-- pebble-oauth/       OAuth 2.0 and PKCE
-|   |-- pebble-rules/       Rules engine
-|   |-- pebble-translate/   Translation providers
-|   `-- pebble-privacy/     HTML sanitizing and tracker controls
-|-- tests/                  Frontend tests
-`-- site/                   Static project site and screenshots
-```
-
-## Keyboard Shortcuts
+## Keyboard shortcuts
 
 | Shortcut | Action |
 | --- | --- |
-| `J` / `K` | Move through messages |
-| `Enter` | Open the selected message |
+| `J` / `K` | Next / previous message |
+| `Enter` | Open message |
 | `E` | Archive |
-| `S` | Toggle star |
-| `R` | Reply |
-| `A` | Reply all |
-| `F` | Forward |
-| `C` | Compose |
+| `S` | Star |
+| `R` / `A` / `F` | Reply / Reply all / Forward |
+| `C` | New message |
 | `/` | Focus search |
+| `Ctrl+K` | Command palette |
+| `Ctrl+Shift+I` / `Ctrl+Shift+K` | Inbox / Kanban board |
+| `Ctrl+Shift+F` | Search |
 | `T` | Translate selected text |
-| `Ctrl+Shift+T` | Toggle bilingual view |
-| `Esc` | Close, cancel, or go back |
+| `Ctrl+Shift+T` | Bilingual view |
+| `Esc` | Close or go back |
 
-Shortcuts can be reviewed and customized in Settings.
+All shortcuts can be changed in Settings → Shortcuts.
 
 ## Pebble Web
 
-Looking for a self-hosted web version? **[Pebble Web](https://github.com/QingJ01/Pebble-Web)** provides the same features as the desktop app, accessible from any browser via Docker.
+Prefer the browser? **[Pebble Web](https://github.com/QingJ01/Pebble-Web)** is a self-hosted version that runs in Docker and shares Pebble's Rust core and React frontend.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/QingJ01/Pebble-Web/main/docker-compose.yml -o docker-compose.yml && docker compose up -d
 ```
 
-Pebble Web shares the same Rust core crates and React frontend. Deploy it on your own server and access your email anywhere.
-
 ## Status
 
-Pebble is under active development. It is usable for day-to-day testing, but mail clients handle sensitive data and provider behavior varies. Keep backups of important mail, and verify account actions against your provider when testing new builds.
+Pebble is under active development and fine for daily use, but mail clients handle sensitive data and providers behave differently. Keep backups of important mail, and check the [changelog](CHANGELOG.md) before upgrading: some releases migrate the database on first launch (Pebble backs it up first).
 
 ## Contributing
 
-Issues and pull requests are welcome.
-
-For code changes, please keep patches focused and include tests for behavior changes when practical. Before submitting, run the relevant checks:
+Issues and pull requests are welcome. Keep patches focused and add tests for behaviour changes where practical. Before opening a pull request, run:
 
 ```bash
 pnpm test
+pnpm check:i18n
 pnpm build:frontend
-cargo check
+cargo test --workspace
 ```
 
 ## License

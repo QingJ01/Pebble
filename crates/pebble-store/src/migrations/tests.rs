@@ -1562,3 +1562,28 @@ fn v21_large_mailbox_benchmark() {
         mib(db_before)
     );
 }
+
+#[test]
+fn upgrade_reports_progress_and_is_detected_beforehand() {
+    let dir = std::env::temp_dir().join(format!("pebble-progress-{}", pebble_core::new_id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("pebble.db");
+
+    // A brand-new database is not an "upgrade".
+    assert_eq!(pending_migration_from(&path).unwrap(), None);
+    {
+        let conn = Connection::open(&path).unwrap();
+        run_migrations_up_to(&conn, 20).unwrap();
+    }
+    assert_eq!(pending_migration_from(&path).unwrap(), Some(20));
+
+    let conn = Connection::open(&path).unwrap();
+    let mut seen = Vec::new();
+    run_migrations_with_progress(&conn, &mut |p| seen.push(p)).unwrap();
+    let total = CURRENT_VERSION - 20;
+    assert_eq!(seen.last(), Some(&MigrationProgress { done: total, total }));
+    assert!(seen.windows(2).all(|w| w[0].done < w[1].done));
+    drop(conn);
+    assert_eq!(pending_migration_from(&path).unwrap(), None);
+    let _ = std::fs::remove_dir_all(&dir);
+}

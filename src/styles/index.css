@@ -37,10 +37,11 @@
                                canvas/raised, >= 3:1 on chrome/overlay/selected.
                                Don't use it for the only copy of key info on chrome.
      --color-text-disabled     disabled labels (no contrast requirement)
-   Accent (brand orange) — ONLY primary action, unread state, compose FAB
+   Accent (brand orange #d4714e) — primary action, unread state, compose FAB,
+   checked controls and selected choices
      --color-accent            unread dot, decorative brand fill
      --color-accent-strong(-hover/-active)  primary button / FAB fill
-                               (pair with --color-on-accent, >= 4.5:1)
+                               (pair with --color-on-accent)
      --color-accent-text       accent as text/icon on canvas (>= 4.5:1): links
      --color-accent-tint / --color-accent-tint-strong
                                the only two accent tints (replace ad-hoc %)
@@ -50,8 +51,8 @@
                                surfaces incl. selected fills, both themes)
      --color-highlight / --color-on-highlight   search-match <mark>
      --color-control-checked / --color-on-control-checked
-                               checkbox/radio/switch "on" fill (neutral by
-                               decision: orange stays reserved)
+                               checkbox/radio/switch "on" fill (brand orange)
+     --color-button-secondary(-hover/-active)  secondary button fill
      --color-{danger,warning,success,info}       text/icon/border (>= 4.5:1)
      --color-{danger,warning,success,info}-bg    subtle tinted surface
      --color-danger-solid(-hover) / --color-on-danger  destructive button
@@ -161,18 +162,21 @@
   --color-text-disabled: #a6a6a6;
   /* Accent */
   --color-accent: #d4714e;
-  --color-accent-strong: #b5532f;
-  --color-accent-strong-hover: #a44a29;
-  --color-accent-strong-active: #934224;
+  --color-accent-strong: #d4714e;
+  --color-accent-strong-hover: #c5623f;
+  --color-accent-strong-active: #b5582f;
   --color-accent-text: #b5532f;
   --color-accent-tint: color-mix(in srgb, #d4714e 10%, transparent);
   --color-accent-tint-strong: color-mix(in srgb, #d4714e 20%, transparent);
   --color-on-accent: #ffffff;
+  --color-button-secondary: #efeeeb;
+  --color-button-secondary-hover: #e6e4e0;
+  --color-button-secondary-active: #dcdad5;
   /* Focus, highlight, checked controls */
   --color-focus-ring: #2563eb;
   --color-highlight: #fde68a;
   --color-on-highlight: #1a1a1a;
-  --color-control-checked: #2b2b2b;
+  --color-control-checked: #d4714e;
   --color-on-control-checked: #ffffff;
   /* Status */
   --color-danger: #b42318;
@@ -244,19 +248,22 @@
   --color-text-disabled: #5e5e5e;
   /* Accent */
   --color-accent: #d4714e;
-  --color-accent-strong: #b5532f;
-  --color-accent-strong-hover: #c25d37;
-  --color-accent-strong-active: #a44a29;
+  --color-accent-strong: #d4714e;
+  --color-accent-strong-hover: #dd8463;
+  --color-accent-strong-active: #c5623f;
   --color-accent-text: #e08a68;
   --color-accent-tint: color-mix(in srgb, #d4714e 16%, transparent);
   --color-accent-tint-strong: color-mix(in srgb, #d4714e 28%, transparent);
   --color-on-accent: #ffffff;
+  --color-button-secondary: #333333;
+  --color-button-secondary-hover: #3b3b3b;
+  --color-button-secondary-active: #444444;
   /* Focus, highlight, checked controls */
   --color-focus-ring: #60a5fa;
   --color-highlight: color-mix(in srgb, #facc15 34%, transparent);
   --color-on-highlight: #f5f5f5;
-  --color-control-checked: #d9d9d9;
-  --color-on-control-checked: #1a1a1a;
+  --color-control-checked: #d4714e;
+  --color-on-control-checked: #ffffff;
   /* Status */
   --color-danger: #f87171;
   --color-danger-bg: color-mix(in srgb, #f87171 12%, transparent);
@@ -391,8 +398,8 @@ textarea::placeholder {
   color: var(--color-text-tertiary);
 }
 
-/* Checked controls are neutral (orange is reserved for primary action, unread
-   and the compose FAB). Custom-drawn: .checkbox / .radio (Primitives). */
+/* Checked controls use the brand orange. Custom-drawn: .checkbox / .radio
+   (Primitives). */
 input[type="checkbox"],
 input[type="radio"] {
   accent-color: var(--color-control-checked);
@@ -502,7 +509,13 @@ option {
   overflow-y: auto;
 }
 .settings-nav .sidebar-btn { color: var(--color-text-secondary); }
-.settings-nav .sidebar-btn.is-active { color: var(--color-text-primary); font-weight: var(--weight-medium); }
+.settings-nav .sidebar-btn.is-active,
+.settings-nav .sidebar-btn.is-active:hover {
+  color: var(--color-text-primary);
+  font-weight: var(--weight-medium);
+  /* A touch lighter than the sidebar's selected fill. */
+  background: color-mix(in srgb, var(--color-fill-selected) 70%, transparent);
+}
 
 .settings-panel {
   flex: 1;
@@ -617,8 +630,9 @@ option {
 }
 .option-card:hover:where(:not(:disabled)) { border-color: var(--color-border-strong); }
 .option-card[aria-pressed="true"] {
-  border-color: var(--color-text-secondary);
-  background: var(--color-fill-selected);
+  border-color: var(--color-accent);
+  background: var(--color-accent-tint);
+  box-shadow: inset 0 0 0 1px var(--color-accent);
 }
 .option-card:disabled { cursor: not-allowed; opacity: var(--opacity-disabled); }
 .option-card__title {
@@ -2290,22 +2304,21 @@ textarea:focus-visible {
   border-color: var(--color-accent-strong-active);
 }
 
-/* Secondary: raised surface + border; hover/active layer a fill over it so
-   the button stays opaque on any surface. */
+/* Secondary: a soft, opaque neutral fill (no outline), so rows of buttons
+   read as one quiet group next to the orange primary. */
 .btn--secondary,
 .icon-btn--secondary {
-  background: var(--color-surface-raised);
-  border-color: var(--color-border);
+  background: var(--color-button-secondary);
+  border-color: transparent;
   color: var(--color-text-primary);
 }
 .btn--secondary:where(:not(:disabled, [aria-disabled="true"])):hover,
 .icon-btn--secondary:where(:not(:disabled, [aria-disabled="true"])):hover {
-  background: linear-gradient(var(--color-fill-hover), var(--color-fill-hover)), var(--color-surface-raised);
-  border-color: var(--color-border-strong);
+  background: var(--color-button-secondary-hover);
 }
 .btn--secondary:where(:not(:disabled, [aria-disabled="true"])):active,
 .icon-btn--secondary:where(:not(:disabled, [aria-disabled="true"])):active {
-  background: linear-gradient(var(--color-fill-pressed), var(--color-fill-pressed)), var(--color-surface-raised);
+  background: var(--color-button-secondary-active);
 }
 
 .btn--ghost,
