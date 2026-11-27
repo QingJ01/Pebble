@@ -120,6 +120,13 @@ yay -S pebble-bin
 paru -S pebble-bin
 ```
 
+On Fedora and other rpm-based distributions, older releases were packaged as `pebble`, a name Fedora also uses for Let's Encrypt's ACME test server, so `dnf upgrade` could replace Pebble with it ([#114](https://github.com/QingJ01/Pebble/issues/114)). The package is now `pebble-mail`. To switch, install the new rpm, then remove the old package; your mail and settings are kept:
+
+```bash
+sudo dnf install ./pebble-mail-<version>-1.x86_64.rpm
+sudo dnf remove pebble
+```
+
 ### Prerequisites
 
 - Rust stable

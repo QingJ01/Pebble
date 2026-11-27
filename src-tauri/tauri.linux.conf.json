@@ -3,9 +3,6 @@
   "mainBinaryName": "pebble-mail",
   "bundle": {
     "linux": {
-      "rpm": {
-        "obsoletes": ["pebble < 1"]
-      },
       "deb": {
         "replaces": ["pebble (<< 1)"],
         "conflicts": ["pebble (<< 1)"]
