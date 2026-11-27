@@ -223,10 +223,11 @@ impl SyncWorker {
     pub async fn initial_sync(&self) -> Result<()> {
         info!("Starting initial sync for account {}", self.base.account_id);
 
-        let selected_remote_ids = self
-            .base
-            .store
-            .get_sync_state(&self.base.account_id)?
+        let sync_state = self.base.store.get_sync_state(&self.base.account_id)?;
+        let defaults_pending = sync_state
+            .as_ref()
+            .is_some_and(|state| state.imap_default_folders_pending);
+        let mut selected_remote_ids = sync_state
             .and_then(|state| state.selected_imap_folder_remote_ids)
             .map(|ids| ids.into_iter().collect::<HashSet<_>>());
 
@@ -235,6 +236,32 @@ impl SyncWorker {
             .inner()
             .list_folders(&self.base.account_id)
             .await?;
+
+        if defaults_pending {
+            let defaults = default_imap_folder_remote_ids(&discovered_folders);
+            let mut saved_selection = None;
+            // Re-check the flag here: the user may have saved a selection while LIST ran.
+            self.base
+                .store
+                .update_sync_state(&self.base.account_id, |state| {
+                    if state.imap_default_folders_pending {
+                        if let Some(ids) = state.selected_imap_folder_remote_ids.as_mut() {
+                            for id in &defaults {
+                                if !ids.contains(id) {
+                                    ids.push(id.clone());
+                                }
+                            }
+                        }
+                        state.imap_default_folders_pending = false;
+                    }
+                    saved_selection = state.selected_imap_folder_remote_ids.clone();
+                })?;
+            selected_remote_ids = saved_selection.map(|ids| ids.into_iter().collect());
+            info!(
+                "Applied default IMAP folders for new account {}",
+                self.base.account_id
+            );
+        }
         let remote_folders: Vec<_> = discovered_folders
             .into_iter()
             .filter(|folder| {

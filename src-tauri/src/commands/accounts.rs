@@ -438,11 +438,12 @@ pub async fn add_account(
             s.provider = Some(provider_slug.to_string());
             s.sync_range_days = request.sync_range_days;
             s.sync_since = pebble_store::accounts::sync_range_cutoff(request.sync_range_days, now);
-            // New IMAP accounts start with Inbox only. Users can opt into
-            // additional mailboxes from the account editor after the account
-            // exists and its saved credentials can be used for IMAP LIST.
+            // New IMAP accounts start with Inbox; the first sync adds the
+            // standard folders (Sent, Drafts…) once IMAP LIST can find them.
+            // Users can change the selection from the account editor.
             if provider == ProviderType::Imap {
                 s.selected_imap_folder_remote_ids = Some(Vec::new());
+                s.imap_default_folders_pending = true;
             }
         })?;
         Ok(())
