@@ -509,10 +509,12 @@ option {
   overflow-y: auto;
 }
 .settings-nav .sidebar-btn { color: var(--color-text-secondary); }
-.settings-nav .sidebar-btn.is-active {
+.settings-nav .sidebar-btn.is-active,
+.settings-nav .sidebar-btn.is-active:hover {
   color: var(--color-text-primary);
   font-weight: var(--weight-medium);
-  box-shadow: inset 3px 0 0 var(--color-accent);
+  /* A touch lighter than the sidebar's selected fill. */
+  background: color-mix(in srgb, var(--color-fill-selected) 70%, transparent);
 }
 
 .settings-panel {
