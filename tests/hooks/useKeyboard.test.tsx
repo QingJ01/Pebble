@@ -5,6 +5,7 @@ import { useMailStore } from "../../src/stores/mail.store";
 import { useUIStore } from "../../src/stores/ui.store";
 import { useToastStore } from "../../src/stores/toast.store";
 import { useCommandStore } from "../../src/stores/command.store";
+import { useComposeStore } from "../../src/stores/compose.store";
 
 const mocks = vi.hoisted(() => ({
   queryClient: {
@@ -376,12 +377,76 @@ describe("delete and vim keys", () => {
     expect(mocks.runMailAction).not.toHaveBeenCalled();
   });
 
-  it("reads printable vim keys as typed: Caps Lock G, AltGr ?", () => {
+  it("cases letters by Shift, so Caps Lock keeps vim keys working, and reads AltGr ?", async () => {
     renderHook(() => useKeyboard());
+    // Caps Lock on: plain keys arrive upper-case without Shift
+    press(document.body, "D");
+    press(document.body, "D");
+    await waitFor(() => expect(mocks.runMailAction).toHaveBeenCalledTimes(1));
     press(document.body, "G");
+    press(document.body, "G");
+    expect(selected()).toBe("m0");
+    // Caps Lock on + Shift: lower-case key, still G
+    press(document.body, "g", { shiftKey: true });
     expect(selected()).toBe("m24");
     press(document.body, "?", { ctrlKey: true, altKey: true });
     expect(useUIStore.getState().activeView).toBe("settings");
+  });
+
+  it("doesn't reopen the trashed message after a failure once the reader moved on", async () => {
+    renderHook(() => useKeyboard());
+    press(document.body, "Delete");
+    await waitFor(() => expect(mocks.runMailAction).toHaveBeenCalledTimes(1));
+    const { onRemoved, onFailed } = mocks.runMailAction.mock.calls[0][3];
+    onRemoved(["m5"]);
+    expect(selected()).toBe("m6");
+    useMailStore.setState({ selectedMessageId: "m9" });
+    onFailed();
+    expect(selected()).toBe("m9");
+    useMailStore.setState({ selectedMessageId: "m6", activeFolderId: "sent-1" });
+    onFailed();
+    expect(selected()).toBe("m6");
+    useMailStore.setState({ activeFolderId: "inbox-1" });
+    onFailed();
+    expect(selected()).toBe("m5");
+  });
+
+  it("only goes to a combined folder that some account has", () => {
+    useMailStore.setState({ activeAccountId: null });
+    renderHook(() => useKeyboard());
+    press(document.body, "g");
+    press(document.body, "a");
+    expect(useMailStore.getState().activeFolderId).toBe("inbox-1");
+    press(document.body, "g");
+    press(document.body, "t");
+    expect(useMailStore.getState().activeFolderId).toBe("all:trash");
+  });
+
+  it("? keeps the remembered settings tab when leaving Compose is cancelled", () => {
+    useUIStore.setState({ activeView: "compose", settingsTab: "general" });
+    useComposeStore.setState({ composeDirty: true, showComposeLeaveConfirm: false });
+    renderHook(() => useKeyboard());
+    press(document.body, "?");
+    expect(useComposeStore.getState().showComposeLeaveConfirm).toBe(true);
+    useComposeStore.getState().cancelCloseCompose();
+    expect(useUIStore.getState().settingsTab).toBe("general");
+    expect(useUIStore.getState().activeView).toBe("compose");
+    useComposeStore.setState({ composeDirty: false });
+  });
+
+  it("ignores keys while mail is being dragged", () => {
+    document.body.classList.add("is-dragging-mail");
+    try {
+      renderHook(() => useKeyboard());
+      press(document.body, "Delete");
+      press(document.body, "d");
+      press(document.body, "d");
+      press(document.body, "x");
+      expect(mocks.runMailAction).not.toHaveBeenCalled();
+      expect(useMailStore.getState().selectedMessageIds.size).toBe(0);
+    } finally {
+      document.body.classList.remove("is-dragging-mail");
+    }
   });
 
   it("u runs the latest Undo toast once, then reports nothing to undo", () => {

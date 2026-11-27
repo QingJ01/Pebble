@@ -4,7 +4,8 @@
  * These sit on top of the user's rebindable shortcuts: a user binding for the
  * same key always wins. Multi-key sequences are written as space-separated,
  * keys. Printable keys are written as the character typed (`KeyboardEvent.key`:
- * "G", "?"), so Caps Lock and AltGr layouts work; others use the lower-cased
+ * "?", so AltGr layouts work), with letters cased by Shift ("G" = Shift+g, also
+ * under Caps Lock); others use the lower-cased
  * `eventToKeyString` format ("ctrl+d").
  */
 export const VIM_SEQUENCE_TIMEOUT_MS = 1000;

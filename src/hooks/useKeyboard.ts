@@ -119,6 +119,7 @@ async function trashSelected(messageId: string) {
   const target: MailActionTarget | undefined =
     findCachedMessage(queryClient, (m) => m.id === messageId) ?? (await getMessage(messageId).catch(() => null)) ?? undefined;
   if (!target) return;
+  const folderId = useMailStore.getState().activeFolderId;
   await runMailAction(queryClient, "trash", [target], {
     confirm: confirmTrash,
     onRemoved: () => {
@@ -126,7 +127,12 @@ async function trashSelected(messageId: string) {
         useMailStore.getState().setSelectedMessage(neighbour?.id ?? null);
       }
     },
-    onFailed: () => useMailStore.getState().setSelectedMessage(messageId),
+    onFailed: () => {
+      // Bring the message back only if the reader is still where we left them
+      const state = useMailStore.getState();
+      const untouched = state.selectedMessageId === null || state.selectedMessageId === (neighbour?.id ?? null);
+      if (state.activeFolderId === folderId && untouched) state.setSelectedMessage(messageId);
+    },
   });
 }
 
@@ -188,9 +194,10 @@ function toggleCurrentInSelection() {
  */
 function goToFolderRole(role: FolderRole) {
   const { activeAccountId } = useMailStore.getState();
+  const folders = getCachedFolders();
   const folderId = activeAccountId
-    ? getCachedFolders().find((f) => f.account_id === activeAccountId && f.role === role)?.id
-    : allAccountsFolderId(role);
+    ? folders.find((f) => f.account_id === activeAccountId && f.role === role)?.id
+    : folders.some((f) => f.role === role) ? allAccountsFolderId(role) : undefined;
   if (!folderId) return;
 
   if (isComposeDirty()) {
@@ -399,10 +406,16 @@ function runAction(actionId: string) {
     case "undo":
       undoLastAction();
       break;
-    case "show-shortcuts":
-      useUIStore.getState().setSettingsTab("shortcuts");
+    case "show-shortcuts": {
+      const openShortcuts = () => useUIStore.getState().setSettingsTab("shortcuts");
+      if (isComposeDirty()) {
+        useComposeStore.setState({ showComposeLeaveConfirm: true, pendingView: "settings", pendingNavigation: openShortcuts });
+        break;
+      }
       useUIStore.getState().setActiveView("settings");
+      openShortcuts();
       break;
+    }
     case "go-inbox":
       goToFolderRole("inbox");
       break;
@@ -463,6 +476,8 @@ export function useKeyboard() {
       // Any other key ends a pending sequence, including keys handled elsewhere
       const previousKey = pendingKey;
       clearPending();
+      // Mail is being dragged (lib/mailDrag): don't act on it mid-drag
+      if (document.body.classList.contains("is-dragging-mail")) return;
 
       // Modal overlays own the keyboard. Non-modal popovers don't block global
       // shortcuts; ones registered on the overlay stack get Escape first (the
@@ -495,8 +510,10 @@ export function useKeyboard() {
       if (isInput || (!hasPrimaryModifier && !allowsPlainShortcut(e.target, e.key))) return;
 
       if (useShortcutStore.getState().vimMode) {
-        // The typed character for printable keys (Caps Lock G, AltGr ?), else Ctrl+D style
-        const vimKey = e.key.length === 1 && !e.metaKey && e.ctrlKey === e.altKey ? e.key : keyString;
+        // The typed character for printable keys (AltGr ?), else Ctrl+D style. Letters
+        // follow Shift, not their case, so Caps Lock doesn't turn d into D.
+        const typed = /^[a-z]$/i.test(e.key) ? (e.shiftKey ? e.key.toUpperCase() : e.key.toLowerCase()) : e.key;
+        const vimKey = e.key.length === 1 && !e.metaKey && e.ctrlKey === e.altKey ? typed : keyString;
 
         if (previousKey) {
           const sequenceAction = VIM_BINDINGS[`${previousKey} ${vimKey}`];

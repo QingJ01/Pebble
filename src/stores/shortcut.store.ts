@@ -58,7 +58,12 @@ function loadBindings(): Record<string, string> {
   try {
     const saved = profileLocalStorage.getItem(STORAGE_KEY);
     if (saved) {
-      const parsed = JSON.parse(saved) as Record<string, string>;
+      const raw: unknown = JSON.parse(saved);
+      if (!raw || typeof raw !== "object") return { ...DEFAULT_BINDINGS };
+      // Skip anything that isn't a string rather than losing every saved binding
+      const parsed = Object.fromEntries(
+        Object.entries(raw).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+      );
       // A default added after the user saved their shortcuts must not take a
       // key they already use (the later action would win it): leave it unset.
       const used = new Set(Object.values(parsed).map((keys) => keys.toLowerCase()));

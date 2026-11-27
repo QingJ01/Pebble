@@ -29,6 +29,14 @@ describe("shortcut store defaults", () => {
     expect(useShortcutStore.getState().bindings["delete-message"]).toBe("X");
   });
 
+  it("keeps valid saved bindings when one entry isn't a string", async () => {
+    profileLocalStorage.setItem("pebble-shortcuts", JSON.stringify({ "archive-message": "Delete", "reply": 42 }));
+    const { useShortcutStore } = await loadStore();
+    const { bindings } = useShortcutStore.getState();
+    expect(bindings["archive-message"]).toBe("Delete");
+    expect(bindings["reply"]).toBe("R");
+  });
+
   it("uses Backspace (the Mac delete key) for delete on macOS", async () => {
     Object.defineProperty(Navigator.prototype, "platform", { configurable: true, get: () => "MacIntel" });
     const { DEFAULT_BINDINGS } = await loadStore();
