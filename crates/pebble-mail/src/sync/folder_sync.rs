@@ -239,24 +239,26 @@ impl SyncWorker {
 
         if defaults_pending {
             let defaults = default_imap_folder_remote_ids(&discovered_folders);
-            if let Some(selected) = selected_remote_ids.as_mut() {
-                selected.extend(defaults.iter().cloned());
-            }
+            let mut saved_selection = None;
+            // Re-check the flag here: the user may have saved a selection while LIST ran.
             self.base
                 .store
                 .update_sync_state(&self.base.account_id, |state| {
-                    if let Some(ids) = state.selected_imap_folder_remote_ids.as_mut() {
-                        for id in &defaults {
-                            if !ids.contains(id) {
-                                ids.push(id.clone());
+                    if state.imap_default_folders_pending {
+                        if let Some(ids) = state.selected_imap_folder_remote_ids.as_mut() {
+                            for id in &defaults {
+                                if !ids.contains(id) {
+                                    ids.push(id.clone());
+                                }
                             }
                         }
+                        state.imap_default_folders_pending = false;
                     }
-                    state.imap_default_folders_pending = false;
+                    saved_selection = state.selected_imap_folder_remote_ids.clone();
                 })?;
+            selected_remote_ids = saved_selection.map(|ids| ids.into_iter().collect());
             info!(
-                "Added {} default IMAP folders for new account {}",
-                defaults.len(),
+                "Applied default IMAP folders for new account {}",
                 self.base.account_id
             );
         }
