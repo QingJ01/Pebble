@@ -14,11 +14,13 @@ describe("scheduled-send native exit wiring", () => {
     expect(menu).not.toContain("PredefinedMenuItem::quit(");
     expect(menu).toContain("app.on_menu_event(");
     expect(menu).toContain("app.exit(0)");
-    // Both run in finish_setup (after the database is open), menu last.
+    // The guarded menu goes in before any database work (so Cmd-Q is
+    // cancellable during a background upgrade); send controls follow once
+    // the database is open.
+    const menuSetup = source.indexOf("setup_application_menu(app.handle())?;");
+    expect(menuSetup).toBeGreaterThan(-1);
+    expect(menuSetup).toBeLessThan(source.indexOf("pending_migration_from(&db_path)"));
     expect(source.indexOf("    send_controls::setup(app)?;")).toBeGreaterThan(-1);
-    expect(source.indexOf("    setup_application_menu(app)?;")).toBeGreaterThan(
-      source.indexOf("    send_controls::setup(app)?;"),
-    );
   });
 
   it("guards explicit exits and non-background window close before destruction", () => {

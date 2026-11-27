@@ -388,8 +388,6 @@ fn finish_setup(
         attachments_dir,
     ));
     send_controls::setup(app)?;
-    #[cfg(target_os = "macos")]
-    setup_application_menu(app)?;
     log_startup_phase(startup_start, &mut startup_phase, "app state registered");
 
     // Start snooze watcher on the Tauri async runtime
@@ -683,6 +681,11 @@ pub fn run() {
                 app.handle(),
                 mailto_urls_from_args(&std::env::args().collect::<Vec<_>>()),
             );
+            // macOS: replace the default menu (whose predefined Quit bypasses
+            // the cancellable exit) before any database work, so Cmd-Q is
+            // guarded during a background upgrade too.
+            #[cfg(target_os = "macos")]
+            setup_application_menu(app.handle())?;
 
             let db_path = get_db_path(&app_data)?;
             tracing::info!("Database path: {}", db_path.display());
