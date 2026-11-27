@@ -568,7 +568,8 @@
       "select": "选择邮件（之后 d d、Delete 和 e 作用于所选邮件）",
       "undo": "撤销上一次删除或归档",
       "help": "显示键盘快捷键",
-      "nothingToUndo": "没有可撤销的操作"
+      "nothingToUndo": "没有可撤销的操作",
+      "blocked": "{{keys}} 已被设为「{{action}}」的快捷键，以它开头的 vim 按键将不起作用。"
     },
     "toggleView": "切换收件箱/看板视图",
     "moveToKanban": "加入看板",

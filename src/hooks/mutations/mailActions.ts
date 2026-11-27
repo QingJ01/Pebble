@@ -548,6 +548,7 @@ export function showUndoableToast(client: QueryClient, message: string, moves: U
   return useToastStore.getState().addToast({
     type: "success",
     message,
+    undoable: moves.length > 0,
     action: moves.length > 0
       ? {
           label: t("common.undo", "Undo"),

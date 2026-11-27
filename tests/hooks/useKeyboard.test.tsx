@@ -52,6 +52,8 @@ vi.mock("../../src/lib/i18n", () => ({
 }));
 
 import { useKeyboard } from "../../src/hooks/useKeyboard";
+import { clearActiveMailList, setActiveMailList } from "../../src/lib/activeMailList";
+import { BATCH_MOVE_EVENT } from "../../src/lib/vimKeys";
 
 function press(target: EventTarget, key: string, init: KeyboardEventInit = {}) {
   const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init });
@@ -206,9 +208,11 @@ describe("delete and vim keys", () => {
     useToastStore.setState({ toasts: [] });
     useUIStore.setState({ activeView: "inbox" });
     useCommandStore.getState().close();
+    setActiveMailList({ messages: many as never, threads: null });
   });
 
   afterEach(() => {
+    clearActiveMailList();
     document.body.innerHTML = "";
     mocks.queryClient.getQueriesData.mockImplementation(() => []);
   });
@@ -293,35 +297,97 @@ describe("delete and vim keys", () => {
     expect(useMailStore.getState().activeFolderId).toBe("all:inbox");
   });
 
-  it("x builds a bulk selection that dd and e act on, and Escape leaves it", async () => {
+  it("x builds a bulk selection that dd, Delete and e hand to the batch toolbar, and Escape leaves it", () => {
+    const requests: unknown[] = [];
+    const onBatchMove = (event: Event) => requests.push((event as CustomEvent).detail);
+    document.addEventListener(BATCH_MOVE_EVENT, onBatchMove);
+    try {
+      renderHook(() => useKeyboard());
+      press(document.body, "x");
+      press(document.body, "j");
+      press(document.body, "x");
+      expect([...useMailStore.getState().selectedMessageIds].sort()).toEqual(["m5", "m6"]);
+
+      press(document.body, "d");
+      press(document.body, "d");
+      press(document.body, "Delete");
+      press(document.body, "e");
+      expect(requests).toEqual(["trash", "trash", "archive"]);
+      expect(mocks.runMailAction).not.toHaveBeenCalled();
+
+      press(document.body, "Escape");
+      expect(useMailStore.getState().batchMode).toBe(false);
+    } finally {
+      document.removeEventListener(BATCH_MOVE_EVENT, onBatchMove);
+    }
+  });
+
+  it("leaves bulk selections and Escape to the toolbar when vim keys are off", async () => {
+    const requests: unknown[] = [];
+    const onBatchMove = (event: Event) => requests.push((event as CustomEvent).detail);
+    document.addEventListener(BATCH_MOVE_EVENT, onBatchMove);
+    try {
+      useShortcutStore.setState({ vimMode: false });
+      useMailStore.setState({ batchMode: true, selectedMessageIds: new Set(["m5", "m6"]) });
+      renderHook(() => useKeyboard());
+      press(document.body, "Escape");
+      expect(useMailStore.getState().batchMode).toBe(true);
+      press(document.body, "Delete");
+      expect(requests).toEqual([]);
+      await waitFor(() => expect(mocks.runMailAction).toHaveBeenCalledWith(
+        mocks.queryClient, "trash", [expect.objectContaining({ id: "m5" })], expect.anything(),
+      ));
+    } finally {
+      document.removeEventListener(BATCH_MOVE_EVENT, onBatchMove);
+    }
+  });
+
+  it.each(["kanban", "settings", "compose"] as const)("Delete, dd, e and x do nothing in %s", (view) => {
+    useUIStore.setState({ activeView: view });
     renderHook(() => useKeyboard());
-    press(document.body, "x");
-    press(document.body, "j");
-    press(document.body, "x");
-    expect([...useMailStore.getState().selectedMessageIds].sort()).toEqual(["m5", "m6"]);
-
+    press(document.body, "Delete");
     press(document.body, "d");
     press(document.body, "d");
-    await waitFor(() => expect(mocks.runMailAction).toHaveBeenLastCalledWith(
-      mocks.queryClient, "trash", [expect.objectContaining({ id: "m5" }), expect.objectContaining({ id: "m6" })],
-      expect.objectContaining({ confirm: expect.any(Function) }),
-    ));
-    await waitFor(() => expect(useMailStore.getState().selectedMessageIds.size).toBe(0));
-
-    press(document.body, "x");
     press(document.body, "e");
-    await waitFor(() => expect(mocks.runMailAction).toHaveBeenLastCalledWith(
-      mocks.queryClient, "archive", [expect.objectContaining({ id: "m6" })], expect.anything(),
-    ));
-
     press(document.body, "x");
-    press(document.body, "Escape");
-    expect(useMailStore.getState().batchMode).toBe(false);
+    expect(mocks.runMailAction).not.toHaveBeenCalled();
+    expect(useMailStore.getState().selectedMessageIds.size).toBe(0);
+  });
+
+  it("ignores key repeat for Delete, dd and e", async () => {
+    renderHook(() => useKeyboard());
+    press(document.body, "Delete");
+    press(document.body, "Delete", { repeat: true });
+    press(document.body, "Delete", { repeat: true });
+    press(document.body, "e", { repeat: true });
+    press(document.body, "d");
+    press(document.body, "d", { repeat: true });
+    await waitFor(() => expect(mocks.runMailAction).toHaveBeenCalledTimes(1));
+  });
+
+  it("drops a pending d when a key in between is handled elsewhere", () => {
+    renderHook(() => useKeyboard());
+    const row = document.createElement("div");
+    row.addEventListener("keydown", (event) => event.preventDefault());
+    document.body.appendChild(row);
+    press(document.body, "d");
+    press(row, "ArrowDown");
+    press(document.body, "d");
+    expect(mocks.runMailAction).not.toHaveBeenCalled();
+  });
+
+  it("reads printable vim keys as typed: Caps Lock G, AltGr ?", () => {
+    renderHook(() => useKeyboard());
+    press(document.body, "G");
+    expect(selected()).toBe("m24");
+    press(document.body, "?", { ctrlKey: true, altKey: true });
+    expect(useUIStore.getState().activeView).toBe("settings");
   });
 
   it("u runs the latest Undo toast once, then reports nothing to undo", () => {
     const undo = vi.fn();
-    useToastStore.getState().addToast({ message: "Moved to Trash", type: "success", action: { label: "Undo", onClick: undo } });
+    useToastStore.getState().addToast({ message: "Retry?", type: "error", action: { label: "Retry", onClick: vi.fn() } });
+    useToastStore.getState().addToast({ message: "Moved to Trash", type: "success", undoable: true, action: { label: "Undo", onClick: undo } });
     renderHook(() => useKeyboard());
     press(document.body, "u");
     expect(undo).toHaveBeenCalledTimes(1);

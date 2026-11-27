@@ -5,7 +5,7 @@ import { formatShortcut, useShortcutStore } from "@/stores/shortcut.store";
 import { eventToKeyString } from "@/hooks/useKeyboard";
 import Button from "@/components/ui/Button";
 import Checkbox from "@/components/ui/Checkbox";
-import { VIM_HELP } from "@/lib/vimKeys";
+import { VIM_FIRST_KEYS_AS_BINDINGS, VIM_HELP } from "@/lib/vimKeys";
 import { SettingsList, SettingsListRow, SettingsNotice, SettingsSection } from "./SettingsLayout";
 
 const ACTION_I18N_MAP: Record<string, string> = {
@@ -62,6 +62,16 @@ function VimKeysList() {
   const { t } = useTranslation();
   const vimMode = useShortcutStore((s) => s.vimMode);
   const setVimMode = useShortcutStore((s) => s.setVimMode);
+  const bindings = useShortcutStore((s) => s.bindings);
+  const blocking = Object.entries(bindings).filter(
+    ([, keys]) => keys && VIM_FIRST_KEYS_AS_BINDINGS.has(keys.toLowerCase()),
+  );
+  const keysFor = (row: (typeof VIM_HELP)[number]) =>
+    row.actions
+      ? row.actions.map((action) => formatShortcut(bindings[action] ?? "")).join(" / ")
+      : row.shortcuts
+        ? row.shortcuts.map((keys) => formatShortcut(keys)).join(" / ")
+        : row.keys;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
       <h4 className="settings-subheading">{t("shortcuts.vim.title", "Vim keys")}</h4>
@@ -74,13 +84,23 @@ function VimKeysList() {
               label={t("shortcuts.vim.enable", "Enable vim keys")}
             />
           }
-          meta={t("shortcuts.vim.description", "Press sequences like d d or g i within one second. Your own shortcuts take priority.")}
+          meta={t("shortcuts.vim.description", "Press sequences like d d or g i within one second. Your own shortcuts above take priority.")}
         />
+        {vimMode && blocking.map(([action, keys]) => (
+          <SettingsListRow
+            key={`conflict-${action}`}
+            title={t("shortcuts.vim.blocked", {
+              action: t(ACTION_I18N_MAP[action] ?? action),
+              keys: formatShortcut(keys),
+              defaultValue: "{{keys}} is your shortcut for {{action}}, so vim keys starting with it won't work.",
+            })}
+          />
+        ))}
         {vimMode && VIM_HELP.map((row) => (
           <SettingsListRow
-            key={row.keys}
+            key={row.labelKey}
             title={t(row.labelKey, row.fallback)}
-            actions={<kbd className="settings-kbd">{row.keys}</kbd>}
+            actions={<kbd className="settings-kbd">{keysFor(row)}</kbd>}
           />
         ))}
       </SettingsList>

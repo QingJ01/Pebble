@@ -14,7 +14,7 @@ import { getActiveMessages, getActiveThreads } from "@/lib/activeMailList";
 import { runMailAction, trashConfirmCopy, type MailActionTarget } from "@/hooks/mutations/mailActions";
 import { hasModalOverlay, hasOverlay } from "@/lib/overlayStack";
 import { allAccountsFolderId, type FolderRole } from "@/lib/folderAggregation";
-import { VIM_BINDINGS, VIM_PAGE_STEP, VIM_PREFIXES, VIM_SEQUENCE_TIMEOUT_MS } from "@/lib/vimKeys";
+import { BATCH_MOVE_EVENT, VIM_BINDINGS, VIM_PAGE_STEP, VIM_PREFIXES, VIM_SEQUENCE_TIMEOUT_MS } from "@/lib/vimKeys";
 import i18n from "@/lib/i18n";
 
 export { eventToKeyString };
@@ -94,28 +94,17 @@ async function archiveSelected(messageId: string) {
 const confirmTrash = (plan: Parameters<typeof trashConfirmCopy>[0]) =>
   useConfirmStore.getState().confirm({ ...trashConfirmCopy(plan), destructive: true });
 
-/** Selected messages in bulk-selection mode, or null when nothing is selected */
-function bulkTargets(): MailActionTarget[] | null {
-  const { batchMode, selectedMessageIds } = useMailStore.getState();
-  if (!batchMode || selectedMessageIds.size === 0) return null;
-  const messages = getCachedMessages();
-  return messages.filter((m) => selectedMessageIds.has(m.id));
-}
+/** Actions on the selected message(s); only while the mail list is on screen */
+const MAIL_LIST_ACTIONS = new Set(["archive-message", "delete-message", "toggle-select"]);
+/** Holding the key down must not remove message after message */
+const NO_REPEAT_ACTIONS = new Set(["archive-message", "delete-message"]);
 
-/** dd / Delete / e on a bulk selection: same action and confirmation as the batch toolbar */
-async function runBulkAction(kind: "archive" | "trash", targets: MailActionTarget[]) {
-  const result = await runMailAction(queryClient, kind, targets, {
-    confirm: confirmTrash,
-    onRemoved: (ids) => {
-      const current = useMailStore.getState().selectedMessageId;
-      if (current && ids.includes(current)) useMailStore.getState().setSelectedMessage(null);
-    },
-  });
-  // Keep the messages that failed selected so they can be retried
-  if (result.ok) {
-    if (result.failedIds?.length) useMailStore.getState().selectAllMessages(result.failedIds);
-    else useMailStore.getState().clearSelection();
-  }
+/** Vim keys only: e / Delete / dd act on the bulk selection when there is one */
+function runOnBulkSelection(kind: "archive" | "trash"): boolean {
+  const { batchMode, selectedMessageIds } = useMailStore.getState();
+  if (!useShortcutStore.getState().vimMode || !batchMode || selectedMessageIds.size === 0) return false;
+  document.dispatchEvent(new CustomEvent(BATCH_MOVE_EVENT, { detail: kind }));
+  return true;
 }
 
 /**
@@ -124,7 +113,7 @@ async function runBulkAction(kind: "archive" | "trash", targets: MailActionTarge
  * be undone (already in Trash, local-only drafts) asks first.
  */
 async function trashSelected(messageId: string) {
-  const messages = getCachedMessages();
+  const messages = getActiveMessages() ?? [];
   const idx = messages.findIndex((m) => m.id === messageId);
   const neighbour = idx >= 0 ? (messages[idx + 1] ?? messages[idx - 1]) : undefined;
   const target: MailActionTarget | undefined =
@@ -143,8 +132,7 @@ async function trashSelected(messageId: string) {
 
 /** u: run the Undo of the most recent toast that offers one */
 function undoLastAction() {
-  const undoLabel = i18n.t("common.undo", "Undo");
-  const toast = [...useToastStore.getState().toasts].reverse().find((t) => !t.exiting && t.action?.label === undoLabel);
+  const toast = [...useToastStore.getState().toasts].reverse().find((t) => t.undoable && !t.exiting);
   if (!toast?.action) {
     useToastStore.getState().addToast({
       message: i18n.t("shortcuts.vim.nothingToUndo", "Nothing to undo"),
@@ -219,6 +207,7 @@ function goToFolderRole(role: FolderRole) {
 
 /** Execute a shortcut action. Shared by rebindable shortcuts and vim keys. */
 function runAction(actionId: string) {
+  if (MAIL_LIST_ACTIONS.has(actionId) && useUIStore.getState().activeView !== "inbox") return;
   switch (actionId) {
     case "close-modal":
       if (useCommandStore.getState().isOpen) {
@@ -227,7 +216,11 @@ function runAction(actionId: string) {
         useComposeStore.getState().closeCompose();
       } else if (useUIStore.getState().activeView === "search") {
         useUIStore.getState().setActiveView("inbox");
-      } else if (useMailStore.getState().batchMode) {
+      } else if (
+        useShortcutStore.getState().vimMode
+        && useUIStore.getState().activeView === "inbox"
+        && useMailStore.getState().batchMode
+      ) {
         useMailStore.getState().toggleBatchMode();
       }
       break;
@@ -269,11 +262,7 @@ function runAction(actionId: string) {
       break;
     }
     case "archive-message": {
-      const bulk = bulkTargets();
-      if (bulk) {
-        void runBulkAction("archive", bulk);
-        break;
-      }
+      if (runOnBulkSelection("archive")) break;
       const { selectedMessageId } = useMailStore.getState();
       if (selectedMessageId) {
         void archiveSelected(selectedMessageId);
@@ -384,11 +373,7 @@ function runAction(actionId: string) {
       document.dispatchEvent(new CustomEvent("pebble:toggle-bilingual"));
       break;
     case "delete-message": {
-      const bulk = bulkTargets();
-      if (bulk) {
-        void runBulkAction("trash", bulk);
-        break;
-      }
+      if (runOnBulkSelection("trash")) break;
       const { selectedMessageId } = useMailStore.getState();
       if (selectedMessageId) void trashSelected(selectedMessageId);
       break;
@@ -473,6 +458,12 @@ export function useKeyboard() {
     };
 
     function handleKeyDown(e: KeyboardEvent) {
+      // A bare modifier press (Shift before G) must not break a sequence
+      if (["Control", "Meta", "Shift", "Alt"].includes(e.key)) return;
+      // Any other key ends a pending sequence, including keys handled elsewhere
+      const previousKey = pendingKey;
+      clearPending();
+
       // Modal overlays own the keyboard. Non-modal popovers don't block global
       // shortcuts; ones registered on the overlay stack get Escape first (the
       // stack consumes it in the capture phase), so only skip Escape here.
@@ -483,16 +474,17 @@ export function useKeyboard() {
 
       // A focused widget already handled this key (list navigation, menus…).
       if (e.defaultPrevented) return;
-      // A bare modifier press (Shift before G) must not break a sequence
-      if (["Control", "Meta", "Shift", "Alt"].includes(e.key)) return;
 
       const isInput = isTextEntry(e.target);
       const keyString = eventToKeyString(e).toLowerCase();
       const actionId = keyToActionRef.current.get(keyString);
+      const run = (id: string) => {
+        e.preventDefault();
+        if (!(e.repeat && NO_REPEAT_ACTIONS.has(id))) runAction(id);
+      };
 
       // Command palette always works even in inputs
       if (actionId === "command-palette") {
-        clearPending();
         e.preventDefault();
         useCommandStore.getState().open();
         return;
@@ -500,20 +492,16 @@ export function useKeyboard() {
 
       // Skip shortcuts while typing, and plain keys meant for a focused control
       const hasPrimaryModifier = e.ctrlKey || e.metaKey || e.altKey;
-      if (isInput || (!hasPrimaryModifier && !allowsPlainShortcut(e.target, e.key))) {
-        clearPending();
-        return;
-      }
+      if (isInput || (!hasPrimaryModifier && !allowsPlainShortcut(e.target, e.key))) return;
 
       if (useShortcutStore.getState().vimMode) {
-        const previousKey = pendingKey;
-        clearPending();
+        // The typed character for printable keys (Caps Lock G, AltGr ?), else Ctrl+D style
+        const vimKey = e.key.length === 1 && !e.metaKey && e.ctrlKey === e.altKey ? e.key : keyString;
 
         if (previousKey) {
-          const sequenceAction = VIM_BINDINGS[`${previousKey} ${keyString}`];
+          const sequenceAction = VIM_BINDINGS[`${previousKey} ${vimKey}`];
           if (sequenceAction) {
-            e.preventDefault();
-            runAction(sequenceAction);
+            run(sequenceAction);
             return;
           }
           // Not a known sequence: handle this key on its own below
@@ -521,24 +509,22 @@ export function useKeyboard() {
 
         // User bindings take priority over vim keys
         if (!actionId) {
-          if (VIM_PREFIXES.has(keyString)) {
+          if (VIM_PREFIXES.has(vimKey)) {
             e.preventDefault();
-            pendingKey = keyString;
+            pendingKey = vimKey;
             pendingTimer = setTimeout(clearPending, VIM_SEQUENCE_TIMEOUT_MS);
             return;
           }
-          const vimAction = VIM_BINDINGS[keyString];
+          const vimAction = VIM_BINDINGS[vimKey];
           if (vimAction) {
-            e.preventDefault();
-            runAction(vimAction);
+            run(vimAction);
             return;
           }
         }
       }
 
       if (!actionId) return;
-      e.preventDefault();
-      runAction(actionId);
+      run(actionId);
     }
 
     document.addEventListener("keydown", handleKeyDown);

@@ -27,7 +27,8 @@ const DEFAULT_BINDINGS: Record<string, string> = {
   "open-message": "Enter",
   "toggle-star": "S",
   "archive-message": "E",
-  "delete-message": "Delete",
+  // The Mac "delete" key sends Backspace; Delete is Fn+delete there.
+  "delete-message": isMacPlatform() ? "Backspace" : "Delete",
   "compose-new": "C",
   "reply": "R",
   "reply-all": "A",
@@ -56,7 +57,17 @@ function loadVimMode(): boolean {
 function loadBindings(): Record<string, string> {
   try {
     const saved = profileLocalStorage.getItem(STORAGE_KEY);
-    if (saved) return { ...DEFAULT_BINDINGS, ...JSON.parse(saved) };
+    if (saved) {
+      const parsed = JSON.parse(saved) as Record<string, string>;
+      // A default added after the user saved their shortcuts must not take a
+      // key they already use (the later action would win it): leave it unset.
+      const used = new Set(Object.values(parsed).map((keys) => keys.toLowerCase()));
+      const merged = { ...DEFAULT_BINDINGS };
+      for (const [action, keys] of Object.entries(DEFAULT_BINDINGS)) {
+        if (!(action in parsed) && used.has(keys.toLowerCase())) merged[action] = "";
+      }
+      return { ...merged, ...parsed };
+    }
   } catch {
     // ignore parse errors
   }

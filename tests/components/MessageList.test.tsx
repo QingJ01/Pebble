@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Account, Folder, MessageSummary } from "../../src/lib/api";
 import { useMailStore } from "../../src/stores/mail.store";
+import { BATCH_MOVE_EVENT } from "../../src/lib/vimKeys";
 
 const mocks = vi.hoisted(() => ({
   accounts: [] as Account[],
@@ -480,6 +481,36 @@ describe("MessageList", () => {
       [expect.objectContaining({ id: "m-1" }), expect.objectContaining({ id: "m-2" })],
       expect.anything(),
     ));
+  });
+
+  it("runs keyboard bulk requests through the toolbar action, one at a time", async () => {
+    let finish: (value: { ok: true; count: number }) => void = () => {};
+    mocks.runMailAction.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    useMailStore.setState({ selectedMessageIds: new Set(["m-1", "m-2"]), batchMode: true });
+    render(
+      <MessageList
+        messages={[makeMessage("m-1"), makeMessage("m-2")]}
+        selectedMessageId={null}
+        onSelectMessage={vi.fn()}
+        loading={false}
+      />,
+    );
+
+    act(() => {
+      document.dispatchEvent(new CustomEvent(BATCH_MOVE_EVENT, { detail: "trash" }));
+      document.dispatchEvent(new CustomEvent(BATCH_MOVE_EVENT, { detail: "trash" }));
+    });
+    await waitFor(() => expect((screen.getByRole("button", { name: "common.delete" }) as HTMLButtonElement).disabled).toBe(true));
+    expect(mocks.runMailAction).toHaveBeenCalledTimes(1);
+    expect(mocks.runMailAction).toHaveBeenCalledWith(
+      mocks.queryClient,
+      "trash",
+      [expect.objectContaining({ id: "m-1" }), expect.objectContaining({ id: "m-2" })],
+      expect.objectContaining({ confirm: expect.any(Function) }),
+    );
+
+    await act(async () => finish({ ok: true, count: 2 }));
+    expect(useMailStore.getState().selectedMessageIds.size).toBe(0);
   });
 
   it("refreshes folder unread counts after a successful batch read-state action", async () => {

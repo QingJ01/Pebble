@@ -573,7 +573,8 @@
       "select": "Select message (d d, Delete and e then act on the selection)",
       "undo": "Undo the last delete or archive",
       "help": "Show keyboard shortcuts",
-      "nothingToUndo": "Nothing to undo"
+      "nothingToUndo": "Nothing to undo",
+      "blocked": "{{keys}} is your shortcut for {{action}}, so vim keys starting with it won't work."
     },
     "toggleView": "Toggle Inbox/Kanban view",
     "moveToKanban": "Add to Kanban",
