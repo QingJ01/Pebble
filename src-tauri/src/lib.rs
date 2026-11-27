@@ -396,15 +396,6 @@ fn finish_setup(
     let state: tauri::State<AppState> = app.state();
     let store_clone = state.store.clone();
     let app_handle = app.clone();
-    let app_for_deep_link = app_handle.clone();
-    app.listen(DEEP_LINK_NEW_URL_EVENT, move |event| {
-        let urls = mailto_urls_from_deep_link_payload(event.payload());
-        record_mailto_urls(&app_for_deep_link, urls);
-    });
-    record_mailto_urls(
-        &app_handle,
-        mailto_urls_from_args(&std::env::args().collect::<Vec<_>>()),
-    );
     tauri::async_runtime::spawn(snooze_watcher::run_snooze_watcher(
         store_clone,
         app_handle.clone(),
@@ -680,6 +671,18 @@ pub fn run() {
                     .set_background_color(Some(tauri::window::Color(0xf8, 0xf7, 0xf5, 0xff)));
             }
             app.manage(PendingMailtoUrls::default());
+            // mailto: links only need the pending queue, so listen before any
+            // database work: links opened during a background upgrade are
+            // queued and opened once the app mounts.
+            let app_for_deep_link = app.handle().clone();
+            app.listen(DEEP_LINK_NEW_URL_EVENT, move |event| {
+                let urls = mailto_urls_from_deep_link_payload(event.payload());
+                record_mailto_urls(&app_for_deep_link, urls);
+            });
+            record_mailto_urls(
+                app.handle(),
+                mailto_urls_from_args(&std::env::args().collect::<Vec<_>>()),
+            );
 
             let db_path = get_db_path(&app_data)?;
             tracing::info!("Database path: {}", db_path.display());

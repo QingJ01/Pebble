@@ -46,6 +46,20 @@ pub fn set_stage<R: Runtime>(app: &AppHandle<R>, stage: StartupStage) {
     let _ = app.emit(STARTUP_STATUS_EVENT, stage);
 }
 
+/// Whether startup stopped with an error (e.g. a failed database upgrade).
+/// Nothing after the database is set up then, so exit must not wait on it.
+pub fn has_failed<R: Runtime>(app: &AppHandle<R>) -> bool {
+    app.try_state::<StartupStatus>()
+        .and_then(|status| {
+            status
+                .0
+                .lock()
+                .ok()
+                .map(|stage| matches!(*stage, StartupStage::Failed { .. }))
+        })
+        .unwrap_or(false)
+}
+
 #[tauri::command]
 pub fn get_startup_status<R: Runtime>(app: AppHandle<R>) -> StartupStage {
     app.try_state::<StartupStatus>()

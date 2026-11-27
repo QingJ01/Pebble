@@ -29,3 +29,20 @@ describe("scheduled-send native exit wiring", () => {
     expect(source).toContain("api.prevent_exit();");
   });
 });
+
+describe("startup with a background database upgrade", () => {
+  const lib = readFileSync(resolve(process.cwd(), "src-tauri/src/lib.rs"), "utf8");
+  const sendControls = readFileSync(resolve(process.cwd(), "src-tauri/src/send_controls.rs"), "utf8");
+
+  it("lets a failed startup quit even though send controls never came up", () => {
+    const fn = sendControls.slice(sendControls.indexOf("pub fn prevent_exit("));
+    expect(fn.slice(0, 400)).toContain("return !crate::startup::has_failed(app);");
+  });
+
+  it("queues mailto links before the database upgrade can start", () => {
+    const listen = lib.indexOf("app.listen(DEEP_LINK_NEW_URL_EVENT");
+    expect(listen).toBeGreaterThan(-1);
+    expect(listen).toBeLessThan(lib.indexOf("pending_migration_from(&db_path)"));
+    expect(lib.indexOf("app.manage(PendingMailtoUrls::default());")).toBeLessThan(listen);
+  });
+});
