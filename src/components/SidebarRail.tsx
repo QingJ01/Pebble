@@ -12,7 +12,7 @@
  * folders, account switcher, overflow folders): Enter/Space/ArrowRight open it,
  * arrows move inside, Escape closes it and focus returns to the button.
  */
-import { useId, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import Popover, { handleMenuKeyDown } from "./ui/Popover";
 
 export interface RailMenuItem {
@@ -24,7 +24,13 @@ export interface RailMenuItem {
   /** Marks the entry that is currently shown (aria-current, neutral fill). */
   current?: boolean;
   onSelect: () => void;
+  /** Makes the entry a drop target for dragged mail (see lib/mailDrag). */
+  dropFolderId?: string;
 }
+
+/** Hovering a rail menu this long while dragging mail opens it. */
+const DRAG_OPEN_DELAY_MS = 450;
+const isDraggingMail = () => document.body.classList.contains("is-dragging-mail");
 
 export function RailMenuButton({
   face,
@@ -55,8 +61,32 @@ export function RailMenuButton({
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
+  /** Opened by hovering during a mail drag: closes when the drag ends. */
+  const [openedByDrag, setOpenedByDrag] = useState(false);
+  const dragOpenTimer = useRef<number | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuId = useId();
+  const hasDropTargets = items.some((item) => item.dropFolderId);
+
+  const cancelDragOpen = () => {
+    if (dragOpenTimer.current !== null) window.clearTimeout(dragOpenTimer.current);
+    dragOpenTimer.current = null;
+  };
+  useEffect(() => cancelDragOpen, []);
+  useEffect(() => {
+    if (!openedByDrag) return;
+    // The drag ends on release (dropped or not): close the spring-loaded menu.
+    const close = () => {
+      setOpen(false);
+      setOpenedByDrag(false);
+    };
+    window.addEventListener("pointerup", close);
+    window.addEventListener("pointercancel", close);
+    return () => {
+      window.removeEventListener("pointerup", close);
+      window.removeEventListener("pointercancel", close);
+    };
+  }, [openedByDrag]);
 
   function select(item: RailMenuItem) {
     setOpen(false);
@@ -73,6 +103,7 @@ export function RailMenuButton({
         className={["menu-item", "sidebar-rail-menu__item", item.current ? "is-current" : null].filter(Boolean).join(" ")}
         aria-current={item.current ? "page" : undefined}
         data-autofocus={item.current || undefined}
+        data-drop-folder-id={item.dropFolderId}
         onClick={() => select(item)}
       >
         <span className="sidebar-rail-menu__icon" aria-hidden="true">{item.icon}</span>
@@ -105,12 +136,26 @@ export function RailMenuButton({
             setOpen(true);
           }
         }}
+        onPointerEnter={() => {
+          if (!hasDropTargets || open || !isDraggingMail()) return;
+          cancelDragOpen();
+          dragOpenTimer.current = window.setTimeout(() => {
+            dragOpenTimer.current = null;
+            if (!isDraggingMail()) return;
+            setOpenedByDrag(true);
+            setOpen(true);
+          }, DRAG_OPEN_DELAY_MS);
+        }}
+        onPointerLeave={cancelDragOpen}
       >
         {face}
       </button>
       <Popover
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={() => {
+          setOpen(false);
+          setOpenedByDrag(false);
+        }}
         anchorRef={buttonRef}
         placement="right-start"
         gap={12}

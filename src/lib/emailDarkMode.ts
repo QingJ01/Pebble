@@ -5,6 +5,15 @@
  * is left alone and keeps the light card.
  */
 
+/**
+ * "Always dark": media restored after the mail is inverted. Each piece is
+ * restored once; media inside an already restored background block is left
+ * alone, or the filters would stack back into a negative.
+ */
+export const FORCE_DARK_MEDIA_SELECTOR =
+  ':is(img, video, canvas, [background], [style*="background-image" i])'
+  + ':not(:is([background], [style*="background-image" i]) *)';
+
 /** Past this many elements the mail is treated as designed (and not walked). */
 const MAX_ELEMENTS = 4000;
 

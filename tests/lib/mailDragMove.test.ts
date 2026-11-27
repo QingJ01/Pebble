@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/hooks/mutations/mailActions", () => ({ moveMessagesWithUndo: vi.fn() }));
 
-import { planDragMove, type DraggedMessage } from "@/lib/mailDragMove";
+import { canDropOnFolder, planDragMove, type DraggedMessage } from "@/lib/mailDragMove";
 import type { Folder } from "@/lib/api";
 import type { MailMoveContext } from "@/lib/folders-api";
 
@@ -49,5 +49,17 @@ describe("planDragMove", () => {
       .toMatchObject({ ok: true, sourceFolderId: "inbox" });
     expect(planDragMove([msg("m1")], "all:inbox", folders, ctx({ m1: ["work", "local"] }), "all:starred"))
       .toMatchObject({ ok: false, reasonKey: "folderManagement.dragChooseSource" });
+  });
+});
+
+describe("canDropOnFolder", () => {
+  it("lights up only folders the drop could move into", () => {
+    expect(canDropOnFolder([msg("m1")], "work", folders, "imap", "inbox")).toBe(true);
+    expect(canDropOnFolder([msg("m1")], "all:inbox", folders, "imap", "work")).toBe(true);
+    expect(canDropOnFolder([msg("m1")], "drafts", folders, "imap", "inbox")).toBe(false);
+    expect(canDropOnFolder([msg("m1")], "inbox", folders, "imap", "inbox")).toBe(false);
+    expect(canDropOnFolder([msg("m1")], "local", folders, "imap", "inbox")).toBe(false);
+    expect(canDropOnFolder([msg("m1")], "other-inbox", folders, "imap", "inbox")).toBe(false);
+    expect(canDropOnFolder([msg("m1", { is_draft: true })], "work", folders, "imap", "inbox")).toBe(false);
   });
 });

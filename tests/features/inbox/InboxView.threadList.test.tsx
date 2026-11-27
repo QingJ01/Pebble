@@ -81,6 +81,7 @@ vi.mock("../../../src/hooks/queries", () => ({
     isLoading: false,
   }),
   patchMessagesCache: vi.fn(),
+  onMessagesCachePatched: () => () => {},
 }));
 
 vi.mock("../../../src/components/SearchBar", () => ({

@@ -1,6 +1,6 @@
 import { isThreadSelected, useMailStore } from "@/stores/mail.store";
 import { MAIL_ROW_HEIGHT } from "@/components/mailRowMetrics";
-import { useAccountsQuery, useMessagesQuery, useThreadsQuery, useFoldersForAccountsQuery, patchMessagesCache } from "@/hooks/queries";
+import { useAccountsQuery, useMessagesQuery, useThreadsQuery, useFoldersForAccountsQuery, patchMessagesCache, onMessagesCachePatched } from "@/hooks/queries";
 import { useUIStore } from "@/stores/ui.store";
 import { toastError, useToastStore } from "@/stores/toast.store";
 import MessageList from "@/components/MessageList";
@@ -95,8 +95,8 @@ export default function InboxView() {
     threadView ? queryFolderIds : undefined,
     unreadOnly,
   );
-  // Unread-only: rows the user opened stay listed (now read) until the
-  // filter, folder or view changes, instead of vanishing under the reader.
+  // Unread-only: the open row stays listed (now read) while it is open,
+  // instead of vanishing under the reader.
   const listResetKey = `${threadView}|${activeFolderId}|${accountFilter}|${unreadOnly}`;
   const messages = useStickyRows<MessageSummary>({
     rows: serverMessages,
@@ -106,6 +106,7 @@ export default function InboxView() {
     keyOf: (m) => m.id,
     markRead: (m) => (m.is_read ? m : { ...m, is_read: true }),
     compareNewestFirst: (a, b) => b.date - a.date || (b.id < a.id ? -1 : b.id > a.id ? 1 : 0),
+    subscribePatches: onMessagesCachePatched,
   });
   const threads = useStickyRows<ThreadSummary>({
     rows: serverThreads,

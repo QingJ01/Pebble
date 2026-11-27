@@ -470,27 +470,23 @@ fn fetch_summaries_ordered(
 /// `(account_id, thread key)` pairs with their most recent date in that folder. The walk is a covering
 /// scan of `idx_mf_folder_date` that stops as soon as enough threads are
 /// found, so page cost is proportional to the page, not the folder.
-/// With `unread_only`, only threads with an unread message in this folder
-/// count (dated by their newest unread message).
+/// With `unread_only`, see [`folder_unread_thread_keys`].
 fn folder_thread_keys(
     conn: &rusqlite::Connection,
     folder_id: &str,
     want: usize,
     unread_only: bool,
 ) -> Result<Vec<((String, String), i64)>> {
-    let mut stmt = conn.prepare_cached(if unread_only {
-        "SELECT m.account_id, mf.thread_key, mf.date
-         FROM message_folders mf
-         JOIN messages m ON m.id = mf.message_id
-         WHERE mf.folder_id = ?1 AND mf.is_deleted = 0 AND mf.is_read = 0
-         ORDER BY mf.date DESC, mf.message_id DESC"
-    } else {
+    if unread_only {
+        return folder_unread_thread_keys(conn, folder_id, want);
+    }
+    let mut stmt = conn.prepare_cached(
         "SELECT m.account_id, mf.thread_key, mf.date
          FROM message_folders mf
          JOIN messages m ON m.id = mf.message_id
          WHERE mf.folder_id = ?1 AND mf.is_deleted = 0
-         ORDER BY mf.date DESC, mf.message_id DESC"
-    })?;
+         ORDER BY mf.date DESC, mf.message_id DESC",
+    )?;
     let mut rows = stmt.query(params![folder_id])?;
     let mut seen = HashSet::new();
     let mut keys = Vec::new();
@@ -503,6 +499,41 @@ fn folder_thread_keys(
         }
     }
     Ok(keys)
+}
+
+/// Threads with an unread message in this folder, ranked like the unfiltered
+/// list: by the thread's newest message in the folder (the date its row
+/// shows), not by its newest unread one. Reads only the unread rows
+/// (`idx_mf_folder_unread_date`) plus one indexed MAX per thread
+/// (`idx_mf_folder_thread`), so cost follows the unread count.
+fn folder_unread_thread_keys(
+    conn: &rusqlite::Connection,
+    folder_id: &str,
+    want: usize,
+) -> Result<Vec<((String, String), i64)>> {
+    let mut unread = conn.prepare_cached(
+        "SELECT DISTINCT m.account_id, mf.thread_key
+         FROM message_folders mf
+         JOIN messages m ON m.id = mf.message_id
+         WHERE mf.folder_id = ?1 AND mf.is_deleted = 0 AND mf.is_read = 0",
+    )?;
+    let keys = unread
+        .query_map(params![folder_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut latest = conn.prepare_cached(
+        "SELECT MAX(date) FROM message_folders
+         WHERE folder_id = ?1 AND thread_key = ?2 AND is_deleted = 0",
+    )?;
+    let mut ranked = Vec::with_capacity(keys.len());
+    for key in keys {
+        let date: Option<i64> = latest.query_row(params![folder_id, key.1], |row| row.get(0))?;
+        ranked.push((key, date.unwrap_or_default()));
+    }
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| b.0.cmp(&a.0)));
+    ranked.truncate(want);
+    Ok(ranked)
 }
 
 #[derive(Default)]

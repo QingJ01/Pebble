@@ -1,4 +1,7 @@
-use super::{insert_message_row, MessageCursor, FOLDER_PAGE_AFTER_SQL, FOLDER_PAGE_SQL};
+use super::{
+    insert_message_row, MessageCursor, FOLDER_PAGE_AFTER_SQL, FOLDER_PAGE_SQL,
+    FOLDER_UNREAD_PAGE_AFTER_SQL, FOLDER_UNREAD_PAGE_SQL,
+};
 use crate::Store;
 use pebble_core::*;
 use rusqlite::params;
@@ -128,6 +131,20 @@ fn folder_page_queries_use_the_date_index_without_sorting() {
                     &[&"inbox", &50, &0, &5000i64, &"m10000"],
                 ),
                 "idx_mf_folder_date",
+            ),
+            (
+                "unread first page",
+                plan(&store, FOLDER_UNREAD_PAGE_SQL, &[&"inbox", &50, &0]),
+                "idx_mf_folder_unread_date",
+            ),
+            (
+                "unread keyset page",
+                plan(
+                    &store,
+                    FOLDER_UNREAD_PAGE_AFTER_SQL,
+                    &[&"inbox", &50, &0, &5000i64, &"m10000"],
+                ),
+                "idx_mf_folder_unread_date",
             ),
             (
                 "thread walk",

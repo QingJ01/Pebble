@@ -8,8 +8,9 @@ mod v01_v10;
 mod v11_v16;
 mod v17_v22;
 mod v21;
+mod v23;
 
-pub(crate) const CURRENT_VERSION: u32 = 22;
+pub(crate) const CURRENT_VERSION: u32 = 23;
 /// How many pre-migration backups to keep next to the database file.
 const MIGRATION_BACKUPS_TO_KEEP: usize = 2;
 // Keep in sync with src/lib/accountColors.ts and src-tauri/src/account_colors.rs
@@ -397,6 +398,11 @@ fn run_migrations_up_to(conn: &Connection, target: u32) -> Result<()> {
     // otherwise cascade into message_labels), mirroring V12.
     if version < 22 && target >= 22 {
         v17_v22::apply_v22(conn)?;
+    }
+
+    // V23: partial date index for unread-only list pages.
+    if version < 23 && target >= 23 {
+        v23::apply_v23(conn)?;
     }
 
     Ok(())

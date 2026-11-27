@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { darkenSimpleEmail, parseCssColor, relativeLuminance, saturation } from "@/lib/emailDarkMode";
+import { darkenSimpleEmail, FORCE_DARK_MEDIA_SELECTOR, parseCssColor, relativeLuminance, saturation } from "@/lib/emailDarkMode";
 
 function mount(html: string) {
   const root = document.createElement("div");
@@ -42,5 +42,17 @@ describe("darkenSimpleEmail", () => {
       <div style="background-color:#0b5394"><p style="color:#333">Banner</p></div>`);
     expect(darkenSimpleEmail(root)).toBe(false);
     expect(root.querySelector("p")!.style.getPropertyValue("color")).toBe("rgb(51, 51, 51)");
+  });
+});
+
+describe("FORCE_DARK_MEDIA_SELECTOR", () => {
+  it("restores each piece of media once", () => {
+    const root = mount(`
+      <picture><img id="p"></picture>
+      <table><tr><td background="x.jpg" id="bg"><img id="inbg"></td></tr></table>
+      <div style="background-image:url(x)" id="bgs"><span><img id="inbgs"></span></div>
+      <img id="plain">`);
+    const hit = [...root.querySelectorAll(FORCE_DARK_MEDIA_SELECTOR)].map((e) => e.id).sort();
+    expect(hit).toEqual(["bg", "bgs", "p", "plain"]);
   });
 });

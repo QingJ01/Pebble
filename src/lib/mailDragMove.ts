@@ -98,6 +98,32 @@ export function planDragMove(
   };
 }
 
+/**
+ * Quick check while hovering a folder, with only what is already loaded
+ * (no move context): the rules of [`planDragMove`] that don't depend on
+ * which folders each message is in. The drop still runs the full plan.
+ */
+export function canDropOnFolder(
+  messages: DraggedMessage[],
+  targetFolderId: string,
+  folders: Folder[],
+  provider: MailMoveContext["provider"] | undefined,
+  listFolderId: string | null,
+): boolean {
+  const accountId = messages[0]?.account_id;
+  if (!accountId || messages.some((m) => m.account_id !== accountId || m.is_draft)) return false;
+  const accountFolders = folders.filter((f) => f.account_id === accountId);
+  const targetId = isAllAccountsFolderId(targetFolderId)
+    ? folderIdsForSelection(targetFolderId, accountFolders, accountId)[0]
+    : targetFolderId;
+  const target = accountFolders.find((f) => f.id === targetId);
+  if (!target || !isMoveDestination(target, provider)) return false;
+  const listed = folderIdsForSelection(listFolderId, accountFolders, accountId);
+  if (listed.includes(target.id)) return false;
+  const source = listed.length === 1 ? accountFolders.find((f) => f.id === listed[0]) : undefined;
+  return !crossesLocalBoundary(source, target, provider);
+}
+
 /** Move dragged messages onto a sidebar folder, reporting problems as toasts. */
 export async function dropMessagesOnFolder(
   client: QueryClient,

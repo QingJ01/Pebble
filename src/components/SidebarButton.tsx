@@ -7,7 +7,7 @@ import type { CSSProperties, MouseEvent, ReactNode } from "react";
  * when the label is actually truncated.
  */
 export default function SidebarButton({
-  icon, label, badge, isActive, collapsed, indent = false, disabled, onClick, style, dropFolderId, dropAccountId,
+  icon, label, badge, isActive, collapsed, indent = false, disabled, onClick, style, dropFolderId,
 }: {
   icon: ReactNode;
   label: string;
@@ -20,8 +20,6 @@ export default function SidebarButton({
   style?: CSSProperties;
   /** Makes this entry a drop target for dragged mail (see lib/mailDrag). */
   dropFolderId?: string;
-  /** Account owning `dropFolderId` (omit for all-accounts folders). */
-  dropAccountId?: string;
 }) {
   function syncTruncationTitle(event: MouseEvent<HTMLButtonElement>) {
     if (collapsed) return;
@@ -49,7 +47,6 @@ export default function SidebarButton({
       ].filter(Boolean).join(" ")}
       style={style}
       data-drop-folder-id={dropFolderId}
-      data-drop-account-id={dropAccountId}
     >
       <span aria-hidden="true" className="sidebar-btn__icon">{icon}</span>
       {!collapsed && <span className="sidebar-btn__label">{label}</span>}

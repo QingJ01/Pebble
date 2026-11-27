@@ -447,4 +447,4 @@ body.is-dragging-mail * {
   cursor: grabbing !important;
   user-select: none !important;
 }
-body.is-dragging-mail .sidebar-btn.is-drop-invalid { cursor: not-allowed !important; }
+body.is-dragging-mail .is-drop-invalid { cursor: not-allowed !important; }

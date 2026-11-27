@@ -2,7 +2,7 @@ import { useRef, useLayoutEffect, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openMailtoUrl } from "@/app/useMailtoOpen";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
-import { darkenSimpleEmail } from "@/lib/emailDarkMode";
+import { darkenSimpleEmail, FORCE_DARK_MEDIA_SELECTOR } from "@/lib/emailDarkMode";
 import { useUIStore } from "@/stores/ui.store";
 
 /** The theme actually applied (`data-theme` on <html>), following system changes. */
@@ -108,7 +108,7 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
         .pebble-email-content[data-dark-mode="force"] {
           filter: invert(1) hue-rotate(180deg);
         }
-        .pebble-email-content[data-dark-mode="force"] :is(img, video, picture, canvas, [background], [style*="background-image" i]) {
+        .pebble-email-content[data-dark-mode="force"] ${FORCE_DARK_MEDIA_SELECTOR} {
           filter: invert(1) hue-rotate(180deg);
         }
         .pebble-email-content[data-plain-text] {

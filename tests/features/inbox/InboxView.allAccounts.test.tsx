@@ -86,6 +86,7 @@ vi.mock("../../../src/hooks/queries", () => ({
   useMessagesQuery: mocks.useMessagesQuery,
   useThreadsQuery: mocks.useThreadsQuery,
   patchMessagesCache: vi.fn(),
+  onMessagesCachePatched: () => () => {},
 }));
 
 vi.mock("../../../src/components/SearchBar", () => ({

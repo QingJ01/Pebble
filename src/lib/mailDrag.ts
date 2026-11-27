@@ -14,8 +14,8 @@ const TARGET_SELECTOR = "[data-drop-folder-id]";
 export interface MailDragOptions<T> {
   /** Called once the press turns into a drag; null cancels it. */
   getPayload: () => { items: T[]; label: string } | null;
-  /** Whether `folderId` (of `accountId`, when known) can take the items. */
-  canDrop?: (items: T[], folderId: string, accountId: string | null) => boolean;
+  /** Whether `folderId` can take the items (hover styling only). */
+  canDrop?: (items: T[], folderId: string) => boolean;
   onDrop: (items: T[], folderId: string) => void;
 }
 
@@ -36,6 +36,8 @@ export function trackMailDrag<T>(event: React.PointerEvent, options: MailDragOpt
   let ghost: HTMLDivElement | null = null;
   let hovered: HTMLElement | null = null;
   let hoveredValid = false;
+  /** A drag began (and may since have been cancelled with Escape). */
+  let dragStarted = false;
 
   const setHovered = (next: HTMLElement | null) => {
     if (next === hovered) return;
@@ -43,7 +45,7 @@ export function trackMailDrag<T>(event: React.PointerEvent, options: MailDragOpt
     hovered = next;
     if (!hovered || !items) return;
     const folderId = hovered.dataset.dropFolderId!;
-    hoveredValid = options.canDrop?.(items, folderId, hovered.dataset.dropAccountId ?? null) ?? true;
+    hoveredValid = options.canDrop?.(items, folderId) ?? true;
     hovered.classList.add(hoveredValid ? "is-drop-target" : "is-drop-invalid");
   };
 
@@ -51,6 +53,7 @@ export function trackMailDrag<T>(event: React.PointerEvent, options: MailDragOpt
     const payload = options.getPayload();
     if (!payload || payload.items.length === 0) return false;
     items = payload.items;
+    dragStarted = true;
     ghost = document.createElement("div");
     ghost.className = "mail-drag-ghost";
     ghost.textContent = payload.label;
@@ -84,19 +87,31 @@ export function trackMailDrag<T>(event: React.PointerEvent, options: MailDragOpt
     const target = dragged ? targetAt(e.clientX, e.clientY) : null;
     const valid = target === hovered ? hoveredValid : false;
     cleanup();
-    if (!dragged) return;
-    // The release ends a drag, not a click on the row underneath.
-    window.addEventListener("click", suppressClick, { capture: true, once: true });
-    window.setTimeout(() => window.removeEventListener("click", suppressClick, { capture: true }), 0);
-    if (target && valid) options.onDrop(dragged, target.dataset.dropFolderId!);
+    if (dragStarted) {
+      // The release ends a drag (even one cancelled with Escape), not a
+      // click on the row underneath.
+      window.addEventListener("click", suppressClick, { capture: true, once: true });
+      window.setTimeout(() => window.removeEventListener("click", suppressClick, { capture: true }), 0);
+    }
+    if (dragged && target && valid) options.onDrop(dragged, target.dataset.dropFolderId!);
   };
 
   const keydown = (e: KeyboardEvent) => {
     if (e.key !== "Escape" || !items) return;
     e.preventDefault();
     e.stopPropagation();
-    cleanup();
+    // Drop the drag but keep waiting for the release, so it isn't a click.
+    endDrag();
+    window.removeEventListener("pointermove", move);
   };
+
+  function endDrag() {
+    setHovered(null);
+    ghost?.remove();
+    ghost = null;
+    if (items) document.body.classList.remove("is-dragging-mail");
+    items = null;
+  }
 
   function cleanup() {
     window.removeEventListener("pointermove", move);
@@ -104,11 +119,7 @@ export function trackMailDrag<T>(event: React.PointerEvent, options: MailDragOpt
     window.removeEventListener("pointercancel", cleanup);
     window.removeEventListener("keydown", keydown, { capture: true });
     window.removeEventListener("blur", cleanup);
-    setHovered(null);
-    ghost?.remove();
-    ghost = null;
-    if (items) document.body.classList.remove("is-dragging-mail");
-    items = null;
+    endDrag();
   }
 
   window.addEventListener("pointermove", move);

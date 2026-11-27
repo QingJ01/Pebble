@@ -23,7 +23,7 @@ import Button from "./ui/Button";
 import { MessageListSkeleton } from "./Skeleton";
 import { prefetchMessage } from "@/hooks/useMessageLoader";
 import { trackMailDrag } from "@/lib/mailDrag";
-import { dropMessagesOnFolder } from "@/lib/mailDragMove";
+import { canDropOnFolder, dropMessagesOnFolder } from "@/lib/mailDragMove";
 import { defaultPrivacyMode } from "@/lib/privacyMode";
 import "./mail-list.css";
 
@@ -308,11 +308,13 @@ export default function MessageList({
           : t("inbox.dragCount", { count: items.length, defaultValue: "{{count}} messages" });
         return { items, label };
       },
-      canDrop: (items, folderId, accountId) =>
-        folderId !== activeFolderId
-        && !items.some((m) => m.is_draft)
-        && items.every((m) => m.account_id === items[0].account_id)
-        && (!accountId || accountId === items[0].account_id),
+      canDrop: (items, folderId) => canDropOnFolder(
+        items,
+        folderId,
+        folders,
+        accounts.find((account) => account.id === items[0]?.account_id)?.provider,
+        activeFolderId,
+      ),
       onDrop: (items, folderId) => void dropMessagesOnFolder(queryClient, items, folderId),
     });
   }

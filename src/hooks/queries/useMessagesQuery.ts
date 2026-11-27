@@ -62,10 +62,23 @@ export type MessagesInfiniteData = InfiniteData<MessageSummary[], MessageCursor 
  * applied to each page's flat array. Used by optimistic flag/delete/move
  * updates so they don't have to know about the page shape.
  */
+type MessagesPatch = (messages: MessageSummary[]) => MessageSummary[];
+const patchListeners = new Set<(transform: MessagesPatch) => void>();
+
+/**
+ * Hear every optimistic patch applied to the message lists (flags, stars,
+ * removals), e.g. to keep a row shown outside the cache in step.
+ */
+export function onMessagesCachePatched(listener: (transform: MessagesPatch) => void): () => void {
+  patchListeners.add(listener);
+  return () => patchListeners.delete(listener);
+}
+
 export function patchMessagesCache(
   queryClient: QueryClient,
-  transform: (messages: MessageSummary[]) => MessageSummary[],
+  transform: MessagesPatch,
 ) {
+  for (const listener of patchListeners) listener(transform);
   queryClient.setQueriesData<MessagesInfiniteData>(
     { queryKey: ["messages"] },
     (old) => {
