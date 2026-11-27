@@ -64,6 +64,12 @@ pub struct SyncState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_imap_folder_remote_ids: Option<Vec<String>>,
 
+    /// Set on new IMAP accounts: the first sync adds the server's Sent,
+    /// Drafts, Archive and Trash folders to the selection, then clears it.
+    /// Cleared too when the user saves a selection, so theirs always wins.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub imap_default_folders_pending: bool,
+
     /// Version of the one-time legacy re-thread pass already applied to this
     /// account's stored messages (IMAP/POP3); 0 = never.
     #[serde(default, skip_serializing_if = "is_zero")]

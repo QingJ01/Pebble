@@ -276,6 +276,7 @@ impl Store {
             };
             let mut sync_state = SyncState::from_json_opt(raw_sync_state.as_deref())?;
             sync_state.selected_imap_folder_remote_ids = Some(selected_ordered);
+            sync_state.imap_default_folders_pending = false;
             let sync_state_json = sync_state.to_json()?;
 
             for folder in remote_folders
@@ -635,6 +636,27 @@ mod tests {
                 assert_eq!(store.get_message_folder_ids("m1").unwrap(), vec!["local"]);
             }
         }
+    }
+
+    #[test]
+    fn saving_imap_selection_clears_pending_default_folders() {
+        let store = Store::open_in_memory().unwrap();
+        let account = account();
+        store.insert_account(&account).unwrap();
+        store
+            .update_account_sync_state(
+                &account.id,
+                r#"{"provider":"imap","selected_imap_folder_remote_ids":[],"imap_default_folders_pending":true}"#,
+            )
+            .unwrap();
+
+        let inbox = folder(&account.id, "inbox-id", "INBOX", Some(FolderRole::Inbox));
+        store
+            .apply_imap_folder_selection(&account.id, &[inbox], &["INBOX".to_string()])
+            .unwrap();
+
+        let state = store.get_sync_state(&account.id).unwrap().unwrap();
+        assert!(!state.imap_default_folders_pending);
     }
 
     #[test]

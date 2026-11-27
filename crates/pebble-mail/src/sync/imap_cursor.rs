@@ -384,6 +384,24 @@ pub(super) fn should_include_discovered_imap_folder(
         || selected_remote_ids.contains(&folder.remote_id)
 }
 
+/// Folders a new IMAP account syncs besides Inbox: the server's Sent, Drafts,
+/// Archive and Trash (identified by their special-use role).
+pub(super) fn default_imap_folder_remote_ids(folders: &[pebble_core::Folder]) -> Vec<String> {
+    use pebble_core::FolderRole;
+    folders
+        .iter()
+        .filter(|folder| {
+            matches!(
+                folder.role,
+                Some(
+                    FolderRole::Sent | FolderRole::Drafts | FolderRole::Archive | FolderRole::Trash
+                )
+            )
+        })
+        .map(|folder| folder.remote_id.clone())
+        .collect()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ImapPollScope {
     Realtime,

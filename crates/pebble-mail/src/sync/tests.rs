@@ -961,6 +961,24 @@ fn missing_imap_selection_preserves_legacy_all_folder_sync() {
 }
 
 #[test]
+fn new_imap_accounts_default_to_standard_folders() {
+    let folders = [
+        test_folder(Some(pebble_core::FolderRole::Inbox), "INBOX"),
+        test_folder(Some(pebble_core::FolderRole::Sent), "[Gmail]/Sent Mail"),
+        test_folder(Some(pebble_core::FolderRole::Drafts), "Drafts"),
+        test_folder(Some(pebble_core::FolderRole::Archive), "Archive"),
+        test_folder(Some(pebble_core::FolderRole::Trash), "Trash"),
+        test_folder(Some(pebble_core::FolderRole::Spam), "Junk"),
+        test_folder(None, "Newsletters"),
+    ];
+
+    assert_eq!(
+        default_imap_folder_remote_ids(&folders),
+        vec!["[Gmail]/Sent Mail", "Drafts", "Archive", "Trash"]
+    );
+}
+
+#[test]
 fn history_page_ranges_empty_mailbox_has_no_pages() {
     assert_eq!(history_page_ranges(0, 200), Vec::<(u32, u32)>::new());
 }

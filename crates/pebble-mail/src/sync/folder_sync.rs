@@ -223,10 +223,11 @@ impl SyncWorker {
     pub async fn initial_sync(&self) -> Result<()> {
         info!("Starting initial sync for account {}", self.base.account_id);
 
-        let selected_remote_ids = self
-            .base
-            .store
-            .get_sync_state(&self.base.account_id)?
+        let sync_state = self.base.store.get_sync_state(&self.base.account_id)?;
+        let defaults_pending = sync_state
+            .as_ref()
+            .is_some_and(|state| state.imap_default_folders_pending);
+        let mut selected_remote_ids = sync_state
             .and_then(|state| state.selected_imap_folder_remote_ids)
             .map(|ids| ids.into_iter().collect::<HashSet<_>>());
 
@@ -235,6 +236,30 @@ impl SyncWorker {
             .inner()
             .list_folders(&self.base.account_id)
             .await?;
+
+        if defaults_pending {
+            let defaults = default_imap_folder_remote_ids(&discovered_folders);
+            if let Some(selected) = selected_remote_ids.as_mut() {
+                selected.extend(defaults.iter().cloned());
+            }
+            self.base
+                .store
+                .update_sync_state(&self.base.account_id, |state| {
+                    if let Some(ids) = state.selected_imap_folder_remote_ids.as_mut() {
+                        for id in &defaults {
+                            if !ids.contains(id) {
+                                ids.push(id.clone());
+                            }
+                        }
+                    }
+                    state.imap_default_folders_pending = false;
+                })?;
+            info!(
+                "Added {} default IMAP folders for new account {}",
+                defaults.len(),
+                self.base.account_id
+            );
+        }
         let remote_folders: Vec<_> = discovered_folders
             .into_iter()
             .filter(|folder| {
