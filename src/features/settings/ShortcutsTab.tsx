@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next";
 import { formatShortcut, useShortcutStore } from "@/stores/shortcut.store";
 import { eventToKeyString } from "@/hooks/useKeyboard";
 import Button from "@/components/ui/Button";
+import Checkbox from "@/components/ui/Checkbox";
+import { VIM_HELP } from "@/lib/vimKeys";
 import { SettingsList, SettingsListRow, SettingsNotice, SettingsSection } from "./SettingsLayout";
 
 const ACTION_I18N_MAP: Record<string, string> = {
@@ -14,6 +16,7 @@ const ACTION_I18N_MAP: Record<string, string> = {
   "open-message": "shortcuts.openMessage",
   "toggle-star": "shortcuts.toggleStar",
   "archive-message": "shortcuts.archiveMessage",
+  "delete-message": "shortcuts.deleteMessage",
   "toggle-view-inbox": "shortcuts.toggleView",
   "toggle-view-kanban": "shortcuts.moveToKanban",
   "compose-new": "shortcuts.composeNew",
@@ -31,7 +34,7 @@ const ACTION_I18N_MAP: Record<string, string> = {
 const SHORTCUT_GROUPS = [
   { categoryKey: "shortcuts.general", actions: ["command-palette", "close-modal", "open-cloud-settings", "toggle-notifications"] },
   { categoryKey: "shortcuts.navigation", actions: ["next-message", "prev-message", "open-message", "open-search", "focus-search"] },
-  { categoryKey: "shortcuts.mailActions", actions: ["compose-new", "reply", "reply-all", "forward", "toggle-star", "archive-message", "toggle-view-inbox", "toggle-view-kanban"] },
+  { categoryKey: "shortcuts.mailActions", actions: ["compose-new", "reply", "reply-all", "forward", "toggle-star", "archive-message", "delete-message", "toggle-view-inbox", "toggle-view-kanban"] },
   { categoryKey: "shortcuts.translate", actions: ["translate-selection", "toggle-bilingual"] },
 ];
 
@@ -52,6 +55,36 @@ function FixedShortcutRow({ labelKey, fallback, keys }: { labelKey: string; fall
         </kbd>
       }
     />
+  );
+}
+
+function VimKeysList() {
+  const { t } = useTranslation();
+  const vimMode = useShortcutStore((s) => s.vimMode);
+  const setVimMode = useShortcutStore((s) => s.setVimMode);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+      <h4 className="settings-subheading">{t("shortcuts.vim.title", "Vim keys")}</h4>
+      <SettingsList>
+        <SettingsListRow
+          title={
+            <Checkbox
+              checked={vimMode}
+              onChange={(e) => setVimMode(e.target.checked)}
+              label={t("shortcuts.vim.enable", "Enable vim keys")}
+            />
+          }
+          meta={t("shortcuts.vim.description", "Press sequences like d d or g i within one second. Your own shortcuts take priority.")}
+        />
+        {vimMode && VIM_HELP.map((row) => (
+          <SettingsListRow
+            key={row.keys}
+            title={t(row.labelKey, row.fallback)}
+            actions={<kbd className="settings-kbd">{row.keys}</kbd>}
+          />
+        ))}
+      </SettingsList>
+    </div>
   );
 }
 
@@ -204,6 +237,8 @@ export default function ShortcutsTab() {
               </SettingsList>
             </div>
           ))}
+
+          <VimKeysList />
 
           <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
             <h4 className="settings-subheading">{t("shortcuts.compose", "Compose")}</h4>

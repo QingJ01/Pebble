@@ -9,6 +9,9 @@ export interface ShortcutBinding {
 interface ShortcutState {
   bindings: Record<string, string>;
   recording: string | null;
+  /** Vim-style keys (dd, gg, G, gi, h, l…) layered on top of the bindings */
+  vimMode: boolean;
+  setVimMode: (enabled: boolean) => void;
   updateShortcut: (actionId: string, keys: string) => void;
   resetToDefaults: () => void;
   startRecording: (actionId: string) => void;
@@ -24,6 +27,7 @@ const DEFAULT_BINDINGS: Record<string, string> = {
   "open-message": "Enter",
   "toggle-star": "S",
   "archive-message": "E",
+  "delete-message": "Delete",
   "compose-new": "C",
   "reply": "R",
   "reply-all": "A",
@@ -39,6 +43,15 @@ const DEFAULT_BINDINGS: Record<string, string> = {
 };
 
 const STORAGE_KEY = "pebble-shortcuts";
+const VIM_MODE_STORAGE_KEY = "pebble-vim-mode";
+
+function loadVimMode(): boolean {
+  try {
+    return profileLocalStorage.getItem(VIM_MODE_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
 
 function loadBindings(): Record<string, string> {
   try {
@@ -53,6 +66,15 @@ function loadBindings(): Record<string, string> {
 export const useShortcutStore = create<ShortcutState>((set, get) => ({
   bindings: loadBindings(),
   recording: null,
+  vimMode: loadVimMode(),
+  setVimMode: (enabled) => {
+    try {
+      profileLocalStorage.setItem(VIM_MODE_STORAGE_KEY, String(enabled));
+    } catch {
+      // storage unavailable: keep the in-memory setting
+    }
+    set({ vimMode: enabled });
+  },
   updateShortcut: (actionId, keys) => {
     const newBindings = { ...get().bindings, [actionId]: keys };
     profileLocalStorage.setItem(STORAGE_KEY, JSON.stringify(newBindings));

@@ -2,6 +2,9 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_BINDINGS, formatShortcut, useShortcutStore } from "../../src/stores/shortcut.store";
 import { useMailStore } from "../../src/stores/mail.store";
+import { useUIStore } from "../../src/stores/ui.store";
+import { useToastStore } from "../../src/stores/toast.store";
+import { useCommandStore } from "../../src/stores/command.store";
 
 const mocks = vi.hoisted(() => ({
   queryClient: {
@@ -34,9 +37,11 @@ vi.mock("../../src/hooks/queries", () => ({
 
 vi.mock("../../src/hooks/mutations/mailActions", () => ({
   runMailAction: mocks.runMailAction,
+  trashConfirmCopy: () => ({ title: "", message: "" }),
 }));
 
-vi.mock("../../src/stores/toast.store", () => ({
+vi.mock("../../src/stores/toast.store", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/stores/toast.store")>()),
   toastError: mocks.toastError,
 }));
 
@@ -169,5 +174,193 @@ describe("formatShortcut", () => {
   it("keeps Ctrl+ text elsewhere", () => {
     expect(formatShortcut("Ctrl+Shift+K", false)).toBe("Ctrl+Shift+K");
     expect(formatShortcut("Escape", false)).toBe("Esc");
+  });
+});
+
+describe("delete and vim keys", () => {
+  const many = Array.from({ length: 25 }, (_, i) => ({ id: `m${i}`, account_id: "acc-1" }));
+  const folders = [
+    { id: "inbox-1", account_id: "acc-1", role: "inbox" },
+    { id: "sent-1", account_id: "acc-1", role: "sent" },
+    { id: "trash-1", account_id: "acc-1", role: "trash" },
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.runMailAction.mockResolvedValue({ ok: true, count: 1 });
+    mocks.readFirstCachedMessages.mockReturnValue(many);
+    mocks.findCachedMessage.mockImplementation((_client: unknown, match: (m: { id: string }) => boolean) => many.find(match));
+    mocks.queryClient.getQueriesData.mockImplementation(
+      ({ queryKey }: { queryKey: string[] }) => (queryKey[0] === "folders" ? [[["folders", "acc-1"], folders]] : []),
+    );
+    useShortcutStore.setState({ bindings: { ...DEFAULT_BINDINGS }, recording: null, vimMode: true });
+    useMailStore.setState({
+      activeAccountId: "acc-1",
+      activeFolderId: "inbox-1",
+      selectedMessageId: "m5",
+      selectedThreadId: null,
+      threadView: false,
+      batchMode: false,
+      selectedMessageIds: new Set(),
+    });
+    useToastStore.setState({ toasts: [] });
+    useUIStore.setState({ activeView: "inbox" });
+    useCommandStore.getState().close();
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+    mocks.queryClient.getQueriesData.mockImplementation(() => []);
+  });
+
+  const selected = () => useMailStore.getState().selectedMessageId;
+
+  it("binds Delete by default", () => {
+    expect(DEFAULT_BINDINGS["delete-message"]).toBe("Delete");
+  });
+
+  it("Delete and dd trash the selected message and select the next one", async () => {
+    renderHook(() => useKeyboard());
+    press(document.body, "Delete");
+    await waitFor(() => expect(mocks.runMailAction).toHaveBeenCalledWith(
+      mocks.queryClient, "trash", [expect.objectContaining({ id: "m5" })],
+      expect.objectContaining({ confirm: expect.any(Function) }),
+    ));
+    mocks.runMailAction.mock.calls[0][3].onRemoved(["m5"]);
+    expect(selected()).toBe("m6");
+
+    press(document.body, "d");
+    expect(mocks.runMailAction).toHaveBeenCalledTimes(1);
+    press(document.body, "d");
+    await waitFor(() => expect(mocks.runMailAction).toHaveBeenCalledTimes(2));
+  });
+
+  it("forgets a pending d after the timeout", () => {
+    vi.useFakeTimers();
+    try {
+      renderHook(() => useKeyboard());
+      press(document.body, "d");
+      act(() => vi.advanceTimersByTime(1100));
+      press(document.body, "d");
+      expect(mocks.runMailAction).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("handles a non-matching second key on its own", () => {
+    renderHook(() => useKeyboard());
+    press(document.body, "d");
+    press(document.body, "j");
+    expect(selected()).toBe("m6");
+  });
+
+  it("gg, G, Ctrl+d and Ctrl+u move through the list", () => {
+    renderHook(() => useKeyboard());
+    press(document.body, "d", { ctrlKey: true });
+    expect(selected()).toBe("m15");
+    press(document.body, "d", { ctrlKey: true });
+    expect(selected()).toBe("m24");
+    press(document.body, "u", { ctrlKey: true });
+    expect(selected()).toBe("m14");
+    press(document.body, "g");
+    press(document.body, "g");
+    expect(selected()).toBe("m0");
+    press(document.body, "Shift", { shiftKey: true });
+    press(document.body, "G", { shiftKey: true });
+    expect(selected()).toBe("m24");
+  });
+
+  it("h closes and l opens the first message", () => {
+    renderHook(() => useKeyboard());
+    press(document.body, "h");
+    expect(selected()).toBeNull();
+    press(document.body, "l");
+    expect(selected()).toBe("m0");
+  });
+
+  it("g-prefixed keys open the active account's folders, or the combined one", () => {
+    renderHook(() => useKeyboard());
+    press(document.body, "g");
+    press(document.body, "s");
+    expect(useMailStore.getState().activeFolderId).toBe("sent-1");
+    press(document.body, "g");
+    press(document.body, "t");
+    expect(useMailStore.getState().activeFolderId).toBe("trash-1");
+    useMailStore.setState({ activeAccountId: null });
+    press(document.body, "g");
+    press(document.body, "i");
+    expect(useMailStore.getState().activeFolderId).toBe("all:inbox");
+  });
+
+  it("x builds a bulk selection that dd and e act on, and Escape leaves it", async () => {
+    renderHook(() => useKeyboard());
+    press(document.body, "x");
+    press(document.body, "j");
+    press(document.body, "x");
+    expect([...useMailStore.getState().selectedMessageIds].sort()).toEqual(["m5", "m6"]);
+
+    press(document.body, "d");
+    press(document.body, "d");
+    await waitFor(() => expect(mocks.runMailAction).toHaveBeenLastCalledWith(
+      mocks.queryClient, "trash", [expect.objectContaining({ id: "m5" }), expect.objectContaining({ id: "m6" })],
+      expect.objectContaining({ confirm: expect.any(Function) }),
+    ));
+    await waitFor(() => expect(useMailStore.getState().selectedMessageIds.size).toBe(0));
+
+    press(document.body, "x");
+    press(document.body, "e");
+    await waitFor(() => expect(mocks.runMailAction).toHaveBeenLastCalledWith(
+      mocks.queryClient, "archive", [expect.objectContaining({ id: "m6" })], expect.anything(),
+    ));
+
+    press(document.body, "x");
+    press(document.body, "Escape");
+    expect(useMailStore.getState().batchMode).toBe(false);
+  });
+
+  it("u runs the latest Undo toast once, then reports nothing to undo", () => {
+    const undo = vi.fn();
+    useToastStore.getState().addToast({ message: "Moved to Trash", type: "success", action: { label: "Undo", onClick: undo } });
+    renderHook(() => useKeyboard());
+    press(document.body, "u");
+    expect(undo).toHaveBeenCalledTimes(1);
+    press(document.body, "u");
+    expect(undo).toHaveBeenCalledTimes(1);
+    expect(useToastStore.getState().toasts.at(-1)?.message).toBe("Nothing to undo");
+  });
+
+  it("? opens the shortcuts settings", () => {
+    renderHook(() => useKeyboard());
+    press(document.body, "?", { shiftKey: true });
+    expect(useUIStore.getState().activeView).toBe("settings");
+    expect(useUIStore.getState().settingsTab).toBe("shortcuts");
+  });
+
+  it("is off when vim keys are disabled, and user bindings win", async () => {
+    useShortcutStore.setState({ vimMode: false });
+    const { unmount } = renderHook(() => useKeyboard());
+    press(document.body, "d");
+    press(document.body, "d");
+    press(document.body, "h");
+    expect(mocks.runMailAction).not.toHaveBeenCalled();
+    expect(selected()).toBe("m5");
+    unmount();
+
+    useShortcutStore.setState({ vimMode: true, bindings: { ...DEFAULT_BINDINGS, "archive-message": "D" } });
+    renderHook(() => useKeyboard());
+    press(document.body, "d");
+    await waitFor(() => expect(mocks.runMailAction).toHaveBeenCalledWith(
+      mocks.queryClient, "archive", [expect.objectContaining({ id: "m5" })], expect.anything(),
+    ));
+  });
+
+  it("ignores vim keys while typing", () => {
+    renderHook(() => useKeyboard());
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    press(input, "d");
+    press(input, "d");
+    expect(mocks.runMailAction).not.toHaveBeenCalled();
   });
 });
