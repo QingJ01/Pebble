@@ -330,7 +330,15 @@ jobs:
           fi
 
           for package in "${found[@]}"; do
-            cp "$package" "$artifact_dir/$(basename "$package")"
+            # productName "Pebble Mail" puts a space in bundle names; publish
+            # pebble-mail_<version>_amd64.deb, pebble-mail-<version>-1.x86_64.rpm…
+            name="$(basename "$package")"
+            name="${name/#Pebble Mail/pebble-mail}"
+            if [[ "$name" == *" "* ]]; then
+              echo "Unexpected space in Linux artifact name: $name" >&2
+              exit 1
+            fi
+            cp "$package" "$artifact_dir/$name"
           done
 
           for file in "$artifact_dir"/*; do
