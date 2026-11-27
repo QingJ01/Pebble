@@ -42,7 +42,7 @@ class ErrorBoundary extends Component<
 }
 
 /** Splash fade duration; matches the transition in index.html. */
-export const SPLASH_FADE_MS = 200;
+export const SPLASH_FADE_MS = 260;
 
 /** Fade out and remove the boot splash. Safe to call when it is already gone. */
 export function dismissSplash(doc: Document = document) {

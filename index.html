@@ -7,22 +7,13 @@
   </head>
   <body>
     <style id="splash-style">
-      @keyframes splash-fade-in {
-        from { opacity: 0; transform: translateY(8px); }
-        to   { opacity: 1; transform: translateY(0); }
-      }
-      @keyframes splash-draw {
-        to { stroke-dashoffset: 0; }
-      }
-      @keyframes splash-fill {
-        from { fill-opacity: 0; }
-        to   { fill-opacity: 1; }
-      }
-      @keyframes splash-fade-out {
-        from { opacity: 1; }
-        to   { opacity: 0; }
-      }
+      /* Boot splash, shown until React has painted (App.tsx dismissSplash).
+         The mark appears at once; the wordmark and loading dots only fade
+         in when startup is slow, so a fast start never shows a loader. */
       #splash {
+        --splash-bg: #191919;
+        --splash-text: #e6e6e6;
+        --splash-muted: rgba(255, 255, 255, .28);
         position: fixed;
         inset: 0;
         z-index: 99999;
@@ -30,85 +21,103 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        background: #1a1a1a;
+        gap: 18px;
+        background: var(--splash-bg);
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
         user-select: none;
+        -webkit-user-select: none;
         overflow: hidden;
-        transition: opacity .2s cubic-bezier(.4, 0, 1, 1);
+        transition: opacity .26s cubic-bezier(.4, 0, .2, 1);
       }
-      /* Follow the app theme applied below (falls back to the OS scheme). */
-      html[data-theme="light"] #splash { background: #f8f7f5; }
-      html[data-theme="light"] #splash .app-name { color: #333; }
-      html[data-theme="light"] #splash .loading-bar { background: rgba(0,0,0,.08); }
+      /* Same surface as the app chrome, so the hand-off doesn't flash. */
+      html[data-theme="light"] #splash {
+        --splash-bg: #f5f4f2;
+        --splash-text: #1a1a1a;
+        --splash-muted: rgba(0, 0, 0, .22);
+      }
       @media (prefers-color-scheme: light) {
-        html:not([data-theme]) #splash { background: #f8f7f5; }
-        html:not([data-theme]) #splash .app-name { color: #333; }
-        html:not([data-theme]) #splash .loading-bar { background: rgba(0,0,0,.08); }
+        html:not([data-theme]) #splash {
+          --splash-bg: #f5f4f2;
+          --splash-text: #1a1a1a;
+          --splash-muted: rgba(0, 0, 0, .22);
+        }
       }
+      #splash .splash-mark {
+        width: 76px;
+        height: 76px;
+        filter: drop-shadow(0 10px 18px rgba(196, 96, 60, .28));
+        animation: splash-pop .42s cubic-bezier(.2, .9, .3, 1.2) both;
+        transition: transform .26s cubic-bezier(.4, 0, .2, 1);
+      }
+      #splash .splash-flap {
+        fill: none;
+        stroke: #fff4ec;
+        stroke-width: 4;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        opacity: 0;
+        animation: splash-flap .32s cubic-bezier(.2, .9, .3, 1) .14s forwards;
+      }
+      #splash .splash-shine {
+        fill: none;
+        stroke: rgba(255, 255, 255, .5);
+        stroke-width: 3;
+        stroke-linecap: round;
+        opacity: 0;
+        animation: splash-in .3s ease-out .3s forwards;
+      }
+      #splash .splash-name {
+        color: var(--splash-text);
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: .32em;
+        text-indent: .32em;
+        text-transform: uppercase;
+        opacity: 0;
+        animation: splash-in .4s ease-out .8s forwards;
+      }
+      #splash .splash-dots {
+        display: flex;
+        gap: 6px;
+        opacity: 0;
+        animation: splash-in .4s ease-out 1.1s forwards;
+      }
+      #splash .splash-dots span {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--splash-muted);
+        animation: splash-dot 1.2s ease-in-out 1.1s infinite;
+      }
+      #splash .splash-dots span:nth-child(2) { animation-delay: 1.25s; }
+      #splash .splash-dots span:nth-child(3) { animation-delay: 1.4s; }
       #splash.fade-out {
         opacity: 0;
         pointer-events: none;
       }
-      #splash svg {
-        width: 64px;
-        height: 64px;
-        margin-bottom: 20px;
+      #splash.fade-out .splash-mark { transform: scale(1.08); }
+      @keyframes splash-pop {
+        from { opacity: 0; transform: scale(.82); }
+        to   { opacity: 1; transform: scale(1); }
       }
-      #splash .pebble-outline {
-        fill: none;
-        stroke: #d4714e;
-        stroke-width: 2;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-        stroke-dasharray: 200;
-        stroke-dashoffset: 200;
-        animation: splash-draw 1.2s ease-out forwards;
+      @keyframes splash-flap {
+        from { opacity: 0; transform: translateY(-5px); }
+        to   { opacity: 1; transform: translateY(0); }
       }
-      #splash .pebble-fill {
-        fill: #d4714e;
-        fill-opacity: 0;
-        animation: splash-fill .6s ease-out .8s forwards;
-      }
-      #splash .app-name {
-        font-size: 18px;
-        font-weight: 600;
-        letter-spacing: 3px;
-        color: #e0e0e0;
-        text-transform: uppercase;
-        opacity: 0;
-        animation: splash-fade-in .6s ease-out .6s forwards;
-      }
-      #splash .loading-bar {
-        margin-top: 24px;
-        width: 120px;
-        height: 2px;
-        border-radius: 1px;
-        background: rgba(255,255,255,.08);
-        overflow: hidden;
-        opacity: 0;
-        animation: splash-fade-in .4s ease-out 1s forwards;
-      }
-      #splash .loading-bar::after {
-        content: '';
-        display: block;
-        width: 40%;
-        height: 100%;
-        border-radius: 1px;
-        background: #d4714e;
-        animation: splash-slide 1.2s ease-in-out .8s infinite;
-      }
-      @keyframes splash-slide {
-        0%   { transform: translateX(-100%); }
-        100% { transform: translateX(350%); }
+      @keyframes splash-in { to { opacity: 1; } }
+      @keyframes splash-dot {
+        0%, 70%, 100% { background: var(--splash-muted); transform: translateY(0); }
+        35% { background: #d4714e; transform: translateY(-3px); }
       }
       @media (prefers-reduced-motion: reduce) {
-        #splash { transition: none; }
-        #splash .pebble-outline { animation: none; stroke-dashoffset: 0; }
-        #splash .pebble-fill { animation: none; fill-opacity: 1; }
-        #splash .app-name,
-        #splash .loading-bar { animation: none; opacity: 1; }
-        #splash .loading-bar::after { animation: none; transform: translateX(75%); }
-        #splash svg ellipse { animation: none !important; opacity: 1 !important; }
+        #splash, #splash .splash-mark { transition: none; }
+        #splash .splash-mark { animation: none; }
+        #splash .splash-flap { animation: none; opacity: 1; }
+        #splash .splash-shine,
+        #splash .splash-name,
+        #splash .splash-dots { animation: none; opacity: 1; }
+        #splash .splash-dots span { animation: none; }
+        #splash.fade-out .splash-mark { transform: none; }
       }
     </style>
     <script>
@@ -116,15 +125,20 @@
       // Apply saved theme immediately to avoid flash of wrong theme
       try{var t=localStorage.getItem('pebble-theme')||'light';var d=t==='system'?matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light':t;document.documentElement.setAttribute('data-theme',d)}catch(e){}
     </script>
-    <div id="splash">
-      <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-        <path class="pebble-fill" d="M32 8C18 8 8 20 10 34c2 12 12 22 22 22s20-10 22-22C56 20 46 8 32 8z"/>
-        <path class="pebble-outline" d="M32 8C18 8 8 20 10 34c2 12 12 22 22 22s20-10 22-22C56 20 46 8 32 8z"/>
-        <ellipse cx="24" cy="22" rx="8" ry="5" fill="rgba(255,255,255,.15)" transform="rotate(-20 24 22)"
-          style="opacity:0; animation: splash-fill .4s ease-out 1.2s forwards;"/>
+    <div id="splash" aria-hidden="true">
+      <svg class="splash-mark" viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="splash-pebble" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#e2865f"/>
+            <stop offset="1" stop-color="#c25e3a"/>
+          </linearGradient>
+        </defs>
+        <path fill="url(#splash-pebble)" d="M48 12C72 12 85 23 85 47S72 84 48 84 11 71 11 47 24 12 48 12Z"/>
+        <path class="splash-shine" d="M24 33C26 25 32 20 41 18"/>
+        <path class="splash-flap" d="M30 40L48 54L66 40"/>
       </svg>
-      <div class="app-name">Pebble</div>
-      <div class="loading-bar"></div>
+      <div class="splash-name">Pebble</div>
+      <div class="splash-dots"><span></span><span></span><span></span></div>
     </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
