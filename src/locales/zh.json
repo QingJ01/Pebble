@@ -82,6 +82,8 @@
     "quit": "退出 Pebble"
   },
   "sidebar": {
+    "collapseFolder": "折叠 {{name}}",
+    "expandFolder": "展开 {{name}}",
     "outbox": "发件箱",
     "inbox": "收件箱",
     "sent": "已发送",

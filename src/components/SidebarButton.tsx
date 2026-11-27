@@ -7,10 +7,12 @@ import type { CSSProperties, MouseEvent, ReactNode } from "react";
  * when the label is actually truncated.
  */
 export default function SidebarButton({
-  icon, label, badge, isActive, collapsed, indent = false, disabled, onClick, style, dropFolderId,
+  icon, label, tooltip, badge, isActive, collapsed, indent = false, disabled, onClick, style, dropFolderId,
 }: {
   icon: ReactNode;
   label: string;
+  /** Hover text shown even when the label fits, e.g. a nested folder's full path */
+  tooltip?: string;
   badge?: number;
   isActive: boolean;
   collapsed: boolean;
@@ -22,7 +24,7 @@ export default function SidebarButton({
   dropFolderId?: string;
 }) {
   function syncTruncationTitle(event: MouseEvent<HTMLButtonElement>) {
-    if (collapsed) return;
+    if (collapsed || tooltip) return;
     const labelEl = event.currentTarget.querySelector<HTMLElement>(".sidebar-btn__label");
     if (!labelEl) return;
     if (labelEl.scrollWidth > labelEl.clientWidth) event.currentTarget.title = label;
@@ -35,7 +37,7 @@ export default function SidebarButton({
       onClick={onClick}
       aria-label={collapsed ? label : undefined}
       aria-current={isActive ? "page" : undefined}
-      title={collapsed ? label : undefined}
+      title={collapsed ? label : tooltip}
       disabled={disabled}
       onMouseEnter={syncTruncationTitle}
       onFocus={(event) => syncTruncationTitle(event as unknown as MouseEvent<HTMLButtonElement>)}

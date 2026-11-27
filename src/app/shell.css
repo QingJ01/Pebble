@@ -112,6 +112,28 @@
 }
 /* Indented rows line their icon up with the group header label. */
 .sidebar-btn--indent { padding-left: var(--space-6); }
+/* Folder tree: depth sets the indent; the toggle sits just left of the icon */
+.sidebar-tree-row { position: relative; }
+.sidebar-tree-row > .sidebar-btn--indent { padding-left: calc(var(--space-6) + var(--tree-depth, 0) * 14px); }
+.sidebar-tree-toggle {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--space-6) + var(--tree-depth, 0) * 14px - 18px);
+  transform: translateY(-50%);
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.sidebar-tree-toggle:hover { background: var(--color-fill-hover); }
 .sidebar-btn--rail {
   flex: none;
   justify-content: center;

@@ -36,6 +36,7 @@ import {
   unreadCountForFolder,
 } from "../lib/folderAggregation";
 import { profileLocalStorage } from "../lib/profileStorage";
+import { ancestorKeys, buildFolderTree, totalForNode, type FolderTreeNode } from "../lib/folderTree";
 import { useSidebarFolderManagement } from "../hooks/useSidebarFolderManagement";
 import type { Folder as FolderType } from "../lib/api";
 
@@ -61,6 +62,18 @@ function readCollapsedAccountIds(): Set<string> {
     return new Set(
       Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [],
     );
+  } catch {
+    return new Set();
+  }
+}
+
+const EXPANDED_FOLDERS_KEY = "pebble-sidebar-expanded-folders";
+
+function readExpandedFolderKeys(): Set<string> {
+  try {
+    const stored = profileLocalStorage.getItem(EXPANDED_FOLDERS_KEY);
+    const parsed = stored ? JSON.parse(stored) : [];
+    return new Set(Array.isArray(parsed) ? parsed.filter((key): key is string => typeof key === "string") : []);
   } catch {
     return new Set();
   }
@@ -134,6 +147,21 @@ export default function SidebarGrouped({ collapsed: sidebarCollapsed }: { collap
       if (next.has(accountId)) next.delete(accountId);
       else next.add(accountId);
       profileLocalStorage.setItem(COLLAPSED_ACCOUNTS_KEY, JSON.stringify([...next]));
+      return next;
+    });
+  }
+
+  const [expandedFolderKeys, setExpandedFolderKeys] = useState<Set<string>>(readExpandedFolderKeys);
+  function toggleFolderExpanded(stateKey: string) {
+    setExpandedFolderKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(stateKey)) next.delete(stateKey);
+      else next.add(stateKey);
+      try {
+        profileLocalStorage.setItem(EXPANDED_FOLDERS_KEY, JSON.stringify([...next]));
+      } catch {
+        // storage unavailable: keep the in-memory state
+      }
       return next;
     });
   }
@@ -311,19 +339,57 @@ export default function SidebarGrouped({ collapsed: sidebarCollapsed }: { collap
                 </span>
               </button>
               {!groupCollapsed && (entries.length > 0
-                ? entries.map((folder) => (
-                    <SidebarButton
-                      key={folder.id}
-                      icon={folderIconFor(folder)}
-                      label={folderLabel(folder)}
-                      badge={showUnread ? unreadCountForFolder(folder.id, accountFolders, unreadCounts) : undefined}
-                      isActive={activeView === "inbox" && activeAccountId === account.id && activeFolderId === folder.id}
-                      collapsed={false}
-                      indent
-                      onClick={() => handleFolderSelect(account.id, folder.id)}
-                      dropFolderId={folder.id}
-                    />
-                  ))
+                ? (() => {
+                    const tree = buildFolderTree(entries);
+                    const openAncestors = new Set(activeAccountId === account.id ? ancestorKeys(tree, activeFolderId) : []);
+                    const unreadFor = (f: FolderType) => unreadCountForFolder(f.id, accountFolders, unreadCounts);
+                    const renderNode = (node: FolderTreeNode, depth: number): React.ReactNode => {
+                      const stateKey = `${account.id}:${node.key}`;
+                      const hasChildren = node.children.length > 0;
+                      const expanded = hasChildren && (expandedFolderKeys.has(stateKey) || openAncestors.has(node.key));
+                      const folder = node.folder;
+                      const label = folder && (folder.role || folder.remote_id === "__local_outbox__") ? folderLabel(folder) : node.label;
+                      // A collapsed parent shows the unread total of everything inside it
+                      const badge = !showUnread ? undefined
+                        : hasChildren && !expanded ? totalForNode(node, unreadFor)
+                        : folder ? unreadFor(folder) : undefined;
+                      return (
+                        <div key={node.key} role="treeitem" aria-expanded={hasChildren ? expanded : undefined}>
+                          <div className="sidebar-tree-row" style={{ "--tree-depth": depth } as React.CSSProperties}>
+                            {hasChildren && (
+                              <button
+                                type="button"
+                                className="sidebar-tree-toggle"
+                                aria-label={expanded
+                                  ? t("sidebar.collapseFolder", { name: label, defaultValue: "Collapse {{name}}" })
+                                  : t("sidebar.expandFolder", { name: label, defaultValue: "Expand {{name}}" })}
+                                onClick={(e) => { e.stopPropagation(); toggleFolderExpanded(stateKey); }}
+                              >
+                                {expanded ? <ChevronDown size={12} aria-hidden="true" /> : <ChevronRight size={12} aria-hidden="true" />}
+                              </button>
+                            )}
+                            <SidebarButton
+                              icon={folder ? folderIconFor(folder) : <Folder size={16} />}
+                              label={label}
+                              tooltip={folder && !folder.role && folder.name !== label ? folder.name : undefined}
+                              badge={badge}
+                              isActive={!!folder && activeView === "inbox" && activeAccountId === account.id && activeFolderId === folder.id}
+                              collapsed={false}
+                              indent
+                              onClick={() => folder ? handleFolderSelect(account.id, folder.id) : toggleFolderExpanded(stateKey)}
+                              dropFolderId={folder?.id}
+                            />
+                          </div>
+                          {expanded && (
+                            <div role="group">
+                              {node.children.map((child) => renderNode(child, depth + 1))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    };
+                    return <div role="tree" aria-label={accountName}>{tree.map((node) => renderNode(node, 0))}</div>;
+                  })()
                 : foldersFetched && (
                     <div className="sidebar-empty-note">
                       {t("sidebar.noFolders", "No folders yet")}
