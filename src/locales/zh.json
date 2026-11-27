@@ -674,7 +674,15 @@
     "dragStart": "已拿起「{{subject}}」。",
     "dragOver": "「{{subject}}」位于「{{column}}」上方。",
     "dragEnd": "已将「{{subject}}」放入「{{column}}」。",
-    "dragCancel": "已取消移动「{{subject}}」。"
+    "dragCancel": "已取消移动「{{subject}}」。",
+    "title": "看板",
+    "summary": "{{open}} 项进行中 · {{done}} 项已完成",
+    "emptySummary": "在阅读邮件时点工具栏的「加入看板」，就能在这里跟进。",
+    "todoHint": "还需要你处理的邮件",
+    "waitingHint": "在等别人回复",
+    "doneHint": "处理完的会放在这里",
+    "markDone": "标记完成",
+    "reopen": "移回待办"
   },
   "accountSetup": {
     "title": "添加邮箱账户",

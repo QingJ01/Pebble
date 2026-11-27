@@ -683,7 +683,15 @@
     "dragStart": "Picked up {{subject}}.",
     "dragOver": "{{subject}} is over {{column}}.",
     "dragEnd": "Dropped {{subject}} in {{column}}.",
-    "dragCancel": "Moving {{subject}} was cancelled."
+    "dragCancel": "Moving {{subject}} was cancelled.",
+    "title": "Kanban board",
+    "summary": "{{open}} open · {{done}} done",
+    "emptySummary": "Add mail from the reader's toolbar to track it here.",
+    "todoHint": "Mail you still need to act on",
+    "waitingHint": "Waiting on someone else",
+    "doneHint": "Finished items land here",
+    "markDone": "Mark done",
+    "reopen": "Move back to To do"
   },
   "accountSetup": {
     "title": "Add email account",

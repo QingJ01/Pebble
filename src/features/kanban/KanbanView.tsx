@@ -32,12 +32,13 @@ import { useMailStore } from "@/stores/mail.store";
 import KanbanColumn from "./KanbanColumn";
 import { KanbanCardPreview } from "./KanbanCard";
 import { KanbanSkeleton } from "@/components/Skeleton";
+import { useAccountBadges } from "@/hooks/useAccountBadges";
 import "./kanban.css";
 
-const COLUMN_IDS: { id: KanbanColumnType; titleKey: string }[] = [
-  { id: "todo", titleKey: "kanban.todo" },
-  { id: "waiting", titleKey: "kanban.waiting" },
-  { id: "done", titleKey: "kanban.done" },
+const COLUMN_IDS: { id: KanbanColumnType; titleKey: string; hintKey: string; hint: string }[] = [
+  { id: "todo", titleKey: "kanban.todo", hintKey: "kanban.todoHint", hint: "Mail you still need to act on" },
+  { id: "waiting", titleKey: "kanban.waiting", hintKey: "kanban.waitingHint", hint: "Waiting on someone else" },
+  { id: "done", titleKey: "kanban.done", hintKey: "kanban.doneHint", hint: "Finished items land here" },
 ];
 
 type ColumnItems = Record<KanbanColumnType, string[]>;
@@ -100,6 +101,9 @@ export default function KanbanView() {
 
   const baseItems = useMemo(() => columnsFromCards(cards), [cards]);
   const items = dragItems ?? baseItems;
+  // Account badges only when the board holds mail from several accounts.
+  const cardAccountIds = useMemo(() => [...messages.values()].map((m) => m.account_id), [messages]);
+  const badgeAccounts = useAccountBadges(cardAccountIds);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -205,6 +209,14 @@ export default function KanbanView() {
     reorderColumn.mutate({ column, orderedIds: ordered });
   }
 
+  /** Mark done (to the top of Done), or reopen a done card into To do. */
+  function handleToggleDone(messageId: string) {
+    const from = findColumn(baseItems, messageId);
+    if (!from) return;
+    const to: KanbanColumnType = from === "done" ? "todo" : "done";
+    reorderColumn.mutate({ column: to, orderedIds: [messageId, ...baseItems[to].filter((id) => id !== messageId)] });
+  }
+
   async function handleRemove(messageId: string) {
     const card = cards.find((c) => c.message_id === messageId);
     const oldColumn = card?.column ?? "todo";
@@ -229,7 +241,17 @@ export default function KanbanView() {
     return <KanbanSkeleton />;
   }
 
+  const openCount = items.todo.length + items.waiting.length;
   return (
+    <div className="kanban-view">
+      <header className="kanban-view__header">
+        <h1 className="kanban-view__title">{t("kanban.title", "Kanban board")}</h1>
+        <p className="kanban-view__summary">
+          {cards.length === 0
+            ? t("kanban.emptySummary", "Add mail from the reader's toolbar to track it here.")
+            : t("kanban.summary", "{{open}} open · {{done}} done", { open: openCount, done: items.done.length })}
+        </p>
+      </header>
     <div className="kanban-board">
       <DndContext
         sensors={sensors}
@@ -253,10 +275,13 @@ export default function KanbanView() {
             key={col.id}
             id={col.id}
             title={t(col.titleKey)}
+            hint={t(col.hintKey, col.hint)}
             cardIds={items[col.id]}
             contextNotes={contextNotes}
             messages={messages}
+            badgeAccounts={badgeAccounts}
             onRemove={handleRemove}
+            onToggleDone={handleToggleDone}
             onOpen={handleOpenMessage}
           />
         ))}
@@ -265,14 +290,20 @@ export default function KanbanView() {
             {activeId ? (
               <KanbanCardPreview
                 id={activeId}
+                column={findColumn(items, activeId) ?? "todo"}
                 note={contextNotes[activeId]}
                 message={messages.get(activeId) ?? null}
+                account={(() => {
+                  const message = messages.get(activeId);
+                  return message && badgeAccounts ? badgeAccounts.get(message.account_id) ?? null : null;
+                })()}
               />
             ) : null}
           </DragOverlay>,
           document.body,
         )}
       </DndContext>
+    </div>
     </div>
   );
 }
