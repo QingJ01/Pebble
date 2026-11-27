@@ -166,23 +166,7 @@ nav .container { display: flex; align-items: center; justify-content: space-betw
   background: var(--bg-secondary);
   box-shadow: 0 8px 40px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04);
 }
-.window-bar {
-  display: flex; align-items: center; gap: 8px;
-  padding: 14px 16px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
-}
-.window-dot {
-  width: 12px; height: 12px; border-radius: 50%;
-}
-.window-dot-r { background: #ff5f57; }
-.window-dot-y { background: #febc2e; }
-.window-dot-g { background: #28c840; }
-.window-body {
-  aspect-ratio: 16 / 10;
-  display: flex; align-items: center; justify-content: center;
-}
-.window-body img { width: 100%; height: 100%; object-fit: cover; }
+.hero-window img { width: 100%; height: auto; }
 .img-placeholder {
   display: flex; flex-direction: column; align-items: center; gap: 8px;
   color: var(--text-muted); font-size: 13px;

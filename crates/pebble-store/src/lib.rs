@@ -53,6 +53,15 @@ pub struct Store {
 
 impl Store {
     pub fn open(path: &Path) -> Result<Self> {
+        Self::open_with_progress(path, &mut |_| {})
+    }
+
+    /// [`Store::open`], reporting schema-upgrade progress (see
+    /// [`migrations::pending_migration_from`] to know beforehand).
+    pub fn open_with_progress(
+        path: &Path,
+        progress: &mut dyn FnMut(migrations::MigrationProgress),
+    ) -> Result<Self> {
         let write_manager = SqliteConnectionManager::file(path).with_init(|conn| {
             conn.execute_batch(
                 "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;",
@@ -79,7 +88,7 @@ impl Store {
             read_pool,
             write_pool,
         };
-        store.initialize()?;
+        store.initialize(progress)?;
         Ok(store)
     }
 
@@ -121,16 +130,16 @@ impl Store {
             read_pool,
             write_pool,
         };
-        store.initialize()?;
+        store.initialize(&mut |_| {})?;
         Ok(store)
     }
 
-    fn initialize(&self) -> Result<()> {
+    fn initialize(&self, progress: &mut dyn FnMut(migrations::MigrationProgress)) -> Result<()> {
         let conn = self
             .write_pool
             .get()
             .map_err(|e| PebbleError::Internal(format!("Pool error: {e}")))?;
-        migrations::run_migrations(&conn)
+        migrations::run_migrations_with_progress(&conn, progress)
     }
 
     /// Obtain a read-only connection from the pool.

@@ -6,6 +6,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-27
+
+### Added
+
+- Added an unread-only filter for message and thread lists. A message you open stays listed until you change the filter, folder or view (#75, #112).
+- Added automatic IMAP/SMTP settings from the email domain for common providers, with hints when an app password or OAuth sign-in is needed (#36, #112).
+- Added an Appearance setting for HTML mail in the dark theme: keep a light card, darken simple mail, or always dark (#103, #112).
+- Added drag and drop of messages onto sidebar folders, with the same rules, Undo and partial-failure reporting as Move To (#80, #112).
+- Added a launch splash with the Pebble logo and a loading line. When a database upgrade is needed after an update, it runs in the background and the splash shows its progress instead of the app appearing frozen (#113).
+
+### Changed
+
+- Restored the amber accent colour, and refreshed secondary buttons, option cards and the Settings navigation (#113).
+- Redesigned the Kanban board: a header with open and done counts, clearer columns with empty-state drop zones, richer cards, and quick actions to mark a card done, reopen it or remove it (#113).
+- Unread list pages use a dedicated index, so they stay fast in large folders (#112).
+- Refreshed the README and website with current features and screenshots (#113).
+
+### Fixed
+
+- Quitting (including macOS Cmd-Q) is held while a database upgrade is running, and still works if startup fails (#113).
+- mailto: links opened while Pebble is starting or upgrading are no longer lost (#113).
+
+### Upgrade notes
+
+- The first launch applies a small database migration (an index for unread lists). Automated tests and package builds cover this release; the background upgrade path has not yet been exercised in a packaged build.
+
 ## [0.2.0] - 2026-11-26
 
 ### Added
@@ -413,7 +439,8 @@ This release includes:
 - Windows installers are not code-signed yet, so Windows SmartScreen may show a warning.
 - Outlook support is still experimental and depends on Microsoft Graph permissions configured by the user.
 
-[Unreleased]: https://github.com/QingJ01/Pebble/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/QingJ01/Pebble/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/QingJ01/Pebble/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/QingJ01/Pebble/compare/v0.1.6...v0.2.0
 [0.1.6]: https://github.com/QingJ01/Pebble/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/QingJ01/Pebble/compare/v0.1.4...v0.1.5

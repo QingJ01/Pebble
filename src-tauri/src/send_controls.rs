@@ -737,7 +737,9 @@ fn guard_exit(gate: &mut ExitGate, count: Result<usize>) -> bool {
 /// Also use on window close when background mode is disabled, BEFORE the window is destroyed.
 pub fn prevent_exit(app: &tauri::AppHandle) -> bool {
     let Some(runtime) = app.try_state::<SendControlRuntime>() else {
-        return true;
+        // Not set up yet: hold exit while the database is being upgraded, but
+        // let a failed startup quit (send controls will never come up).
+        return !crate::startup::has_failed(app);
     };
     let state = app.state::<AppState>();
     let prevented = guard_exit(
