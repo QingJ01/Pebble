@@ -4005,7 +4005,7 @@ dependencies = [
 
 [[package]]
 name = "pebble"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4052,7 +4052,7 @@ dependencies = [
 
 [[package]]
 name = "pebble-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "rusqlite",
@@ -4065,7 +4065,7 @@ dependencies = [
 
 [[package]]
 name = "pebble-crypto"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -4082,7 +4082,7 @@ dependencies = [
 
 [[package]]
 name = "pebble-mail"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-imap",
  "async-trait",
@@ -4110,7 +4110,7 @@ dependencies = [
 
 [[package]]
 name = "pebble-oauth"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "oauth2",
  "pebble-core",
@@ -4125,7 +4125,7 @@ dependencies = [
 
 [[package]]
 name = "pebble-privacy"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ammonia",
  "htmlescape",
@@ -4136,7 +4136,7 @@ dependencies = [
 
 [[package]]
 name = "pebble-rules"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "pebble-core",
  "serde",
@@ -4146,7 +4146,7 @@ dependencies = [
 
 [[package]]
 name = "pebble-search"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "pebble-core",
  "tantivy",
@@ -4156,7 +4156,7 @@ dependencies = [
 
 [[package]]
 name = "pebble-store"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "pebble-core",
  "r2d2",
@@ -4173,7 +4173,7 @@ dependencies = [
 
 [[package]]
 name = "pebble-translate"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "pebble-core",
  "reqwest 0.12.28",
@@ -4186,7 +4186,7 @@ dependencies = [
 
 [[package]]
 name = "pebble-webdav"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "pebble-core",
  "reqwest 0.12.28",
