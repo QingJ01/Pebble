@@ -107,30 +107,35 @@ describe("Sidebar folder tree", () => {
     mocks.unreadCounts = { amy: 2, colleen: 3, clients: 1 };
   });
 
-  it("starts with sub-folders collapsed and shows short names", () => {
+  it("starts with sub-folders expanded and shows short names", () => {
     render(<Sidebar />);
     const labels = visibleLabels();
     expect(labels).toContain("Inbox");
     expect(labels).toContain("Sent");
-    expect(labels.some((l) => l?.startsWith("Clients"))).toBe(true);
-    expect(labels.some((l) => l?.startsWith("Gmail"))).toBe(true);
-    expect(labels.join("|")).not.toContain("Amy & Todd");
+    expect(labels).toEqual(expect.arrayContaining(["Amy & Todd2", "Mara Ream", "Colleen Erickson3", "All Mail"]));
+    expect(labels.join("|")).not.toContain("Clients/");
     expect(labels.join("|")).not.toContain("[Gmail]");
   });
 
   it("shows the total unread of a collapsed folder and its sub-folders", () => {
+    profileLocalStorage.setItem("pebble-sidebar-expanded-folders", JSON.stringify({ "acc:clients": false }));
     render(<Sidebar />);
     const clients = folderButton("Clients");
     expect(clients.textContent).toBe("Clients6");
   });
 
-  it("expands with the arrow and remembers it", () => {
+  it("collapses and expands with the arrow and remembers it", () => {
     const { unmount } = render(<Sidebar />);
-    fireEvent.click(screen.getByRole("button", { name: "Expand Clients" }));
-    expect(visibleLabels()).toEqual(expect.arrayContaining(["Amy & Todd2", "Mara Ream3"]));
     expect(folderButton("Clients").textContent).toBe("Clients1");
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Clients" }));
+    expect(visibleLabels()).not.toContain("Amy & Todd2");
+    expect(folderButton("Clients").textContent).toBe("Clients6");
 
     unmount();
+    const { unmount: unmountAgain } = render(<Sidebar />);
+    expect(visibleLabels()).not.toContain("Amy & Todd2");
+    fireEvent.click(screen.getByRole("button", { name: "Expand Clients" }));
+    unmountAgain();
     render(<Sidebar />);
     expect(visibleLabels()).toContain("Amy & Todd2");
   });
@@ -139,12 +144,11 @@ describe("Sidebar folder tree", () => {
     render(<Sidebar />);
     fireEvent.click(folderButton("Clients"));
     expect(useMailStore.getState().activeFolderId).toBe("clients");
-    expect(screen.getByRole("button", { name: "Expand Clients" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Collapse Clients" })).toBeTruthy();
   });
 
   it("shows the full path when hovering a nested folder", () => {
     render(<Sidebar />);
-    fireEvent.click(screen.getByRole("button", { name: "Expand Clients" }));
     expect(within(mailNav()).getByTitle("Clients/Amy & Todd").textContent).toBe("Amy & Todd2");
   });
 
@@ -159,6 +163,7 @@ describe("Sidebar folder tree", () => {
     render(<Sidebar />);
     expect(visibleLabels()).toContain("All Mail");
     expect(folderButton("Gmail").getAttribute("aria-expanded")).toBe("true");
+    expect(screen.queryByRole("button", { name: "Collapse Gmail" })).toBeNull();
     fireEvent.click(folderButton("Gmail"));
     expect(visibleLabels()).not.toContain("All Mail");
     expect(folderButton("Gmail").getAttribute("aria-expanded")).toBe("false");
@@ -181,12 +186,13 @@ describe("Sidebar folder tree", () => {
 
   it("makes the whole row, arrow included, the drop target", () => {
     render(<Sidebar />);
-    const toggle = screen.getByRole("button", { name: "Expand Clients" });
+    const toggle = screen.getByRole("button", { name: "Collapse Clients" });
     expect(toggle.closest<HTMLElement>("[data-drop-folder-id]")?.dataset.dropFolderId).toBe("clients");
     expect(folderButton("Clients").closest<HTMLElement>("[data-drop-folder-id]")?.dataset.dropFolderId).toBe("clients");
   });
 
   it("opens a collapsed folder when dragged mail hovers it", () => {
+    profileLocalStorage.setItem("pebble-sidebar-expanded-folders", JSON.stringify({ "acc:clients": false }));
     render(<Sidebar />);
     const row = folderButton("Clients").closest<HTMLElement>(".sidebar-tree-row")!;
     expect(row.dataset.dropExpand).toBe("acc:clients");
@@ -203,8 +209,8 @@ describe("Sidebar folder tree", () => {
       JSON.stringify({ "gone:x": true, "acc:deleted-folder": true, "acc:mara": true }),
     );
     render(<Sidebar />);
-    fireEvent.click(screen.getByRole("button", { name: "Expand Clients" }));
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Clients" }));
     const stored = JSON.parse(profileLocalStorage.getItem("pebble-sidebar-expanded-folders") ?? "{}");
-    expect(stored).toEqual({ "acc:mara": true, "acc:clients": true });
+    expect(stored).toEqual({ "acc:mara": true, "acc:clients": false });
   });
 });

@@ -36,7 +36,7 @@ import {
   unreadCountForFolder,
 } from "../lib/folderAggregation";
 import { profileLocalStorage } from "../lib/profileStorage";
-import { ancestorKeys, buildFolderTree, GMAIL_CONTAINER_KEY, totalForNode, type FolderTreeNode } from "../lib/folderTree";
+import { buildFolderTree, totalForNode, type FolderTreeNode } from "../lib/folderTree";
 import { MAIL_DRAG_EXPAND_EVENT } from "../lib/mailDrag";
 import { useSidebarFolderManagement } from "../hooks/useSidebarFolderManagement";
 import type { Folder as FolderType } from "../lib/api";
@@ -387,14 +387,12 @@ export default function SidebarGrouped({ collapsed: sidebarCollapsed }: { collap
               </button>
               {!groupCollapsed && (tree.length > 0
                 ? (() => {
-                    const openAncestors = new Set(activeAccountId === account.id ? ancestorKeys(tree, activeFolderId) : []);
                     const unreadFor = (f: FolderType) => unreadCountForFolder(f.id, accountFolders, unreadCounts);
                     const renderNode = (node: FolderTreeNode, depth: number): React.ReactNode => {
                       const stateKey = `${account.id}:${node.key}`;
                       const hasChildren = node.children.length > 0;
-                      // Open folder's parents and the Gmail group start expanded; a stored choice wins
-                      const expanded = hasChildren
-                        && (expandedFolders[stateKey] ?? (openAncestors.has(node.key) || node.key === GMAIL_CONTAINER_KEY));
+                      // Folders start expanded; a stored choice wins
+                      const expanded = hasChildren && (expandedFolders[stateKey] ?? true);
                       const groupId = `sidebar-folders-${stateKey}`.replace(/\s/g, "_");
                       const folder = node.folder;
                       const label = folder && (folder.role || folder.remote_id === "__local_outbox__") ? folderLabel(folder) : node.label;
@@ -416,6 +414,9 @@ export default function SidebarGrouped({ collapsed: sidebarCollapsed }: { collap
                                 className="sidebar-tree-toggle"
                                 aria-expanded={expanded}
                                 aria-controls={expanded ? groupId : undefined}
+                                // The Gmail group's name button toggles too: expose one control
+                                aria-hidden={folder ? undefined : true}
+                                tabIndex={folder ? undefined : -1}
                                 aria-label={expanded
                                   ? t("sidebar.collapseFolder", { name: label, defaultValue: "Collapse {{name}}" })
                                   : t("sidebar.expandFolder", { name: label, defaultValue: "Expand {{name}}" })}

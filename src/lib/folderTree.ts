@@ -6,8 +6,9 @@ import type { Folder } from "@/lib/api";
  * Folders nest by `parent_id`. IMAP servers return full paths as folder names
  * ("Clients/Mara Ream"), so a child is labelled with only the part after its
  * parent's path; Outlook and local folders already have their own names.
- * Children of Inbox stay at the top level: on Dovecot/Courier servers every
- * folder lives in the "INBOX." namespace, so nesting would hide them all. Gmail's
+ * IMAP folders in the "INBOX." / "INBOX/" namespace (Dovecot, Courier) stay at
+ * the top level, since nesting would hide them all under Inbox; other children
+ * of Inbox (Outlook "Inbox › Receipts") nest under it as usual. Gmail's
  * "[Gmail]" / "[Google Mail]" container cannot be opened, so its non-system
  * children (All Mail, Important, Starred…) are gathered under a virtual
  * "Gmail" node instead of being shown with the bracketed prefix.
@@ -22,7 +23,7 @@ export interface FolderTreeNode {
 }
 
 const GMAIL_CONTAINERS = ["[Gmail]", "[Google Mail]"];
-const PATH_DELIMITERS = ["/", "."];
+const PATH_DELIMITERS = ["/", ".", "\\"];
 
 export const GMAIL_CONTAINER_KEY = "virtual:[Gmail]";
 
@@ -63,8 +64,11 @@ export function buildFolderTree(folders: Folder[]): FolderTreeNode[] {
       : undefined;
     const segment = validParent ? childSegment(folder.name, validParent.name) : null;
 
+    // IMAP remote ids are server paths ("INBOX.Work"); Outlook and Gmail API ids aren't
+    const inboxNamespace = validParent?.role === "inbox"
+      && childSegment(folder.remote_id, validParent.remote_id) !== null;
     // System folders (Inbox, Sent…) always stay at the top level
-    if (!folder.role && validParent && validParent.role !== "inbox") {
+    if (!folder.role && validParent && !inboxNamespace) {
       node.label = segment ?? folder.name;
       nodes.get(validParent.id)!.children.push(node);
       continue;
@@ -119,22 +123,6 @@ export function buildFolderTree(folders: Folder[]): FolderTreeNode[] {
   const custom = roots.filter((n) => n.folder && !n.folder.role).sort(byLabel);
   const virtual = roots.filter((n) => !n.folder);
   return [...system, ...custom, ...virtual];
-}
-
-/** Keys of every ancestor of the folder with `folderId`, outermost first */
-export function ancestorKeys(tree: FolderTreeNode[], folderId: string | null): string[] {
-  if (!folderId) return [];
-  const path: string[] = [];
-  const walk = (nodes: FolderTreeNode[]): boolean => {
-    for (const node of nodes) {
-      if (node.key === folderId) return true;
-      path.push(node.key);
-      if (walk(node.children)) return true;
-      path.pop();
-    }
-    return false;
-  };
-  return walk(tree) ? path : [];
 }
 
 /** Sum a per-folder count over a node and all its descendants */

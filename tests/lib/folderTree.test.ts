@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Folder } from "../../src/lib/api";
-import { ancestorKeys, buildFolderTree, GMAIL_CONTAINER_KEY, totalForNode, type FolderTreeNode } from "../../src/lib/folderTree";
+import { buildFolderTree, GMAIL_CONTAINER_KEY, totalForNode, type FolderTreeNode } from "../../src/lib/folderTree";
 
 let order = 0;
 function folder(id: string, name: string, extra: Partial<Folder> = {}): Folder {
@@ -92,6 +92,19 @@ describe("buildFolderTree", () => {
     expect(shape(tree)).toEqual(["INBOX", "Work(Q1)"]);
   });
 
+  it("nests other children of Inbox under it (Outlook, opaque remote ids)", () => {
+    const tree = buildFolderTree([
+      folder("inbox", "Inbox", { role: "inbox", remote_id: "AAMk-inbox" }),
+      folder("receipts", "Receipts", { parent_id: "inbox", remote_id: "AAMk-receipts" }),
+    ]);
+    expect(shape(tree)).toEqual(["Inbox(Receipts)"]);
+  });
+
+  it("strips backslash-delimited paths too", () => {
+    const tree = buildFolderTree([folder("c", "Clients"), folder("m", "Clients\\Mara", { parent_id: "c" })]);
+    expect(shape(tree)).toEqual(["Clients(Mara)"]);
+  });
+
   it("nests sub-folders of other system folders under them", () => {
     const tree = buildFolderTree([folder("trash", "Trash", { role: "trash" }), folder("old", "Trash/Old", { parent_id: "trash" })]);
     expect(shape(tree)).toEqual(["Trash(Old)"]);
@@ -111,16 +124,6 @@ describe("buildFolderTree", () => {
   it("sorts custom folders naturally regardless of case", () => {
     const tree = buildFolderTree([folder("b", "beta"), folder("a2", "Item 10"), folder("a1", "Item 9"), folder("c", "Alpha")]);
     expect(shape(tree)).toEqual(["Alpha", "beta", "Item 9", "Item 10"]);
-  });
-});
-
-describe("ancestorKeys", () => {
-  it("returns the chain of parents for a nested folder", () => {
-    const tree = buildFolderTree(gmailAccount);
-    expect(ancestorKeys(tree, "colleen")).toEqual(["clients", "mara"]);
-    expect(ancestorKeys(tree, "important")).toEqual([GMAIL_CONTAINER_KEY]);
-    expect(ancestorKeys(tree, "inbox")).toEqual([]);
-    expect(ancestorKeys(tree, "missing")).toEqual([]);
   });
 });
 
