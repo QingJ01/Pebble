@@ -1,10 +1,12 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Sidebar from "../../src/components/Sidebar";
 import { useComposeStore } from "../../src/stores/compose.store";
 import { useMailStore } from "../../src/stores/mail.store";
 import { useUIStore } from "../../src/stores/ui.store";
 import type { Account, Folder } from "../../src/lib/api";
+import { MAIL_DRAG_EXPAND_EVENT } from "../../src/lib/mailDrag";
+import { profileLocalStorage } from "../../src/lib/profileStorage";
 
 const mocks = vi.hoisted(() => ({
   accounts: [] as Account[],
@@ -153,11 +155,56 @@ describe("Sidebar folder tree", () => {
     expect(active.getAttribute("aria-current")).toBe("page");
   });
 
-  it("toggles the virtual Gmail group by clicking its name", () => {
+  it("starts the virtual Gmail group open and toggles it by clicking its name", () => {
     render(<Sidebar />);
-    expect(visibleLabels()).not.toContain("All Mail");
-    fireEvent.click(folderButton("Gmail"));
     expect(visibleLabels()).toContain("All Mail");
+    expect(folderButton("Gmail").getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(folderButton("Gmail"));
+    expect(visibleLabels()).not.toContain("All Mail");
+    expect(folderButton("Gmail").getAttribute("aria-expanded")).toBe("false");
     expect(useMailStore.getState().activeFolderId).toBe("inbox");
+  });
+
+  it("collapses the open folder's parent, and keeps it collapsed after leaving", () => {
+    useMailStore.setState({ activeAccountId: "acc", activeFolderId: "amy" });
+    render(<Sidebar />);
+    expect(visibleLabels()).toContain("Amy & Todd2");
+    const toggle = screen.getByRole("button", { name: "Collapse Clients" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(toggle);
+    expect(visibleLabels()).not.toContain("Amy & Todd2");
+
+    act(() => useMailStore.setState({ activeFolderId: "inbox" }));
+    expect(visibleLabels()).not.toContain("Amy & Todd2");
+    expect(screen.getByRole("button", { name: "Expand Clients" }).getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("makes the whole row, arrow included, the drop target", () => {
+    render(<Sidebar />);
+    const toggle = screen.getByRole("button", { name: "Expand Clients" });
+    expect(toggle.closest<HTMLElement>("[data-drop-folder-id]")?.dataset.dropFolderId).toBe("clients");
+    expect(folderButton("Clients").closest<HTMLElement>("[data-drop-folder-id]")?.dataset.dropFolderId).toBe("clients");
+  });
+
+  it("opens a collapsed folder when dragged mail hovers it", () => {
+    render(<Sidebar />);
+    const row = folderButton("Clients").closest<HTMLElement>(".sidebar-tree-row")!;
+    expect(row.dataset.dropExpand).toBe("acc:clients");
+    act(() => {
+      document.dispatchEvent(new CustomEvent(MAIL_DRAG_EXPAND_EVENT, { detail: row.dataset.dropExpand }));
+    });
+    expect(visibleLabels()).toContain("Amy & Todd2");
+    expect(row.dataset.dropExpand).toBeUndefined();
+  });
+
+  it("drops stored state for removed accounts and folders", () => {
+    profileLocalStorage.setItem(
+      "pebble-sidebar-expanded-folders",
+      JSON.stringify({ "gone:x": true, "acc:deleted-folder": true, "acc:mara": true }),
+    );
+    render(<Sidebar />);
+    fireEvent.click(screen.getByRole("button", { name: "Expand Clients" }));
+    const stored = JSON.parse(profileLocalStorage.getItem("pebble-sidebar-expanded-folders") ?? "{}");
+    expect(stored).toEqual({ "acc:mara": true, "acc:clients": true });
   });
 });

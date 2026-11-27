@@ -3,8 +3,11 @@ import type { Folder } from "@/lib/api";
 /**
  * Turns a flat, sidebar-sorted folder list into a tree for display.
  *
- * IMAP servers return full paths as folder names ("Clients/Mara Ream"), so a
- * child is labelled with only the part after its parent's path. Gmail's
+ * Folders nest by `parent_id`. IMAP servers return full paths as folder names
+ * ("Clients/Mara Ream"), so a child is labelled with only the part after its
+ * parent's path; Outlook and local folders already have their own names.
+ * Children of Inbox stay at the top level: on Dovecot/Courier servers every
+ * folder lives in the "INBOX." namespace, so nesting would hide them all. Gmail's
  * "[Gmail]" / "[Google Mail]" container cannot be opened, so its non-system
  * children (All Mail, Important, Starred…) are gathered under a virtual
  * "Gmail" node instead of being shown with the bracketed prefix.
@@ -33,8 +36,10 @@ function childSegment(name: string, parentName: string): string | null {
   return PATH_DELIMITERS.includes(name[parentName.length]) ? name.slice(parentName.length + 1) : null;
 }
 
+const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
+
 function byLabel(a: FolderTreeNode, b: FolderTreeNode): number {
-  return a.label.localeCompare(b.label, undefined, { sensitivity: "base", numeric: true });
+  return collator.compare(a.label, b.label);
 }
 
 export function buildFolderTree(folders: Folder[]): FolderTreeNode[] {
@@ -53,14 +58,18 @@ export function buildFolderTree(folders: Folder[]): FolderTreeNode[] {
     const parent = folder.parent_id
       ? (byId.get(folder.parent_id) ?? byRemoteId.get(folder.parent_id))
       : undefined;
-    const segment = parent && parent.id !== folder.id ? childSegment(folder.name, parent.name) : null;
+    const validParent = parent && parent.id !== folder.id && parent.account_id === folder.account_id
+      ? parent
+      : undefined;
+    const segment = validParent ? childSegment(folder.name, validParent.name) : null;
 
     // System folders (Inbox, Sent…) always stay at the top level
-    if (!folder.role && parent && segment && parent.account_id === folder.account_id) {
-      node.label = segment;
-      nodes.get(parent.id)!.children.push(node);
+    if (!folder.role && validParent && validParent.role !== "inbox") {
+      node.label = segment ?? folder.name;
+      nodes.get(validParent.id)!.children.push(node);
       continue;
     }
+    if (!folder.role && segment) node.label = segment;
 
     const container = gmailContainerOf(folder);
     if (container) {
@@ -88,6 +97,8 @@ export function buildFolderTree(folders: Folder[]): FolderTreeNode[] {
       const node = nodes.get(folder.id)!;
       node.children = node.children.filter((child) => !reachable.has(child.key));
       node.label = folder.name;
+      // Break the cycle: the surfaced folder is a root now, nobody's child
+      for (const other of nodes.values()) other.children = other.children.filter((child) => child !== node);
       roots.push(node);
       visit(node);
     }

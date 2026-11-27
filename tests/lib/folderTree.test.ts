@@ -78,9 +78,23 @@ describe("buildFolderTree", () => {
     expect(shape(tree)).toEqual(["INBOX.Projects(Acme)"]);
   });
 
-  it("shows the full name when it does not start with the parent's path", () => {
-    const tree = buildFolderTree([folder("p", "Work"), folder("c", "Elsewhere", { parent_id: "p" })]);
-    expect(shape(tree)).toEqual(["Elsewhere", "Work"]);
+  it("nests Outlook and local folders, whose names have no path prefix", () => {
+    const tree = buildFolderTree([folder("p", "Work"), folder("c", "Projects", { parent_id: "p" })]);
+    expect(shape(tree)).toEqual(["Work(Projects)"]);
+  });
+
+  it("keeps INBOX.-namespace folders at the top level instead of under Inbox", () => {
+    const tree = buildFolderTree([
+      folder("inbox", "INBOX", { role: "inbox" }),
+      folder("work", "INBOX.Work", { parent_id: "INBOX" }),
+      folder("q1", "INBOX.Work.Q1", { parent_id: "INBOX.Work" }),
+    ]);
+    expect(shape(tree)).toEqual(["INBOX", "Work(Q1)"]);
+  });
+
+  it("nests sub-folders of other system folders under them", () => {
+    const tree = buildFolderTree([folder("trash", "Trash", { role: "trash" }), folder("old", "Trash/Old", { parent_id: "trash" })]);
+    expect(shape(tree)).toEqual(["Trash(Old)"]);
   });
 
   it("does not lose folders caught in a parent cycle", () => {
