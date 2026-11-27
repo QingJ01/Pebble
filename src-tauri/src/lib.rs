@@ -3,6 +3,8 @@ mod commands;
 mod events;
 #[cfg(test)]
 mod ipc_bindings;
+#[cfg(target_os = "linux")]
+mod linux_migration;
 mod profile;
 mod realtime;
 mod send_controls;
@@ -673,6 +675,8 @@ pub fn run() {
                         tracing::warn!("Failed to refresh the autostart entry: {e}");
                     }
                 }
+                // The launcher file is now "Pebble Mail.desktop"; off the startup path.
+                std::thread::spawn(linux_migration::migrate_mailto_default);
             }
 
             // macOS: the overlay title bar, hidden native title and traffic-light

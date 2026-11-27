@@ -132,6 +132,8 @@ sudo dnf install ./pebble-mail-<version>-1.x86_64.rpm
 sudo dnf remove pebble
 ```
 
+如果之前把 Pebble 固定在了程序坞或任务栏，切换后请重新固定。如果 Pebble 是默认邮件应用，它会在首次启动时自动更新该设置。
+
 ### 添加账户
 
 - **Gmail / Outlook：** 使用登录按钮。如果 Google 拦截了你账户的登录，可以改用[应用专用密码](https://myaccount.google.com/apppasswords)手动添加，参见 [#86](https://github.com/QingJ01/Pebble/issues/86)。

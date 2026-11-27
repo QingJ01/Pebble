@@ -132,6 +132,8 @@ sudo dnf install ./pebble-mail-<version>-1.x86_64.rpm
 sudo dnf remove pebble
 ```
 
+If Pebble was pinned to your dock or taskbar, pin it again after switching. If it was your default mail app, Pebble updates that setting on its first start.
+
 ### Adding an account
 
 - **Gmail / Outlook:** use the sign-in buttons. If Google blocks the sign-in for your account, add the account manually with an [app password](https://myaccount.google.com/apppasswords) instead (see [#86](https://github.com/QingJ01/Pebble/issues/86)).
