@@ -1056,5 +1056,10 @@
   "participants": {
     "more": "+{{count}} more",
     "showLess": "Show less"
+  },
+  "startup": {
+    "migrating": "Upgrading your mail data…",
+    "migratingHint": "This happens once after an update. Please keep Pebble open.",
+    "failed": "Pebble couldn't open its data"
   }
 }

@@ -256,10 +256,48 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
     run_migrations_up_to(conn, CURRENT_VERSION)
 }
 
+/// [`run_migrations`], reporting progress after each schema version.
+pub fn run_migrations_with_progress(
+    conn: &Connection,
+    progress: &mut dyn FnMut(MigrationProgress),
+) -> Result<()> {
+    run_migrations_reporting(conn, CURRENT_VERSION, progress)
+}
+
+/// How far an upgrade has got: `done` of `total` schema versions applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MigrationProgress {
+    pub done: u32,
+    pub total: u32,
+}
+
+/// Schema version of the database at `path` when it exists and is older
+/// than this build (so opening it will run migrations), else `None`. A new
+/// or empty database returns `None`: creating it is quick.
+pub fn pending_migration_from(path: &std::path::Path) -> Result<Option<u32>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let conn = Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    let version = get_schema_version(&conn);
+    Ok((version > 0 && version < CURRENT_VERSION).then_some(version))
+}
+
 /// Apply migrations up to `target` (tests use this to build historical
 /// schemas; production always targets [`CURRENT_VERSION`]). Versions up to
 /// 20 are always applied.
 fn run_migrations_up_to(conn: &Connection, target: u32) -> Result<()> {
+    run_migrations_reporting(conn, target, &mut |_| {})
+}
+
+fn run_migrations_reporting(
+    conn: &Connection,
+    target: u32,
+    progress: &mut dyn FnMut(MigrationProgress),
+) -> Result<()> {
     // auto_vacuum can only be chosen before the first table exists; new
     // databases reclaim space incrementally (see Store::run_maintenance).
     let has_tables: bool = conn.query_row(
@@ -278,6 +316,15 @@ fn run_migrations_up_to(conn: &Connection, target: u32) -> Result<()> {
     conn.execute_batch("PRAGMA busy_timeout=5000;")?;
 
     let version = get_schema_version(conn);
+    let total = target.saturating_sub(version);
+    let mut step = |applied: u32| {
+        if total > 0 && applied > version {
+            progress(MigrationProgress {
+                done: (applied - version).min(total),
+                total,
+            });
+        }
+    };
     if version > CURRENT_VERSION {
         return Err(PebbleError::Storage(format!(
             "Database schema version {version} is newer than this version of Pebble supports \
@@ -296,56 +343,69 @@ fn run_migrations_up_to(conn: &Connection, target: u32) -> Result<()> {
 
     if version < 1 {
         v01_v10::apply_v1(conn)?;
+        step(1);
     }
 
     if version < 2 {
         v01_v10::apply_v2(conn)?;
+        step(2);
     }
 
     if version < 3 {
         v01_v10::apply_v3(conn)?;
+        step(3);
     }
 
     if version < 4 {
         v01_v10::apply_v4(conn)?;
+        step(4);
     }
 
     if version < 5 {
         v01_v10::apply_v5(conn)?;
+        step(5);
     }
 
     // V6: search_pending table for crash-recovery of the search index
     if version < 6 {
         v01_v10::apply_v6(conn)?;
+        step(6);
     }
 
     if version < 7 {
         v01_v10::apply_v7(conn)?;
+        step(7);
     }
 
     if version < 8 {
         v01_v10::apply_v8(conn)?;
+        step(8);
     }
 
     if version < 9 {
         v01_v10::apply_v9(conn)?;
+        step(9);
     }
 
     if version < 10 {
         v01_v10::apply_v10(conn)?;
+        step(10);
     }
 
     if version < 11 {
         v11_v16::apply_v11(conn)?;
+        step(11);
     }
 
     if version < 12 {
         v11_v16::apply_v12(conn)?;
+        step(12);
     }
 
     // V13: rebuild snippets to strip leaked HTML/CSS from previews
     if version < 13 {
         v11_v16::apply_v13(conn)?;
+        step(13);
     }
 
     // V14: enforce at most one LIVE row per (account_id, remote_id). The legacy
@@ -356,12 +416,14 @@ fn run_migrations_up_to(conn: &Connection, target: u32) -> Result<()> {
     // tombstones (is_deleted = 1) can still coexist with a fresh live copy.
     if version < 14 {
         v11_v16::apply_v14(conn)?;
+        step(14);
     }
 
     // V15: local-only drafts use an empty remote_id. They are distinct records,
     // so the remote-message uniqueness constraint must not include them.
     if version < 15 {
         v11_v16::apply_v15(conn)?;
+        step(15);
     }
 
     // V16: IMAP UIDs are scoped to one mailbox, while OAuth/POP provider IDs
@@ -369,28 +431,34 @@ fn run_migrations_up_to(conn: &Connection, target: u32) -> Result<()> {
     // messages-table index, so provider-aware triggers enforce both scopes.
     if version < 16 {
         v11_v16::apply_v16(conn)?;
+        step(16);
     }
 
     // V17: profile-level address book and hidden recent-contact suggestions.
     if version < 17 {
         v17_v22::apply_v17(conn)?;
+        step(17);
     }
 
     if version < 18 {
         v17_v22::apply_v18(conn)?;
+        step(18);
     }
 
     if version < 19 {
         v17_v22::apply_v19(conn)?;
+        step(19);
     }
 
     if version < 20 {
         v17_v22::apply_v20(conn)?;
+        step(20);
     }
 
     // V21: storage layout for fast list pages (staged and resumable).
     if version < 21 && target >= 21 {
         v21::apply_v21(conn)?;
+        step(21);
     }
 
     // V22: foreign keys for pending_mail_ops.account_id and labels.rule_id.
@@ -398,11 +466,13 @@ fn run_migrations_up_to(conn: &Connection, target: u32) -> Result<()> {
     // otherwise cascade into message_labels), mirroring V12.
     if version < 22 && target >= 22 {
         v17_v22::apply_v22(conn)?;
+        step(22);
     }
 
     // V23: partial date index for unread-only list pages.
     if version < 23 && target >= 23 {
         v23::apply_v23(conn)?;
+        step(23);
     }
 
     Ok(())

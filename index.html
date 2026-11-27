@@ -7,13 +7,16 @@
   </head>
   <body>
     <style id="splash-style">
-      /* Boot splash, shown until React has painted (App.tsx dismissSplash).
-         The mark appears at once; the wordmark and loading dots only fade
-         in when startup is slow, so a fast start never shows a loader. */
+      /* Boot splash: the Pebble logo and name in the middle, a thin loading
+         line along the bottom. When startup is done the line fills and the
+         splash fades into the app (App.tsx dismissSplash). During a database
+         upgrade the line shows real progress with a short status above it
+         (src/main.tsx via window.__pebbleSplash). */
       #splash {
         --splash-bg: #191919;
         --splash-text: #e6e6e6;
-        --splash-muted: rgba(255, 255, 255, .28);
+        --splash-muted: #8c8c8c;
+        --splash-track: rgba(255, 255, 255, .08);
         position: fixed;
         inset: 0;
         z-index: 99999;
@@ -21,103 +24,117 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 18px;
+        gap: 16px;
         background: var(--splash-bg);
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
         user-select: none;
         -webkit-user-select: none;
         overflow: hidden;
-        transition: opacity .26s cubic-bezier(.4, 0, .2, 1);
+        transition: opacity .3s cubic-bezier(.4, 0, .2, 1);
       }
-      /* Same surface as the app chrome, so the hand-off doesn't flash. */
+      /* Same surface as the app chrome. */
       html[data-theme="light"] #splash {
         --splash-bg: #f5f4f2;
         --splash-text: #1a1a1a;
-        --splash-muted: rgba(0, 0, 0, .22);
+        --splash-muted: #737373;
+        --splash-track: rgba(0, 0, 0, .06);
       }
       @media (prefers-color-scheme: light) {
         html:not([data-theme]) #splash {
           --splash-bg: #f5f4f2;
           --splash-text: #1a1a1a;
-          --splash-muted: rgba(0, 0, 0, .22);
+          --splash-muted: #737373;
+          --splash-track: rgba(0, 0, 0, .06);
         }
       }
-      #splash .splash-mark {
-        width: 76px;
-        height: 76px;
-        filter: drop-shadow(0 10px 18px rgba(196, 96, 60, .28));
-        animation: splash-pop .42s cubic-bezier(.2, .9, .3, 1.2) both;
-        transition: transform .26s cubic-bezier(.4, 0, .2, 1);
-      }
-      #splash .splash-flap {
-        fill: none;
-        stroke: #fff4ec;
-        stroke-width: 4;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-        opacity: 0;
-        animation: splash-flap .32s cubic-bezier(.2, .9, .3, 1) .14s forwards;
-      }
-      #splash .splash-shine {
-        fill: none;
-        stroke: rgba(255, 255, 255, .5);
-        stroke-width: 3;
-        stroke-linecap: round;
-        opacity: 0;
-        animation: splash-in .3s ease-out .3s forwards;
+      #splash .splash-icon {
+        width: 88px;
+        height: 88px;
+        filter: drop-shadow(0 8px 18px rgba(0, 0, 0, .12)) drop-shadow(0 1px 3px rgba(0, 0, 0, .08));
+        animation: splash-rise .5s cubic-bezier(.2, .8, .2, 1) both;
       }
       #splash .splash-name {
         color: var(--splash-text);
-        font-size: 15px;
+        font-size: 22px;
         font-weight: 600;
-        letter-spacing: .32em;
-        text-indent: .32em;
-        text-transform: uppercase;
+        letter-spacing: .01em;
+        animation: splash-rise .5s cubic-bezier(.2, .8, .2, 1) .06s both;
+      }
+
+      /* Bottom loading line. */
+      #splash .splash-line {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 2px;
+        background: var(--splash-track);
+      }
+      #splash .splash-line-fill {
+        height: 100%;
+        width: 0;
+        background: #d4714e;
+        border-radius: 0 1px 1px 0;
+        /* Moves on its own toward ~85% while startup runs. */
+        animation: splash-load 1.6s cubic-bezier(.1, .7, .3, 1) .05s forwards;
+      }
+      #splash.is-done .splash-line-fill {
+        width: 100% !important;
+        animation: none;
+        transition: width .16s ease-out;
+      }
+      #splash.is-migrating .splash-line-fill {
+        animation: none;
+        transition: width .35s cubic-bezier(.2, .8, .2, 1);
+      }
+      /* Unknown total during an upgrade: a sliding segment. */
+      #splash.is-migrating.is-indeterminate .splash-line-fill {
+        width: 30%;
+        animation: splash-slide 1.2s cubic-bezier(.4, 0, .2, 1) infinite;
+      }
+
+      /* Upgrade / failure status, just above the line. */
+      #splash .splash-status {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 24px;
+        display: grid;
+        gap: 4px;
+        justify-items: center;
+        padding: 0 24px;
+        text-align: center;
         opacity: 0;
-        animation: splash-in .4s ease-out .8s forwards;
+        transition: opacity .25s ease-out;
       }
-      #splash .splash-dots {
-        display: flex;
-        gap: 6px;
-        opacity: 0;
-        animation: splash-in .4s ease-out 1.1s forwards;
-      }
-      #splash .splash-dots span {
-        width: 5px;
-        height: 5px;
-        border-radius: 50%;
-        background: var(--splash-muted);
-        animation: splash-dot 1.2s ease-in-out 1.1s infinite;
-      }
-      #splash .splash-dots span:nth-child(2) { animation-delay: 1.25s; }
-      #splash .splash-dots span:nth-child(3) { animation-delay: 1.4s; }
-      #splash.fade-out {
+      #splash.is-migrating .splash-status,
+      #splash.is-failed .splash-status { opacity: 1; }
+      #splash .splash-status-label { color: var(--splash-text); font-size: 13px; font-weight: 500; }
+      #splash .splash-status-hint { color: var(--splash-muted); font-size: 12px; }
+      #splash.is-failed .splash-line { display: none; }
+
+      #splash.is-leaving {
         opacity: 0;
         pointer-events: none;
       }
-      #splash.fade-out .splash-mark { transform: scale(1.08); }
-      @keyframes splash-pop {
-        from { opacity: 0; transform: scale(.82); }
-        to   { opacity: 1; transform: scale(1); }
+
+      @keyframes splash-rise {
+        from { opacity: 0; transform: translateY(6px); }
+        to   { opacity: 1; transform: none; }
       }
-      @keyframes splash-flap {
-        from { opacity: 0; transform: translateY(-5px); }
-        to   { opacity: 1; transform: translateY(0); }
+      @keyframes splash-load {
+        from { width: 0; }
+        to   { width: 85%; }
       }
-      @keyframes splash-in { to { opacity: 1; } }
-      @keyframes splash-dot {
-        0%, 70%, 100% { background: var(--splash-muted); transform: translateY(0); }
-        35% { background: #d4714e; transform: translateY(-3px); }
+      @keyframes splash-slide {
+        from { transform: translateX(-100%); }
+        to   { transform: translateX(340%); }
       }
       @media (prefers-reduced-motion: reduce) {
-        #splash, #splash .splash-mark { transition: none; }
-        #splash .splash-mark { animation: none; }
-        #splash .splash-flap { animation: none; opacity: 1; }
-        #splash .splash-shine,
-        #splash .splash-name,
-        #splash .splash-dots { animation: none; opacity: 1; }
-        #splash .splash-dots span { animation: none; }
-        #splash.fade-out .splash-mark { transform: none; }
+        #splash .splash-icon,
+        #splash .splash-name { animation: none; }
+        #splash .splash-line-fill { animation: none; width: 60%; }
+        #splash.is-migrating.is-indeterminate .splash-line-fill { animation: none; width: 100%; opacity: .5; }
       }
     </style>
     <script>
@@ -126,20 +143,39 @@
       try{var t=localStorage.getItem('pebble-theme')||'light';var d=t==='system'?matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light':t;document.documentElement.setAttribute('data-theme',d)}catch(e){}
     </script>
     <div id="splash" aria-hidden="true">
-      <svg class="splash-mark" viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <linearGradient id="splash-pebble" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stop-color="#e2865f"/>
-            <stop offset="1" stop-color="#c25e3a"/>
-          </linearGradient>
-        </defs>
-        <path fill="url(#splash-pebble)" d="M48 12C72 12 85 23 85 47S72 84 48 84 11 71 11 47 24 12 48 12Z"/>
-        <path class="splash-shine" d="M24 33C26 25 32 20 41 18"/>
-        <path class="splash-flap" d="M30 40L48 54L66 40"/>
-      </svg>
+      <img class="splash-icon" src="/src/assets/app-icon@2x.png" alt="" width="88" height="88" draggable="false">
       <div class="splash-name">Pebble</div>
-      <div class="splash-dots"><span></span><span></span><span></span></div>
+      <div class="splash-status" role="status" aria-live="polite">
+        <div class="splash-status-label"></div>
+        <div class="splash-status-hint"></div>
+      </div>
+      <div class="splash-line"><div class="splash-line-fill"></div></div>
     </div>
+    <script>
+      // Startup gate API (src/main.tsx): database-upgrade progress / failure.
+      window.__pebbleSplash = {
+        progress: function (fraction, label, hint) {
+          var s = document.getElementById('splash');
+          if (!s) return;
+          s.classList.add('is-migrating');
+          s.classList.toggle('is-indeterminate', fraction == null);
+          s.removeAttribute('aria-hidden');
+          s.querySelector('.splash-status-label').textContent = label;
+          s.querySelector('.splash-status-hint').textContent = hint;
+          var fill = s.querySelector('.splash-line-fill');
+          fill.style.width = fraction == null ? '' : Math.max(2, Math.round(fraction * 100)) + '%';
+        },
+        fail: function (title, detail) {
+          var s = document.getElementById('splash');
+          if (!s) return;
+          s.classList.remove('is-migrating');
+          s.classList.add('is-failed');
+          s.removeAttribute('aria-hidden');
+          s.querySelector('.splash-status-label').textContent = title;
+          s.querySelector('.splash-status-hint').textContent = detail;
+        }
+      };
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

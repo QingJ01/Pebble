@@ -14,8 +14,10 @@ describe("scheduled-send native exit wiring", () => {
     expect(menu).not.toContain("PredefinedMenuItem::quit(");
     expect(menu).toContain("app.on_menu_event(");
     expect(menu).toContain("app.exit(0)");
-    expect(source.indexOf("setup_application_menu(app.handle())?")).toBeGreaterThan(
-      source.indexOf("send_controls::setup(app.handle())?"),
+    // Both run in finish_setup (after the database is open), menu last.
+    expect(source.indexOf("    send_controls::setup(app)?;")).toBeGreaterThan(-1);
+    expect(source.indexOf("    setup_application_menu(app)?;")).toBeGreaterThan(
+      source.indexOf("    send_controls::setup(app)?;"),
     );
   });
 

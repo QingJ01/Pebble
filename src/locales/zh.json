@@ -1031,5 +1031,10 @@
   "participants": {
     "more": "还有 {{count}} 人",
     "showLess": "收起"
+  },
+  "startup": {
+    "migrating": "正在升级邮件数据…",
+    "migratingHint": "更新后只需进行一次，请不要关闭 Pebble。",
+    "failed": "Pebble 无法打开数据"
   }
 }
