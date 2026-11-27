@@ -56,11 +56,23 @@ impl Store {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<MessageSummary>> {
+        self.list_messages_page_filtered(folder_ids, cursor, limit, offset, false)
+    }
+
+    /// [`Store::list_messages_page`], optionally keeping only unread messages.
+    pub fn list_messages_page_filtered(
+        &self,
+        folder_ids: &[String],
+        cursor: Option<&MessageCursor>,
+        limit: u32,
+        offset: u32,
+        unread_only: bool,
+    ) -> Result<Vec<MessageSummary>> {
         if folder_ids.is_empty() || limit == 0 {
             return Ok(Vec::new());
         }
         self.with_read(|conn| {
-            let ids = page_message_ids(conn, folder_ids, cursor, limit, offset)?;
+            let ids = page_message_ids(conn, folder_ids, cursor, limit, offset, unread_only)?;
             fetch_summaries_ordered(conn, &ids)
         })
     }
@@ -372,6 +384,19 @@ impl Store {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<pebble_core::ThreadSummary>> {
+        self.list_threads_by_folders_filtered(folder_ids, limit, offset, false)
+    }
+
+    /// [`Store::list_threads_by_folders`], optionally keeping only threads
+    /// with an unread message in the selected folders. Matching threads are
+    /// still aggregated in full (all their messages in those folders).
+    pub fn list_threads_by_folders_filtered(
+        &self,
+        folder_ids: &[String],
+        limit: u32,
+        offset: u32,
+        unread_only: bool,
+    ) -> Result<Vec<pebble_core::ThreadSummary>> {
         if folder_ids.is_empty() || limit == 0 {
             return Ok(Vec::new());
         }
@@ -387,7 +412,7 @@ impl Store {
             let want = limit.saturating_add(offset) as usize;
             let mut latest: HashMap<(String, String), i64> = HashMap::new();
             for folder_id in &unique_folders {
-                for (key, date) in folder_thread_keys(conn, folder_id, want)? {
+                for (key, date) in folder_thread_keys(conn, folder_id, want, unread_only)? {
                     let entry = latest.entry(key).or_insert(date);
                     *entry = (*entry).max(date);
                 }

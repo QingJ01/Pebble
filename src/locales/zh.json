@@ -123,7 +123,11 @@
     "messageView": "邮件视图",
     "threadView": "会话视图",
     "messageList": "邮件列表",
-    "threadList": "会话列表"
+    "threadList": "会话列表",
+    "showUnreadOnly": "只看未读",
+    "showAll": "显示全部邮件",
+    "noUnread": "没有未读邮件",
+    "dragCount": "{{count}} 封邮件"
   },
   "compose": {
     "sendDisabledNoAccount": "请先添加账户再发送",
@@ -338,7 +342,15 @@
       "slate": "石板灰",
       "cyan": "青色",
       "navy": "藏青"
-    }
+    },
+    "htmlMailDark": "暗色主题下的 HTML 邮件",
+    "htmlMailDarkDesc": "纯文本邮件始终跟随主题。",
+    "htmlMailDarkOff": "浅色卡片",
+    "htmlMailDarkOffDesc": "按发件人设计的样子显示",
+    "htmlMailDarkAuto": "简单邮件转暗色",
+    "htmlMailDarkAutoDesc": "没有设计背景的邮件转为暗色，其余仍用浅色卡片",
+    "htmlMailDarkForce": "全部转暗色",
+    "htmlMailDarkForceDesc": "所有 HTML 邮件反色显示，品牌色可能失真"
   },
   "cloudSync": {
     "title": "设置备份",
@@ -721,7 +733,10 @@
     "reviewNames": "前往账户设置核对",
     "senderNoticeDismiss": "知道了",
     "senderPreviewLabel": "外发邮件将显示为",
-    "discardAction": "放弃"
+    "discardAction": "放弃",
+    "providerDetected": "已自动填入 {{name}} 的服务器设置。",
+    "providerAppPassword": "{{name}} 一般需要使用授权码（应用专用密码），而不是登录密码。",
+    "providerOAuth": "{{name}} 建议直接用上方的登录按钮；手动添加需要应用专用密码。"
   },
   "contacts": {
     "title": "联系人",

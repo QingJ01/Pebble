@@ -4,8 +4,8 @@ import type { MessageCursor, MessageSummary } from "@/lib/api";
 
 export const MESSAGES_PAGE_SIZE = 50;
 
-export const messagesQueryKey = (folderId: string, folderIds?: string[]) =>
-  ["messages", folderId, folderIds] as const;
+export const messagesQueryKey = (folderId: string, folderIds?: string[], unreadOnly = false) =>
+  ["messages", folderId, folderIds, unreadOnly ? "unread" : "all"] as const;
 
 /**
  * Cursor for the page after `pages`: the `(date, id)` of the oldest message
@@ -30,11 +30,12 @@ export function nextMessagesCursor(pages: MessageSummary[][]): MessageCursor | n
 export function useMessagesQuery(
   folderId: string | null,
   folderIds?: string[],
+  unreadOnly = false,
 ) {
   const query = useInfiniteQuery({
-    queryKey: messagesQueryKey(folderId ?? "", folderIds),
+    queryKey: messagesQueryKey(folderId ?? "", folderIds, unreadOnly),
     queryFn: ({ pageParam }) =>
-      listMessages(folderId!, MESSAGES_PAGE_SIZE, 0, folderIds, pageParam),
+      listMessages(folderId!, MESSAGES_PAGE_SIZE, 0, folderIds, pageParam, unreadOnly),
     initialPageParam: null as MessageCursor | null,
     getNextPageParam: (lastPage, allPages) =>
       lastPage.length < MESSAGES_PAGE_SIZE ? undefined : nextMessagesCursor(allPages) ?? undefined,

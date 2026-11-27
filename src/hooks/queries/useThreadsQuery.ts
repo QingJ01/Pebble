@@ -6,17 +6,19 @@ export const threadsQueryKey = (
   limit: number,
   offset: number,
   folderIds?: string[],
-) => ["threads", folderId, folderIds, limit, offset] as const;
+  unreadOnly = false,
+) => ["threads", folderId, folderIds, limit, offset, unreadOnly ? "unread" : "all"] as const;
 
 export function useThreadsQuery(
   folderId: string | null,
   limit = 50,
   offset = 0,
   folderIds?: string[],
+  unreadOnly = false,
 ) {
   return useQuery({
-    queryKey: threadsQueryKey(folderId ?? "", limit, offset, folderIds),
-    queryFn: () => listThreads(folderId!, limit, offset, folderIds),
+    queryKey: threadsQueryKey(folderId ?? "", limit, offset, folderIds, unreadOnly),
+    queryFn: () => listThreads(folderId!, limit, offset, folderIds, unreadOnly),
     enabled: !!folderId,
     staleTime: 60_000,
   });

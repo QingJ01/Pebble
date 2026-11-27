@@ -359,6 +359,15 @@ const FOLDER_PAGE_AFTER_SQL: &str = "SELECT message_id, date FROM message_folder
      WHERE folder_id = ?1 AND is_deleted = 0 AND (date, message_id) < (?4, ?5)
      ORDER BY date DESC, message_id DESC
      LIMIT ?2 OFFSET ?3";
+/// Unread-only variants: same index walk, skipping read rows.
+const FOLDER_UNREAD_PAGE_SQL: &str = "SELECT message_id, date FROM message_folders
+     WHERE folder_id = ?1 AND is_deleted = 0 AND is_read = 0
+     ORDER BY date DESC, message_id DESC
+     LIMIT ?2 OFFSET ?3";
+const FOLDER_UNREAD_PAGE_AFTER_SQL: &str = "SELECT message_id, date FROM message_folders
+     WHERE folder_id = ?1 AND is_deleted = 0 AND is_read = 0 AND (date, message_id) < (?4, ?5)
+     ORDER BY date DESC, message_id DESC
+     LIMIT ?2 OFFSET ?3";
 
 fn folder_page(
     conn: &rusqlite::Connection,
@@ -366,18 +375,24 @@ fn folder_page(
     cursor: Option<&MessageCursor>,
     limit: u32,
     offset: u32,
+    unread_only: bool,
 ) -> Result<Vec<(String, i64)>> {
     let map = |row: &Row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?));
+    let (page_sql, after_sql) = if unread_only {
+        (FOLDER_UNREAD_PAGE_SQL, FOLDER_UNREAD_PAGE_AFTER_SQL)
+    } else {
+        (FOLDER_PAGE_SQL, FOLDER_PAGE_AFTER_SQL)
+    };
     let rows = match cursor {
         Some(cursor) => conn
-            .prepare_cached(FOLDER_PAGE_AFTER_SQL)?
+            .prepare_cached(after_sql)?
             .query_map(
                 params![folder_id, limit, offset, cursor.date, cursor.id],
                 map,
             )?
             .collect::<rusqlite::Result<Vec<_>>>()?,
         None => conn
-            .prepare_cached(FOLDER_PAGE_SQL)?
+            .prepare_cached(page_sql)?
             .query_map(params![folder_id, limit, offset], map)?
             .collect::<rusqlite::Result<Vec<_>>>()?,
     };
@@ -393,12 +408,15 @@ fn page_message_ids(
     cursor: Option<&MessageCursor>,
     limit: u32,
     offset: u32,
+    unread_only: bool,
 ) -> Result<Vec<String>> {
     if folder_ids.len() == 1 {
-        return Ok(folder_page(conn, &folder_ids[0], cursor, limit, offset)?
-            .into_iter()
-            .map(|(id, _)| id)
-            .collect());
+        return Ok(
+            folder_page(conn, &folder_ids[0], cursor, limit, offset, unread_only)?
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect(),
+        );
     }
     let window = limit.saturating_add(offset);
     let mut merged: HashMap<String, i64> = HashMap::new();
@@ -407,7 +425,7 @@ fn page_message_ids(
         if !seen_folders.insert(folder_id.as_str()) {
             continue;
         }
-        for (id, date) in folder_page(conn, folder_id, cursor, window, 0)? {
+        for (id, date) in folder_page(conn, folder_id, cursor, window, 0, unread_only)? {
             merged.insert(id, date);
         }
     }
@@ -452,18 +470,27 @@ fn fetch_summaries_ordered(
 /// `(account_id, thread key)` pairs with their most recent date in that folder. The walk is a covering
 /// scan of `idx_mf_folder_date` that stops as soon as enough threads are
 /// found, so page cost is proportional to the page, not the folder.
+/// With `unread_only`, only threads with an unread message in this folder
+/// count (dated by their newest unread message).
 fn folder_thread_keys(
     conn: &rusqlite::Connection,
     folder_id: &str,
     want: usize,
+    unread_only: bool,
 ) -> Result<Vec<((String, String), i64)>> {
-    let mut stmt = conn.prepare_cached(
+    let mut stmt = conn.prepare_cached(if unread_only {
+        "SELECT m.account_id, mf.thread_key, mf.date
+         FROM message_folders mf
+         JOIN messages m ON m.id = mf.message_id
+         WHERE mf.folder_id = ?1 AND mf.is_deleted = 0 AND mf.is_read = 0
+         ORDER BY mf.date DESC, mf.message_id DESC"
+    } else {
         "SELECT m.account_id, mf.thread_key, mf.date
          FROM message_folders mf
          JOIN messages m ON m.id = mf.message_id
          WHERE mf.folder_id = ?1 AND mf.is_deleted = 0
-         ORDER BY mf.date DESC, mf.message_id DESC",
-    )?;
+         ORDER BY mf.date DESC, mf.message_id DESC"
+    })?;
     let mut rows = stmt.query(params![folder_id])?;
     let mut seen = HashSet::new();
     let mut keys = Vec::new();

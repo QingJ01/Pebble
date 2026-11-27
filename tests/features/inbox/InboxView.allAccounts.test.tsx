@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     selectedMessageId: null as string | null,
     selectedThreadId: null as string | null,
     threadView: false,
+    unreadOnly: false,
     selectedThreadAccountId: null as string | null,
     unifiedAccountFilter: null as string | null,
     setUnifiedAccountFilter: vi.fn(),
@@ -145,7 +146,7 @@ describe("InboxView all accounts", () => {
     render(<InboxView />);
 
     expect(mocks.useFoldersForAccountsQuery).toHaveBeenCalledWith(["account-1", "account-2"]);
-    expect(mocks.useMessagesQuery).toHaveBeenCalledWith("a1-inbox", ["a1-inbox", "a2-inbox"]);
+    expect(mocks.useMessagesQuery).toHaveBeenCalledWith("a1-inbox", ["a1-inbox", "a2-inbox"], false);
   });
 
   it("shows the account filter with unread counts in the unified view", () => {
@@ -166,7 +167,7 @@ describe("InboxView all accounts", () => {
 
     render(<InboxView />);
 
-    expect(mocks.useMessagesQuery).toHaveBeenLastCalledWith("a2-inbox", undefined);
+    expect(mocks.useMessagesQuery).toHaveBeenLastCalledWith("a2-inbox", undefined, false);
     expect(screen.getAllByRole("radio")[2].getAttribute("aria-checked")).toBe("true");
     expect(screen.getByTestId("message-list").getAttribute("data-spans-accounts")).toBe("false");
   });
@@ -176,7 +177,7 @@ describe("InboxView all accounts", () => {
 
     render(<InboxView />);
 
-    expect(mocks.useMessagesQuery).toHaveBeenLastCalledWith("a1-inbox", ["a1-inbox", "a2-inbox"]);
+    expect(mocks.useMessagesQuery).toHaveBeenLastCalledWith("a1-inbox", ["a1-inbox", "a2-inbox"], false);
   });
 
   it("selects an account by click and moves with arrow keys", () => {

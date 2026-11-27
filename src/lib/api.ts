@@ -308,6 +308,7 @@ export async function listMessages(
   offset: number,
   folderIds?: string[],
   before?: MessageCursor | null,
+  unreadOnly = false,
 ): Promise<MessageSummary[]> {
   return invoke<MessageSummary[]>("list_messages", {
     folderId,
@@ -315,6 +316,7 @@ export async function listMessages(
     limit,
     offset,
     before: before ?? null,
+    ...(unreadOnly ? { unreadOnly: true } : {}),
   });
 }
 
@@ -660,8 +662,15 @@ export async function listThreads(
   limit: number,
   offset: number,
   folderIds?: string[],
+  unreadOnly = false,
 ): Promise<ThreadSummary[]> {
-  return invoke<ThreadSummary[]>("list_threads", { folderId, folderIds, limit, offset });
+  return invoke<ThreadSummary[]>("list_threads", {
+    folderId,
+    folderIds,
+    limit,
+    offset,
+    ...(unreadOnly ? { unreadOnly: true } : {}),
+  });
 }
 
 /**

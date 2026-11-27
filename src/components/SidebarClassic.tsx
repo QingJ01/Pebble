@@ -33,6 +33,7 @@ import {
   ALL_ACCOUNTS_SELECT_VALUE,
   allAccountsFolderId,
   buildAllAccountsFolders,
+  isAllAccountsFolderId,
   sortFoldersForSidebar,
   unreadCountForFolder,
 } from "../lib/folderAggregation";
@@ -278,6 +279,8 @@ export default function SidebarClassic({ collapsed: sidebarCollapsed }: { collap
                 isActive={folder.id === activeFolderId && activeView === "inbox"}
                 collapsed
                 onClick={() => handleFolderClick(folder.id)}
+                dropFolderId={folder.id}
+                dropAccountId={isAllAccountsFolderId(folder.id) ? undefined : folder.account_id}
               />
             ))}
             {(otherFolders.length > 0 || hasRealFolders) && (
@@ -368,6 +371,8 @@ export default function SidebarClassic({ collapsed: sidebarCollapsed }: { collap
                   isActive={folder.id === activeFolderId && activeView === "inbox"}
                   collapsed={false}
                   onClick={() => handleFolderClick(folder.id)}
+                  dropFolderId={folder.id}
+                  dropAccountId={isAllAccountsFolderId(folder.id) ? undefined : folder.account_id}
                 />
               );
               return items;

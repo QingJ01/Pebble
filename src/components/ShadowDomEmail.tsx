@@ -1,7 +1,20 @@
-import { useRef, useLayoutEffect } from "react";
+import { useRef, useLayoutEffect, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openMailtoUrl } from "@/app/useMailtoOpen";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
+import { darkenSimpleEmail } from "@/lib/emailDarkMode";
+import { useUIStore } from "@/stores/ui.store";
+
+/** The theme actually applied (`data-theme` on <html>), following system changes. */
+function subscribeDocumentTheme(onChange: () => void) {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  return () => observer.disconnect();
+}
+const readDocumentTheme = () => document.documentElement.getAttribute("data-theme") === "dark";
+function useDocumentIsDark() {
+  return useSyncExternalStore(subscribeDocumentTheme, readDocumentTheme, () => false);
+}
 
 interface ShadowDomEmailProps {
   html: string;
@@ -29,6 +42,9 @@ const PLAIN_TEXT_RE =
 
 export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const isDark = useDocumentIsDark();
+  const htmlMailDarkMode = useUIStore((s) => s.htmlMailDarkMode);
+  const darkMode = isDark ? htmlMailDarkMode : "off";
 
   // The shadow body must be ready before paint; otherwise the reader can flash
   // from the fallback text into the sanitized HTML a frame later.
@@ -77,6 +93,23 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
           color-scheme: var(--email-content-color-scheme);
           color: var(--email-content-color);
           background: var(--email-content-bg);
+        }
+        /* Dark theme, "darken simple mail": follows the app theme like
+           plain text (dropped again if the mail turns out to be designed). */
+        .pebble-email-content[data-dark-mode="auto"] {
+          padding: 0;
+          border-radius: 0;
+          color-scheme: dark;
+          color: var(--color-text-primary);
+          background: transparent;
+        }
+        /* Dark theme, "always dark": invert the light card, then invert
+           media back so photos and logos keep their colors. */
+        .pebble-email-content[data-dark-mode="force"] {
+          filter: invert(1) hue-rotate(180deg);
+        }
+        .pebble-email-content[data-dark-mode="force"] :is(img, video, picture, canvas, [background], [style*="background-image" i]) {
+          filter: invert(1) hue-rotate(180deg);
         }
         .pebble-email-content[data-plain-text] {
           padding: 0;
@@ -145,8 +178,12 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
           box-sizing: border-box;
         }
       </style>
-      <div class="pebble-email-content"${isPlainText ? " data-plain-text" : ""}>${safeHtml}</div>
+      <div class="pebble-email-content"${isPlainText ? " data-plain-text" : darkMode !== "off" ? ` data-dark-mode="${darkMode}"` : ""}>${safeHtml}</div>
     `;
+    if (!isPlainText && darkMode === "auto") {
+      const content = shadow.querySelector<HTMLElement>(".pebble-email-content");
+      if (content && !darkenSimpleEmail(content)) content.removeAttribute("data-dark-mode");
+    }
 
     const handleClick = (event: Event) => {
       const target = event.target;
@@ -181,7 +218,7 @@ export function ShadowDomEmail({ html, className }: ShadowDomEmailProps) {
     return () => {
       shadow.removeEventListener("click", handleClick);
     };
-  }, [html]);
+  }, [html, darkMode]);
 
   return <div ref={hostRef} className={className} />;
 }

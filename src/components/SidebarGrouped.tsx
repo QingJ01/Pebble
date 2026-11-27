@@ -201,6 +201,7 @@ export default function SidebarGrouped({ collapsed: sidebarCollapsed }: { collap
         isActive={isOverviewActive}
         collapsed={sidebarCollapsed}
         onClick={() => handleFolderSelect(null, allAccountsFolderId("inbox"))}
+        dropFolderId={allAccountsFolderId("inbox")}
       />
       <SidebarButton
         icon={<Star size={16} />}
@@ -319,6 +320,8 @@ export default function SidebarGrouped({ collapsed: sidebarCollapsed }: { collap
                       collapsed={false}
                       indent
                       onClick={() => handleFolderSelect(account.id, folder.id)}
+                      dropFolderId={folder.id}
+                      dropAccountId={account.id}
                     />
                   ))
                 : foldersFetched && (
