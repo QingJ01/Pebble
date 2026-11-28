@@ -5,6 +5,7 @@ mod deadlines;
 mod events;
 #[cfg(test)]
 mod ipc_bindings;
+mod mcp;
 mod model_triage;
 mod proactive;
 mod profile;
@@ -510,6 +511,11 @@ fn finish_setup(
     });
     // Follow-up deadlines, mail awaiting a reply, daily briefing (#107).
     tauri::async_runtime::spawn(proactive::run(app_handle.clone(), state.store.clone()));
+    // Local MCP, when the user turned it on (#107, M4).
+    tauri::async_runtime::spawn(commands::mcp::start_if_enabled(
+        app_handle.clone(),
+        state.store.mcp_enabled().unwrap_or(false),
+    ));
 
     // Background integrity check, once the UI and sync are up.
     let store_for_check = state.store.clone();
@@ -899,6 +905,14 @@ pub fn run() {
             commands::smart_notify::list_digest,
             commands::smart_notify::mark_digest_seen,
             commands::smart_notify::notify_feedback,
+            commands::mcp::mcp_get_status,
+            commands::mcp::mcp_set_enabled,
+            commands::mcp::mcp_pending_pairs,
+            commands::mcp::mcp_respond_pair,
+            commands::mcp::mcp_list_clients,
+            commands::mcp::mcp_set_grants,
+            commands::mcp::mcp_revoke,
+            commands::mcp::mcp_list_audit,
             commands::trusted_senders::trust_sender,
             commands::trusted_senders::list_trusted_senders,
             commands::trusted_senders::remove_trusted_sender,

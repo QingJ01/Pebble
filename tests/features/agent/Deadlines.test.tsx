@@ -82,7 +82,8 @@ describe("deadlines in the assistant", () => {
     const log = await screen.findByRole("log");
     expect(await within(log).findByText(/Dana needs something from you by/)).toBeTruthy();
     expect(within(log).getByText("“by Friday”")).toBeTruthy();
-    expect(within(log).getByText(/Due today .*: Wei is waiting on “Venue deposit”/)).toBeTruthy();
+    // Two hours from now may already be tomorrow late in the evening.
+    expect(within(log).getByText(/Due (today|tomorrow) .*: Wei is waiting on “Venue deposit”/)).toBeTruthy();
 
     const notOne = within(log).getAllByRole("button", { name: "Not a deadline" });
     expect(notOne).toHaveLength(2); // the arrival notes, not the reminder

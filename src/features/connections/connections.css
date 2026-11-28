@@ -1,0 +1,56 @@
+/* Settings → Connections and the pairing dialog (#107, M4). */
+
+.connections-help,
+.connections-pair__lead,
+.connections-pair__note {
+  margin: var(--space-2) 0;
+  font-size: var(--font-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.connections-pair__note {
+  font-size: var(--font-xs);
+  color: var(--color-text-tertiary);
+}
+
+.connections-copy {
+  margin: var(--space-3) 0;
+}
+
+.connections-copy__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--font-xs);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-1);
+}
+
+.connections-copy__text {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-fill-selected);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--font-xs);
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+
+.connections-grants {
+  margin: var(--space-2) 0;
+}
+
+.connections-warning {
+  margin-top: var(--space-2);
+}
+
+.connections-client.is-revoked {
+  opacity: 0.6;
+}
+
+.connections-client__edit {
+  padding: 0 var(--space-3) var(--space-3);
+}

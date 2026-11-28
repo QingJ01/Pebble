@@ -4009,6 +4009,7 @@ version = "0.2.1"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "hex",
  "image",
  "lettre",
  "lol_html",
@@ -4018,6 +4019,7 @@ dependencies = [
  "pebble-core",
  "pebble-crypto",
  "pebble-mail",
+ "pebble-mcp",
  "pebble-notify",
  "pebble-oauth",
  "pebble-privacy",
@@ -4026,6 +4028,7 @@ dependencies = [
  "pebble-store",
  "pebble-translate",
  "pebble-webdav",
+ "rand 0.8.8",
  "regex",
  "reqwest 0.12.28",
  "rfd 0.15.4",
@@ -4107,6 +4110,16 @@ dependencies = [
  "ts-rs",
  "utf7-imap",
  "webpki-roots 0.26.11",
+]
+
+[[package]]
+name = "pebble-mcp"
+version = "0.2.1"
+dependencies = [
+ "keyring",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

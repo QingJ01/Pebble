@@ -13,8 +13,9 @@ mod v24;
 mod v25;
 mod v26;
 mod v27;
+mod v28;
 
-pub(crate) const CURRENT_VERSION: u32 = 27;
+pub(crate) const CURRENT_VERSION: u32 = 28;
 /// How many pre-migration backups to keep next to the database file.
 const MIGRATION_BACKUPS_TO_KEEP: usize = 2;
 // Keep in sync with src/lib/accountColors.ts and src-tauri/src/account_colors.rs
@@ -501,6 +502,12 @@ fn run_migrations_reporting(
     if version < 27 && target >= 27 {
         v27::apply_v27(conn)?;
         step(27);
+    }
+
+    // V28: local MCP connections.
+    if version < 28 && target >= 28 {
+        v28::apply_v28(conn)?;
+        step(28);
     }
 
     Ok(())

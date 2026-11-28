@@ -8,6 +8,7 @@ import ComposeFAB from "../components/ComposeFAB";
 import InboxView from "../features/inbox/InboxView";
 import CommandPalette from "../features/command-palette/CommandPalette";
 import ToastContainer from "../components/ToastContainer";
+import PairDialog from "../features/connections/PairDialog";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { useConfirmStore } from "../stores/confirm.store";
 import { useComposeStore } from "../stores/compose.store";
@@ -169,6 +170,7 @@ export default function Layout() {
       <StatusBar />
       <CommandPalette />
       <ToastContainer />
+      <PairDialog />
       <SendControlExitGuard />
       <GlobalConfirmDialog />
     </div>

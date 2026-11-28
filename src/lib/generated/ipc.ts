@@ -140,7 +140,11 @@ agent_many: string,
 /**
  * A deadline from a mail is coming up; `{subject}`, `{time}`.
  */
-deadline_soon: string, };
+deadline_soon: string, 
+/**
+ * An MCP client proposed a draft; `{client}`, `{subject}`.
+ */
+draft_proposal: string, };
 
 export type NotificationStatus = { enabled: boolean, attention_active: boolean, platform: string, app_id: string | null, };
 

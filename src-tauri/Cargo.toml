@@ -23,6 +23,7 @@ pebble-mail = { path = "../crates/pebble-mail" }
 pebble-search = { path = "../crates/pebble-search" }
 pebble-rules = { path = "../crates/pebble-rules" }
 pebble-notify = { path = "../crates/pebble-notify" }
+pebble-mcp = { path = "../crates/pebble-mcp" }
 pebble-translate = { path = "../crates/pebble-translate" }
 pebble-crypto = { path = "../crates/pebble-crypto" }
 pebble-oauth = { path = "../crates/pebble-oauth" }
@@ -38,6 +39,8 @@ image = { version = "0.25.10", default-features = false, features = ["png", "jpe
 tauri-plugin-dialog = "=2.6.0"
 rfd = "0.15.4"
 sha2 = "0.10.9"
+rand = { workspace = true }
+hex = { workspace = true }
 url = "2"
 regex = "1"
 chrono = { version = "0.4.44", default-features = false, features = ["std", "clock"] }
