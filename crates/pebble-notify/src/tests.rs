@@ -161,6 +161,30 @@ fn automated_replies_on_followed_threads_do_not_count() {
 }
 
 #[test]
+fn a_person_replying_on_a_mailing_list_still_counts() {
+    let list_reply = MessageFacts {
+        reply_to_me: true,
+        signals: MailSignals {
+            bulk: true,
+            provider_low_priority: true,
+            ..MailSignals::default()
+        },
+        ..person()
+    };
+    let d = decide(&list_reply, &prefs(Mode::ImportantOnly), NOON);
+    assert_eq!((d.tier, d.reason), (Tier::Interrupt, Reason::ReplyToMe));
+    let watched = MessageFacts {
+        reply_to_me: false,
+        watched_thread: true,
+        ..list_reply
+    };
+    assert_eq!(
+        decide(&watched, &prefs(Mode::Smart), NOON).reason,
+        Reason::Watch
+    );
+}
+
+#[test]
 fn modes_handle_ordinary_and_bulk_mail() {
     let bulk = MessageFacts {
         from_address: "news@shop.example".into(),
