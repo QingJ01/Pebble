@@ -17,8 +17,8 @@ use std::time::Duration;
 
 use pebble_core::{now_timestamp, Message};
 use pebble_notify::triage_model::{
-    parse_response, system_prompt, usable_model_deadline, user_prompt, Correction, TriageAnswer,
-    TriageItem, MAX_BATCH, MIN_CONFIDENCE,
+    parse_response, redact_codes, system_prompt, usable_model_deadline, user_prompt, Correction,
+    TriageAnswer, TriageItem, MAX_BATCH, MIN_CONFIDENCE,
 };
 use pebble_notify::{apply_model_verdict, Decision, Reason, Tier};
 use pebble_store::Store;
