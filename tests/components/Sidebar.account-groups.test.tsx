@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   unreadCounts: {} as Record<string, number>,
 }));
 
+vi.mock("../../src/features/agent/api", () => ({ useUnreadAgentEvents: () => ({ data: 0 }) }));
 vi.mock("react-i18next", () => ({
   initReactI18next: {
     type: "3rdParty",

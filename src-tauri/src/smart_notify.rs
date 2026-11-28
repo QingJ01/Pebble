@@ -23,6 +23,16 @@ pub struct NotifyPrefsRecord {
     pub model_reviews_bulk: bool,
     /// Send the start of the body to the model (otherwise metadata only).
     pub model_send_body: bool,
+    /// Proactive agent (read from the defaults row only).
+    pub briefing_enabled: bool,
+    /// Local minute of day for the daily briefing (09:00 = 540).
+    pub briefing_minute: u16,
+    /// Nudge about mail that waits for the user's reply.
+    pub awaiting_reply_enabled: bool,
+    /// How long mail may wait before the nudge.
+    pub awaiting_reply_hours: u32,
+    /// Default "remind me if no reply" delay offered in compose.
+    pub follow_up_days: u32,
 }
 
 impl Default for NotifyPrefsRecord {
@@ -33,6 +43,11 @@ impl Default for NotifyPrefsRecord {
             model_assist: false,
             model_reviews_bulk: false,
             model_send_body: true,
+            briefing_enabled: true,
+            briefing_minute: 9 * 60,
+            awaiting_reply_enabled: true,
+            awaiting_reply_hours: 24,
+            follow_up_days: 3,
         }
     }
 }
@@ -85,6 +100,7 @@ pub struct TriageCache {
     accounts: HashMap<String, Option<Account>>,
     folder_roles: HashMap<String, HashMap<String, Option<FolderRole>>>,
     prefs: HashMap<String, NotifyPrefsRecord>,
+    watches: HashMap<String, Vec<pebble_store::agent::ThreadWatch>>,
 }
 
 impl TriageCache {
@@ -104,6 +120,37 @@ impl TriageCache {
                     .map(|folders| folders.into_iter().map(|f| (f.id, f.role)).collect())
                     .unwrap_or_default()
             })
+    }
+
+    /// The active follow-up this message answers, if any. Never matches the
+    /// account's own mail.
+    pub fn matching_watch(
+        &mut self,
+        store: &Store,
+        message: &Message,
+        from_self: bool,
+    ) -> Option<pebble_store::agent::ThreadWatch> {
+        if from_self {
+            return None;
+        }
+        let watches = self
+            .watches
+            .entry(message.account_id.clone())
+            .or_insert_with(|| {
+                store
+                    .active_thread_watches(&message.account_id)
+                    .unwrap_or_default()
+            });
+        let index = watches.iter().position(|watch| watch.matches(message))?;
+        Some(watches[index].clone())
+    }
+
+    /// Forget a completed watch so a second reply in the same flush does
+    /// not complete it again.
+    pub fn forget_watch(&mut self, account_id: &str, watch_id: &str) {
+        if let Some(watches) = self.watches.get_mut(account_id) {
+            watches.retain(|watch| watch.id != watch_id);
+        }
     }
 
     pub fn prefs(&mut self, store: &Store, account_id: &str) -> NotifyPrefsRecord {
@@ -252,6 +299,52 @@ pub fn record(store: &Store, triaged: &Triaged, now: i64) -> bool {
             true
         }
     }
+}
+
+/// Mark a follow-up as answered and add a feed entry for it. Returns
+/// `true` if this reply completed the watch.
+/// `push` asks for a desktop notification for the conversation entry: when
+/// the reply itself didn't notify (found later, or synced quietly).
+pub fn complete_watch(
+    store: &Store,
+    watch: &pebble_store::agent::ThreadWatch,
+    reply: &Message,
+    now: i64,
+    push: bool,
+) -> bool {
+    match store.complete_thread_watch(&watch.id, &reply.id, now) {
+        Ok(true) => {}
+        Ok(false) => return false,
+        Err(e) => {
+            warn!("Failed to complete follow-up {}: {e}", watch.id);
+            return false;
+        }
+    }
+    let event = pebble_store::agent::NewAgentEvent {
+        kind: "watch_reply".into(),
+        dedupe_key: format!("watch_reply:{}", watch.id),
+        account_id: Some(watch.account_id.clone()),
+        message_id: Some(reply.id.clone()),
+        thread_id: reply.thread_id.clone(),
+        watch_id: Some(watch.id.clone()),
+        conversation_id: watch.conversation_id.clone(),
+        payload: serde_json::json!({
+            "title": watch.title,
+            "from": if reply.from_name.trim().is_empty() { reply.from_address.clone() } else { reply.from_name.clone() },
+            "fromAddress": reply.from_address,
+            "subject": reply.subject,
+            "snippet": reply.snippet.chars().take(140).collect::<String>(),
+            "receivedAt": reply.date,
+            "waitedSeconds": (now - watch.created_at).max(0),
+        }),
+        // When the reply itself notified (reason "watch"), the
+        // conversation entry must not notify a second time.
+        push,
+    };
+    if let Err(e) = store.insert_agent_event(&event, now) {
+        warn!("Failed to record follow-up reply: {e}");
+    }
+    true
 }
 
 pub fn tier_code(tier: Tier) -> &'static str {

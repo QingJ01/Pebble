@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   unreadCounts: {} as Record<string, number>,
 }));
 
+vi.mock("../../src/features/agent/api", () => ({ useUnreadAgentEvents: () => ({ data: 0 }) }));
 vi.mock("react-i18next", () => ({
   initReactI18next: { type: "3rdParty", init: vi.fn() },
   useTranslation: () => ({
@@ -121,7 +122,7 @@ describe("Collapsed sidebar rail", () => {
       .toEqual(["Search", "Overview", "Starred"]);
     const bottom = screen.getByRole("navigation", { name: "Tools" });
     expect(within(bottom).getAllByRole("button").map((b) => b.getAttribute("aria-label")))
-      .toEqual(["Contacts", "Snoozed", "Kanban", "Settings"]);
+      .toEqual(["Contacts", "Snoozed", "Kanban", "Assistant", "Settings"]);
   });
 
   it("marks the current account and accounts with unread inbox mail", () => {

@@ -8,6 +8,7 @@ import { useConfirmStore } from "../../src/stores/confirm.store";
 import { useMailStore } from "../../src/stores/mail.store";
 import { useUIStore } from "../../src/stores/ui.store";
 
+vi.mock("../../src/features/agent/api", () => ({ useUnreadAgentEvents: () => ({ data: 0 }) }));
 vi.mock("react-i18next", () => ({
   initReactI18next: {
     type: "3rdParty",

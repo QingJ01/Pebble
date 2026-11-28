@@ -235,7 +235,7 @@ fn merge_stored_api_key(
     submitted
 }
 
-fn load_stored_provider_config(
+pub(crate) fn load_stored_provider_config(
     state: &AppState,
 ) -> std::result::Result<Option<TranslateProviderConfig>, PebbleError> {
     let Some(stored) = state.store.get_translate_config()? else {

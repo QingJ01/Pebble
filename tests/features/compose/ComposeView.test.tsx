@@ -11,6 +11,14 @@ import {
 } from "../../../src/lib/api";
 import { listControlledSends, queueControlledSend, restoreControlledSend } from "../../../src/lib/send-controls-api";
 
+vi.mock("../../../src/features/notify/api", () => ({
+  useNotifySettings: () => ({ data: { defaults: { followUpDays: 3 } } }),
+}));
+vi.mock("../../../src/features/agent/api", () => ({
+  createThreadWatch: vi.fn().mockResolvedValue({}),
+  cancelSendFollowUp: vi.fn().mockResolvedValue(0),
+  deadlineInDays: (days: number) => 1_000 + days,
+}));
 vi.mock("../../../src/features/compose/ScheduledSendsView", () => ({
   useControlledSends: () => ({ data: [], refetch: vi.fn() }),
 }));
@@ -345,6 +353,32 @@ describe("ComposeView", () => {
     await waitFor(() => expect(queueControlledSend).toHaveBeenCalledTimes(2));
     expect(vi.mocked(queueControlledSend).mock.calls[1][2]).toBe(requestId);
     expect(mocks.mutate).not.toHaveBeenCalled();
+  });
+
+  it("follows up on the queued send when asked to", async () => {
+    localStorage.removeItem("pebble-undo-send-seconds");
+    const { createThreadWatch } = await import("../../../src/features/agent/api");
+    vi.mocked(createThreadWatch).mockClear();
+    vi.mocked(queueControlledSend).mockResolvedValue({ id: "job", accountId: "account-1", subject: "Subject", dueAt: Math.floor(Date.now() / 1000) + 10, revision: 0, state: "pending", kind: "undo" });
+    render(<ComposeView />);
+    fireEvent.click(screen.getByRole("button", { name: /Remind me if there/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(createThreadWatch).toHaveBeenCalledOnce());
+    const requestId = vi.mocked(queueControlledSend).mock.calls.at(-1)![2];
+    expect(createThreadWatch).toHaveBeenCalledWith(expect.objectContaining({
+      accountId: "account-1", participants: ["to@example.com"], deadline: 1_003, anchor: `send:${requestId}`,
+    }));
+  });
+
+  it("does not follow up unless asked", async () => {
+    localStorage.removeItem("pebble-undo-send-seconds");
+    const { createThreadWatch } = await import("../../../src/features/agent/api");
+    vi.mocked(createThreadWatch).mockClear();
+    vi.mocked(queueControlledSend).mockResolvedValue({ id: "job", accountId: "account-1", subject: "Subject", dueAt: Math.floor(Date.now() / 1000) + 10, revision: 0, state: "pending", kind: "undo" });
+    render(<ComposeView />);
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(queueControlledSend).toHaveBeenCalled());
+    expect(createThreadWatch).not.toHaveBeenCalled();
   });
 
   it("places schedule next to send as the secondary action", () => {

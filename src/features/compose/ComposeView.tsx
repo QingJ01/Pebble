@@ -3,6 +3,8 @@ import { useState, useEffect, useRef } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import Button from "@/components/ui/Button";
 import IconButton from "@/components/ui/IconButton";
+import { cancelSendFollowUp, createThreadWatch, deadlineInDays } from "@/features/agent/api";
+import { useNotifySettings } from "@/features/notify/api";
 import Popover from "@/components/ui/Popover";
 import { EditorContent } from "@tiptap/react";
 import {
@@ -10,6 +12,7 @@ import {
   Type, FileCode2, Hash, Eye, EyeOff,
   Paperclip, FileText, Trash2, BookTemplate,
   ChevronDown, ChevronRight,
+  BellPlus,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useMailStore } from "@/stores/mail.store";
@@ -62,6 +65,9 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
   const { t } = useTranslation();
   const composeMode = useComposeStore((s) => s.composeMode);
   const composeReplyTo = useComposeStore((s) => s.composeReplyTo);
+  // "Remind me if there's no reply" (#107): follow the thread after sending.
+  const [followUp, setFollowUp] = useState(false);
+  const followUpDays = useNotifySettings().data?.defaults.followUpDays ?? 3;
   const composePrefill = useComposeStore((s) => s.composePrefill);
   const closeCompose = useComposeStore((s) => s.closeCompose);
   const showComposeLeaveConfirm = useComposeStore((s) => s.showComposeLeaveConfirm);
@@ -522,6 +528,19 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
         ? composeReplyTo.message_id_header
         : undefined);
 
+    const startFollowUp = (anchor: string) => {
+      if (!followUp) return;
+      void createThreadWatch({
+        accountId: fromAccountId,
+        messageId: isReply && composeReplyTo?.account_id === fromAccountId ? composeReplyTo.id : undefined,
+        subject: finalSubject,
+        participants: [...finalTo, ...finalCc],
+        // Counted from when the mail actually goes out.
+        deadline: deadlineInDays(followUpDays, scheduleAt !== undefined ? scheduleAt * 1000 : Date.now()),
+        anchor,
+      }).catch((error) => console.warn("Failed to follow up on the sent message", error));
+    };
+
     const undoSeconds = loadUndoSeconds();
     if (scheduleAt !== undefined || undoSeconds > 0) {
       try {
@@ -537,6 +556,8 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
           rawSource, richTextHtml: editorMode === "rich" ? bodyHtml : richTextHtml,
           quotedReplyHtml, attachments: attachmentsRef.current,
         }, scheduleAt !== undefined ? { dueAt: scheduleAt } : { undoSeconds }, requestId);
+        // Undo / delete of this send cancels the follow-up (send_controls.rs).
+        startFollowUp(`send:${requestId}`);
         if (scheduleAt !== undefined) {
           // The independently encrypted scheduled copy now owns its attachment lifetime.
           // Source drafts stay protected by durable queue ownership until delivery/cancellation.
@@ -553,6 +574,8 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
       return;
     }
 
+    const directAnchor = `send:${crypto.randomUUID()}`;
+    startFollowUp(directAnchor);
     sendMutation.mutate(
       {
         accountId: fromAccountId,
@@ -581,6 +604,7 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
           })();
         },
         onError: (e) => {
+          if (followUp) void cancelSendFollowUp(directAnchor).catch(() => {});
           sendInProgressRef.current = false;
           setSendInProgress(false);
           setSendError(formatError(e, { fallbackKey: "compose.sendError", fallback: "Failed to send" }));
@@ -737,6 +761,13 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
               {sendDisabledReason}
             </span>
           )}
+          <IconButton
+            size="md"
+            label={t("agent.composeFollowUp", "Remind me if there's no reply in {{n}} days", { n: followUpDays })}
+            icon={<BellPlus size={16} />}
+            pressed={followUp}
+            onClick={() => setFollowUp((value) => !value)}
+          />
           <Button
             variant="secondary"
             aria-expanded={showSchedule}

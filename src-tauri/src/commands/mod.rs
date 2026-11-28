@@ -1,5 +1,7 @@
 pub mod accounts;
 pub mod advanced_search;
+pub mod agent_feed;
+pub mod agent_model;
 pub mod appearance;
 pub mod attachments;
 pub mod autostart;

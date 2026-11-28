@@ -44,6 +44,7 @@ vi.mock("../../src/hooks/useMessageLoader", () => ({
     errorInfo: null,
   }),
 }));
+vi.mock("../../src/features/agent/FollowUpButton", () => ({ default: () => null }));
 vi.mock("../../src/features/notify/SenderNotifyAction", () => ({ default: () => null }));
 vi.mock("../../src/hooks/useBilingualTranslation", () => ({
   useBilingualTranslation: () => ({

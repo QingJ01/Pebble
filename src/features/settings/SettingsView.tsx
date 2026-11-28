@@ -12,14 +12,16 @@ import TranslateTab from "./TranslateTab";
 import PrivacyTab from "./PrivacyTab";
 import AboutTab from "./AboutTab";
 import NotificationsTab from "../notify/NotificationsTab";
+import AssistantSettingsTab from "../agent/AssistantSettingsTab";
 import MailArchiveView from "../mail-archive/MailArchiveView";
 
-const TAB_IDS = ["accounts", "general", "notifications", "proxy", "appearance", "privacy", "rules", "remoteWrites", "mailArchive", "translation", "shortcuts", "cloudSync", "about"] as const;
+const TAB_IDS = ["accounts", "general", "notifications", "assistant", "proxy", "appearance", "privacy", "rules", "remoteWrites", "mailArchive", "translation", "shortcuts", "cloudSync", "about"] as const;
 
 const TAB_LABEL_KEYS: Record<SettingsTab, string> = {
   accounts: "settings.accounts",
   general: "settings.general",
   notifications: "settings.notifications",
+  assistant: "settings.assistant",
   proxy: "settings.proxy",
   appearance: "settings.appearance",
   privacy: "settings.privacy",
@@ -34,6 +36,7 @@ const TAB_LABEL_KEYS: Record<SettingsTab, string> = {
 
 /** Optional one-line description under each tab's page title. */
 const TAB_DESCRIPTION_KEYS: Partial<Record<SettingsTab, string>> = {
+  assistant: "assistantSettings.description",
   cloudSync: "cloudSync.description",
   remoteWrites: "pendingOps.description",
 };
@@ -104,6 +107,7 @@ export default function SettingsView() {
         {activeTab === "accounts" && <AccountsTab />}
         {activeTab === "general" && <GeneralTab />}
         {activeTab === "notifications" && <NotificationsTab />}
+        {activeTab === "assistant" && <AssistantSettingsTab />}
         {activeTab === "proxy" && <ProxyTab />}
         {activeTab === "appearance" && <AppearanceTab />}
         {activeTab === "rules" && <RulesTab />}

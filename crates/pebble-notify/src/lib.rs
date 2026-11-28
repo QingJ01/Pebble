@@ -7,6 +7,8 @@
 //! the store; the evaluation harness feeds synthetic ones. Keeping it pure
 //! means the evaluated logic is exactly the shipped logic.
 
+pub mod awaiting;
+pub mod delivery;
 pub mod sender;
 
 use pebble_core::MailSignals;

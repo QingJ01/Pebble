@@ -144,7 +144,7 @@
 .sidebar-btn:hover:not(:disabled) { background: var(--color-fill-hover); }
 .sidebar-btn:active:not(:disabled) { background: var(--color-fill-pressed); }
 .sidebar-btn.is-active,
-.sidebar-btn.is-active:hover { background: var(--color-fill-selected); }
+.sidebar-btn.is-active:hover { background: color-mix(in srgb, var(--color-fill-selected) 70%, transparent); }
 .sidebar-btn.is-active { font-weight: var(--weight-medium); }
 /* Dragged mail hovering a folder (lib/mailDrag). */
 .sidebar-btn.is-drop-target,

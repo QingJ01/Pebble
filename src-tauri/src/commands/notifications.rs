@@ -16,6 +16,7 @@ const TRAY_DEFAULT_TOOLTIP: &str = "Pebble";
 /// frontend reports in, English defaults are used.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(default)]
 pub struct NotificationLabels {
     /// Title of a new-mail notification.
     pub new_mail_title: String,
@@ -31,6 +32,20 @@ pub struct NotificationLabels {
     pub test_body: String,
     /// Tray tooltip while unread new mail is waiting.
     pub tray_attention_tooltip: String,
+    /// Title of the agent's own notifications (follow-ups, nudges, briefing).
+    pub agent_title: String,
+    /// A followed thread got a reply; `{from}`, `{title}`.
+    pub watch_reply: String,
+    /// A follow-up passed its deadline without a reply; `{title}`.
+    pub watch_overdue: String,
+    /// One message is waiting for the user's reply; `{from}`, `{subject}`.
+    pub awaiting_one: String,
+    /// Several are; `{n}`.
+    pub awaiting_many: String,
+    /// Daily briefing body; `{important}`, `{awaiting}`, `{followups}`.
+    pub briefing_body: String,
+    /// Several assistant messages in one notification; `{n}`.
+    pub agent_many: String,
 }
 
 impl Default for NotificationLabels {
@@ -44,8 +59,24 @@ impl Default for NotificationLabels {
             test_title: "Pebble - Test notification".to_string(),
             test_body: "Desktop notifications are working.".to_string(),
             tray_attention_tooltip: "Pebble - New mail".to_string(),
+            agent_title: "Pebble".to_string(),
+            watch_reply: "{from} replied: {title}".to_string(),
+            watch_overdue: "Still no reply: {title}".to_string(),
+            awaiting_one: "{from} is waiting for your reply: {subject}".to_string(),
+            awaiting_many: "{n} messages are waiting for your reply".to_string(),
+            briefing_body: "Today: {important} important, {awaiting} waiting for your reply, {followups} follow-ups".to_string(),
+            agent_many: "{n} new messages from Pebble".to_string(),
         }
     }
+}
+
+/// Replace `{name}` placeholders in a label template.
+pub fn fill(template: &str, values: &[(&str, &str)]) -> String {
+    let mut out = template.to_string();
+    for (name, value) in values {
+        out = out.replace(&format!("{{{name}}}"), value);
+    }
+    out
 }
 
 impl NotificationLabels {
@@ -75,6 +106,13 @@ impl NotificationLabels {
                 &mut self.tray_attention_tooltip,
                 defaults.tray_attention_tooltip,
             ),
+            (&mut self.agent_title, defaults.agent_title),
+            (&mut self.watch_reply, defaults.watch_reply),
+            (&mut self.watch_overdue, defaults.watch_overdue),
+            (&mut self.awaiting_one, defaults.awaiting_one),
+            (&mut self.awaiting_many, defaults.awaiting_many),
+            (&mut self.briefing_body, defaults.briefing_body),
+            (&mut self.agent_many, defaults.agent_many),
         ];
         for (field, default) in fields {
             if field.trim().is_empty() {

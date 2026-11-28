@@ -108,7 +108,35 @@ snoozed_title: string, test_title: string, test_body: string,
 /**
  * Tray tooltip while unread new mail is waiting.
  */
-tray_attention_tooltip: string, };
+tray_attention_tooltip: string, 
+/**
+ * Title of the agent's own notifications (follow-ups, nudges, briefing).
+ */
+agent_title: string, 
+/**
+ * A followed thread got a reply; `{from}`, `{title}`.
+ */
+watch_reply: string, 
+/**
+ * A follow-up passed its deadline without a reply; `{title}`.
+ */
+watch_overdue: string, 
+/**
+ * One message is waiting for the user's reply; `{from}`, `{subject}`.
+ */
+awaiting_one: string, 
+/**
+ * Several are; `{n}`.
+ */
+awaiting_many: string, 
+/**
+ * Daily briefing body; `{important}`, `{awaiting}`, `{followups}`.
+ */
+briefing_body: string, 
+/**
+ * Several assistant messages in one notification; `{n}`.
+ */
+agent_many: string, };
 
 export type NotificationStatus = { enabled: boolean, attention_active: boolean, platform: string, app_id: string | null, };
 

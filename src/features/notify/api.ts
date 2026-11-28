@@ -20,6 +20,13 @@ export interface NotifyPrefs {
   modelAssist: boolean;
   modelReviewsBulk: boolean;
   modelSendBody: boolean;
+  /** Proactive agent (defaults row only). */
+  briefingEnabled: boolean;
+  /** Local minute of day for the daily briefing. */
+  briefingMinute: number;
+  awaitingReplyEnabled: boolean;
+  awaitingReplyHours: number;
+  followUpDays: number;
 }
 
 export interface NotifySettings {

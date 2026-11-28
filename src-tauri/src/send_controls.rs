@@ -454,6 +454,7 @@ pub async fn restore_controlled_send(
     {
         return Err(conflict());
     }
+    cancel_follow_up_for_send(&app, &state, &id);
     let _ = app.emit(CHANGED, ());
     // The encrypted backup remains in state=draft if staging fails or the app exits.
     let mut snapshot = stage_snapshot(&state.attachments_dir, sealed)?;
@@ -505,8 +506,26 @@ pub async fn delete_controlled_send(
     if !state.store.delete_scheduled_send(&id, revision)? {
         return Err(conflict());
     }
+    if job.state != "sent" {
+        cancel_follow_up_for_send(&app, &state, &id);
+    }
     let _ = app.emit(CHANGED, ());
     Ok(())
+}
+
+/// A send that was undone or discarded must not leave a "tell me when they
+/// reply" follow-up behind (#107).
+fn cancel_follow_up_for_send(app: &tauri::AppHandle, state: &AppState, send_id: &str) {
+    match state
+        .store
+        .cancel_thread_watches_by_anchor(&format!("send:{send_id}"), now_timestamp())
+    {
+        Ok(0) => {}
+        Ok(_) => {
+            let _ = app.emit(crate::events::AGENT_EVENTS_CHANGED, ());
+        }
+        Err(e) => tracing::warn!("Failed to cancel the follow-up for send {send_id}: {e}"),
+    }
 }
 
 async fn deliver(
