@@ -616,7 +616,7 @@ function DraftCard({ draft }: { draft: ChatDraft }) {
     setActiveAccountId(draft.accountId);
     const original = draft.replyToMessageId ? await getMessage(draft.replyToMessageId).catch(() => null) : null;
     if (original) {
-      useComposeStore.getState().openCompose("reply", original, { body: draft.body });
+      useComposeStore.getState().openCompose("reply", original, { to: draft.to, cc: draft.cc, body: draft.body });
     } else {
       useComposeStore.getState().openCompose("new", null, { to: draft.to, cc: draft.cc, subject: draft.subject, body: draft.body });
     }
@@ -627,6 +627,11 @@ function DraftCard({ draft }: { draft: ChatDraft }) {
         <FileText size={14} aria-hidden="true" />
         <span>{t("agent.draftTo", "Draft to {{who}}", { who: draft.to.join(", ") })}</span>
       </div>
+      {draft.unverified && draft.unverified.length > 0 && (
+        <p className="agent-draft__warn" role="note">
+          {t("agent.draftUnverified", "Check the recipients: you haven't mentioned or written to {{who}}.", { who: draft.unverified.join(", ") })}
+        </p>
+      )}
       {draft.subject && <div className="agent-draft__subject">{draft.subject}</div>}
       <div className={`agent-draft__body${draft.body.split("\n").length > 7 || draft.body.length > 360 ? " is-long" : ""}`}>{draft.body}</div>
       <div className="agent-draft__foot">

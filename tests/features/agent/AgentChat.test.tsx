@@ -83,7 +83,7 @@ describe("assistant chat", () => {
 
     expect(within(log).getByText("Not sent. You review and send it.")).toBeTruthy();
     fireEvent.click(within(log).getByRole("button", { name: "Open in composer" }));
-    await waitFor(() => expect(openCompose).toHaveBeenCalledWith("reply", expect.objectContaining({ id: "m3" }), { body: "Count me in!" }));
+    await waitFor(() => expect(openCompose).toHaveBeenCalledWith("reply", expect.objectContaining({ id: "m3" }), { to: ["wei@x.example"], cc: [], body: "Count me in!" }));
   });
 
   it("offers a retry after an error", async () => {

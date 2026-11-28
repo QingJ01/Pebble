@@ -1269,7 +1269,8 @@
     "watchReplyMsg": "{{from}} 回复了你在跟进的「{{title}}」。",
     "writeNudge": "写封跟进邮件",
     "yesterday": "昨天 {{time}}",
-    "yourMail": "你发出的邮件"
+    "yourMail": "你发出的邮件",
+    "draftUnverified": "请核对收件人：你没有提到过、也没给 {{who}} 写过信。"
   },
   "assistantSettings": {
     "description": "Pebble 回答你的问题时使用的 AI 模型。",

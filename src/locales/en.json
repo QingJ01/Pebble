@@ -1297,7 +1297,8 @@
     "watchReplyMsg": "{{from}} replied to “{{title}}”, the thread you're following.",
     "writeNudge": "Write a follow-up",
     "yesterday": "Yesterday {{time}}",
-    "yourMail": "Your mail"
+    "yourMail": "Your mail",
+    "draftUnverified": "Check the recipients: you haven't mentioned or written to {{who}}."
   },
   "assistantSettings": {
     "description": "The AI model Pebble uses to answer your questions.",

@@ -1068,3 +1068,9 @@
   color: var(--color-text-secondary);
   font-size: var(--font-sm);
 }
+
+.agent-draft__warn {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-xs);
+  color: var(--color-warning, #b45309);
+}
