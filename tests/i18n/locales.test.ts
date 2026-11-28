@@ -108,7 +108,7 @@ describe("locale files", () => {
     expect(en.privacy.loadTrustedFailed).toBe("Failed to load trusted senders");
     expect(en.privacy.removeTrustFailed).toBe("Failed to remove trusted sender");
     expect(en.privacy.trackerBlockingDesc).toBe(
-      "Known tracking pixels and tracker domains are blocked unless privacy is Off or the sender is fully trusted.",
+      "Known tracking pixels and tracker domains are always blocked, even for trusted senders, unless privacy is Off.",
     );
     expect(en.privacy.trackerBlockingOff).toBe(
       "Tracker blocking is disabled in Off mode. All images and trackers are loaded directly.",
