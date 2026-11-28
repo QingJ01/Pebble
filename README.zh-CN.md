@@ -26,6 +26,10 @@
 </p>
 
 <p align="center">
+  <a href="https://trendshift.io/repositories/109712" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/109712/daily" alt="QingJ01%2FPebble | Trendshift" width="250" height="55"/></a>
+</p>
+
+<p align="center">
   <img src="site/screenshots/zh/inbox.png" alt="Pebble 的聚合收件箱：三个账户、账户筛选标签，右侧打开一封邮件">
 </p>
 
