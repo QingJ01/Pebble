@@ -469,6 +469,16 @@ pub fn notification_text(
                 ],
             ),
             "watch_overdue" => fill(&labels.watch_overdue, &[("title", &str_of(one, "title"))]),
+            "draft_proposal" => fill(
+                &labels.draft_proposal,
+                &[
+                    ("client", &str_of(one, "client")),
+                    (
+                        "subject",
+                        one.payload["draft"]["subject"].as_str().unwrap_or_default(),
+                    ),
+                ],
+            ),
             "deadline_soon" => fill(
                 &labels.deadline_soon,
                 &[

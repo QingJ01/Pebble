@@ -48,6 +48,10 @@ pub struct NotificationLabels {
     pub agent_many: String,
     /// A deadline from a mail is coming up; `{subject}`, `{time}`.
     pub deadline_soon: String,
+    /// An MCP client proposed a draft; `{client}`, `{subject}`.
+    pub draft_proposal: String,
+    /// An app asks to connect over MCP; `{client}`.
+    pub mcp_pair: String,
 }
 
 impl Default for NotificationLabels {
@@ -69,6 +73,8 @@ impl Default for NotificationLabels {
             briefing_body: "Today: {important} important, {awaiting} waiting for your reply, {followups} follow-ups".to_string(),
             agent_many: "{n} new messages from Pebble".to_string(),
             deadline_soon: "Due {time}: {subject}".to_string(),
+            draft_proposal: "{client} proposed a draft: {subject}".to_string(),
+            mcp_pair: "{client} asks to use your mail. Answer in Pebble.".to_string(),
         }
     }
 }
@@ -117,6 +123,8 @@ impl NotificationLabels {
             (&mut self.briefing_body, defaults.briefing_body),
             (&mut self.agent_many, defaults.agent_many),
             (&mut self.deadline_soon, defaults.deadline_soon),
+            (&mut self.draft_proposal, defaults.draft_proposal),
+            (&mut self.mcp_pair, defaults.mcp_pair),
         ];
         for (field, default) in fields {
             if field.trim().is_empty() {

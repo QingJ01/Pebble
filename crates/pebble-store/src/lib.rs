@@ -11,6 +11,7 @@ pub mod folders;
 pub mod kanban;
 pub mod labels;
 pub mod mail_archive;
+pub mod mcp;
 pub mod messages;
 pub mod migrations;
 pub mod notify;

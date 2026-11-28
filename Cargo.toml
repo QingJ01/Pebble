@@ -9,6 +9,7 @@ members = [
     "crates/pebble-rules",
     "crates/pebble-notify",
     "crates/pebble-notify-eval",
+    "crates/pebble-mcp",
     "crates/pebble-translate",
     "crates/pebble-crypto",
     "crates/pebble-oauth",

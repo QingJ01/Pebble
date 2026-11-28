@@ -22,6 +22,7 @@ pub mod indexing;
 pub mod kanban;
 pub mod labels;
 pub mod mail_archive;
+pub mod mcp;
 pub mod messages;
 pub mod network;
 pub mod notifications;

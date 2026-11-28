@@ -15,7 +15,9 @@
     "awaitingMany": "{{n}} messages are waiting for your reply",
     "briefingBody": "Today: {{important}} important, {{awaiting}} waiting for your reply, {{followups}} follow-ups",
     "agentMany": "{{n}} new messages from Pebble",
-    "deadlineSoon": "Due {{time}}: {{subject}}"
+    "deadlineSoon": "Due {{time}}: {{subject}}",
+    "draftProposal": "{{client}} proposed a draft: {{subject}}",
+    "mcpPair": "{{client}} asks to use your mail. Answer in Pebble."
   },
   "layout": {
     "resizeList": "Resize list",
@@ -364,7 +366,8 @@
     "htmlMailDarkAutoDesc": "Darken mail without designed backgrounds; keep the rest on a light card",
     "htmlMailDarkForce": "Always dark",
     "htmlMailDarkForceDesc": "Invert every HTML mail; brand colors may shift",
-    "assistant": "AI assistant"
+    "assistant": "AI assistant",
+    "connections": "Connections"
   },
   "cloudSync": {
     "title": "Settings backup",
@@ -1331,7 +1334,8 @@
     "deadlineNotOne": "Not a deadline",
     "deadlinesTitle": "Coming up",
     "dueBy": "{{from}} · due {{when}}",
-    "draftUnverified": "Check the recipients: you haven't mentioned or written to {{who}}."
+    "draftUnverified": "Check the recipients: you haven't mentioned or written to {{who}}.",
+    "proposalMsg": "{{client}} proposed a draft. Review it before sending; nothing has been sent."
   },
   "assistantSettings": {
     "description": "The AI model Pebble uses to answer your questions.",
@@ -1355,5 +1359,60 @@
     "privacyTitle": "What the model sees",
     "privacyLocal": "This model runs on your computer: your mail stays on this device.",
     "privacyCloud": "When you ask Pebble something, the mail it needs to answer is sent to this service. Nothing is sent until you ask, and each answer shows which messages were used."
+  },
+  "connections": {
+    "levelNone": "Not allowed",
+    "levelMetadata": "Search (sender, subject, date)",
+    "levelSummary": "Search with snippets",
+    "levelBody": "Full text",
+    "levelDrafts": "Full text and draft proposals",
+    "toolSearch": "Search",
+    "toolThread": "Read thread",
+    "toolDraft": "Propose draft",
+    "outcomeOk": "OK",
+    "outcomeForbidden": "Not allowed",
+    "outcomeRateLimited": "Too many calls",
+    "outcomeNotFound": "Not found",
+    "outcomeInvalid": "Bad request",
+    "outcomeError": "Error",
+    "gmailUnavailable": "Gmail accounts can't be shared yet",
+    "levelFor": "Access to {{account}}",
+    "bodyWarning": "With full text, mail content goes to this app and its AI model. Pebble can't control what happens to it there.",
+    "pairTitle": "Let “{{client}}” use your mail?",
+    "pairLead": "An app on this computer asked to connect to Pebble over MCP. Approve only if you just set it up yourself: any app can use this name. Choose what it may see for each account; you can change this or disconnect it later in Settings → Connections.",
+    "neverSend": "Connected apps can never send, delete or move mail.",
+    "deny": "Don't allow",
+    "approve": "Allow",
+    "pairFailed": "Couldn't answer the request",
+    "copied": "Copied",
+    "copy": "Copy",
+    "revokedOn": "Disconnected {{date}}",
+    "lastUsed": "Last used {{date}}",
+    "neverUsed": "Not used yet",
+    "revoked": "Disconnected",
+    "close": "Close",
+    "edit": "Change access",
+    "revoke": "Disconnect",
+    "revokeFailed": "Couldn't disconnect",
+    "save": "Save",
+    "saveFailed": "Couldn't save access",
+    "mcpTitle": "MCP clients",
+    "mcpDesc": "Let AI apps on this computer (Claude Desktop, Cursor and others that support MCP) search and read your mail through Pebble, with your approval for each app.",
+    "enable": "Let MCP clients use Pebble",
+    "toggleFailed": "Couldn't change this setting",
+    "notRunning": "Pebble couldn't start listening. Turn it off and on again.",
+    "setupHelp": "Add Pebble as an MCP server in the app, using this command (or paste the JSON into Claude Desktop's configuration). Pebble needs to be running.",
+    "command": "Command",
+    "config": "Claude Desktop configuration",
+    "trust": "Every new app must be approved here, and none can send, delete or move mail. Any program running as you could ask to connect, so approve only apps you just set up.",
+    "clientsTitle": "Connected apps",
+    "clientsEmpty": "No app has connected yet.",
+    "auditTitle": "Recent activity",
+    "auditDesc": "What connected apps asked for. Only the request type and outcome are kept, never mail content.",
+    "auditEmpty": "Nothing yet.",
+    "results_one": "{{count}} result",
+    "results_other": "{{count}} results",
+    "moreWaiting_one": "{{count}} more request is waiting.",
+    "moreWaiting_other": "{{count}} more requests are waiting."
   }
 }

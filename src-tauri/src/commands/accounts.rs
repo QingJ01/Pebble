@@ -974,6 +974,9 @@ pub async fn delete_account(
     //    queued pending ops and search work). If this fails nothing else has
     //    been touched, so the account stays fully usable.
     state.store.delete_account(&account_id)?;
+    if let Err(e) = state.store.remove_account_from_mcp_grants(&account_id) {
+        tracing::warn!("Failed to drop the account from MCP grants: {e}");
+    }
 
     // 4. Remove all documents from the search index. A failure here only
     //    leaves stale hits for rows that no longer exist.

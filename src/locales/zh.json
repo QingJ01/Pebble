@@ -15,7 +15,9 @@
     "awaitingMany": "有 {{n}} 封邮件在等你回复",
     "briefingBody": "今天：{{important}} 封重要邮件，{{awaiting}} 封等你回复，{{followups}} 个跟进中",
     "agentMany": "Pebble 有 {{n}} 条新消息",
-    "deadlineSoon": "{{time}} 截止：{{subject}}"
+    "deadlineSoon": "{{time}} 截止：{{subject}}",
+    "draftProposal": "{{client}} 提出了一份草稿：{{subject}}",
+    "mcpPair": "{{client}} 请求使用你的邮件，请在 Pebble 中处理。"
   },
   "layout": {
     "resizeList": "调整列表宽度",
@@ -362,7 +364,8 @@
     "htmlMailDarkAutoDesc": "没有设计背景的邮件转为暗色，其余仍用浅色卡片",
     "htmlMailDarkForce": "全部转暗色",
     "htmlMailDarkForceDesc": "所有 HTML 邮件反色显示，品牌色可能失真",
-    "assistant": "AI 助手"
+    "assistant": "AI 助手",
+    "connections": "连接"
   },
   "cloudSync": {
     "title": "设置备份",
@@ -1303,7 +1306,8 @@
     "deadlineNotOne": "不是截止时间",
     "deadlinesTitle": "即将截止",
     "dueBy": "{{from}} · {{when}}截止",
-    "draftUnverified": "请核对收件人：你没有提到过、也没给 {{who}} 写过信。"
+    "draftUnverified": "请核对收件人：你没有提到过、也没给 {{who}} 写过信。",
+    "proposalMsg": "{{client}} 提出了一份草稿。发送前请先检查；还没有发送任何内容。"
   },
   "assistantSettings": {
     "description": "Pebble 回答你的问题时使用的 AI 模型。",
@@ -1327,5 +1331,58 @@
     "privacyTitle": "模型能看到什么",
     "privacyLocal": "这个模型在你的电脑上运行，邮件不会离开这台设备。",
     "privacyCloud": "你向 Pebble 提问时，回答所需的邮件内容会发送给这个服务。你不提问就不会发送，每条回答都会标明用到了哪些邮件。"
+  },
+  "connections": {
+    "levelNone": "不允许",
+    "levelMetadata": "搜索（发件人、主题、日期）",
+    "levelSummary": "搜索并显示摘要",
+    "levelBody": "读取正文",
+    "levelDrafts": "读取正文并提出草稿",
+    "toolSearch": "搜索",
+    "toolThread": "读取会话",
+    "toolDraft": "提出草稿",
+    "outcomeOk": "成功",
+    "outcomeForbidden": "未获允许",
+    "outcomeRateLimited": "调用过于频繁",
+    "outcomeNotFound": "未找到",
+    "outcomeInvalid": "请求有误",
+    "outcomeError": "出错",
+    "gmailUnavailable": "Gmail 账户暂不支持共享",
+    "levelFor": "{{account}} 的访问权限",
+    "bodyWarning": "开放正文后，邮件内容会交给这个应用和它的 AI 模型，Pebble 无法控制对方如何使用。",
+    "pairTitle": "允许「{{client}}」使用你的邮件吗？",
+    "pairLead": "这台电脑上的一个应用请求通过 MCP 连接 Pebble。只有在你刚刚亲自配置了它时才批准：任何应用都可以用这个名字。为每个账户选择它能看到的内容；之后可以在「设置 → 连接」里修改或断开。",
+    "neverSend": "连接的应用永远不能发送、删除或移动邮件。",
+    "deny": "不允许",
+    "approve": "允许",
+    "pairFailed": "没能回应这个请求",
+    "copied": "已复制",
+    "copy": "复制",
+    "revokedOn": "已于 {{date}} 断开",
+    "lastUsed": "最近使用 {{date}}",
+    "neverUsed": "还没有使用",
+    "revoked": "已断开",
+    "close": "收起",
+    "edit": "修改权限",
+    "revoke": "断开",
+    "revokeFailed": "没能断开",
+    "save": "保存",
+    "saveFailed": "没能保存权限",
+    "mcpTitle": "MCP 客户端",
+    "mcpDesc": "让这台电脑上的 AI 应用（Claude Desktop、Cursor 等支持 MCP 的应用）通过 Pebble 搜索和阅读你的邮件，每个应用都需要你批准。",
+    "enable": "允许 MCP 客户端使用 Pebble",
+    "toggleFailed": "没能修改这个设置",
+    "notRunning": "Pebble 没能开始监听。请关闭后重新打开。",
+    "setupHelp": "在应用里把 Pebble 添加为 MCP 服务器，使用下面的命令（或把 JSON 粘贴到 Claude Desktop 的配置里）。使用时 Pebble 需要保持运行。",
+    "command": "命令",
+    "config": "Claude Desktop 配置",
+    "trust": "每个新应用都必须在这里批准，而且都不能发送、删除或移动邮件。以你的身份运行的任何程序都可能请求连接，所以只批准你刚刚配置的应用。",
+    "clientsTitle": "已连接的应用",
+    "clientsEmpty": "还没有应用连接。",
+    "auditTitle": "最近活动",
+    "auditDesc": "连接的应用请求了什么。只保留请求类型和结果，从不保存邮件内容。",
+    "auditEmpty": "还没有记录。",
+    "results": "{{count}} 条结果",
+    "moreWaiting": "还有 {{count}} 个请求在等待。"
   }
 }

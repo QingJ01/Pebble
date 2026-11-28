@@ -578,6 +578,21 @@ function DeadlineBlock({ event, compact }: { event: AgentEvent; compact: boolean
   );
 }
 
+/** A draft an MCP client proposed (#107, M4); nothing was sent. */
+function ProposalBlock({ event, compact }: { event: AgentEvent; compact: boolean }) {
+  const { t } = useTranslation();
+  const draft = event.payload.draft as ChatDraft | undefined;
+  if (!draft) return null;
+  return (
+    <AgentMessage compact={compact} wide>
+      <Bubble>
+        <p>{t("agent.proposalMsg", "{{client}} proposed a draft. Review it before sending; nothing has been sent.", { client: str(event.payload.client) })}</p>
+      </Bubble>
+      <DraftCard draft={draft} />
+    </AgentMessage>
+  );
+}
+
 function BlockView({ block, compact }: { block: Block; compact: boolean }) {
   if (block.kind === "awaiting") return <AwaitingBlock events={block.events} compact={compact} />;
   const { event } = block;
@@ -593,6 +608,8 @@ function BlockView({ block, compact }: { block: Block; compact: boolean }) {
     case "deadline":
     case "deadline_soon":
       return <DeadlineBlock event={event} compact={compact} />;
+    case "draft_proposal":
+      return <ProposalBlock event={event} compact={compact} />;
     default:
       return null;
   }

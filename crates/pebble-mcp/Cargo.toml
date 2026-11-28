@@ -1,0 +1,16 @@
+[package]
+name = "pebble-mcp"
+version = "0.2.1"
+edition = "2021"
+publish = false
+description = "Pebble's local MCP bridge: speaks MCP over stdio and forwards to the running app"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+keyring = { workspace = true }
+
+[[bin]]
+name = "pebble-mcp"
+path = "src/main.rs"
