@@ -606,6 +606,12 @@ async fn tick(app: &AppHandle, store: &Arc<Store>, scan: bool) {
         changed |= record_later_reminders(&store, now) > 0;
         changed |= settle_answered(&store, now) > 0;
         changed |= crate::deadlines::tick(&store, now);
+        // Held notifications whose model call never finished.
+        if let Ok(settled) = store.settle_stale_model_pending(now - 120) {
+            if settled > 0 {
+                tracing::info!("Settled {settled} notifications left waiting for the model");
+            }
+        }
         if scan {
             changed |= complete_answered_follow_ups(&store, now) > 0;
         }

@@ -135,7 +135,14 @@ fn corrections(store: &Store, candidates: &[ModelCandidate]) -> Vec<Correction> 
         .into_iter()
         .map(|(sender, subject, important)| Correction {
             sender,
-            subject: redact_codes(&subject).chars().take(80).collect(),
+            // One line: a correction's subject is mail content too.
+            subject: redact_codes(&subject)
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .chars()
+                .take(80)
+                .collect(),
             important,
         })
         .collect()
@@ -226,11 +233,9 @@ pub async fn refine(app: AppHandle, candidates: Vec<ModelCandidate>) {
                 warn!("Failed to store model decision: {e}");
             }
             if decision.tier == Tier::Interrupt {
-                let mut item = candidate.notify.clone();
-                if let Some(why) = &why {
-                    item.body = format!("{}\n✦ {why}", item.body);
-                }
-                notify.push(item);
+                // The model's "why" is mail-influenced text: it stays in the
+                // app (digest, log), never in a system notification.
+                notify.push(candidate.notify.clone());
             }
             // A deadline from the model only for mail that is about the
             // user (not bulk: "offer ends Friday" is no deadline), when the

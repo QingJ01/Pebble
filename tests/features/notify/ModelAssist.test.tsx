@@ -85,7 +85,7 @@ describe("AI help with notifications", () => {
     expect(within(section).getByText("Not available for Gmail accounts yet")).toBeTruthy();
 
     fireEvent.click(within(section).getByLabelText("AI help for me@work.example"));
-    await waitFor(() => expect(saved.at(-1)).toEqual({ accountId: "work", prefs: { ...defaults, modelAssist: true } }));
+    await waitFor(() => expect(saved.at(-1)).toEqual({ accountId: "work", prefs: { ...defaults, ownMode: false, modelAssist: true } }));
   });
 
   it("a newly enabled account follows the metadata-only choice", async () => {
@@ -96,7 +96,7 @@ describe("AI help with notifications", () => {
       renderTab();
       const section = await aiSection();
       fireEvent.click(await within(section).findByLabelText("AI help for me@home.example"));
-      await waitFor(() => expect(saved.at(-1)).toEqual({ accountId: "home", prefs: { ...defaults, modelAssist: true, modelSendBody: false } }));
+      await waitFor(() => expect(saved.at(-1)).toEqual({ accountId: "home", prefs: { ...defaults, ownMode: false, modelAssist: true, modelSendBody: false } }));
     } finally {
       accounts.pop();
     }

@@ -785,7 +785,21 @@ fn process_flush_window(
         {
             continue;
         }
-        if !smart_notify::record(store, &triaged, now) {
+        let model_assisted = triaged.decision.model_candidate
+            && prefs.model_assist
+            && triage
+                .account(store, account_id)
+                .is_some_and(|account| smart_notify::model_assist_allowed(&account));
+        // Held for the model: logged as pending, so a crash or a quit during
+        // the call can't lose it (stale pending rows go to the digest).
+        let logged = if model_assisted {
+            let mut pending = triaged.clone();
+            pending.decision.reason = pebble_notify::Reason::ModelPending;
+            smart_notify::record(store, &pending, now)
+        } else {
+            smart_notify::record(store, &triaged, now)
+        };
+        if !logged {
             continue;
         }
         // Deadlines in mail that reaches the user (not bulk: "offer ends
@@ -801,11 +815,6 @@ fn process_flush_window(
             body: new_mail_notification_body(stored, &labels),
             date: stored.message.date,
         };
-        let model_assisted = triaged.decision.model_candidate
-            && prefs.model_assist
-            && triage
-                .account(store, account_id)
-                .is_some_and(|account| smart_notify::model_assist_allowed(&account));
         if model_assisted {
             outcome
                 .model_candidates

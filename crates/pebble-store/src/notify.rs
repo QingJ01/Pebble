@@ -382,6 +382,21 @@ impl Store {
         })
     }
 
+    /// Messages still waiting for the model since before `before` (the app
+    /// quit, or the call died): settle them by the rules, into the digest
+    /// rather than a late notification. Returns how many.
+    pub fn settle_stale_model_pending(&self, before: i64) -> Result<usize> {
+        self.with_write(|conn| {
+            Ok(conn.execute(
+                "UPDATE notification_log
+                 SET reason = 'model_fallback',
+                     tier = CASE WHEN tier = 'interrupt' AND delivered = 0 THEN 'digest' ELSE tier END
+                 WHERE reason = 'model_pending' AND created_at < ?1",
+                params![before],
+            )?)
+        })
+    }
+
     /// Model decisions recorded since `since` (for the daily limit).
     pub fn count_model_decisions_since(&self, since: i64) -> Result<u32> {
         self.with_read(|conn| {
@@ -670,6 +685,37 @@ mod tests {
     }
 
     #[test]
+    fn notifications_left_waiting_for_the_model_land_in_the_digest() {
+        let store = Store::open_in_memory().unwrap();
+        let me = account("me@example.com");
+        store.insert_account(&me).unwrap();
+        let m = message("m1", &me, "ann@example.com", &["me@example.com"]);
+        store.insert_message(&m, &[]).unwrap();
+        let held = NewNotificationLog {
+            account_id: &me.id,
+            message_key: "mid:held",
+            message_id: &m.id,
+            tier: "interrupt",
+            reason: "model_pending",
+            why: None,
+            created_at: 30,
+        };
+        store.insert_notification_log(&held).unwrap();
+        assert_eq!(
+            store.settle_stale_model_pending(20).unwrap(),
+            0,
+            "still fresh"
+        );
+        assert_eq!(store.settle_stale_model_pending(100).unwrap(), 1);
+        let row = &store.list_notification_log(10).unwrap()[0];
+        assert_eq!(
+            (row.tier.as_str(), row.reason.as_str()),
+            ("digest", "model_fallback")
+        );
+        assert_eq!(store.list_unseen_digest(10).unwrap().len(), 1);
+    }
+
+    #[test]
     fn notification_log_dedupes_and_tracks_digest() {
         let store = Store::open_in_memory().unwrap();
         let me = account("me@example.com");
@@ -711,7 +757,7 @@ mod tests {
             "digest doesn't undo it"
         );
         store
-            .update_notification_decision(&me.id, &key, "digest", "default", None)
+            .update_notification_decision(&me.id, &key, "digest", "default", None, None)
             .unwrap();
         store
             .update_notification_decision(
@@ -724,6 +770,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(store.count_model_decisions_since(0).unwrap(), 1);
+
         assert_eq!(
             store
                 .record_notify_feedback(&me.id, "m1", "Ann@Example.com", "Hi", false, 20)

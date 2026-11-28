@@ -79,7 +79,7 @@ pub fn user_prompt(items: &[TriageItem], corrections: &[Correction]) -> String {
         for c in corrections {
             text.push_str(&format!(
                 "- from {} \"{}\": {}\n",
-                c.sender,
+                c.sender.split_whitespace().collect::<Vec<_>>().join(" "),
                 c.subject,
                 if c.important {
                     "should notify"

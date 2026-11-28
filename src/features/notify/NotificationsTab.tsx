@@ -131,7 +131,7 @@ export default function NotificationsTab() {
             />
           ))}
         </OptionCardGroup>
-        {accounts.length > 1 && defaults && (
+        {defaults && (accounts.length > 1 || accounts.some((a) => settings?.accounts[a.id]?.ownMode !== false && !!settings?.accounts[a.id])) && (
           <SettingsList className="notify-account-list">
             {accounts.map((account) => {
               const own = settings?.accounts[account.id];
@@ -144,7 +144,7 @@ export default function NotificationsTab() {
                     <Select
                       size="sm"
                       aria-label={t("notify.accountMode", "Notifications for {{account}}", { account: account.email })}
-                      value={own?.mode ?? "default"}
+                      value={own && own.ownMode !== false ? own.mode : "default"}
                       onChange={(event) => {
                         const value = event.target.value;
                         if (value === "default") {
@@ -152,7 +152,7 @@ export default function NotificationsTab() {
                             queryClient.invalidateQueries({ queryKey: notifyKeys.settings }),
                           );
                         } else {
-                          save.mutate({ accountId: account.id, prefs: { ...(own ?? defaults), mode: value as NotifyMode } });
+                          save.mutate({ accountId: account.id, prefs: { ...(own ?? defaults), mode: value as NotifyMode, ownMode: true } });
                         }
                       }}
                     >
@@ -185,7 +185,8 @@ function ModelAssistSection({ defaults, own }: { defaults: NotifyPrefs; own: Rec
   const { data: accounts = [] } = useAccountsQuery();
   const save = useSaveNotifyPrefs();
   const setSettingsTab = useUIStore((s) => s.setSettingsTab);
-  const prefsOf = (id: string) => own[id] ?? defaults;
+  // An account without its own row follows the default mode.
+  const prefsOf = (id: string): NotifyPrefs => own[id] ?? { ...defaults, ownMode: false };
   const assisted = accounts.filter((account) => prefsOf(account.id).modelAssist);
   const update = (id: string, patch: Partial<NotifyPrefs>) =>
     save.mutate(

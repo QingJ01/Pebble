@@ -15,6 +15,7 @@ const REASONS: Record<string, string> = {
   direct: "Someone you've written to",
   default: "Notification mode",
   model_fallback: "Model unavailable, used the rules",
+  model_pending: "Waiting for the AI",
 };
 
 const MODEL_LABELS: Record<string, string> = {
