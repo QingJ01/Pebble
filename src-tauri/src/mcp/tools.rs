@@ -370,6 +370,45 @@ fn get_thread(
     let mut value = caps
         .read_thread(&args.message_id)
         .map_err(|e| (ErrorCode::NotFound, e))?;
+    // Spam and trash stay out, as in search (they're the likeliest to carry
+    // instructions aimed at the model).
+    if let Some(messages) = value.get_mut("messages").and_then(Value::as_array_mut) {
+        let ids: Vec<String> = messages
+            .iter()
+            .filter_map(|m| {
+                m.get("message_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .collect();
+        let folders = store.get_message_folder_ids_batch(&ids).unwrap_or_default();
+        let mut roles: HashMap<String, Option<FolderRole>> = HashMap::new();
+        for g in granted {
+            for folder in store.list_folders(&g.id).unwrap_or_default() {
+                roles.insert(folder.id, folder.role);
+            }
+        }
+        messages.retain(|m| {
+            let id = m
+                .get("message_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            !folders.get(id).is_some_and(|ids| {
+                ids.iter().any(|f| {
+                    matches!(
+                        roles.get(f),
+                        Some(Some(FolderRole::Spam | FolderRole::Trash))
+                    )
+                })
+            })
+        });
+        if messages.is_empty() {
+            return Err((
+                ErrorCode::NotFound,
+                "That message is in spam or trash".into(),
+            ));
+        }
+    }
     // Attachments: names and sizes only.
     if let Some(messages) = value.get_mut("messages").and_then(Value::as_array_mut) {
         for message in messages {

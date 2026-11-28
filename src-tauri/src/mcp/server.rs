@@ -23,6 +23,12 @@ const RATE_LIMIT: usize = 60;
 const PAIR_TIMEOUT: Duration = Duration::from_secs(170);
 /// Longest request line accepted.
 const MAX_LINE: usize = 256 * 1024;
+/// A request must arrive this quickly after connecting.
+const READ_TIMEOUT: Duration = Duration::from_secs(5);
+/// Connections served at once; more are closed.
+const MAX_CONNECTIONS: usize = 32;
+/// Pairing requests waiting for the user at once.
+const MAX_PENDING: usize = 3;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,6 +57,36 @@ fn shared() -> &'static Mutex<Shared> {
 struct Running {
     endpoint: String,
     stop: oneshot::Sender<()>,
+    /// Which start this is; an old listener only cleans up after itself.
+    generation: u64,
+}
+
+fn connections() -> &'static Arc<tokio::sync::Semaphore> {
+    static CONNECTIONS: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
+    CONNECTIONS.get_or_init(|| Arc::new(tokio::sync::Semaphore::new(MAX_CONNECTIONS)))
+}
+
+/// A client name safe to show: no control, bidi or zero-width characters,
+/// whitespace collapsed, at most 60 characters.
+pub fn clean_client_name(name: &str) -> String {
+    let invisible = |c: char| {
+        c.is_control()
+            || matches!(c,
+                '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}')
+    };
+    let cleaned: String = name
+        .chars()
+        .filter(|c| !invisible(*c))
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let cleaned: String = cleaned.chars().take(60).collect();
+    if cleaned.is_empty() {
+        "MCP client".to_string()
+    } else {
+        cleaned
+    }
 }
 
 fn running() -> &'static Mutex<Option<Running>> {
@@ -62,11 +98,14 @@ pub fn is_running() -> bool {
     running().lock().map(|r| r.is_some()).unwrap_or(false)
 }
 
+/// Open pairing requests, oldest first (the dialog answers them in order).
 pub fn pending_pairs() -> Vec<PendingPair> {
-    shared()
+    let mut list: Vec<PendingPair> = shared()
         .lock()
         .map(|s| s.pending.values().map(|p| p.info.clone()).collect())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    list.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
+    list
 }
 
 /// The user's answer to a pairing request. Approving issues a token with
@@ -83,28 +122,41 @@ pub fn respond_to_pairing(
         .pending
         .remove(id)
         .ok_or("This request is no longer waiting")?;
-    let response = if approve {
-        let token = super::new_token();
-        store
-            .insert_mcp_client(
-                &new_id(),
-                &pending.info.client,
-                &token_hash(&token),
-                grants,
-                now_timestamp(),
-            )
-            .map_err(|e| e.to_string())?;
-        BridgeResponse::token(token)
-    } else {
-        BridgeResponse::error(ErrorCode::Denied, "The user declined the connection")
-    };
-    let _ = pending.reply.send(response);
+    if !approve {
+        let _ = pending.reply.send(BridgeResponse::error(
+            ErrorCode::Denied,
+            "The user declined the connection",
+        ));
+        return Ok(());
+    }
+    // The client gave up (it quit, or the request timed out): don't keep a
+    // connection nobody can use.
+    if pending.reply.is_closed() {
+        return Err("The app stopped waiting. Connect it again and approve the new request".into());
+    }
+    let token = super::new_token();
+    let client_id = new_id();
+    store
+        .insert_mcp_client(
+            &client_id,
+            &pending.info.client,
+            &token_hash(&token),
+            grants,
+            now_timestamp(),
+        )
+        .map_err(|e| e.to_string())?;
+    if pending.reply.send(BridgeResponse::token(token)).is_err() {
+        let _ = store.revoke_mcp_client(&client_id, now_timestamp());
+        return Err("The app stopped waiting. Connect it again and approve the new request".into());
+    }
     Ok(())
 }
 
-fn rate_limited(client_id: &str) -> bool {
+/// `Some(first)` when over the limit (`first` for the first refusal in the
+/// window, which is the only one audited).
+fn rate_limited(client_id: &str) -> Option<bool> {
     let Ok(mut shared) = shared().lock() else {
-        return false;
+        return None;
     };
     let now = Instant::now();
     let calls = shared.calls.entry(client_id.to_string()).or_default();
@@ -115,10 +167,15 @@ fn rate_limited(client_id: &str) -> bool {
         calls.pop_front();
     }
     if calls.len() >= RATE_LIMIT {
-        return true;
+        let first = calls.len() == RATE_LIMIT;
+        if first {
+            // Mark the window as reported (an extra entry; it expires too).
+            calls.push_back(now);
+        }
+        return Some(first);
     }
     calls.push_back(now);
-    false
+    None
 }
 
 /// Check the token and run the tool. Audit rows never hold arguments or
@@ -138,13 +195,23 @@ pub fn handle_call(
         Err(e) => return BridgeResponse::error(ErrorCode::Internal, e.to_string()),
     };
     let now = now_timestamp();
+    // Unknown tool names are client input: don't store them as given.
+    let tool_name = if pebble_mcp::protocol::Level::required_for(tool).is_some() {
+        tool
+    } else {
+        "unknown"
+    };
     let audit = |accounts: &[String], results: u32, outcome: &str| {
-        if let Err(e) = store.insert_mcp_audit(&client.id, tool, accounts, results, outcome, now) {
+        if let Err(e) =
+            store.insert_mcp_audit(&client.id, tool_name, accounts, results, outcome, now)
+        {
             warn!("Failed to record MCP call: {e}");
         }
     };
-    if rate_limited(&client.id) {
-        audit(&[], 0, ErrorCode::RateLimited.as_str());
+    if let Some(first) = rate_limited(&client.id) {
+        if first {
+            audit(&[], 0, ErrorCode::RateLimited.as_str());
+        }
         return BridgeResponse::error(
             ErrorCode::RateLimited,
             "Too many calls; Pebble allows 60 a minute per client. Wait a moment.",
@@ -164,12 +231,7 @@ pub fn handle_call(
 }
 
 async fn handle_pair(app: &AppHandle, client: String) -> BridgeResponse {
-    let client: String = client.trim().chars().take(80).collect();
-    let client = if client.is_empty() {
-        "MCP client".to_string()
-    } else {
-        client
-    };
+    let client = clean_client_name(&client);
     let (tx, rx) = oneshot::channel();
     let info = PendingPair {
         id: new_id(),
@@ -180,7 +242,7 @@ async fn handle_pair(app: &AppHandle, client: String) -> BridgeResponse {
         let Ok(mut shared) = shared().lock() else {
             return BridgeResponse::error(ErrorCode::Internal, "busy");
         };
-        // One open request per client name.
+        // One open request per client name, and only a few in all.
         if shared
             .pending
             .values()
@@ -189,6 +251,12 @@ async fn handle_pair(app: &AppHandle, client: String) -> BridgeResponse {
             return BridgeResponse::error(
                 ErrorCode::Pending,
                 "A request from this client is already waiting for the user in Pebble.",
+            );
+        }
+        if shared.pending.len() >= MAX_PENDING {
+            return BridgeResponse::error(
+                ErrorCode::Pending,
+                "Pebble has other connection requests waiting. Try again later.",
             );
         }
         shared.pending.insert(
@@ -200,9 +268,19 @@ async fn handle_pair(app: &AppHandle, client: String) -> BridgeResponse {
         );
     }
     let _ = app.emit(PAIR_EVENT, &info);
+    // Pebble may be hidden in the tray: bring the window back, and say so
+    // in a desktop notification too.
     if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
+    }
+    let labels = crate::commands::notifications::notification_labels();
+    let body = crate::commands::notifications::fill(&labels.mcp_pair, &[("client", &info.client)]);
+    if let Err(e) =
+        crate::commands::notifications::show_desktop_notification(app, &labels.agent_title, &body)
+    {
+        warn!("MCP: couldn't show the pairing notification: {e}");
     }
     match tokio::time::timeout(PAIR_TIMEOUT, rx).await {
         Ok(Ok(response)) => {
@@ -226,9 +304,10 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(app: AppHandle, str
     let (read, mut write) = tokio::io::split(stream);
     let mut reader = BufReader::new(read).take(MAX_LINE as u64);
     let mut line = String::new();
-    let response = match reader.read_line(&mut line).await {
-        Ok(0) | Err(_) => return,
-        Ok(_) => match serde_json::from_str::<BridgeRequest>(line.trim()) {
+    let read = tokio::time::timeout(READ_TIMEOUT, reader.read_line(&mut line)).await;
+    let response = match read {
+        Err(_) | Ok(Ok(0)) | Ok(Err(_)) => return,
+        Ok(Ok(_)) => match serde_json::from_str::<BridgeRequest>(line.trim()) {
             Err(_) => BridgeResponse::error(ErrorCode::Invalid, "Unreadable request"),
             Ok(BridgeRequest::Pair { client }) => handle_pair(&app, client).await,
             Ok(BridgeRequest::Call { token, tool, args }) => {
@@ -254,23 +333,45 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(app: AppHandle, str
     let _ = write.flush().await;
 }
 
-/// Start listening (no-op when already running).
+/// Serve one accepted connection if there is room; otherwise drop it.
+fn accept<S>(app: &AppHandle, stream: S)
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    match Arc::clone(connections()).try_acquire_owned() {
+        Ok(permit) => {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                serve_connection(app, stream).await;
+                drop(permit);
+            });
+        }
+        Err(_) => warn!("MCP: too many connections; one was closed"),
+    }
+}
+
+/// Start listening (no-op when already running). Holds the state lock
+/// from the check to the bind, so two starts can't race.
 pub async fn start(app: AppHandle, endpoint: String) -> Result<(), String> {
-    if is_running() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static GENERATION: AtomicU64 = AtomicU64::new(1);
+    let mut slot = running().lock().map_err(|_| "busy".to_string())?;
+    if slot.is_some() {
         return Ok(());
     }
+    let generation = GENERATION.fetch_add(1, Ordering::SeqCst);
     let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
 
     #[cfg(unix)]
     let listener = {
         use std::os::unix::fs::PermissionsExt;
         let path = std::path::Path::new(&endpoint);
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         if path.exists() {
             // A socket left by a previous run.
             let _ = std::fs::remove_file(path);
-        }
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
         }
         let listener = tokio::net::UnixListener::bind(path).map_err(|e| e.to_string())?;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
@@ -278,12 +379,21 @@ pub async fn start(app: AppHandle, endpoint: String) -> Result<(), String> {
         listener
     };
 
-    if let Ok(mut slot) = running().lock() {
-        *slot = Some(Running {
-            endpoint: endpoint.clone(),
-            stop: stop_tx,
-        });
-    }
+    // On Windows the first pipe instance is created here, so a pipe already
+    // taken by another process fails the start instead of failing later.
+    #[cfg(windows)]
+    let first_server = tokio::net::windows::named_pipe::ServerOptions::new()
+        .first_pipe_instance(true)
+        .reject_remote_clients(true)
+        .create(&endpoint)
+        .map_err(|e| format!("can't create the pipe ({e})"))?;
+
+    *slot = Some(Running {
+        endpoint: endpoint.clone(),
+        stop: stop_tx,
+        generation,
+    });
+    drop(slot);
     info!("MCP: listening on {endpoint}");
 
     #[cfg(unix)]
@@ -292,14 +402,19 @@ pub async fn start(app: AppHandle, endpoint: String) -> Result<(), String> {
             tokio::select! {
                 _ = &mut stop_rx => break,
                 accepted = listener.accept() => match accepted {
-                    Ok((stream, _)) => {
-                        tauri::async_runtime::spawn(serve_connection(app.clone(), stream));
-                    }
+                    Ok((stream, _)) => accept(&app, stream),
                     Err(e) => warn!("MCP: accept failed: {e}"),
                 },
             }
         }
-        let _ = std::fs::remove_file(&endpoint);
+        // Remove the socket unless a newer listener owns the path now.
+        let newer = running()
+            .lock()
+            .map(|r| r.as_ref().is_some_and(|r| r.generation != generation))
+            .unwrap_or(true);
+        if !newer {
+            let _ = std::fs::remove_file(&endpoint);
+        }
     });
 
     #[cfg(windows)]
@@ -307,29 +422,33 @@ pub async fn start(app: AppHandle, endpoint: String) -> Result<(), String> {
         use tokio::net::windows::named_pipe::ServerOptions;
         // Remote clients are rejected; the default security only lets the
         // owner (and administrators) open the pipe for writing.
-        let mut first = true;
+        let mut server = first_server;
         loop {
-            let server = match ServerOptions::new()
-                .first_pipe_instance(first)
+            tokio::select! {
+                _ = &mut stop_rx => break,
+                connected = server.connect() => {
+                    if let Err(e) = connected {
+                        warn!("MCP: connect failed: {e}");
+                    }
+                }
+            }
+            let next = match ServerOptions::new()
                 .reject_remote_clients(true)
                 .create(&endpoint)
             {
-                Ok(server) => server,
+                Ok(next) => next,
                 Err(e) => {
                     warn!("MCP: can't create pipe: {e}");
+                    if let Ok(mut slot) = running().lock() {
+                        if slot.as_ref().is_some_and(|r| r.generation == generation) {
+                            *slot = None;
+                        }
+                    }
                     break;
                 }
             };
-            first = false;
-            tokio::select! {
-                _ = &mut stop_rx => break,
-                connected = server.connect() => match connected {
-                    Ok(()) => {
-                        tauri::async_runtime::spawn(serve_connection(app.clone(), server));
-                    }
-                    Err(e) => warn!("MCP: connect failed: {e}"),
-                },
-            }
+            let connected = std::mem::replace(&mut server, next);
+            accept(&app, connected);
         }
     });
 

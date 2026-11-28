@@ -16,7 +16,8 @@
     "briefingBody": "Today: {{important}} important, {{awaiting}} waiting for your reply, {{followups}} follow-ups",
     "agentMany": "{{n}} new messages from Pebble",
     "deadlineSoon": "Due {{time}}: {{subject}}",
-    "draftProposal": "{{client}} proposed a draft: {{subject}}"
+    "draftProposal": "{{client}} proposed a draft: {{subject}}",
+    "mcpPair": "{{client}} asks to use your mail. Answer in Pebble."
   },
   "layout": {
     "resizeList": "Resize list",
@@ -1410,6 +1411,8 @@
     "auditDesc": "What connected apps asked for. Only the request type and outcome are kept, never mail content.",
     "auditEmpty": "Nothing yet.",
     "results_one": "{{count}} result",
-    "results_other": "{{count}} results"
+    "results_other": "{{count}} results",
+    "moreWaiting_one": "{{count}} more request is waiting.",
+    "moreWaiting_other": "{{count}} more requests are waiting."
   }
 }

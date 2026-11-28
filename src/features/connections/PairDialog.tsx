@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import Button from "@/components/ui/Button";
 import Dialog from "@/components/ui/Dialog";
@@ -13,10 +13,18 @@ export default function PairDialog() {
   useMcpInvalidation();
   const { data: pending = [] } = usePendingPairs();
   const { respond } = useMcpMutations();
-  const request = pending[0];
+  // Stay on the request being answered: a new one arriving meanwhile must
+  // not take its place (it could carry a lookalike name).
+  const [currentId, setCurrentId] = useState<string | null>(null);
+  const request = pending.find((p) => p.id === currentId) ?? pending[0];
+  const others = pending.length - (request ? 1 : 0);
   const [grants, setGrants] = useState<Record<string, McpLevel>>({});
   const titleId = useId();
-  useEffect(() => setGrants({}), [request?.id]);
+  const denyRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    setCurrentId(request?.id ?? null);
+    setGrants({});
+  }, [request?.id]);
   if (!request) return null;
   const answer = (approve: boolean) =>
     respond.mutate(
@@ -24,7 +32,14 @@ export default function PairDialog() {
       { onError: (error) => toastError(error, "connections.pairFailed") },
     );
   return (
-    <Dialog open onClose={() => answer(false)} labelledBy={titleId} dismissible={!respond.isPending} closeOnBackdrop={false}>
+    <Dialog
+      open
+      onClose={() => answer(false)}
+      labelledBy={titleId}
+      dismissible={!respond.isPending}
+      closeOnBackdrop={false}
+      initialFocus={denyRef}
+    >
       <h2 id={titleId} className="dialog-title">
         {t("connections.pairTitle", "Let “{{client}}” use your mail?", { client: request.client })}
       </h2>
@@ -37,9 +52,10 @@ export default function PairDialog() {
       <GrantEditor grants={grants} onChange={setGrants} disabled={respond.isPending} />
       <p className="connections-pair__note">
         {t("connections.neverSend", "Connected apps can never send, delete or move mail.")}
+        {others > 0 && ` ${t("connections.moreWaiting", { count: others, defaultValue: "{{count}} more requests are waiting." })}`}
       </p>
       <div className="dialog-actions">
-        <Button onClick={() => answer(false)} disabled={respond.isPending}>{t("connections.deny", "Don't allow")}</Button>
+        <Button ref={denyRef} onClick={() => answer(false)} disabled={respond.isPending}>{t("connections.deny", "Don't allow")}</Button>
         <Button
           variant="primary"
           onClick={() => answer(true)}

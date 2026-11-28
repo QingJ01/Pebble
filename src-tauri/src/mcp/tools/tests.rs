@@ -344,3 +344,14 @@ fn calls_are_rate_limited_per_client() {
     }
     assert_eq!(limited, 5);
 }
+
+#[test]
+fn client_names_are_cleaned_for_the_dialog() {
+    use crate::mcp::server::clean_client_name;
+    assert_eq!(
+        clean_client_name("Claude\u{200B} Desktop\u{202E}"),
+        "Claude Desktop"
+    );
+    assert_eq!(clean_client_name("  \n\t "), "MCP client");
+    assert_eq!(clean_client_name(&"x".repeat(200)).len(), 60);
+}

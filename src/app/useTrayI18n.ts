@@ -44,6 +44,7 @@ export function buildNotificationLabels(t: TFunction): NotificationLabels {
     agent_many: t("notifications.agentMany", "{{n}} new messages from Pebble", raw("n")),
     deadline_soon: t("notifications.deadlineSoon", "Due {{time}}: {{subject}}", raw("time", "subject")),
     draft_proposal: t("notifications.draftProposal", "{{client}} proposed a draft: {{subject}}", raw("client", "subject")),
+    mcp_pair: t("notifications.mcpPair", "{{client}} asks to use your mail. Answer in Pebble.", raw("client")),
   };
 }
 

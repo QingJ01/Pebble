@@ -144,7 +144,11 @@ deadline_soon: string,
 /**
  * An MCP client proposed a draft; `{client}`, `{subject}`.
  */
-draft_proposal: string, };
+draft_proposal: string, 
+/**
+ * An app asks to connect over MCP; `{client}`.
+ */
+mcp_pair: string, };
 
 export type NotificationStatus = { enabled: boolean, attention_active: boolean, platform: string, app_id: string | null, };
 

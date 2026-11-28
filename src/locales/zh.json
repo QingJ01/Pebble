@@ -16,7 +16,8 @@
     "briefingBody": "今天：{{important}} 封重要邮件，{{awaiting}} 封等你回复，{{followups}} 个跟进中",
     "agentMany": "Pebble 有 {{n}} 条新消息",
     "deadlineSoon": "{{time}} 截止：{{subject}}",
-    "draftProposal": "{{client}} 提出了一份草稿：{{subject}}"
+    "draftProposal": "{{client}} 提出了一份草稿：{{subject}}",
+    "mcpPair": "{{client}} 请求使用你的邮件，请在 Pebble 中处理。"
   },
   "layout": {
     "resizeList": "调整列表宽度",
@@ -1381,6 +1382,7 @@
     "auditTitle": "最近活动",
     "auditDesc": "连接的应用请求了什么。只保留请求类型和结果，从不保存邮件内容。",
     "auditEmpty": "还没有记录。",
-    "results": "{{count}} 条结果"
+    "results": "{{count}} 条结果",
+    "moreWaiting": "还有 {{count}} 个请求在等待。"
   }
 }

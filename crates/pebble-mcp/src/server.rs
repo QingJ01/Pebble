@@ -103,7 +103,15 @@ impl<C: Connector + 'static, T: TokenStore + 'static> Bridge<C, T> {
                 Ok(response) if response.ok => match response.token {
                     Some(token) => {
                         bridge.tokens.set(&client, &token);
-                        Pairing::Approved
+                        // A keychain that refused the token: pair again next
+                        // time instead of getting stuck.
+                        if bridge.tokens.get(&client).as_deref() == Some(token.as_str()) {
+                            Pairing::Approved
+                        } else {
+                            Pairing::Failed(
+                                "Pebble approved the connection, but the system keychain refused to store it. Try again.".into(),
+                            )
+                        }
                     }
                     None => Pairing::Failed("Pebble sent no token".into()),
                 },
