@@ -14,6 +14,51 @@ use serde_json::Value;
 
 use crate::{ModelLabel, ModelVerdict};
 
+/// Characters of body sent per message.
+pub const BODY_CHARS: usize = 600;
+
+/// Mask one-time codes so they never reach a model: "code: 482913",
+/// "code for account 2 is 482913", "Your code:\n482913", "482913 is your
+/// code", "验证码482913", "482913是您的验证码". Boundaries are ASCII-only so a
+/// code right next to Chinese text still counts as a separate word. Apply
+/// before truncating, so a cut-off code can't slip through.
+pub fn redact_codes(text: &str) -> String {
+    static AFTER: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    static BEFORE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let after = AFTER.get_or_init(|| {
+        regex::Regex::new(
+            r"(?i)(验证码|驗證碼|校验码|校驗碼|动态码|動態碼|动态密码|認證碼|认证码|確認碼|确认码|認証コード|確認コード|(?-u:\b)(?:code|passcode|otp|pin|verification)(?-u:\b))([\s\S]{0,40}?)((?-u:\b)[A-Za-z]{0,2}-?\d[\d \-]{2,8}\d(?-u:\b))",
+        )
+        .expect("valid regex")
+    });
+    let before = BEFORE.get_or_init(|| {
+        regex::Regex::new(
+            r"(?i)(?-u:\b)(\d{4,8})(?-u:\b)(\s*(?:is your|is the|是你的|是您的|为你的|为您的|為您的|是|为|為)[^\n]{0,30}?(?:code|passcode|otp|pin|验证码|驗證碼|校验码|校驗碼|动态码|動態碼|认证码|認證碼|認証コード))",
+        )
+        .expect("valid regex")
+    });
+    let once = after.replace_all(text, |caps: &regex::Captures| {
+        format!("{}{}••••••", &caps[1], &caps[2])
+    });
+    before
+        .replace_all(&once, |caps: &regex::Captures| {
+            format!("••••••{}", &caps[2])
+        })
+        .into_owned()
+}
+
+/// The part of a body sent to the model: quotes stripped, codes masked,
+/// the first [`BODY_CHARS`] characters.
+pub fn prepare_body(text: &str) -> String {
+    // Mask before cutting, so a code split by the cut can't slip through.
+    let masked = redact_codes(crate::awaiting::strip_quoted(text).trim());
+    let mut out: String = masked.chars().take(BODY_CHARS).collect();
+    if masked.chars().count() > BODY_CHARS {
+        out.push('…');
+    }
+    out
+}
+
 /// Longest "why" line kept, in characters.
 pub const WHY_CHARS: usize = 40;
 /// Below this the model's "interrupt" goes to the digest.
@@ -100,6 +145,28 @@ pub fn user_prompt(items: &[TriageItem], corrections: &[Correction]) -> String {
 pub struct TriageAnswer {
     pub verdict: ModelVerdict,
     pub deadline: Option<NaiveDateTime>,
+}
+
+/// The model's deadline for a message, when the app uses it: not for bulk
+/// mail ("offer ends Friday" is no deadline), only when the model was sure
+/// and didn't call it a newsletter or promotion, and only for a date from
+/// the day it arrived up to 120 days ahead.
+pub fn usable_model_deadline(
+    answer: &TriageAnswer,
+    received: NaiveDateTime,
+    bulk: bool,
+) -> Option<NaiveDateTime> {
+    if bulk
+        || answer.verdict.confidence < MIN_CONFIDENCE
+        || matches!(
+            answer.verdict.label,
+            ModelLabel::Newsletter | ModelLabel::Promotion
+        )
+    {
+        return None;
+    }
+    let due = answer.deadline?;
+    (due.date() >= received.date() && due - received <= chrono::Duration::days(120)).then_some(due)
 }
 
 /// The JSON object in a reply (tolerates code fences and prose around it).

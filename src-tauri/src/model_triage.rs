@@ -17,15 +17,14 @@ use std::time::Duration;
 
 use pebble_core::{now_timestamp, Message};
 use pebble_notify::triage_model::{
-    parse_response, system_prompt, user_prompt, Correction, TriageAnswer, TriageItem, MAX_BATCH,
-    MIN_CONFIDENCE,
+    parse_response, redact_codes, system_prompt, usable_model_deadline, user_prompt, Correction,
+    TriageAnswer, TriageItem, MAX_BATCH, MIN_CONFIDENCE,
 };
-use pebble_notify::{apply_model_verdict, Decision, ModelLabel, Reason, Tier};
+use pebble_notify::{apply_model_verdict, Decision, Reason, Tier};
 use pebble_store::Store;
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{info, warn};
 
-use crate::agent::capabilities::redact_codes;
 use crate::agent::llm::{ChatMessage, Llm, OpenAiCompatible};
 use crate::commands::agent_model::{chat_completions_url, load_config};
 use crate::commands::indexing::{send_planned_notifications, NotifyItem};
@@ -39,8 +38,6 @@ use pebble_translate::TranslateService;
 const MODEL_TIMEOUT: Duration = Duration::from_secs(8);
 /// Model decisions per day; beyond it the rules decide until midnight.
 const DAILY_LIMIT: u32 = 300;
-/// Characters of body sent per message.
-const BODY_CHARS: usize = 600;
 /// Corrections included as examples.
 const EXAMPLES: u32 = 8;
 
@@ -67,12 +64,7 @@ fn body_for_model(message: &Message) -> String {
     } else {
         message.body_text.clone()
     };
-    let stripped = pebble_notify::awaiting::strip_quoted(&text);
-    let mut out: String = stripped.trim().chars().take(BODY_CHARS).collect();
-    if stripped.trim().chars().count() > BODY_CHARS {
-        out.push('…');
-    }
-    redact_codes(&out)
+    pebble_notify::triage_model::prepare_body(&text)
 }
 
 pub fn triage_items(candidates: &[ModelCandidate]) -> Vec<TriageItem> {
@@ -237,34 +229,24 @@ pub async fn refine(app: AppHandle, candidates: Vec<ModelCandidate>) {
                 // app (digest, log), never in a system notification.
                 notify.push(candidate.notify.clone());
             }
-            // A deadline from the model only for mail that is about the
-            // user (not bulk: "offer ends Friday" is no deadline), when the
-            // model was sure and didn't call it a newsletter or promotion.
-            let model_deadline = answer
-                .filter(|a| {
-                    a.verdict.confidence >= MIN_CONFIDENCE
-                        && !matches!(
-                            a.verdict.label,
-                            ModelLabel::Newsletter | ModelLabel::Promotion
-                        )
-                })
-                .and_then(|a| a.deadline)
-                .filter(|_| !matches!(candidate.triaged.decision.reason, Reason::Bulk));
+            let received = crate::deadlines::local_naive(candidate.message.date);
+            let model_deadline = answer.and_then(|a| {
+                usable_model_deadline(
+                    a,
+                    received,
+                    matches!(candidate.triaged.decision.reason, Reason::Bulk),
+                )
+            });
             if let (false, Some(due)) = (candidate.has_deadline, model_deadline) {
-                let received = crate::deadlines::local_naive(candidate.message.date);
-                let sane =
-                    due.date() >= received.date() && due - received <= chrono::Duration::days(120);
-                if sane {
-                    deadlines |= crate::deadlines::record(
-                        &store,
-                        &candidate.message,
-                        due,
-                        false,
-                        None,
-                        "model",
-                        now,
-                    );
-                }
+                deadlines |= crate::deadlines::record(
+                    &store,
+                    &candidate.message,
+                    due,
+                    false,
+                    None,
+                    "model",
+                    now,
+                );
             }
         }
         let _ = app_for_task.emit(events::NOTIFY_CHANGED, ());

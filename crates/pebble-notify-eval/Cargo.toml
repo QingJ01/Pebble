@@ -1,0 +1,13 @@
+[package]
+name = "pebble-notify-eval"
+version = "0.2.1"
+edition = "2021"
+publish = false
+description = "Evaluates Pebble's smart notifications: the shipped rules, and a model you supply"
+
+[dependencies]
+pebble-notify = { path = "../pebble-notify" }
+serde_json = { workspace = true }
+chrono = { version = "0.4.44", default-features = false, features = ["std", "clock"] }
+reqwest = { workspace = true }
+tokio = { workspace = true }

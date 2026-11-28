@@ -12,7 +12,6 @@ use pebble_core::{now_timestamp, Message};
 use pebble_search::{AdvancedSearchParams, TantivySearch};
 use pebble_store::agent::NewThreadWatch;
 use pebble_store::Store;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -93,35 +92,7 @@ fn truncate(text: &str, max: usize) -> String {
     out
 }
 
-/// Mask one-time codes so they never reach a model: "code: 482913",
-/// "code for account 2 is 482913", "Your code:\n482913", "482913 is your
-/// code", "验证码482913", "482913是您的验证码". Boundaries are ASCII-only so a
-/// code right next to Chinese text still counts as a separate word. Apply
-/// before truncating, so a cut-off code can't slip through.
-pub fn redact_codes(text: &str) -> String {
-    static AFTER: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-    static BEFORE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-    let after = AFTER.get_or_init(|| {
-        Regex::new(
-            r"(?i)(验证码|驗證碼|校验码|校驗碼|动态码|動態碼|动态密码|認證碼|认证码|確認碼|确认码|認証コード|確認コード|(?-u:\b)(?:code|passcode|otp|pin|verification)(?-u:\b))([\s\S]{0,40}?)((?-u:\b)[A-Za-z]{0,2}-?\d[\d \-]{2,8}\d(?-u:\b))",
-        )
-        .expect("valid regex")
-    });
-    let before = BEFORE.get_or_init(|| {
-        Regex::new(
-            r"(?i)(?-u:\b)(\d{4,8})(?-u:\b)(\s*(?:is your|is the|是你的|是您的|为你的|为您的|為您的|是|为|為)[^\n]{0,30}?(?:code|passcode|otp|pin|验证码|驗證碼|校验码|校驗碼|动态码|動態碼|认证码|認證碼|認証コード))",
-        )
-        .expect("valid regex")
-    });
-    let once = after.replace_all(text, |caps: &regex::Captures| {
-        format!("{}{}••••••", &caps[1], &caps[2])
-    });
-    before
-        .replace_all(&once, |caps: &regex::Captures| {
-            format!("••••••{}", &caps[2])
-        })
-        .into_owned()
-}
+pub use pebble_notify::triage_model::redact_codes;
 
 /// A plausible single email address.
 fn looks_like_address(text: &str) -> bool {

@@ -10,6 +10,7 @@
 pub mod awaiting;
 pub mod deadline;
 pub mod delivery;
+pub mod eval;
 pub mod sender;
 pub mod triage_model;
 

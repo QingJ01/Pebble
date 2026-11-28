@@ -1,0 +1,271 @@
+{
+ "received": "2026-12-02 10:00",
+ "cases": [
+  {
+   "id": "d001",
+   "lang": "en",
+   "subject": "Budget",
+   "body": "Can you send it by Friday?",
+   "expected": "2026-12-04 18:00"
+  },
+  {
+   "id": "d002",
+   "lang": "en",
+   "subject": "",
+   "body": "Please reply by tomorrow 3pm.",
+   "expected": "2026-12-03 15:00"
+  },
+  {
+   "id": "d003",
+   "lang": "en",
+   "subject": "Numbers",
+   "body": "Need this EOD please.",
+   "expected": "2026-12-02 18:00"
+  },
+  {
+   "id": "d004",
+   "lang": "en",
+   "subject": "",
+   "body": "Deadline: Dec 10",
+   "expected": "2026-12-10 18:00"
+  },
+  {
+   "id": "d005",
+   "lang": "en",
+   "subject": "",
+   "body": "The form is due on 15th December at 09:30.",
+   "expected": "2026-12-15 09:30"
+  },
+  {
+   "id": "d006",
+   "lang": "en",
+   "subject": "",
+   "body": "Submit before 2026-12-20.",
+   "expected": "2026-12-20 18:00"
+  },
+  {
+   "id": "d007",
+   "lang": "en",
+   "subject": "Party",
+   "body": "RSVP by Monday!",
+   "expected": "2026-12-07 18:00"
+  },
+  {
+   "id": "d008",
+   "lang": "en",
+   "subject": "",
+   "body": "Let me know by the end of the week.",
+   "expected": "2026-12-04 18:00"
+  },
+  {
+   "id": "d009",
+   "lang": "en",
+   "subject": "Workshop",
+   "body": "Registration closes on Dec 8.",
+   "expected": "2026-12-08 18:00"
+  },
+  {
+   "id": "d010",
+   "lang": "en",
+   "subject": "",
+   "body": "Can you get back to me within 48 hours?",
+   "expected": "2026-12-04 10:00"
+  },
+  {
+   "id": "d011",
+   "lang": "en",
+   "subject": "",
+   "body": "See you Friday!",
+   "expected": null
+  },
+  {
+   "id": "d012",
+   "lang": "en",
+   "subject": "",
+   "body": "We met on Monday and it went well.",
+   "expected": null
+  },
+  {
+   "id": "d013",
+   "lang": "en",
+   "subject": "",
+   "body": "Thanks for sending it by Friday last week.",
+   "expected": null
+  },
+  {
+   "id": "d014",
+   "lang": "en",
+   "subject": "",
+   "body": "The report is due next Tuesday.",
+   "expected": "2026-12-08 18:00"
+  },
+  {
+   "id": "d015",
+   "lang": "en",
+   "subject": "",
+   "body": "Please confirm no later than 5pm today.",
+   "expected": "2026-12-02 17:00"
+  },
+  {
+   "id": "d016",
+   "lang": "en",
+   "subject": "",
+   "body": "By the way, the deck looks great.",
+   "expected": null
+  },
+  {
+   "id": "d017",
+   "lang": "en",
+   "subject": "Invoice",
+   "body": "Payment due by January 5.",
+   "expected": "2027-01-05 18:00"
+  },
+  {
+   "id": "d018",
+   "lang": "en",
+   "subject": "",
+   "body": "Could you review it before our meeting on Thursday at 2pm?",
+   "expected": "2026-12-03 14:00"
+  },
+  {
+   "id": "d019",
+   "lang": "en",
+   "subject": "",
+   "body": "Happy to chat anytime next month.",
+   "expected": null
+  },
+  {
+   "id": "d020",
+   "lang": "en",
+   "subject": "Re: plan",
+   "body": "Sounds good.\n\n> Please reply by Friday",
+   "expected": null
+  },
+  {
+   "id": "d021",
+   "lang": "zh",
+   "subject": "",
+   "body": "请于周五前回复",
+   "expected": "2026-12-04 18:00"
+  },
+  {
+   "id": "d022",
+   "lang": "zh",
+   "subject": "",
+   "body": "明天下班前给我",
+   "expected": "2026-12-03 18:00"
+  },
+  {
+   "id": "d023",
+   "lang": "zh",
+   "subject": "",
+   "body": "截止日期：12月10日",
+   "expected": "2026-12-10 18:00"
+  },
+  {
+   "id": "d024",
+   "lang": "zh",
+   "subject": "",
+   "body": "下周三下午3点前提交",
+   "expected": "2026-12-09 15:00"
+  },
+  {
+   "id": "d025",
+   "lang": "zh",
+   "subject": "",
+   "body": "最晚今晚",
+   "expected": "2026-12-02 23:00"
+  },
+  {
+   "id": "d026",
+   "lang": "zh",
+   "subject": "发票",
+   "body": "月底之前把发票寄过来",
+   "expected": "2026-12-31 18:00"
+  },
+  {
+   "id": "d027",
+   "lang": "zh",
+   "subject": "",
+   "body": "请在12月8号中午12点半前确认",
+   "expected": "2026-12-08 12:30"
+  },
+  {
+   "id": "d028",
+   "lang": "zh",
+   "subject": "",
+   "body": "周五见",
+   "expected": null
+  },
+  {
+   "id": "d029",
+   "lang": "zh",
+   "subject": "",
+   "body": "明天开会讨论一下",
+   "expected": null
+  },
+  {
+   "id": "d030",
+   "lang": "zh",
+   "subject": "活动",
+   "body": "报名将于12月6日结束",
+   "expected": "2026-12-06 18:00"
+  },
+  {
+   "id": "d031",
+   "lang": "zh",
+   "subject": "",
+   "body": "48小时内回复有效",
+   "expected": "2026-12-04 10:00"
+  },
+  {
+   "id": "d032",
+   "lang": "zh",
+   "subject": "",
+   "body": "上周五之前已经交过了",
+   "expected": null
+  },
+  {
+   "id": "d033",
+   "lang": "zh",
+   "subject": "",
+   "body": "这周内给我答复就行",
+   "expected": "2026-12-04 18:00"
+  },
+  {
+   "id": "d034",
+   "lang": "zh",
+   "subject": "合同",
+   "body": "下午三点前把合同发我",
+   "expected": "2026-12-02 15:00"
+  },
+  {
+   "id": "d035",
+   "lang": "zh",
+   "subject": "付款",
+   "body": "2026年12月15日前完成付款",
+   "expected": "2026-12-15 18:00"
+  },
+  {
+   "id": "d036",
+   "lang": "zh",
+   "subject": "",
+   "body": "去年12月的账单已结清",
+   "expected": null
+  },
+  {
+   "id": "d037",
+   "lang": "zh",
+   "subject": "",
+   "body": "尽快回复，谢谢",
+   "expected": null
+  },
+  {
+   "id": "d038",
+   "lang": "zh",
+   "subject": "",
+   "body": "后天中午之前给我",
+   "expected": "2026-12-04 12:00"
+  }
+ ]
+}
