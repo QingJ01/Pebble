@@ -72,6 +72,8 @@ pub struct Capabilities<'a> {
     pub follow_ups: Vec<FollowUpStarted>,
     /// The user's question (addresses in it count as known).
     pub question: String,
+    /// The account new mail is written from (the one the user is in).
+    pub preferred_account: Option<String>,
     seen: HashSet<String>,
 }
 
@@ -92,21 +94,22 @@ fn truncate(text: &str, max: usize) -> String {
 }
 
 /// Mask one-time codes so they never reach a model: "code: 482913",
-/// "code for account 2 is 482913", "482913 is your code", "验证码 482913",
-/// "482913 是你的验证码". Apply before truncating, so a cut-off code can't
-/// slip through.
+/// "code for account 2 is 482913", "Your code:\n482913", "482913 is your
+/// code", "验证码482913", "482913是您的验证码". Boundaries are ASCII-only so a
+/// code right next to Chinese text still counts as a separate word. Apply
+/// before truncating, so a cut-off code can't slip through.
 pub fn redact_codes(text: &str) -> String {
     static AFTER: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     static BEFORE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     let after = AFTER.get_or_init(|| {
         Regex::new(
-            r"(?i)(验证码|校验码|动态码|动态密码|\b(?:code|passcode|otp|pin|verification)\b)([^\n]{0,30}?)(\b[A-Za-z]{0,2}-?\d[\d \-]{2,8}\d\b)",
+            r"(?i)(验证码|驗證碼|校验码|校驗碼|动态码|動態碼|动态密码|認證碼|认证码|確認碼|确认码|認証コード|確認コード|(?-u:\b)(?:code|passcode|otp|pin|verification)(?-u:\b))([\s\S]{0,40}?)((?-u:\b)[A-Za-z]{0,2}-?\d[\d \-]{2,8}\d(?-u:\b))",
         )
         .expect("valid regex")
     });
     let before = BEFORE.get_or_init(|| {
         Regex::new(
-            r"(?i)\b(\d{4,8})\b(\s*(?:is your|is the|是你的|是您的|为你的|为您的|为)[^\n]{0,30}?(?:code|passcode|otp|pin|验证码|校验码|动态码))",
+            r"(?i)(?-u:\b)(\d{4,8})(?-u:\b)(\s*(?:is your|is the|是你的|是您的|为你的|为您的|為您的|是|为|為)[^\n]{0,30}?(?:code|passcode|otp|pin|验证码|驗證碼|校验码|校驗碼|动态码|動態碼|认证码|認證碼|認証コード))",
         )
         .expect("valid regex")
     });
@@ -118,6 +121,35 @@ pub fn redact_codes(text: &str) -> String {
             format!("••••••{}", &caps[2])
         })
         .into_owned()
+}
+
+/// A plausible single email address.
+fn looks_like_address(text: &str) -> bool {
+    let text = text.trim();
+    match text.split_once('@') {
+        Some((local, domain)) => {
+            !local.is_empty()
+                && domain.contains('.')
+                && !domain.starts_with('.')
+                && !domain.ends_with('.')
+                && !text
+                    .chars()
+                    .any(|c| c.is_whitespace() || c == ',' || c == ';' || c == '<' || c == '>')
+                && text.matches('@').count() == 1
+        }
+        None => false,
+    }
+}
+
+/// Email addresses written in `text`, lower-cased.
+fn addresses_in(text: &str) -> Vec<String> {
+    text.split(|c: char| c.is_whitespace() || ",;<>()[]\"'，；：、".contains(c))
+        .map(|w| {
+            w.trim_matches(|c: char| ".:!?。！？".contains(c))
+                .to_lowercase()
+        })
+        .filter(|w| looks_like_address(w))
+        .collect()
 }
 
 fn clean_body(message: &Message) -> String {
@@ -199,6 +231,7 @@ impl<'a> Capabilities<'a> {
             drafts: Vec::new(),
             follow_ups: Vec::new(),
             question: String::new(),
+            preferred_account: None,
             seen: HashSet::new(),
         }
     }
@@ -414,11 +447,22 @@ impl<'a> Capabilities<'a> {
                 if to.is_empty() {
                     return Err("A new email needs at least one recipient in `to`".into());
                 }
+                if let Some(bad) = to
+                    .iter()
+                    .chain(args.cc.iter().flatten())
+                    .find(|a| !looks_like_address(a))
+                {
+                    return Err(format!("{bad} isn't an email address"));
+                }
+                // The account the user is in, else the only one in scope,
+                // else the first (the composer lets them change it).
                 let mut accounts: Vec<&String> = self.scope.keys().collect();
                 accounts.sort();
-                let account = accounts
-                    .first()
-                    .map(|a| a.to_string())
+                let account = self
+                    .preferred_account
+                    .clone()
+                    .filter(|a| self.scope.contains_key(a))
+                    .or_else(|| accounts.first().map(|a| a.to_string()))
                     .ok_or("No account in scope")?;
                 (account, to, args.subject.clone().unwrap_or_default())
             }
@@ -452,26 +496,25 @@ impl<'a> Capabilities<'a> {
             "status": "draft_ready",
             "note": "The user will see the draft and open it in the composer. It has NOT been sent.",
             "to": draft.to,
-            "subject": draft.subject,
+            "subject": redact_codes(&draft.subject),
         }))
     }
 
-    /// The user named the address, has written to it, saved it as a
-    /// contact, or it is a sender of mail the assistant read.
-    fn known_address(&self, account_id: &str, address: &str) -> bool {
+    /// The user named the address in the question, has written to it from
+    /// an account in scope, or saved it as a contact. Senders of mail the
+    /// assistant read don't count: mail content is what could have planted
+    /// the address.
+    fn known_address(&self, _account_id: &str, address: &str) -> bool {
         let address = address.trim().to_lowercase();
-        if address.is_empty() {
+        if !looks_like_address(&address) {
             return false;
         }
-        self.question.to_lowercase().contains(&address)
-            || self
-                .used
-                .iter()
-                .any(|m| m.from_address.trim().eq_ignore_ascii_case(&address))
-            || self
-                .store
-                .sent_count_to(account_id, &address)
-                .is_ok_and(|n| n > 0)
+        addresses_in(&self.question).contains(&address)
+            || self.scope.keys().any(|account| {
+                self.store
+                    .sent_count_to(account, &address)
+                    .is_ok_and(|n| n > 0)
+            })
             || self
                 .store
                 .get_contact_by_email(&address)
@@ -480,6 +523,17 @@ impl<'a> Capabilities<'a> {
 
     pub fn follow_up(&mut self, args: FollowArgs) -> Result<Value, String> {
         let message = self.load(&args.message_id)?;
+        // Never replace a follow-up the user already has on this thread
+        // (with its own reminder): report it instead.
+        if let Some(thread) = message.thread_id.as_deref() {
+            if let Ok(Some(existing)) = self.store.watch_for_thread(&message.account_id, thread) {
+                return Ok(json!({
+                    "status": "already_following",
+                    "title": redact_codes(&existing.title),
+                    "deadline": existing.deadline.map(local_day),
+                }));
+            }
+        }
         let now = now_timestamp();
         let deadline = args
             .days
@@ -523,7 +577,7 @@ impl<'a> Capabilities<'a> {
             account_id: message.account_id.clone(),
         });
         Ok(
-            json!({ "status": "following", "title": watch.title, "deadline": deadline.map(local_day) }),
+            json!({ "status": "following", "title": redact_codes(&watch.title), "deadline": deadline.map(local_day) }),
         )
     }
 
@@ -536,7 +590,7 @@ impl<'a> Capabilities<'a> {
             .filter(|w| self.scope.contains_key(&w.account_id))
             .map(|w| {
                 json!({
-                    "title": w.title,
+                    "title": redact_codes(&w.title),
                     "status": w.status,
                     "since": local_day(w.created_at),
                     "deadline": w.deadline.map(local_day),
