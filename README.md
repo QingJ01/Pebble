@@ -26,6 +26,10 @@
 </p>
 
 <p align="center">
+  <a href="https://trendshift.io/repositories/109712" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/109712/daily" alt="QingJ01%2FPebble | Trendshift" width="250" height="55"/></a>
+</p>
+
+<p align="center">
   <img src="site/screenshots/inbox.png" alt="Pebble's unified inbox with three accounts, account filter chips and a message open in the reader">
 </p>
 
