@@ -113,6 +113,14 @@ pub async fn get_agent_model(state: State<'_, AppState>) -> CmdResult<AgentModel
     Ok(view_of(load_config(&state)?.as_ref()))
 }
 
+/// Same scheme, host and port.
+fn same_origin(a: &str, b: &str) -> bool {
+    match (url::Url::parse(a.trim()), url::Url::parse(b.trim())) {
+        (Ok(a), Ok(b)) => a.origin() == b.origin(),
+        _ => false,
+    }
+}
+
 /// Merge a submission with the saved config: an empty `api_key` keeps the
 /// saved key unless `clear_api_key` is set.
 fn merge(
@@ -122,7 +130,14 @@ fn merge(
     api_key: Option<String>,
     clear_api_key: bool,
 ) -> AgentModelConfig {
-    let saved_key = saved.map(|config| config.api_key).unwrap_or_default();
+    // The saved key only ever goes back to the server it was saved for:
+    // a new host (typed before its key, or by script in the webview) must
+    // get its own key.
+    let endpoint_trimmed = endpoint.trim().trim_end_matches('/').to_string();
+    let saved_key = saved
+        .filter(|config| same_origin(&config.endpoint, &endpoint_trimmed))
+        .map(|config| config.api_key)
+        .unwrap_or_default();
     let api_key = match api_key.map(|key| key.trim().to_string()) {
         Some(key) if !key.is_empty() => key,
         _ if clear_api_key => String::new(),
@@ -301,9 +316,21 @@ mod tests {
         assert_eq!(
             merge(
                 Some(saved.clone()),
-                "https://b/".into(),
+                "https://a/v1/".into(),
                 " m2 ".into(),
                 None,
+                false
+            )
+            .api_key,
+            "sk-old",
+            "same server, other path or model"
+        );
+        assert_eq!(
+            merge(
+                Some(saved.clone()),
+                "https://a".into(),
+                "m2".into(),
+                Some("  ".into()),
                 false
             )
             .api_key,
@@ -314,11 +341,23 @@ mod tests {
                 Some(saved.clone()),
                 "https://b".into(),
                 "m2".into(),
-                Some("  ".into()),
+                None,
                 false
             )
             .api_key,
-            "sk-old"
+            "",
+            "a new server never gets the saved key"
+        );
+        assert_eq!(
+            merge(
+                Some(saved.clone()),
+                "http://a".into(),
+                "m2".into(),
+                None,
+                false
+            )
+            .api_key,
+            ""
         );
         assert_eq!(
             merge(

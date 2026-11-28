@@ -262,11 +262,15 @@ pub fn decide(facts: &MessageFacts, prefs: &Prefs, local_minute_of_day: u16) -> 
     }
 
     let automated = is_automated(facts);
+    // A person's reply on a mailing list still carries list headers; only
+    // auto-replies and bots disqualify a reply.
+    let machine_reply =
+        facts.signals.auto_submitted || is_automated_sender(&facts.from_address, &facts.from_name);
 
     // 6–8: important regardless of mode.
-    let important = if facts.watched_thread && !automated {
+    let important = if facts.watched_thread && !machine_reply {
         Some(Reason::Watch)
-    } else if facts.reply_to_me && !automated {
+    } else if facts.reply_to_me && !machine_reply {
         Some(Reason::ReplyToMe)
     } else if facts.sender_pref == Some(SenderPref::Vip) || facts.sender_is_favorite {
         Some(Reason::Vip)

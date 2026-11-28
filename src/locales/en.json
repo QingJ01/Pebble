@@ -1329,7 +1329,8 @@
     "deadlineMarkDone": "It's done",
     "deadlineNotOne": "Not a deadline",
     "deadlinesTitle": "Coming up",
-    "dueBy": "{{from}} · due {{when}}"
+    "dueBy": "{{from}} · due {{when}}",
+    "draftUnverified": "Check the recipients: you haven't mentioned or written to {{who}}."
   },
   "assistantSettings": {
     "description": "The AI model Pebble uses to answer your questions.",

@@ -19,6 +19,8 @@ export interface ChatDraft {
   cc: string[];
   subject: string;
   body: string;
+  /** Recipients nobody mentioned or wrote to (could come from mail content). */
+  unverified?: string[];
 }
 
 export interface ChatFollowUp {

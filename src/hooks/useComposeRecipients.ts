@@ -36,7 +36,8 @@ export function useComposeRecipients({
 
   const [to, setTo] = useState<string[]>(() => {
     if (restoredDraft) return restoredDraft.to ?? [];
-    if (composePrefill) return composePrefill.to ?? [];
+    // A prefill without recipients (e.g. only a body) keeps the reply defaults.
+    if (composePrefill?.to) return composePrefill.to;
     if (!composeReplyTo) return [];
     if (composeMode === "reply") return [composeReplyTo.from_address];
     if (composeMode === "reply-all") {
@@ -48,7 +49,7 @@ export function useComposeRecipients({
 
   const [cc, setCc] = useState<string[]>(() => {
     if (restoredDraft) return restoredDraft.cc ?? [];
-    if (composePrefill) return composePrefill.cc ?? [];
+    if (composePrefill?.cc) return composePrefill.cc;
     if (composeMode === "reply-all" && composeReplyTo) {
       return composeReplyTo.cc_list.map((a) => a.address).filter((addr) => addr !== myEmail);
     }

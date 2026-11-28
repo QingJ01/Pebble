@@ -112,6 +112,7 @@ pub async fn run_chat(
     progress: &(dyn Fn(Progress) + Send + Sync),
     cancel: &AtomicBool,
 ) -> Result<ChatOutcome, ChatError> {
+    caps.question = question.clone();
     let tools = tool_definitions();
     let mut messages = Vec::with_capacity(history.len() + 4);
     messages.push(ChatMessage::system(system));

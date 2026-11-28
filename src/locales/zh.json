@@ -1301,7 +1301,8 @@
     "deadlineMarkDone": "已经处理了",
     "deadlineNotOne": "不是截止时间",
     "deadlinesTitle": "即将截止",
-    "dueBy": "{{from}} · {{when}}截止"
+    "dueBy": "{{from}} · {{when}}截止",
+    "draftUnverified": "请核对收件人：你没有提到过、也没给 {{who}} 写过信。"
   },
   "assistantSettings": {
     "description": "Pebble 回答你的问题时使用的 AI 模型。",
