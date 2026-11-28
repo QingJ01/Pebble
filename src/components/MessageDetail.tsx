@@ -23,6 +23,7 @@ import SelectionActionPopover from "./SelectionActionPopover";
 import ContactAddressAction from "./ContactAddressAction";
 import SenderNotifyAction from "@/features/notify/SenderNotifyAction";
 import FollowUpButton from "@/features/agent/FollowUpButton";
+import AskPebbleButton from "@/features/agent/AskPebbleButton";
 import MessageParticipants from "./MessageParticipants";
 import IconButton from "./ui/IconButton";
 import { useDelayedFlag } from "@/hooks/useDelayedFlag";
@@ -286,6 +287,12 @@ export default function MessageDetail({ messageId, onBack, onReopen, folderRole 
           onMessageUpdate={setMessage}
         />
         <div className="reader-toolbar__end">
+          <AskPebbleButton
+            accountId={message.account_id}
+            messageId={message.id}
+            subject={message.subject}
+            from={message.from_name || message.from_address}
+          />
           <FollowUpButton accountId={message.account_id} messageId={message.id} threadId={message.thread_id} />
           <IconButton
             ref={snoozeButtonRef}

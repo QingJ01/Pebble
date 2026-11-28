@@ -1106,3 +1106,50 @@
   font-size: var(--font-xs);
   color: var(--color-warning, #b45309);
 }
+
+/* Asking about the mail being read (#107) */
+.agent-context {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-fill-selected);
+  font-size: var(--font-xs);
+  min-width: 0;
+}
+
+.agent-context__label {
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+.agent-context__subject {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.agent-context__from {
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.agent-context__clear {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  font-size: var(--font-sm);
+}
+
+.agent-reply__about {
+  display: block;
+  font-size: var(--font-xs);
+  opacity: 0.75;
+  margin-bottom: 2px;
+}

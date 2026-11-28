@@ -29,6 +29,9 @@ pub struct NotifyPrefsRecord {
     pub model_send_body: bool,
     /// Proactive agent (read from the defaults row only).
     pub briefing_enabled: bool,
+    /// Add an AI summary to the daily briefing (sends senders and subjects
+    /// to the configured model; off by default).
+    pub briefing_summary: bool,
     /// Local minute of day for the daily briefing (09:00 = 540).
     pub briefing_minute: u16,
     /// Nudge about mail that waits for the user's reply.
@@ -53,6 +56,7 @@ impl Default for NotifyPrefsRecord {
             model_reviews_bulk: false,
             model_send_body: true,
             briefing_enabled: true,
+            briefing_summary: false,
             briefing_minute: 9 * 60,
             awaiting_reply_enabled: true,
             awaiting_reply_hours: 24,

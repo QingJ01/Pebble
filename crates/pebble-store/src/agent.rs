@@ -857,6 +857,18 @@ impl Store {
     }
 
     /// Record the user's answer to an event (and mark it read).
+    /// Replace an event's payload (e.g. a summary added later).
+    pub fn set_agent_event_payload(&self, id: &str, payload: &serde_json::Value) -> Result<bool> {
+        let json =
+            serde_json::to_string(payload).map_err(|e| PebbleError::Internal(e.to_string()))?;
+        self.with_write(|conn| {
+            Ok(conn.execute(
+                "UPDATE agent_events SET payload_json = ?2 WHERE id = ?1",
+                params![id, json],
+            )? == 1)
+        })
+    }
+
     pub fn resolve_agent_event(
         &self,
         id: &str,

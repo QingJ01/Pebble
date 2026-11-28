@@ -130,3 +130,13 @@
   color: var(--color-text-tertiary);
   white-space: nowrap;
 }
+
+.notify-proactive-sub {
+  margin: 0 0 var(--space-2) var(--space-6, 24px);
+}
+
+.notify-proactive-note {
+  margin: 2px 0 0;
+  font-size: var(--font-xs);
+  color: var(--color-text-tertiary);
+}

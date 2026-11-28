@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use super::*;
 use crate::mcp::{server::handle_call, token_hash};
-use pebble_core::{Account, EmailAddress, Folder, FolderType};
+use pebble_core::{Account, EmailAddress, Folder, FolderRole, FolderType, Message};
 
 struct Fixture {
     store: Store,
@@ -248,7 +248,10 @@ fn search_respects_levels_scope_spam_and_pages() {
     assert!(w1.get("snippet").is_none(), "metadata only");
     let h1 = results.iter().find(|m| m["message_id"] == "h1").unwrap();
     assert!(h1["snippet"].as_str().unwrap().contains("Dinner"));
-    assert_eq!(r["coverage"]["excluded"], json!(["spam", "trash"]));
+    assert_eq!(
+        r["coverage"]["excluded"],
+        json!(["spam", "trash", "drafts"])
+    );
 
     let page = call(
         &f,
@@ -354,4 +357,123 @@ fn client_names_are_cleaned_for_the_dialog() {
     );
     assert_eq!(clean_client_name("  \n\t "), "MCP client");
     assert_eq!(clean_client_name(&"x".repeat(200)).len(), 60);
+}
+
+#[test]
+fn new_tools_list_accounts_recent_mail_messages_and_open_items() {
+    let f = setup();
+    let token = pair(&f, &[("work", "body"), ("home", "metadata")]);
+    let accounts = call(&f, &token, "mail_list_accounts", json!({}))
+        .result
+        .unwrap();
+    let list = accounts["accounts"].as_array().unwrap();
+    assert_eq!(list.len(), 2, "Gmail never listed");
+    let work = list
+        .iter()
+        .find(|a| a["account"] == "me@work.example")
+        .unwrap();
+    assert_eq!(work["level"], "body");
+    assert!(work["tools"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("mail_get_message")));
+    let home = list
+        .iter()
+        .find(|a| a["account"] == "me@home.example")
+        .unwrap();
+    assert!(!home["tools"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("mail_get_message")));
+
+    // Search filters and structured paging.
+    let unread = call(
+        &f,
+        &token,
+        TOOL_SEARCH,
+        json!({"query": "partnership", "unread": true, "folder": "inbox"}),
+    )
+    .result
+    .unwrap();
+    assert!(unread["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|m| m["unread"] == true));
+    assert!(
+        call(&f, &token, TOOL_SEARCH, json!({})).code == Some(ErrorCode::Invalid),
+        "needs something to search for"
+    );
+
+    let message = call(&f, &token, "mail_get_message", json!({"message_id": "w1"}))
+        .result
+        .unwrap();
+    assert!(!message["body"].as_str().unwrap().contains("482913"));
+    assert_eq!(
+        call(&f, &token, "mail_get_message", json!({"message_id": "h1"})).code,
+        Some(ErrorCode::NotFound),
+        "metadata only for home"
+    );
+    assert_eq!(
+        call(&f, &token, "mail_get_message", json!({"message_id": "w2"})).code,
+        Some(ErrorCode::NotFound),
+        "spam"
+    );
+
+    let open = call(&f, &token, "mail_list_open_items", json!({}))
+        .result
+        .unwrap();
+    assert!(open["following"].is_array());
+    // Writes need the drafts level.
+    assert_eq!(
+        call(&f, &token, "mail_follow_up", json!({"message_id": "w1"})).code,
+        Some(ErrorCode::Forbidden)
+    );
+}
+
+#[test]
+fn proposals_report_what_the_user_did() {
+    let f = setup();
+    let token = pair(&f, &[("work", "drafts")]);
+    let other = pair(&f, &[("work", "drafts")]);
+    let proposed = call(
+        &f,
+        &token,
+        TOOL_PROPOSE_DRAFT,
+        json!({"reply_to_message_id": "w1", "body": "Yes"}),
+    )
+    .result
+    .unwrap();
+    let id = proposed["proposal_id"].as_str().unwrap().to_string();
+    let status = |t: &str| call(&f, t, "mail_proposal_status", json!({"proposal_id": id}));
+    assert_eq!(
+        status(&token).result.unwrap()["status"],
+        "waiting_for_the_user"
+    );
+    assert_eq!(
+        status(&other).code,
+        Some(ErrorCode::NotFound),
+        "only the client that proposed it"
+    );
+    f.store
+        .resolve_agent_event(&id, &json!({"action": "opened", "at": 1}), 1)
+        .unwrap();
+    assert_eq!(
+        status(&token).result.unwrap()["status"],
+        "opened_in_composer"
+    );
+
+    let followed = call(
+        &f,
+        &token,
+        "mail_follow_up",
+        json!({"message_id": "w1", "days": 3}),
+    )
+    .result
+    .unwrap();
+    assert_eq!(followed["status"], "following");
+    let again = call(&f, &token, "mail_follow_up", json!({"message_id": "w1"}))
+        .result
+        .unwrap();
+    assert_eq!(again["status"], "already_following");
 }

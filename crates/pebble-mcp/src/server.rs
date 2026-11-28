@@ -31,6 +31,8 @@ enum Pairing {
 pub struct ToolOutcome {
     pub text: String,
     pub is_error: bool,
+    /// The result as an object, for clients that read structured content.
+    pub structured: Option<Value>,
 }
 
 impl ToolOutcome {
@@ -38,6 +40,7 @@ impl ToolOutcome {
         Self {
             text: text.into(),
             is_error: true,
+            structured: None,
         }
     }
 }
@@ -190,11 +193,18 @@ impl<C: Connector + 'static, T: TokenStore + 'static> Bridge<C, T> {
         };
         match self.connector.send(&request, CALL_WAIT).await {
             Err(_) => ToolOutcome::error(NOT_RUNNING),
-            Ok(response) if response.ok => ToolOutcome {
-                text: serde_json::to_string_pretty(&response.result.unwrap_or(Value::Null))
-                    .unwrap_or_default(),
-                is_error: false,
-            },
+            Ok(response) if response.ok => {
+                let result = response.result.unwrap_or(Value::Null);
+                ToolOutcome {
+                    text: serde_json::to_string_pretty(&result).unwrap_or_default(),
+                    is_error: false,
+                    structured: Some(if result.is_object() {
+                        result
+                    } else {
+                        json!({ "result": result })
+                    }),
+                }
+            }
             Ok(response) if response.code == Some(ErrorCode::Unauthorized) => {
                 // Revoked (or a stale token): forget it and ask again.
                 self.tokens.delete(&self.client());
@@ -264,13 +274,14 @@ pub async fn handle<C: Connector + 'static, T: TokenStore + 'static>(
                 .cloned()
                 .unwrap_or_else(|| json!({}));
             let outcome = bridge.call(name, args).await;
-            rpc_result(
-                &id,
-                json!({
-                    "content": [{"type": "text", "text": outcome.text}],
-                    "isError": outcome.is_error,
-                }),
-            )
+            let mut result = json!({
+                "content": [{"type": "text", "text": outcome.text}],
+                "isError": outcome.is_error,
+            });
+            if let Some(structured) = outcome.structured {
+                result["structuredContent"] = structured;
+            }
+            rpc_result(&id, result)
         }
         "resources/list" => rpc_result(&id, json!({"resources": []})),
         "prompts/list" => rpc_result(&id, json!({"prompts": []})),
@@ -300,6 +311,12 @@ where
             }
         }
     });
+    // Requests in flight by JSON-RPC id, so `notifications/cancelled` can
+    // stop one (its answer is then never sent, as the spec asks).
+    let in_flight: Arc<Mutex<std::collections::HashMap<String, tokio::task::AbortHandle>>> =
+        Arc::new(Mutex::new(std::collections::HashMap::new()));
+    let cancelled: Arc<Mutex<std::collections::HashSet<String>>> =
+        Arc::new(Mutex::new(std::collections::HashSet::new()));
     let mut lines = BufReader::new(input).lines();
     while let Some(line) = lines.next_line().await? {
         if line.trim().is_empty() {
@@ -312,14 +329,48 @@ where
                 continue;
             }
         };
+        if message.get("method").and_then(Value::as_str) == Some("notifications/cancelled") {
+            if let Some(id) = message.pointer("/params/requestId") {
+                let key = id.to_string();
+                if let Ok(mut set) = cancelled.lock() {
+                    set.insert(key.clone());
+                }
+                if let Some(task) = in_flight.lock().ok().and_then(|mut m| m.remove(&key)) {
+                    task.abort();
+                }
+            }
+            continue;
+        }
         // Calls may wait (pairing); answer others meanwhile.
+        let key = message.get("id").map(Value::to_string);
         let bridge = Arc::clone(&bridge);
         let tx = tx.clone();
-        tokio::spawn(async move {
-            if let Some(answer) = handle(&bridge, message).await {
+        let registry = Arc::clone(&in_flight);
+        let cancelled_ids = Arc::clone(&cancelled);
+        let done_key = key.clone();
+        let task = tokio::spawn(async move {
+            let answer = handle(&bridge, message).await;
+            let wanted = match &done_key {
+                Some(key) => {
+                    if let Ok(mut map) = registry.lock() {
+                        map.remove(key);
+                    }
+                    !cancelled_ids
+                        .lock()
+                        .map(|mut set| set.remove(key))
+                        .unwrap_or(false)
+                }
+                None => true,
+            };
+            if let (Some(answer), true) = (answer, wanted) {
                 let _ = tx.send(answer);
             }
         });
+        if let Some(key) = key {
+            if let Ok(mut map) = in_flight.lock() {
+                map.insert(key, task.abort_handle());
+            }
+        }
     }
     drop(tx);
     // Let calls in flight finish writing.

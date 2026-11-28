@@ -6,19 +6,22 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use pebble_core::{now_timestamp, FolderRole, Message, ProviderType};
-use pebble_mcp::protocol::{ErrorCode, Level, TOOL_GET_THREAD, TOOL_PROPOSE_DRAFT, TOOL_SEARCH};
+use pebble_core::{now_timestamp, ProviderType};
+use pebble_mcp::protocol::{
+    ErrorCode, Level, TOOL_FOLLOW_UP, TOOL_GET_MESSAGE, TOOL_GET_THREAD, TOOL_LIST_ACCOUNTS,
+    TOOL_LIST_OPEN_ITEMS, TOOL_LIST_RECENT, TOOL_PROPOSAL_STATUS, TOOL_PROPOSE_DRAFT, TOOL_SEARCH,
+};
 use pebble_notify::triage_model::redact_codes;
-use pebble_search::{AdvancedSearchParams, TantivySearch};
+use pebble_search::TantivySearch;
 use pebble_store::agent::NewAgentEvent;
 use pebble_store::mcp::McpClient;
 use pebble_store::Store;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::agent::capabilities::{Capabilities, DraftArgs};
+use crate::agent::capabilities::{local_day, Capabilities, DraftArgs, FollowArgs, RecentArgs};
+use crate::agent::mail_search::{self, MailQuery};
 
-pub const MAX_PAGE: usize = 50;
 const SNIPPET_CHARS: usize = 200;
 
 /// What a successful call touched (for the audit log).
@@ -97,36 +100,25 @@ fn truncate(text: &str, max: usize) -> String {
     out
 }
 
-fn local_time(ts: i64) -> String {
-    use chrono::TimeZone;
-    chrono::Local
-        .timestamp_opt(ts, 0)
-        .single()
-        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
-        .unwrap_or_default()
-}
-
-fn parse_day(value: &str) -> Option<i64> {
-    let date = chrono::NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d").ok()?;
-    crate::deadlines::local_ts(date.and_hms_opt(0, 0, 0)?)
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct SearchArgs {
+    #[serde(flatten)]
+    query: MailQuery,
+    account: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
-struct SearchArgs {
-    query: Option<String>,
-    from: Option<String>,
-    to: Option<String>,
-    subject: Option<String>,
-    after: Option<String>,
-    before: Option<String>,
+struct RecentToolArgs {
+    days: Option<u32>,
+    unread_only: Option<bool>,
     account: Option<String>,
     limit: Option<usize>,
-    cursor: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-struct ThreadArgs {
+struct MessageArgs {
     message_id: String,
 }
 
@@ -140,8 +132,23 @@ struct ProposeArgs {
     account: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct FollowToolArgs {
+    message_id: String,
+    days: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StatusArgs {
+    proposal_id: String,
+}
+
 fn invalid(e: impl std::fmt::Display) -> ToolError {
     (ErrorCode::Invalid, format!("Invalid arguments: {e}"))
+}
+
+fn parse<T: serde::de::DeserializeOwned>(args: Value) -> Result<T, ToolError> {
+    serde_json::from_value(if args.is_null() { json!({}) } else { args }).map_err(invalid)
 }
 
 /// Run one tool for `client`.
@@ -171,27 +178,16 @@ pub fn run(
             ),
         ));
     }
-    let args = if args.is_null() { json!({}) } else { args };
     match tool {
-        TOOL_SEARCH => search_mail(
-            store,
-            search,
-            &granted,
-            serde_json::from_value(args).map_err(invalid)?,
-        ),
-        TOOL_GET_THREAD => get_thread(
-            store,
-            search,
-            &granted,
-            serde_json::from_value(args).map_err(invalid)?,
-        ),
-        TOOL_PROPOSE_DRAFT => propose_draft(
-            store,
-            search,
-            client,
-            &granted,
-            serde_json::from_value(args).map_err(invalid)?,
-        ),
+        TOOL_LIST_ACCOUNTS => list_accounts(store, client),
+        TOOL_SEARCH => search_mail(store, search, &granted, parse(args)?),
+        TOOL_LIST_RECENT => list_recent(store, search, &granted, parse(args)?),
+        TOOL_GET_THREAD => get_thread(store, search, &granted, parse(args)?),
+        TOOL_GET_MESSAGE => get_message(store, search, &granted, parse(args)?),
+        TOOL_LIST_OPEN_ITEMS => list_open_items(store, search, &granted),
+        TOOL_PROPOSE_DRAFT => propose_draft(store, search, client, &granted, parse(args)?),
+        TOOL_FOLLOW_UP => follow_up(store, search, &granted, parse(args)?),
+        TOOL_PROPOSAL_STATUS => proposal_status(store, client, parse(args)?),
         _ => Err((
             ErrorCode::Invalid,
             format!("Pebble has no tool named {tool}"),
@@ -223,135 +219,6 @@ fn pick_account<'a>(
     }
 }
 
-fn search_mail(
-    store: &Store,
-    search: &TantivySearch,
-    granted: &[Granted],
-    args: SearchArgs,
-) -> Result<ToolResult, ToolError> {
-    let accounts = pick_account(granted, args.account.as_deref())?;
-    let levels: HashMap<&str, &Granted> = accounts.iter().map(|g| (g.id.as_str(), *g)).collect();
-    let limit = args.limit.unwrap_or(20).clamp(1, MAX_PAGE);
-    let offset: usize = args
-        .cursor
-        .as_deref()
-        .map(|c| c.parse().map_err(|_| invalid("cursor")))
-        .transpose()?
-        .unwrap_or(0)
-        .min(1_000);
-    // Over-fetch: other accounts, spam and trash are dropped below.
-    let hits = search
-        .advanced_search(AdvancedSearchParams {
-            text: args.query.as_deref().filter(|q| !q.trim().is_empty()),
-            from: args.from.as_deref(),
-            to: args.to.as_deref(),
-            subject: args.subject.as_deref(),
-            date_from: args.after.as_deref().and_then(parse_day),
-            date_to: args.before.as_deref().and_then(parse_day),
-            has_attachment: None,
-            folder_id: None,
-            limit: ((offset + limit) * 4).min(2_000),
-        })
-        .map_err(|e| (ErrorCode::Internal, e.to_string()))?;
-    let ids: Vec<String> = hits.iter().map(|h| h.message_id.clone()).collect();
-    let messages: HashMap<String, Message> = store
-        .get_messages_batch(&ids)
-        .map_err(|e| (ErrorCode::Internal, e.to_string()))?
-        .into_iter()
-        .map(|m| (m.id.clone(), m))
-        .collect();
-    let folder_ids = store
-        .get_message_folder_ids_batch(&ids)
-        .map_err(|e| (ErrorCode::Internal, e.to_string()))?;
-    let mut folders: HashMap<String, (String, Option<FolderRole>)> = HashMap::new();
-    for account in &accounts {
-        for folder in store.list_folders(&account.id).unwrap_or_default() {
-            folders.insert(
-                folder.id.clone(),
-                (folder.name.clone(), folder.role.clone()),
-            );
-        }
-    }
-    let mut matching = Vec::new();
-    for id in &ids {
-        let Some(message) = messages.get(id) else {
-            continue;
-        };
-        if message.is_deleted
-            || message.is_draft
-            || !levels.contains_key(message.account_id.as_str())
-        {
-            continue;
-        }
-        let names: Vec<(String, Option<FolderRole>)> = folder_ids
-            .get(id)
-            .map(|ids| ids.iter().filter_map(|f| folders.get(f).cloned()).collect())
-            .unwrap_or_default();
-        if names
-            .iter()
-            .any(|(_, role)| matches!(role, Some(FolderRole::Spam | FolderRole::Trash)))
-        {
-            continue;
-        }
-        matching.push((message, names));
-    }
-    let total_seen = matching.len();
-    let page: Vec<Value> = matching
-        .iter()
-        .skip(offset)
-        .take(limit)
-        .map(|(message, names)| {
-            let grant = levels[message.account_id.as_str()];
-            let mut item = json!({
-                "message_id": message.id,
-                "thread_id": message.thread_id,
-                "account": grant.email,
-                "from": message.from_name,
-                "from_address": message.from_address,
-                "subject": redact_codes(&message.subject),
-                "date": local_time(message.date),
-                "folders": names.iter().map(|(name, _)| name.clone()).collect::<Vec<_>>(),
-                "unread": !message.is_read,
-                "has_attachments": message.has_attachments,
-            });
-            if grant.level >= Level::Summary {
-                item["snippet"] = json!(truncate(&redact_codes(&message.snippet), SNIPPET_CHARS));
-            }
-            item
-        })
-        .collect();
-    let next = offset + page.len();
-    let coverage: Vec<Value> = accounts
-        .iter()
-        .map(|g| {
-            json!({
-                "account": g.email,
-                "synced_since": store
-                    .earliest_message_date(&g.id)
-                    .ok()
-                    .flatten()
-                    .map(local_time),
-                "snippets": g.level >= Level::Summary,
-            })
-        })
-        .collect();
-    let touched: Vec<String> = accounts.iter().map(|g| g.id.clone()).collect();
-    let count = page.len() as u32;
-    Ok(ToolResult {
-        value: json!({
-            "results": page,
-            "next_cursor": (next < total_seen).then(|| next.to_string()),
-            "coverage": {
-                "accounts": coverage,
-                "excluded": ["spam", "trash"],
-                "note": "Only mail synced to this device and only the accounts the user allowed. No match doesn't mean the mail doesn't exist.",
-            },
-        }),
-        accounts: touched,
-        results: count,
-    })
-}
-
 fn scope_of(granted: &[&Granted]) -> HashMap<String, String> {
     granted
         .iter()
@@ -359,88 +226,274 @@ fn scope_of(granted: &[&Granted]) -> HashMap<String, String> {
         .collect()
 }
 
+fn pairs_of(granted: &[&Granted]) -> Vec<(String, String)> {
+    granted
+        .iter()
+        .map(|g| (g.id.clone(), g.email.clone()))
+        .collect()
+}
+
+fn level_code(level: Level) -> &'static str {
+    match level {
+        Level::Metadata => "metadata",
+        Level::Summary => "summary",
+        Level::Body => "body",
+        Level::Drafts => "drafts",
+    }
+}
+
+/// A list entry for one message, with a snippet only at summary level.
+fn listing(message: &pebble_core::Message, folders: &[String], grant: &Granted) -> Value {
+    let mut item = json!({
+        "message_id": message.id,
+        "thread_id": message.thread_id,
+        "account": grant.email,
+        "from": message.from_name,
+        "from_address": message.from_address,
+        "subject": redact_codes(&message.subject),
+        "date": local_day(message.date),
+        "folders": folders,
+        "unread": !message.is_read,
+        "starred": message.is_starred,
+        "has_attachments": message.has_attachments,
+    });
+    if grant.level >= Level::Summary {
+        item["snippet"] = json!(truncate(&redact_codes(&message.snippet), SNIPPET_CHARS));
+    }
+    item
+}
+
+/// The accounts this client may use, its level for each, and how far back
+/// mail is synced. Lets a client know what it can ask before asking.
+fn list_accounts(store: &Store, client: &McpClient) -> Result<ToolResult, ToolError> {
+    let granted = granted_accounts(store, client);
+    let accounts: Vec<Value> = granted
+        .iter()
+        .map(|g| {
+            let mut tools = vec!["mail_search", "mail_list_recent", "mail_list_open_items"];
+            if g.level >= Level::Body {
+                tools.extend(["mail_get_thread", "mail_get_message"]);
+            }
+            if g.level >= Level::Drafts {
+                tools.extend([
+                    "mail_propose_draft",
+                    "mail_follow_up",
+                    "mail_proposal_status",
+                ]);
+            }
+            json!({
+                "account": g.email,
+                "level": level_code(g.level),
+                "snippets": g.level >= Level::Summary,
+                "tools": tools,
+                "synced_since": store.earliest_message_date(&g.id).ok().flatten().map(local_day),
+            })
+        })
+        .collect();
+    let count = accounts.len() as u32;
+    Ok(ToolResult {
+        value: json!({ "accounts": accounts }),
+        accounts: granted.iter().map(|g| g.id.clone()).collect(),
+        results: count,
+    })
+}
+
+fn search_mail(
+    store: &Store,
+    search: &TantivySearch,
+    granted: &[Granted],
+    args: SearchArgs,
+) -> Result<ToolResult, ToolError> {
+    let accounts = pick_account(granted, args.account.as_deref())?;
+    let by_id: HashMap<&str, &Granted> = accounts.iter().map(|g| (g.id.as_str(), *g)).collect();
+    let ids: Vec<String> = accounts.iter().map(|g| g.id.clone()).collect();
+    let page = mail_search::search(store, search, &ids, &args.query)
+        .map_err(|e| (ErrorCode::Invalid, e))?;
+    let results: Vec<Value> = page
+        .items
+        .iter()
+        .filter_map(|f| {
+            by_id
+                .get(f.message.account_id.as_str())
+                .map(|g| listing(&f.message, &f.folders, g))
+        })
+        .collect();
+    let count = results.len() as u32;
+    Ok(ToolResult {
+        value: json!({
+            "results": results,
+            "next_cursor": page.next_cursor,
+            "coverage": mail_search::coverage(store, &pairs_of(&accounts)),
+        }),
+        accounts: ids,
+        results: count,
+    })
+}
+
+/// Recent inbox mail ("what's new"), newest first.
+fn list_recent(
+    store: &Store,
+    search: &TantivySearch,
+    granted: &[Granted],
+    args: RecentToolArgs,
+) -> Result<ToolResult, ToolError> {
+    let accounts = pick_account(granted, args.account.as_deref())?;
+    let by_id: HashMap<&str, &Granted> = accounts.iter().map(|g| (g.id.as_str(), *g)).collect();
+    let mut caps = Capabilities::new(store, search, scope_of(&accounts));
+    let value = caps
+        .list_recent_mail(RecentArgs {
+            days: args.days,
+            unread_only: args.unread_only,
+            limit: Some(args.limit.unwrap_or(20).clamp(1, 30) as u32),
+        })
+        .map_err(|e| (ErrorCode::Internal, e))?;
+    let ids: Vec<String> = value["results"]
+        .as_array()
+        .map(|r| {
+            r.iter()
+                .filter_map(|m| m["message_id"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let messages = store
+        .get_messages_batch(&ids)
+        .map_err(|e| (ErrorCode::Internal, e.to_string()))?;
+    let messages = mail_search::outside_spam_and_trash(store, &messages);
+    let mut results: Vec<(i64, Value)> = messages
+        .iter()
+        .filter_map(|m| {
+            by_id
+                .get(m.account_id.as_str())
+                .map(|g| (m.date, listing(m, &["Inbox".to_string()], g)))
+        })
+        .collect();
+    results.sort_by_key(|(date, _)| std::cmp::Reverse(*date));
+    let results: Vec<Value> = results.into_iter().map(|(_, v)| v).collect();
+    let count = results.len() as u32;
+    Ok(ToolResult {
+        value: json!({
+            "results": results,
+            "coverage": mail_search::coverage(store, &pairs_of(&accounts)),
+        }),
+        accounts: accounts.iter().map(|g| g.id.clone()).collect(),
+        results: count,
+    })
+}
+
+/// Attachments by name, size and type only.
+fn add_attachments(store: &Store, message: &mut Value) {
+    let Some(id) = message
+        .get("message_id")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
+        return;
+    };
+    let attachments: Vec<Value> = store
+        .list_attachments_by_message(&id)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|a| !a.is_inline)
+        .map(|a| json!({"name": a.filename, "size": a.size, "type": a.mime_type}))
+        .collect();
+    message["attachments"] = json!(attachments);
+}
+
+fn used_accounts(caps: &Capabilities<'_>) -> Vec<String> {
+    caps.used
+        .iter()
+        .map(|m| m.account_id.clone())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect()
+}
+
 fn get_thread(
     store: &Store,
     search: &TantivySearch,
     granted: &[Granted],
-    args: ThreadArgs,
+    args: MessageArgs,
 ) -> Result<ToolResult, ToolError> {
     let all: Vec<&Granted> = granted.iter().collect();
     let mut caps = Capabilities::new(store, search, scope_of(&all));
     let mut value = caps
         .read_thread(&args.message_id)
         .map_err(|e| (ErrorCode::NotFound, e))?;
-    // Spam and trash stay out, as in search (they're the likeliest to carry
-    // instructions aimed at the model).
-    if let Some(messages) = value.get_mut("messages").and_then(Value::as_array_mut) {
-        let ids: Vec<String> = messages
-            .iter()
-            .filter_map(|m| {
-                m.get("message_id")
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            })
-            .collect();
-        let folders = store.get_message_folder_ids_batch(&ids).unwrap_or_default();
-        let mut roles: HashMap<String, Option<FolderRole>> = HashMap::new();
-        for g in granted {
-            for folder in store.list_folders(&g.id).unwrap_or_default() {
-                roles.insert(folder.id, folder.role);
-            }
-        }
-        messages.retain(|m| {
-            let id = m
-                .get("message_id")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            !folders.get(id).is_some_and(|ids| {
-                ids.iter().any(|f| {
-                    matches!(
-                        roles.get(f),
-                        Some(Some(FolderRole::Spam | FolderRole::Trash))
-                    )
-                })
-            })
-        });
-        if messages.is_empty() {
-            return Err((
-                ErrorCode::NotFound,
-                "That message is in spam or trash".into(),
-            ));
-        }
-    }
-    // Attachments: names and sizes only.
     if let Some(messages) = value.get_mut("messages").and_then(Value::as_array_mut) {
         for message in messages {
-            let Some(id) = message
-                .get("message_id")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-            else {
-                continue;
-            };
-            let attachments: Vec<Value> = store
-                .list_attachments_by_message(&id)
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|a| !a.is_inline)
-                .map(|a| json!({"name": a.filename, "size": a.size, "type": a.mime_type}))
-                .collect();
-            message["attachments"] = json!(attachments);
+            add_attachments(store, message);
         }
     }
-    let accounts: Vec<String> = caps
-        .used
+    Ok(ToolResult {
+        value,
+        accounts: used_accounts(&caps),
+        results: caps.used.len() as u32,
+    })
+}
+
+fn get_message(
+    store: &Store,
+    search: &TantivySearch,
+    granted: &[Granted],
+    args: MessageArgs,
+) -> Result<ToolResult, ToolError> {
+    let all: Vec<&Granted> = granted.iter().collect();
+    let mut caps = Capabilities::new(store, search, scope_of(&all));
+    let mut value = caps
+        .read_message(&args.message_id)
+        .map_err(|e| (ErrorCode::NotFound, e))?;
+    add_attachments(store, &mut value);
+    Ok(ToolResult {
+        value,
+        accounts: used_accounts(&caps),
+        results: 1,
+    })
+}
+
+fn list_open_items(
+    store: &Store,
+    search: &TantivySearch,
+    granted: &[Granted],
+) -> Result<ToolResult, ToolError> {
+    let all: Vec<&Granted> = granted.iter().collect();
+    let mut caps = Capabilities::new(store, search, scope_of(&all));
+    let value = caps
+        .list_open_items()
+        .map_err(|e| (ErrorCode::Internal, e))?;
+    let count = value["following"].as_array().map_or(0, Vec::len)
+        + value["waiting_for_your_reply"]
+            .as_array()
+            .map_or(0, Vec::len);
+    Ok(ToolResult {
+        value,
+        accounts: granted.iter().map(|g| g.id.clone()).collect(),
+        results: count as u32,
+    })
+}
+
+fn follow_up(
+    store: &Store,
+    search: &TantivySearch,
+    granted: &[Granted],
+    args: FollowToolArgs,
+) -> Result<ToolResult, ToolError> {
+    let all: Vec<&Granted> = granted.iter().collect();
+    let mut caps = Capabilities::new(store, search, scope_of(&all));
+    let value = caps
+        .follow_up(FollowArgs {
+            message_id: args.message_id,
+            days: args.days,
+        })
+        .map_err(|e| (ErrorCode::NotFound, e))?;
+    let accounts = caps
+        .follow_ups
         .iter()
-        .map(|m| m.account_id.clone())
-        .collect::<HashSet<_>>()
-        .into_iter()
+        .map(|f| f.account_id.clone())
         .collect();
-    let count = caps.used.len() as u32;
     Ok(ToolResult {
         value,
         accounts,
-        results: count,
+        results: 1,
     })
 }
 
@@ -471,21 +524,65 @@ fn propose_draft(
         dedupe_key: format!("draft_proposal:{}", pebble_core::new_id()),
         account_id: Some(draft.account_id.clone()),
         message_id: draft.reply_to_message_id.clone(),
-        payload: json!({ "client": client.name, "draft": draft }),
+        payload: json!({ "client": client.name, "clientId": client.id, "draft": draft }),
         push: true,
         ..Default::default()
     };
-    store
+    let created = store
         .insert_agent_event(&event, now)
-        .map_err(|e| (ErrorCode::Internal, e.to_string()))?;
+        .map_err(|e| (ErrorCode::Internal, e.to_string()))?
+        .ok_or_else(|| {
+            (
+                ErrorCode::Internal,
+                "The proposal wasn't stored".to_string(),
+            )
+        })?;
     Ok(ToolResult {
         value: json!({
             "status": "proposed",
-            "note": "The draft is waiting for the user in Pebble's assistant. It has NOT been sent; the user reviews and sends it themselves.",
+            "proposal_id": created.id,
+            "note": "The draft is waiting for the user in Pebble's assistant. It has NOT been sent; the user reviews and sends it themselves. Check mail_proposal_status later.",
             "to": draft.to,
-            "subject": draft.subject,
+            "subject": redact_codes(&draft.subject),
         }),
         accounts: vec![draft.account_id],
+        results: 1,
+    })
+}
+
+/// Whether the user opened or dismissed a proposal this client made.
+fn proposal_status(
+    store: &Store,
+    client: &McpClient,
+    args: StatusArgs,
+) -> Result<ToolResult, ToolError> {
+    let event = store
+        .list_agent_events(1_000, None)
+        .map_err(|e| (ErrorCode::Internal, e.to_string()))?
+        .into_iter()
+        .find(|e| {
+            e.id == args.proposal_id
+                && e.kind == "draft_proposal"
+                && e.payload["clientId"].as_str() == Some(client.id.as_str())
+        })
+        .ok_or_else(|| {
+            (
+                ErrorCode::NotFound,
+                "No such proposal from this client".to_string(),
+            )
+        })?;
+    let status = match event.resolution.as_ref().and_then(|r| r["action"].as_str()) {
+        Some("opened") => "opened_in_composer",
+        Some("dismissed") => "dismissed",
+        _ => "waiting_for_the_user",
+    };
+    Ok(ToolResult {
+        value: json!({
+            "proposal_id": event.id,
+            "status": status,
+            "note": "Pebble can't tell whether an opened draft was sent; the user decides in the composer.",
+        }),
+        accounts: event.account_id.into_iter().collect(),
         results: 1,
     })
 }

@@ -48,7 +48,7 @@ export interface AgentEvent {
   resolution: AgentResolution | null;
 }
 
-export type AgentAction = "wait" | "stop" | "later" | "no_reply" | "done" | "not_deadline";
+export type AgentAction = "wait" | "stop" | "later" | "no_reply" | "done" | "not_deadline" | "opened" | "dismissed";
 
 export interface AgentResolution {
   action: AgentAction | "answered" | "expired";

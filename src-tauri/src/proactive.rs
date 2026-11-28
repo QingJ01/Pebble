@@ -416,6 +416,7 @@ pub fn briefing_has_news(payload: &serde_json::Value) -> bool {
 }
 
 /// Produce today's briefing if it is due. Returns `true` when one was added.
+#[cfg(test)]
 pub fn maybe_record_briefing(
     store: &Store,
     prefs: &NotifyPrefsRecord,
@@ -423,13 +424,24 @@ pub fn maybe_record_briefing(
     minute: u16,
     now: i64,
 ) -> bool {
+    record_briefing(store, prefs, local_date, minute, now).is_some()
+}
+
+/// Today's briefing if it is due and not made yet.
+pub fn record_briefing(
+    store: &Store,
+    prefs: &NotifyPrefsRecord,
+    local_date: &str,
+    minute: u16,
+    now: i64,
+) -> Option<AgentEvent> {
     if !prefs.briefing_enabled {
-        return false;
+        return None;
     }
     let key = format!("briefing:{local_date}");
     let already = store.agent_event_exists(&key).unwrap_or(true);
     if !briefing_due(minute, prefs.briefing_minute, already) {
-        return false;
+        return None;
     }
     let payload = build_briefing(store, now);
     let push = briefing_has_news(&payload);
@@ -440,7 +452,7 @@ pub fn maybe_record_briefing(
         push,
         ..Default::default()
     };
-    matches!(store.insert_agent_event(&event, now), Ok(Some(_)))
+    store.insert_agent_event(&event, now).ok().flatten()
 }
 
 fn push_kind(event: &AgentEvent) -> PushKind {
@@ -608,7 +620,7 @@ fn deliver(app: &AppHandle, store: &Store, prefs: &NotifyPrefsRecord, now: i64) 
 /// One pass: findings (scan when `scan` is set), briefing, then delivery.
 async fn tick(app: &AppHandle, store: &Arc<Store>, scan: bool) {
     let store_for_findings = Arc::clone(store);
-    let changed = tokio::task::spawn_blocking(move || {
+    let (changed, summarize) = tokio::task::spawn_blocking(move || {
         let store = store_for_findings;
         let now = now_timestamp();
         let prefs = load_prefs(&store, "");
@@ -631,13 +643,18 @@ async fn tick(app: &AppHandle, store: &Arc<Store>, scan: bool) {
                 changed |= record_awaiting_replies(&store, &found, now) > 0;
             }
         }
-        changed |= maybe_record_briefing(&store, &prefs, &local_date(), local_minute_of_day(), now);
-        changed
+        let briefing = record_briefing(&store, &prefs, &local_date(), local_minute_of_day(), now);
+        changed |= briefing.is_some();
+        let summarize = briefing.filter(|_| prefs.briefing_summary).map(|b| b.id);
+        (changed, summarize)
     })
     .await
-    .unwrap_or(false);
+    .unwrap_or((false, None));
     if changed {
         let _ = app.emit(events::AGENT_EVENTS_CHANGED, ());
+    }
+    if let Some(briefing_id) = summarize {
+        tauri::async_runtime::spawn(crate::briefing_summary::summarize(app.clone(), briefing_id));
     }
     let app = app.clone();
     let store = Arc::clone(store);

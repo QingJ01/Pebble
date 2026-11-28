@@ -29,6 +29,7 @@ import {
   type ChatProgress,
 } from "./chat-api";
 import { useUIStore } from "@/stores/ui.store";
+import { useAskContext } from "./askContext";
 
 // ---------------------------------------------------------------- helpers
 
@@ -578,17 +579,32 @@ function DeadlineBlock({ event, compact }: { event: AgentEvent; compact: boolean
   );
 }
 
-/** A draft an MCP client proposed (#107, M4); nothing was sent. */
+/** A draft an MCP client proposed (#107, M4); nothing was sent. The
+ *  client can ask whether the user opened or dismissed it. */
 function ProposalBlock({ event, compact }: { event: AgentEvent; compact: boolean }) {
   const { t } = useTranslation();
+  const { resolve } = useAgentMutations();
   const draft = event.payload.draft as ChatDraft | undefined;
   if (!draft) return null;
+  const action = event.resolution?.action;
   return (
     <AgentMessage compact={compact} wide>
       <Bubble>
         <p>{t("agent.proposalMsg", "{{client}} proposed a draft. Review it before sending; nothing has been sent.", { client: str(event.payload.client) })}</p>
       </Bubble>
-      <DraftCard draft={draft} />
+      <DraftCard
+        draft={draft}
+        onOpened={() => { if (!action) resolve.mutate({ id: event.id, action: "opened" }); }}
+      />
+      {action === "dismissed" ? (
+        <div className="agent-mail__status"><Check size={13} aria-hidden="true" />{t("agent.proposalDismissed", "Dismissed")}</div>
+      ) : action === "opened" ? (
+        <div className="agent-mail__status"><Check size={13} aria-hidden="true" />{t("agent.proposalOpened", "Opened in the composer")}</div>
+      ) : (
+        <Chips label={t("agent.quickReplies", "Quick replies")}>
+          <Chip onClick={() => resolve.mutate({ id: event.id, action: "dismissed" })}>{t("agent.proposalDismiss", "Dismiss")}</Chip>
+        </Chips>
+      )}
     </AgentMessage>
   );
 }
@@ -688,7 +704,7 @@ function Typing({ progress, onStop }: { progress?: ChatProgress; onStop: () => v
   );
 }
 
-function DraftCard({ draft }: { draft: ChatDraft }) {
+function DraftCard({ draft, onOpened }: { draft: ChatDraft; onOpened?: () => void }) {
   const { t } = useTranslation();
   const setActiveAccountId = useMailStore((s) => s.setActiveAccountId);
   async function openInComposer() {
@@ -699,6 +715,7 @@ function DraftCard({ draft }: { draft: ChatDraft }) {
     } else {
       useComposeStore.getState().openCompose("new", null, { to: draft.to, cc: draft.cc, subject: draft.subject, body: draft.body });
     }
+    onOpened?.();
   }
   return (
     <article className="agent-draft">
@@ -795,6 +812,12 @@ function ChatAnswer({ entry, question, onRetry }: { entry: ChatEntry; question?:
   );
 }
 
+const ABOUT_SUGGESTIONS: Array<{ key: string; fallback: string }> = [
+  { key: "agent.suggestSummarize", fallback: "Summarise this thread" },
+  { key: "agent.suggestWant", fallback: "What do they want from me?" },
+  { key: "agent.suggestReply", fallback: "Draft a reply" },
+];
+
 const SUGGESTIONS: Array<{ key: string; fallback: string }> = [
   { key: "agent.suggestToday", fallback: "Anything that needs me today?" },
   { key: "agent.suggestWaiting", fallback: "What's waiting for my reply?" },
@@ -811,9 +834,18 @@ function Composer({ running, onStop, showSuggestions }: { running: string[]; onS
   const setActiveView = useUIStore((s) => s.setActiveView);
   const setSettingsTab = useUIStore((s) => s.setSettingsTab);
   const { send } = useChatMutations();
+  const askContext = useAskContext((s) => s.context);
+  const setAskContext = useAskContext((s) => s.setContext);
   const [text, setText] = useState("");
   const [scope, setScope] = useState<string>(() => activeAccountId ?? "all");
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Asking about a mail: search its account, and be ready to type.
+  useEffect(() => {
+    if (!askContext) return;
+    setScope((current) => (current === "all" || current === askContext.accountId ? current : askContext.accountId));
+    inputRef.current?.focus();
+  }, [askContext]);
 
   useLayoutEffect(() => {
     const node = inputRef.current;
@@ -852,15 +884,31 @@ function Composer({ running, onStop, showSuggestions }: { running: string[]; onS
   const submit = (value: string) => {
     const question = value.trim();
     if (!question || busy || send.isPending) return;
-    send.mutate({ text: question, accountIds: scope === "all" ? null : [scope] });
+    send.mutate({ text: question, accountIds: scope === "all" ? null : [scope], contextMessageId: askContext?.messageId ?? null });
     setText("");
+    setAskContext(null);
   };
 
   return (
     <div className="agent-composer">
-      {showSuggestions && !busy && (
+      {askContext && (
+        <div className="agent-context" role="status">
+          <span className="agent-context__label">{t("agent.aboutLabel", "About")}</span>
+          <span className="agent-context__subject">{askContext.subject || t("inbox.noSubject", "(no subject)")}</span>
+          <span className="agent-context__from">{askContext.from}</span>
+          <button
+            type="button"
+            className="agent-context__clear"
+            aria-label={t("agent.aboutClear", "Don't ask about this mail")}
+            onClick={() => setAskContext(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
+      {(showSuggestions || askContext) && !busy && (
         <div className="agent-suggestions" role="group" aria-label={t("agent.suggestions", "Suggestions")}>
-          {SUGGESTIONS.map((item) => (
+          {(askContext ? ABOUT_SUGGESTIONS : SUGGESTIONS).map((item) => (
             <Chip key={item.key} onClick={() => submit(t(item.key, item.fallback))}>{t(item.key, item.fallback)}</Chip>
           ))}
         </div>
@@ -1019,7 +1067,16 @@ export default function AgentThread() {
                 {divider && <div className="agent-thread__divider" role="separator">{t("agent.newMessages", "New")}</div>}
                 {separator && !divider && <div className="agent-thread__separator">{dayLabel(t, at, i18n.language)}</div>}
                 {item.kind === "block" && <BlockView block={item.block} compact={compact && !divider} />}
-                {item.kind === "chat" && item.entry.role === "user" && <UserReply><RichText text={item.entry.text} /></UserReply>}
+                {item.kind === "chat" && item.entry.role === "user" && (
+                  <UserReply>
+                    {item.entry.context && (
+                      <span className="agent-reply__about">
+                        {t("agent.aboutLine", "About: {{subject}}", { subject: item.entry.context.subject || t("inbox.noSubject", "(no subject)") })}
+                      </span>
+                    )}
+                    <RichText text={item.entry.text} />
+                  </UserReply>
+                )}
                 {item.kind === "chat" && item.entry.role === "assistant" && (
                   <ChatAnswer
                     entry={item.entry}

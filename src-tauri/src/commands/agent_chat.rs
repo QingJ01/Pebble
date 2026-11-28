@@ -30,6 +30,8 @@ const PURPOSE: &str = "agent_chat.payload";
 const HISTORY_MESSAGES: u32 = 12;
 pub const CHAT_PROGRESS_EVENT: &str = "agent:chat-progress";
 pub const CHAT_CHANGED_EVENT: &str = "agent:chat-changed";
+/// Activity-log id for Pebble's own assistant.
+pub const ASSISTANT_CLIENT_ID: &str = "assistant";
 
 /// What a chat message holds (stored encrypted).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -43,6 +45,18 @@ pub struct ChatPayload {
     pub follow_ups: Vec<FollowUpStarted>,
     pub error: Option<String>,
     pub fallback: bool,
+    /// The mail the user was reading when they asked.
+    pub context: Option<ChatContext>,
+}
+
+/// "Ask Pebble about this" from the reader.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ChatContext {
+    pub message_id: String,
+    pub account_id: String,
+    pub from: String,
+    pub subject: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -162,6 +176,7 @@ pub async fn agent_chat_send(
     text: String,
     account_ids: Option<Vec<String>>,
     from_account_id: Option<String>,
+    context_message_id: Option<String>,
 ) -> CmdResult<String> {
     let question = text.trim().to_string();
     if question.is_empty() {
@@ -218,6 +233,32 @@ pub async fn agent_chat_send(
         })
         .collect();
 
+    // The mail the user is reading, if it is in scope.
+    let context = match context_message_id.as_deref() {
+        Some(id) => {
+            let message = state
+                .store
+                .get_message(id)?
+                .filter(|m| scope.contains_key(&m.account_id) && !m.is_deleted)
+                .ok_or_else(|| {
+                    PebbleError::Validation(
+                        "That message isn't in the accounts Pebble may read".into(),
+                    )
+                })?;
+            Some(ChatContext {
+                message_id: message.id.clone(),
+                account_id: message.account_id.clone(),
+                from: if message.from_name.trim().is_empty() {
+                    message.from_address.clone()
+                } else {
+                    message.from_name.clone()
+                },
+                subject: message.subject.clone(),
+            })
+        }
+        None => None,
+    };
+
     // Everything that can fail happens before the run exists, so a failed
     // send never leaves a run without an answer.
     let proxy = get_global_proxy_raw(&state.crypto, &state.store)?;
@@ -238,6 +279,7 @@ pub async fn agent_chat_send(
         &ChatPayload {
             text: question.clone(),
             scope: scope.keys().cloned().collect(),
+            context: context.clone(),
             ..Default::default()
         },
     )?;
@@ -266,7 +308,17 @@ pub async fn agent_chat_send(
         let search = Arc::clone(&state.search);
         let mut caps = Capabilities::new(&store, &search, scope);
         caps.preferred_account = from_account_id;
-        let system = system_prompt(&today(), &caps.scope_emails());
+        let mut system = system_prompt(&today(), &caps.scope_emails());
+        if let Some(context) = &context {
+            // Ids and headers only; the model reads the mail with its tools.
+            system.push_str(&format!(
+                "\nThe user is looking at a message right now (message_id {}, from {}, subject \"{}\"). \
+                 When they say \"this\", \"this mail\" or \"this thread\", they mean it: read it with read_thread.",
+                context.message_id,
+                context.from,
+                crate::agent::capabilities::redact_codes(&context.subject),
+            ));
+        }
         let progress_app = app.clone();
         let progress_run = run_id.clone();
         let progress = move |p: Progress| {
@@ -317,6 +369,21 @@ pub async fn agent_chat_send(
             }
         };
         let started_follow_ups = !caps.follow_ups.is_empty();
+        // The assistant's own tool calls go in the same activity log as
+        // MCP clients' (Settings → Connections), without content.
+        let now = now_timestamp();
+        for call in &caps.calls {
+            if let Err(e) = state.store.insert_mcp_audit(
+                ASSISTANT_CLIENT_ID,
+                &call.tool,
+                &call.accounts,
+                call.results,
+                &call.outcome,
+                now,
+            ) {
+                warn!("Failed to record the assistant's tool call: {e}");
+            }
+        }
         if let Err(e) = save(&state, "assistant", Some(&run_id), status, &payload) {
             warn!("Failed to store the assistant's answer: {e}");
         }

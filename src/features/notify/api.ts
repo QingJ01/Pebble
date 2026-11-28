@@ -24,6 +24,8 @@ export interface NotifyPrefs {
   modelSendBody: boolean;
   /** Proactive agent (defaults row only). */
   briefingEnabled: boolean;
+  /** Add an AI summary to the briefing (sends senders and subjects to the model). */
+  briefingSummary?: boolean;
   /** Local minute of day for the daily briefing. */
   briefingMinute: number;
   awaitingReplyEnabled: boolean;
