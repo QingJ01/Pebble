@@ -722,7 +722,9 @@ mod tests {
         );
         assert_eq!(store.notify_feedback_for(&me.id, "m1").unwrap(), Some(true));
         assert_eq!(
-            store.recent_notify_feedback(&[me.id.clone()], 5).unwrap(),
+            store
+                .recent_notify_feedback(std::slice::from_ref(&me.id), 5)
+                .unwrap(),
             vec![("ann@example.com".to_string(), "Hi".to_string(), true)]
         );
         assert!(
