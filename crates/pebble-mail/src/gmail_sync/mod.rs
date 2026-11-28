@@ -384,6 +384,7 @@ impl GmailSyncWorker {
             folder_ids: folder_ids.clone(),
             notify: false,
             reconciliation: true,
+            signals: Default::default(),
         });
         self.base
             .emit_list_refresh(folder_ids, vec![message_id.to_string()]);
@@ -400,6 +401,7 @@ impl GmailSyncWorker {
             mut message,
             visible_label_ids,
             attachments,
+            signals,
         } = fetched;
 
         let account_id = self.base.account_id.clone();
@@ -458,6 +460,7 @@ impl GmailSyncWorker {
             folder_ids,
             notify: notify && !repairing_incomplete,
             reconciliation: repairing_incomplete,
+            signals,
         });
 
         Ok(true)

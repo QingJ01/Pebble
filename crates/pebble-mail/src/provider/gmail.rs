@@ -169,6 +169,8 @@ pub struct GmailFetchedMessage {
     pub message: Message,
     pub visible_label_ids: Vec<String>,
     pub attachments: Vec<AttachmentData>,
+    /// Bulk / auto-reply headers and Gmail category labels.
+    pub signals: pebble_core::MailSignals,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -422,10 +424,28 @@ impl GmailProvider {
             Vec::new()
         };
 
+        let header_signals = gm
+            .payload
+            .as_ref()
+            .and_then(|payload| payload.headers.as_ref())
+            .map(|headers| {
+                pebble_core::MailSignals::from_headers(
+                    headers.iter().map(|h| (h.name.as_str(), h.value.as_str())),
+                )
+            })
+            .unwrap_or_default();
+        let label_signals = pebble_core::MailSignals::from_gmail_labels(
+            gm.label_ids
+                .as_deref()
+                .unwrap_or(&[])
+                .iter()
+                .map(String::as_str),
+        );
         Ok(GmailFetchedMessage {
             message: Self::gmail_message_to_message(&gm, account_id),
             visible_label_ids,
             attachments,
+            signals: header_signals.merge(label_signals),
         })
     }
 

@@ -1,5 +1,5 @@
 use mail_parser::{Address, HeaderValue, MessageParser, MimeHeaders, PartType};
-use pebble_core::{build_snippet, EmailAddress, PebbleError, Result};
+use pebble_core::{build_snippet, EmailAddress, MailSignals, PebbleError, Result};
 
 /// Metadata about a parsed attachment.
 #[derive(Debug, Clone)]
@@ -36,6 +36,8 @@ pub struct ParsedMessage {
     pub snippet: String,
     pub has_attachments: bool,
     pub attachments: Vec<AttachmentData>,
+    /// Bulk / auto-reply markers from the headers (notification triage).
+    pub signals: MailSignals,
 }
 
 /// Convert a mail-parser `Address` into a `Vec<EmailAddress>`.
@@ -103,6 +105,8 @@ pub fn parse_raw_email(raw: &[u8]) -> Result<ParsedMessage> {
     let mut message = MessageParser::default()
         .parse(raw)
         .ok_or_else(|| PebbleError::Sync("Failed to parse email message".to_string()))?;
+
+    let signals = MailSignals::from_headers(message.headers_raw());
 
     // Message-ID
     let message_id_header = message.message_id().map(|s| format!("<{s}>"));
@@ -228,6 +232,7 @@ pub fn parse_raw_email(raw: &[u8]) -> Result<ParsedMessage> {
         snippet,
         has_attachments,
         attachments,
+        signals,
     })
 }
 
@@ -493,5 +498,22 @@ mod tests {
         let parsed =
             parse_raw_email(&multipart_with_attachments(MAX_ATTACHMENT_PARTS + 3)).unwrap();
         assert_eq!(parsed.attachments.len(), MAX_ATTACHMENT_PARTS);
+    }
+}
+
+#[cfg(test)]
+mod signal_tests {
+    use super::parse_raw_email;
+
+    #[test]
+    fn list_and_auto_headers_become_signals() {
+        let raw = b"From: News <news@example.com>\r\nTo: me@example.com\r\nSubject: Weekly\r\nList-Unsubscribe: <mailto:u@example.com>\r\nAuto-Submitted: auto-generated\r\n\r\nHello";
+        let parsed = parse_raw_email(raw).unwrap();
+        assert!(parsed.signals.bulk);
+        assert!(parsed.signals.auto_submitted);
+
+        let personal =
+            b"From: Ann <ann@example.com>\r\nTo: me@example.com\r\nSubject: Hi\r\n\r\nHello";
+        assert!(parse_raw_email(personal).unwrap().signals.is_empty());
     }
 }

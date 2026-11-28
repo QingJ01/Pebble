@@ -22,6 +22,7 @@ pebble-privacy = { path = "../crates/pebble-privacy" }
 pebble-mail = { path = "../crates/pebble-mail" }
 pebble-search = { path = "../crates/pebble-search" }
 pebble-rules = { path = "../crates/pebble-rules" }
+pebble-notify = { path = "../crates/pebble-notify" }
 pebble-translate = { path = "../crates/pebble-translate" }
 pebble-crypto = { path = "../crates/pebble-crypto" }
 pebble-oauth = { path = "../crates/pebble-oauth" }
@@ -39,7 +40,7 @@ rfd = "0.15.4"
 sha2 = "0.10.9"
 url = "2"
 regex = "1"
-chrono = { version = "0.4.44", default-features = false, features = ["std"] }
+chrono = { version = "0.4.44", default-features = false, features = ["std", "clock"] }
 
 [dev-dependencies]
 rusqlite = { workspace = true }

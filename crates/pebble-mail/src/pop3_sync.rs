@@ -289,6 +289,7 @@ impl Pop3SyncWorker {
         notify_new: bool,
     ) -> Result<()> {
         let parsed = parse_raw_email(&raw)?;
+        let parsed_signals = parsed.signals;
         let now = now_timestamp();
         let remote_ids = vec![message_ref.uid.clone()];
         let incomplete = self
@@ -371,6 +372,7 @@ impl Pop3SyncWorker {
             folder_ids,
             notify: notify_new && !repairing_incomplete,
             reconciliation: repairing_incomplete,
+            signals: parsed_signals,
         });
         Ok(())
     }

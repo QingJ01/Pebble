@@ -6,6 +6,7 @@ mod ipc_bindings;
 mod profile;
 mod realtime;
 mod send_controls;
+mod smart_notify;
 mod snooze_watcher;
 mod startup;
 mod state;
@@ -517,6 +518,15 @@ fn finish_setup(
             Err(e) => tracing::warn!("Database integrity check task failed: {}", e),
         }
     });
+
+    // Keep the notification decision log to the last 60 days.
+    let store_for_prune = state.store.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let cutoff = pebble_core::now_timestamp() - 60 * 24 * 60 * 60;
+        if let Err(e) = store_for_prune.prune_notification_log(cutoff) {
+            tracing::warn!("Failed to prune the notification log: {e}");
+        }
+    });
     log_startup_phase(
         startup_start,
         &mut startup_phase,
@@ -853,6 +863,15 @@ pub fn run() {
             send_controls::send_control_exit_pending,
             commands::compose::stage_compose_attachment,
             commands::compose::cleanup_staged_compose_attachment,
+            commands::smart_notify::get_notify_settings,
+            commands::smart_notify::set_notify_prefs,
+            commands::smart_notify::reset_account_notify_prefs,
+            commands::smart_notify::list_sender_prefs,
+            commands::smart_notify::set_sender_pref,
+            commands::smart_notify::remove_sender_pref,
+            commands::smart_notify::list_notification_log,
+            commands::smart_notify::list_digest,
+            commands::smart_notify::mark_digest_seen,
             commands::trusted_senders::trust_sender,
             commands::trusted_senders::list_trusted_senders,
             commands::trusted_senders::remove_trusted_sender,

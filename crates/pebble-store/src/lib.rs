@@ -11,6 +11,7 @@ pub mod labels;
 pub mod mail_archive;
 pub mod messages;
 pub mod migrations;
+pub mod notify;
 pub mod pending_ops;
 pub mod rules;
 pub mod scheduled_sends;

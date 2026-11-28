@@ -44,6 +44,7 @@ vi.mock("../../src/hooks/useMessageLoader", () => ({
     errorInfo: null,
   }),
 }));
+vi.mock("../../src/features/notify/SenderNotifyAction", () => ({ default: () => null }));
 vi.mock("../../src/hooks/useBilingualTranslation", () => ({
   useBilingualTranslation: () => ({
     bilingualMode: false,

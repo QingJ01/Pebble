@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import ScheduledSendsView from "@/features/compose/ScheduledSendsView";
 import { useTranslation } from "react-i18next";
 import {
-  showTestNotification,
   openDefaultMailSettings,
   getAutostartEnabled,
   setAutostartEnabled,
@@ -53,37 +52,12 @@ const REALTIME_OPTIONS: Array<{
 export default function GeneralTab() {
   const { t } = useTranslation();
   const addToast = useToastStore((s) => s.addToast);
-  const [testingNotification, setTestingNotification] = useState(false);
   const realtimeMode = useUIStore((s) => s.realtimeMode);
   const setRealtimeMode = useUIStore((s) => s.setRealtimeMode);
-  const notificationsEnabled = useUIStore((s) => s.notificationsEnabled);
-  const setNotificationsEnabled = useUIStore((s) => s.setNotificationsEnabled);
   const keepRunningInBackground = useUIStore((s) => s.keepRunningInBackground);
   const setKeepRunningInBackground = useUIStore((s) => s.setKeepRunningInBackground);
   const startHiddenToTray = useUIStore((s) => s.startHiddenToTray);
   const setStartHiddenToTray = useUIStore((s) => s.setStartHiddenToTray);
-
-  const toggleNotifications = useCallback(() => {
-    setNotificationsEnabled(!notificationsEnabled);
-  }, [notificationsEnabled, setNotificationsEnabled]);
-
-  const handleTestNotification = useCallback(async () => {
-    setTestingNotification(true);
-    try {
-      await showTestNotification();
-      addToast({
-        message: t("settings.testNotificationSent", "Test notification sent"),
-        type: "success",
-      });
-    } catch {
-      addToast({
-        message: t("settings.testNotificationFailed", "Failed to send test notification"),
-        type: "error",
-      });
-    } finally {
-      setTestingNotification(false);
-    }
-  }, [addToast, t]);
 
   const quitOnClose = !keepRunningInBackground;
   const toggleQuitOnClose = useCallback(() => {
@@ -154,26 +128,6 @@ export default function GeneralTab() {
             );
           })}
         </OptionCardGroup>
-      </SettingsSection>
-
-      <SettingsSection title={t("settings.notifications")}>
-        <Checkbox
-          checked={notificationsEnabled}
-          onChange={toggleNotifications}
-          label={t("settings.enableNotifications")}
-        />
-        <div className="settings-actions">
-          <Button
-            aria-label={t("settings.testNotification", "Send test notification")}
-            onClick={handleTestNotification}
-            disabled={!notificationsEnabled}
-            loading={testingNotification}
-          >
-            {testingNotification
-              ? t("settings.testNotificationSending", "Sending test notification...")
-              : t("settings.testNotification", "Send test notification")}
-          </Button>
-        </div>
       </SettingsSection>
 
       <SettingsSection title={t("settings.startupBehavior", "Startup Behavior")}>
