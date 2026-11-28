@@ -237,6 +237,18 @@ describe("MessageList", () => {
     });
   });
 
+  it("switches from a populated list to loading or empty without changing hook order", () => {
+    const messages = [makeMessage("m-1")];
+    const { rerender } = render(
+      <MessageList messages={messages} selectedMessageId={null} onSelectMessage={vi.fn()} loading={false} />,
+    );
+    // Before the fix these rerenders threw React error #300 (fewer hooks than expected).
+    rerender(<MessageList messages={messages} selectedMessageId={null} onSelectMessage={vi.fn()} loading />);
+    rerender(<MessageList messages={[]} selectedMessageId={null} onSelectMessage={vi.fn()} loading={false} />);
+    rerender(<MessageList messages={messages} selectedMessageId={null} onSelectMessage={vi.fn()} loading={false} />);
+    expect(screen.getByText("Subject m-1")).toBeTruthy();
+  });
+
   it("fetches labels per stable page-sized chunk so earlier pages stay cached", () => {
     mocks.labelQueryKeys = [];
     const firstPages = Array.from({ length: 100 }, (_, index) => makeMessage(`m-${index}`));
