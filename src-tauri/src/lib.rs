@@ -1,4 +1,5 @@
 mod account_colors;
+mod agent;
 mod commands;
 mod events;
 #[cfg(test)]
@@ -866,6 +867,11 @@ pub fn run() {
             send_controls::send_control_exit_pending,
             commands::compose::stage_compose_attachment,
             commands::compose::cleanup_staged_compose_attachment,
+            commands::agent_chat::agent_chat_send,
+            commands::agent_chat::agent_chat_list,
+            commands::agent_chat::agent_chat_running,
+            commands::agent_chat::agent_chat_cancel,
+            commands::agent_chat::agent_chat_clear,
             commands::agent_model::get_agent_model,
             commands::agent_model::set_agent_model,
             commands::agent_model::clear_agent_model,

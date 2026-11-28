@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { ArrowDown, ArrowUp, ArrowUpRight, Check, Sun } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpRight, BellRing, Check, FileText, Square, Sun } from "lucide-react";
 import IconButton from "@/components/ui/IconButton";
 import { formatDate, formatDateTime, formatTime } from "@/lib/formatDate";
 import iconUrl from "@/assets/app-icon.png";
@@ -14,6 +14,20 @@ import {
 } from "./api";
 import { useOpenMessage, useReplyToMessage } from "./useOpenMessage";
 import { useAgentModel } from "./model-api";
+import { useAccountsQuery } from "@/hooks/queries";
+import { useMailStore } from "@/stores/mail.store";
+import { useComposeStore } from "@/stores/compose.store";
+import { getMessage } from "@/lib/api";
+import {
+  useChat,
+  useChatInvalidation,
+  useChatMutations,
+  useChatProgress,
+  useRunningChats,
+  type ChatDraft,
+  type ChatEntry,
+  type ChatProgress,
+} from "./chat-api";
 import { useUIStore } from "@/stores/ui.store";
 
 // ---------------------------------------------------------------- helpers
@@ -522,13 +536,213 @@ function BlockView({ block, compact }: { block: Block; compact: boolean }) {
   }
 }
 
+// ------------------------------------------------------------------ chat
+
+/** Paragraphs, "- " / "1. " lists and **bold**; everything as text nodes. */
+export function RichText({ text }: { text: string }) {
+  const blocks = text.replace(/\r\n/g, "\n").split(/\n{2,}/);
+  const inline = (line: string, key: string) =>
+    line.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
+      part.startsWith("**") && part.endsWith("**") && part.length > 4
+        ? <strong key={`${key}-${i}`}>{part.slice(2, -2)}</strong>
+        : <span key={`${key}-${i}`}>{part}</span>,
+    );
+  return (
+    <>
+      {blocks.map((block, index) => {
+        const lines = block.split("\n").filter((line) => line.trim() !== "");
+        if (lines.length === 0) return null;
+        const bullet = /^\s*(?:[-*•]|\d+[.)])\s+/;
+        if (lines.every((line) => bullet.test(line))) {
+          const ordered = /^\s*\d/.test(lines[0]);
+          const items = lines.map((line, i) => <li key={i}>{inline(line.replace(bullet, ""), `${index}-${i}`)}</li>);
+          return ordered ? <ol key={index}>{items}</ol> : <ul key={index}>{items}</ul>;
+        }
+        return (
+          <p key={index}>
+            {lines.map((line, i) => (
+              <span key={i}>
+                {i > 0 && <br />}
+                {inline(line, `${index}-${i}`)}
+              </span>
+            ))}
+          </p>
+        );
+      })}
+    </>
+  );
+}
+
+function progressText(t: TFunction, progress: ChatProgress | undefined): string {
+  switch (progress?.step) {
+    case "searching":
+      return progress.detail
+        ? t("agent.stepSearchingFor", "Searching for “{{q}}”…", { q: progress.detail })
+        : t("agent.stepSearching", "Searching your mail…");
+    case "reading":
+      return t("agent.stepReading", "Reading the conversation…");
+    case "checking":
+      return t("agent.stepChecking", "Looking through recent mail…");
+    case "drafting":
+      return t("agent.stepDrafting", "Writing a draft…");
+    case "following":
+      return t("agent.stepFollowing", "Setting up a follow-up…");
+    default:
+      return t("agent.stepThinking", "Thinking…");
+  }
+}
+
+function Typing({ progress, onStop }: { progress?: ChatProgress; onStop: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <AgentMessage>
+      <Bubble>
+        <p className="agent-typing">
+          <span className="agent-typing__dots" aria-hidden="true"><i /><i /><i /></span>
+          {progressText(t, progress)}
+        </p>
+      </Bubble>
+      <Chips label={t("agent.quickReplies", "Quick replies")}>
+        <Chip onClick={onStop}>{t("agent.stop", "Stop")}</Chip>
+      </Chips>
+    </AgentMessage>
+  );
+}
+
+function DraftCard({ draft }: { draft: ChatDraft }) {
+  const { t } = useTranslation();
+  const setActiveAccountId = useMailStore((s) => s.setActiveAccountId);
+  async function openInComposer() {
+    setActiveAccountId(draft.accountId);
+    const original = draft.replyToMessageId ? await getMessage(draft.replyToMessageId).catch(() => null) : null;
+    if (original) {
+      useComposeStore.getState().openCompose("reply", original, { to: draft.to, cc: draft.cc, body: draft.body });
+    } else {
+      useComposeStore.getState().openCompose("new", null, { to: draft.to, cc: draft.cc, subject: draft.subject, body: draft.body });
+    }
+  }
+  return (
+    <article className="agent-draft">
+      <div className="agent-draft__head">
+        <FileText size={14} aria-hidden="true" />
+        <span>{t("agent.draftTo", "Draft to {{who}}", { who: draft.to.join(", ") })}</span>
+      </div>
+      {draft.unverified && draft.unverified.length > 0 && (
+        <p className="agent-draft__warn" role="note">
+          {t("agent.draftUnverified", "Check the recipients: you haven't mentioned or written to {{who}}.", { who: draft.unverified.join(", ") })}
+        </p>
+      )}
+      {draft.subject && <div className="agent-draft__subject">{draft.subject}</div>}
+      <div className={`agent-draft__body${draft.body.split("\n").length > 7 || draft.body.length > 360 ? " is-long" : ""}`}>{draft.body}</div>
+      <div className="agent-draft__foot">
+        <Chip primary onClick={() => void openInComposer()}>{t("agent.openDraft", "Open in composer")}</Chip>
+        <span className="agent-draft__note">{t("agent.draftNotSent", "Not sent. You review and send it.")}</span>
+      </div>
+    </article>
+  );
+}
+
+function Sources({ entry }: { entry: ChatEntry }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  if (entry.used.length === 0) return null;
+  return (
+    <div className="agent-sources">
+      <button type="button" className="agent-sources__toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+        {t("agent.sourcesCount", { count: entry.used.length, defaultValue: "Used {{count}} messages" })}
+        {entry.fallback && ` · ${t("agent.fallbackNote", "searched for you (this model can't use tools)")}`}
+      </button>
+      {open && (
+        <ul className="agent-brief__list agent-sources__list">
+          {entry.used.map((mail) => (
+            <MailRow
+              key={mail.messageId}
+              item={{
+                messageId: mail.messageId,
+                accountId: mail.accountId,
+                from: mail.from,
+                fromAddress: mail.fromAddress,
+                subject: mail.subject,
+              }}
+            />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function ChatAnswer({ entry, question, onRetry }: { entry: ChatEntry; question?: ChatEntry; onRetry: (text: string) => void }) {
+  const { t, i18n } = useTranslation();
+  const open = useOpenMessage();
+  if (entry.status === "cancelled") {
+    return <p className="agent-msg__note agent-msg__note--indent">{t("agent.stopped", "Stopped.")}</p>;
+  }
+  if (entry.status === "error") {
+    return (
+      <AgentMessage>
+        <Bubble>
+          <p className="agent-error">{t("agent.answerFailed", "I couldn't answer that: {{error}}", { error: entry.error ?? "" })}</p>
+        </Bubble>
+        {question && (
+          <Chips label={t("agent.quickReplies", "Quick replies")}>
+            <Chip primary onClick={() => onRetry(question.text)}>{t("agent.retry", "Try again")}</Chip>
+          </Chips>
+        )}
+      </AgentMessage>
+    );
+  }
+  return (
+    <AgentMessage wide={entry.drafts.length > 0 || entry.followUps.length > 0}>
+      <Bubble>
+        <RichText text={entry.text || t("agent.emptyAnswer", "(no answer)")} />
+      </Bubble>
+      {entry.drafts.map((draft, index) => <DraftCard key={index} draft={draft} />)}
+      {entry.followUps.map((follow) => (
+        <button key={follow.watchId} type="button" className="agent-follow" onClick={() => open(follow.accountId, follow.messageId)}>
+          <BellRing size={14} aria-hidden="true" />
+          <span>
+            {follow.deadline
+              ? t("agent.followStartedUntil", "Following “{{title}}”, reminder on {{date}}", {
+                title: follow.title,
+                date: formatDate(follow.deadline, { month: "short", day: "numeric" }, i18n.language),
+              })
+              : t("agent.followStartedPlain", "Following “{{title}}”", { title: follow.title })}
+          </span>
+        </button>
+      ))}
+      <Sources entry={entry} />
+    </AgentMessage>
+  );
+}
+
+const SUGGESTIONS: Array<{ key: string; fallback: string }> = [
+  { key: "agent.suggestToday", fallback: "Anything that needs me today?" },
+  { key: "agent.suggestWaiting", fallback: "What's waiting for my reply?" },
+  { key: "agent.suggestFind", fallback: "Find last week's mail about the contract" },
+];
+
 /** Bottom of the conversation: the composer once a model is set up,
  *  otherwise a prompt to set one up. */
-function Composer() {
+function Composer({ running, onStop, showSuggestions }: { running: string[]; onStop: () => void; showSuggestions: boolean }) {
   const { t } = useTranslation();
   const { data: model, isLoading } = useAgentModel();
+  const { data: accounts = [] } = useAccountsQuery();
+  const activeAccountId = useMailStore((s) => s.activeAccountId);
   const setActiveView = useUIStore((s) => s.setActiveView);
   const setSettingsTab = useUIStore((s) => s.setSettingsTab);
+  const { send } = useChatMutations();
+  const [text, setText] = useState("");
+  const [scope, setScope] = useState<string>(() => activeAccountId ?? "all");
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  useLayoutEffect(() => {
+    const node = inputRef.current;
+    if (!node) return;
+    node.style.height = "auto";
+    node.style.height = `${Math.min(node.scrollHeight, 160)}px`;
+  }, [text]);
+
   if (isLoading) return <div className="agent-composer" />;
   if (!model?.configured) {
     return (
@@ -554,17 +768,71 @@ function Composer() {
       </div>
     );
   }
+
+  const busy = running.length > 0;
+  const submit = (value: string) => {
+    const question = value.trim();
+    if (!question || busy || send.isPending) return;
+    send.mutate({ text: question, accountIds: scope === "all" ? null : [scope] });
+    setText("");
+  };
+
   return (
     <div className="agent-composer">
-      <div className="agent-composer__box">
+      {showSuggestions && !busy && (
+        <div className="agent-suggestions" role="group" aria-label={t("agent.suggestions", "Suggestions")}>
+          {SUGGESTIONS.map((item) => (
+            <Chip key={item.key} onClick={() => submit(t(item.key, item.fallback))}>{t(item.key, item.fallback)}</Chip>
+          ))}
+        </div>
+      )}
+      <form
+        className="agent-composer__box"
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit(text);
+        }}
+      >
         <textarea
+          ref={inputRef}
           className="agent-composer__input"
           rows={1}
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              submit(text);
+            }
+          }}
           placeholder={t("agent.composerPlaceholder", "Ask Pebble about your mail…")}
           aria-label={t("agent.composerPlaceholder", "Ask Pebble about your mail…")}
         />
-        <IconButton label={t("agent.send", "Send")} icon={<ArrowUp size={16} />} variant="secondary" disabled />
-      </div>
+        {accounts.length > 1 && (
+          <select
+            className="agent-composer__scope"
+            value={scope}
+            onChange={(event) => setScope(event.target.value)}
+            aria-label={t("agent.scope", "Which accounts Pebble may read")}
+          >
+            <option value="all">{t("agent.scopeAll", "All accounts")}</option>
+            {accounts.map((account) => (
+              <option key={account.id} value={account.id}>{account.account_label || account.email}</option>
+            ))}
+          </select>
+        )}
+        {busy ? (
+          <IconButton label={t("agent.stop", "Stop")} icon={<Square size={14} />} variant="secondary" onClick={onStop} />
+        ) : (
+          <IconButton
+            type="submit"
+            label={t("agent.send", "Send")}
+            icon={<ArrowUp size={16} />}
+            variant="secondary"
+            disabled={!text.trim() || send.isPending}
+          />
+        )}
+      </form>
     </div>
   );
 }
@@ -576,9 +844,34 @@ export default function AgentThread() {
   const { t, i18n } = useTranslation();
   const { data: events = [], isLoading } = useAgentEvents();
   const { markRead } = useAgentMutations();
+  useChatInvalidation();
+  const { data: chat = [] } = useChat();
+  const { data: running = [] } = useRunningChats();
+  const progress = useChatProgress();
+  const { send, cancel } = useChatMutations();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
   const blocks = useMemo(() => buildBlocks(events), [events]);
+  type Item =
+    | { kind: "block"; at: number; key: string; block: Block }
+    | { kind: "chat"; at: number; key: string; entry: ChatEntry; order: number }
+    | { kind: "typing"; at: number; key: string; runId: string };
+  const items = useMemo<Item[]>(() => {
+    const list: Item[] = blocks.map((block) => ({
+      kind: "block",
+      at: block.at,
+      key: block.kind === "awaiting" ? block.events[0].id : block.event.id,
+      block,
+    }));
+    chat.forEach((entry, order) => list.push({ kind: "chat", at: entry.createdAt, key: entry.id, entry, order }));
+    const answered = new Set(chat.filter((entry) => entry.role === "assistant").map((entry) => entry.runId));
+    for (const runId of running) {
+      if (!answered.has(runId)) list.push({ kind: "typing", at: Number.MAX_SAFE_INTEGER, key: `typing-${runId}`, runId });
+    }
+    return list.sort((a, b) => a.at - b.at || (a.kind === "chat" && b.kind === "chat" ? a.order - b.order : 0));
+  }, [blocks, chat, running]);
+  const questionFor = (runId: string | null) => chat.find((entry) => entry.role === "user" && entry.runId === runId);
+  const stopAll = () => running.forEach((runId) => cancel.mutate(runId));
   const hasUnread = events.some((event) => !event.readAt);
   // Where the "new" divider goes: frozen when the view opens so it doesn't
   // vanish the moment the messages are marked read.
@@ -591,7 +884,7 @@ export default function AgentThread() {
     const node = scrollRef.current;
     if (node && atBottom) node.scrollTop = node.scrollHeight;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blocks.length, events]);
+  }, [blocks.length, events, chat.length, running.length, progress]);
 
   useEffect(() => {
     if (!hasUnread) return;
@@ -630,18 +923,32 @@ export default function AgentThread() {
           {!isLoading && blocks.length === 0 && (
             <p className="agent-thread__empty">{t("agent.activityEmpty", "Nothing yet.")}</p>
           )}
-          {blocks.map((block) => {
-            const separator = previous === null || dayKey(previous) !== dayKey(block.at) || block.at - previous > 2 * 3600;
-            const compact = !separator && previous !== null && block.at - previous < 5 * 60;
-            const divider = !dividerShown && dividerAt.current !== null && block.at >= dividerAt.current;
+          {items.map((item) => {
+            const at = item.kind === "typing" ? (previous ?? item.at) : item.at;
+            const separator = item.kind !== "typing"
+              && (previous === null || dayKey(previous) !== dayKey(at) || at - previous > 2 * 3600);
+            const compact = item.kind === "block" && !separator && previous !== null && at - previous < 5 * 60;
+            const divider = item.kind === "block" && !dividerShown && dividerAt.current !== null && at >= dividerAt.current;
             if (divider) dividerShown = true;
-            previous = block.kind === "awaiting" ? block.events[block.events.length - 1].createdAt : block.at;
-            const key = block.kind === "awaiting" ? block.events[0].id : block.event.id;
+            if (item.kind === "block") {
+              previous = item.block.kind === "awaiting" ? item.block.events[item.block.events.length - 1].createdAt : item.at;
+            } else if (item.kind === "chat") {
+              previous = item.at;
+            }
             return (
-              <div key={key} className="agent-thread__item" title={formatDateTime(block.at, undefined, i18n.language)}>
+              <div key={item.key} className="agent-thread__item" title={item.kind === "typing" ? undefined : formatDateTime(at, undefined, i18n.language)}>
                 {divider && <div className="agent-thread__divider" role="separator">{t("agent.newMessages", "New")}</div>}
-                {separator && !divider && <div className="agent-thread__separator">{dayLabel(t, block.at, i18n.language)}</div>}
-                <BlockView block={block} compact={compact && !divider} />
+                {separator && !divider && <div className="agent-thread__separator">{dayLabel(t, at, i18n.language)}</div>}
+                {item.kind === "block" && <BlockView block={item.block} compact={compact && !divider} />}
+                {item.kind === "chat" && item.entry.role === "user" && <UserReply><RichText text={item.entry.text} /></UserReply>}
+                {item.kind === "chat" && item.entry.role === "assistant" && (
+                  <ChatAnswer
+                    entry={item.entry}
+                    question={questionFor(item.entry.runId)}
+                    onRetry={(text) => send.mutate({ text, accountIds: questionFor(item.entry.runId)?.scope ?? null })}
+                  />
+                )}
+                {item.kind === "typing" && <Typing progress={progress[item.runId]} onStop={() => cancel.mutate(item.runId)} />}
               </div>
             );
           })}
@@ -652,7 +959,7 @@ export default function AgentThread() {
           <ArrowDown size={16} />
         </button>
       )}
-      <Composer />
+      <Composer running={running} onStop={stopAll} showSuggestions={chat.length === 0} />
     </section>
   );
 }

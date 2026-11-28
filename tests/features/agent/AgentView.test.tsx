@@ -83,6 +83,10 @@ describe("AgentView", () => {
           return Promise.resolve({ id: "m1", account_id: "a1", subject: "Dinner?" });
         case "get_agent_model":
           return Promise.resolve(model);
+        case "agent_chat_list":
+        case "agent_chat_running":
+        case "list_accounts":
+          return Promise.resolve([]);
         default:
           return Promise.resolve(null);
       }

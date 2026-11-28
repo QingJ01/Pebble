@@ -76,6 +76,20 @@ describe("buildComposeEditorContent", () => {
     expect(content).not.toContain("&lt;strong&gt;");
   });
 
+  it("starts a reply with the assistant's drafted text when given one", () => {
+    const content = buildComposeEditorContent({
+      composeMode: "reply",
+      composeReplyTo: makeMessage({ subject: "Proposal", body_html_raw: "" }),
+      isReply: true,
+      signatureHtml: "<p>-- Me</p>",
+      prefillBody: "Sounds good.\n\nLet's talk Friday.",
+      t,
+    });
+    expect(content.startsWith("<p>Sounds good.</p>")).toBe(true);
+    expect(content).toContain("<p>Let's talk Friday.</p>");
+    expect(content.endsWith("<p>-- Me</p>")).toBe(true);
+  });
+
   it("builds the original reply as separate quoted HTML", () => {
     const quote = buildReplyQuoteHtml({
       composeReplyTo: makeMessage({

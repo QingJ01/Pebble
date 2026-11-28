@@ -105,6 +105,8 @@ export function buildComposeEditorContent({
 }: BuildComposeEditorContentArgs) {
   try {
     if (isReply && composeReplyTo) {
+      // A reply drafted by the assistant arrives as prefilled text.
+      if (prefillBody?.trim()) return `${plainTextToParagraphs(prefillBody)}${signatureHtml}`;
       return `<p><br></p>${signatureHtml}`;
     }
     if (composeMode === "forward" && composeReplyTo) {
