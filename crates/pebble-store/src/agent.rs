@@ -636,6 +636,45 @@ impl Store {
         })
     }
 
+    /// Inbox messages of `account_ids` received since `since`, newest first.
+    pub fn recent_inbox_messages(
+        &self,
+        account_ids: &[String],
+        since: i64,
+        unread_only: bool,
+        limit: u32,
+    ) -> Result<Vec<String>> {
+        if account_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = (0..account_ids.len())
+            .map(|i| format!("?{}", i + 4))
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.with_read(|conn| {
+            let sql = format!(
+                "SELECT m.id FROM messages m
+                 WHERE m.is_deleted = 0 AND m.is_draft = 0 AND m.date >= ?1
+                   AND (?2 = 0 OR m.is_read = 0)
+                   AND EXISTS (SELECT 1 FROM message_folders mf JOIN folders f ON f.id = mf.folder_id
+                               WHERE mf.message_id = m.id AND f.role = 'inbox')
+                   AND m.account_id IN ({placeholders})
+                 ORDER BY m.date DESC LIMIT ?3"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let mut values: Vec<rusqlite::types::Value> = vec![
+                since.into(),
+                (unread_only as i64).into(),
+                (limit.min(100) as i64).into(),
+            ];
+            values.extend(account_ids.iter().map(|id| rusqlite::types::Value::from(id.clone())));
+            let ids = stmt
+                .query_map(rusqlite::params_from_iter(values), |row| row.get(0))?
+                .collect::<rusqlite::Result<Vec<String>>>()?;
+            Ok(ids)
+        })
+    }
+
     /// Messages that notified (tier interrupt) since `since` and are still unread.
     pub fn count_unread_interrupts(&self, since: i64) -> Result<u32> {
         self.with_read(|conn| {

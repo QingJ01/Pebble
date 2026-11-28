@@ -1,5 +1,6 @@
 pub mod accounts;
 pub mod agent;
+pub mod agent_chat;
 pub use accounts::SyncState;
 pub mod attachments;
 pub mod auth_data;
