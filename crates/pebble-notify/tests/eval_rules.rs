@@ -88,11 +88,9 @@ fn deadlines_are_precise() {
         "a reminder for a deadline that isn't there"
     );
     assert_eq!(score.wrong_day, 0);
-    assert!(
-        score.exact + score.same_day >= 18,
-        "found {} deadlines",
-        score.exact + score.same_day
-    );
+    // Exact, not just the right day: a wrong time of day moves the reminder.
+    assert_eq!(score.same_day, 0, "deadlines at the wrong time of day");
+    assert!(score.exact >= 18, "found {} deadlines exactly", score.exact);
 }
 
 #[test]

@@ -1157,7 +1157,8 @@
       "bulk": "Newsletter or automated mail",
       "direct": "Someone you've written to",
       "default": "Notification mode",
-      "model_fallback": "Model unavailable, used the rules"
+      "model_fallback": "Model unavailable, used the rules",
+      "model_pending": "Waiting for the AI"
     },
     "modelLabel": {
       "needs_action": "Needs your action",

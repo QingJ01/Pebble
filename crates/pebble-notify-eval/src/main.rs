@@ -689,7 +689,7 @@ fn deadline_item(case: &DeadlineCase) -> TriageItem {
         id: String::new(),
         from: "colleague@work.example".into(),
         from_name: "Colleague".into(),
-        subject: case.subject.clone(),
+        subject: redact_codes(&case.subject),
         to_me: true,
         known_contact: true,
         times_user_wrote: 3,

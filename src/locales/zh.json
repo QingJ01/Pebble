@@ -1132,7 +1132,8 @@
       "bulk": "订阅或自动邮件",
       "direct": "你写过信的人",
       "default": "提醒方式",
-      "model_fallback": "模型不可用，已按规则处理"
+      "model_fallback": "模型不可用，已按规则处理",
+      "model_pending": "等待 AI 判断"
     },
     "modelLabel": {
       "needs_action": "需要你处理",

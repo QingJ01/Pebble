@@ -64,6 +64,8 @@ pub enum Reason {
     Model(ModelLabel),
     /// Model assist was on but unavailable; rule result used.
     ModelFallback,
+    /// Waiting for the model's answer (the notification is held).
+    ModelPending,
 }
 
 impl Reason {
@@ -363,7 +365,15 @@ pub fn apply_model_verdict(
     if !decision.model_candidate {
         return decision.clone();
     }
-    let tier = if verdict.interrupt && verdict.confidence >= min_confidence {
+    // An unsure model changes nothing: the rules decide. A sure one may
+    // promote or demote (never silence).
+    if verdict.confidence < min_confidence {
+        return Decision {
+            model_candidate: false,
+            ..decision.clone()
+        };
+    }
+    let tier = if verdict.interrupt {
         Tier::Interrupt
     } else {
         Tier::Digest

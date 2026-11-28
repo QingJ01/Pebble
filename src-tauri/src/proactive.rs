@@ -192,6 +192,33 @@ pub fn record_awaiting_replies(store: &Store, found: &[AwaitingReply], now: i64)
     recorded
 }
 
+/// A person's reply to `watch` that is already stored (bots excluded).
+fn stored_reply(store: &Store, watch: &pebble_store::agent::ThreadWatch) -> Option<Message> {
+    store
+        .stored_replies_for_watch(watch)
+        .unwrap_or_default()
+        .into_iter()
+        .find(|m| !pebble_notify::is_automated_sender(&m.from_address, &m.from_name))
+}
+
+/// Complete open follow-ups whose reply is already stored but was missed
+/// (it came while the follow-up was paused, or a sync stored it quietly).
+/// Runs at the scan cadence. Returns how many.
+pub fn complete_answered_follow_ups(store: &Store, now: i64) -> usize {
+    let mut completed = 0;
+    for watch in store.open_thread_watches().unwrap_or_default() {
+        if watch.status != "active" {
+            continue;
+        }
+        if let Some(reply) = stored_reply(store, &watch) {
+            if crate::smart_notify::complete_watch(store, &watch, &reply, now, true) {
+                completed += 1;
+            }
+        }
+    }
+    completed
+}
+
 /// Follow-ups whose deadline passed without a reply. Returns how many.
 pub fn record_overdue_follow_ups(store: &Store, now: i64) -> usize {
     let overdue = store.overdue_thread_watches(now).unwrap_or_default();
@@ -199,8 +226,8 @@ pub fn record_overdue_follow_ups(store: &Store, now: i64) -> usize {
     for watch in overdue {
         // The answer may already be here (it came while the follow-up was
         // paused, or was filed away): complete it instead of nudging.
-        if let Ok(Some(reply)) = store.stored_reply_for_watch(&watch) {
-            crate::smart_notify::complete_watch(store, &watch, &reply, now);
+        if let Some(reply) = stored_reply(store, &watch) {
+            crate::smart_notify::complete_watch(store, &watch, &reply, now, true);
             recorded += 1;
             continue;
         }
@@ -589,6 +616,15 @@ async fn tick(app: &AppHandle, store: &Arc<Store>, scan: bool) {
         changed |= record_later_reminders(&store, now) > 0;
         changed |= settle_answered(&store, now) > 0;
         changed |= crate::deadlines::tick(&store, now);
+        // Held notifications whose model call never finished.
+        if let Ok(settled) = store.settle_stale_model_pending(now - 120) {
+            if settled > 0 {
+                tracing::info!("Settled {settled} notifications left waiting for the model");
+            }
+        }
+        if scan {
+            changed |= complete_answered_follow_ups(&store, now) > 0;
+        }
         if scan && prefs.awaiting_reply_enabled {
             for account in store.list_accounts().unwrap_or_default() {
                 let found = find_awaiting_replies(&store, &account, &prefs, now);
