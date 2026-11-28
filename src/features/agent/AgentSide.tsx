@@ -29,7 +29,8 @@ function Following({ watches }: { watches: ThreadWatch[] }) {
         <ul className="agent-side__list">
           {live.map((watch) => {
             const overdue = watch.status === "active" && !!watch.deadline && watch.deadline * 1000 <= Date.now();
-            const openable = watch.anchorMessageId && !watch.anchorMessageId.startsWith("send:") ? watch.anchorMessageId : null;
+            const openable = watch.linkMessageId
+              ?? (watch.anchorMessageId && !watch.anchorMessageId.startsWith("send:") ? watch.anchorMessageId : null);
             return (
               <li key={watch.id} className={`agent-side__row${overdue ? " is-overdue" : ""}`}>
                 <span className={`agent-side__dot${watch.status === "paused" ? " is-paused" : overdue ? " is-alert" : ""}`} aria-hidden="true" />
@@ -38,6 +39,7 @@ function Following({ watches }: { watches: ThreadWatch[] }) {
                     type="button"
                     className="agent-side__row-title"
                     disabled={!openable}
+                    title={openable ? t("agent.openInInbox", "Open in the inbox") : undefined}
                     onClick={() => open(watch.accountId, openable)}
                   >
                     {watch.title || t("inbox.noSubject", "(no subject)")}

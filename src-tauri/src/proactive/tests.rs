@@ -517,3 +517,67 @@ fn answered_mail_settles_its_reminder() {
         0
     );
 }
+
+#[test]
+fn overdue_follow_ups_link_to_the_sent_mail() {
+    let (store, _) = setup();
+    let sent = put_to(
+        &store,
+        "me@pebble.example",
+        "Proposal",
+        "Here is the proposal.",
+        60,
+        "t-sent",
+        &["dana@partner.example"],
+        &[],
+    );
+    let watch = store
+        .create_thread_watch(
+            &NewThreadWatch {
+                account_id: "acct".into(),
+                subject: "Proposal".into(),
+                participants: vec!["dana@partner.example".into()],
+                anchor_message_id: Some("send:job".into()),
+                deadline: Some(NOW - 10),
+                ..Default::default()
+            },
+            NOW - 61 * HOUR,
+        )
+        .unwrap();
+    assert_eq!(
+        store.watch_link_message(&watch).unwrap().as_deref(),
+        Some(sent.id.as_str())
+    );
+    record_overdue_follow_ups(&store, NOW);
+    let event = store.list_agent_events(10, None).unwrap().remove(0);
+    assert_eq!(event.message_id.as_deref(), Some(sent.id.as_str()));
+    assert_eq!(event.payload["subject"], "Proposal");
+}
+
+#[test]
+fn briefing_lists_important_unread_mail_to_open() {
+    let (store, _) = setup();
+    let important = put(
+        &store,
+        "boss@corp.example",
+        "Board deck",
+        "Need it by noon",
+        2,
+        "t1",
+    );
+    store
+        .insert_notification_log(&pebble_store::notify::NewNotificationLog {
+            account_id: "acct",
+            message_key: "k1",
+            message_id: &important.id,
+            tier: "interrupt",
+            reason: "vip",
+            why: None,
+            created_at: NOW - 3600,
+        })
+        .unwrap();
+    let briefing = build_briefing(&store, NOW);
+    assert_eq!(briefing["importantUnread"], 1);
+    assert_eq!(briefing["important"][0]["messageId"], important.id.as_str());
+    assert_eq!(briefing["important"][0]["subject"], "Board deck");
+}

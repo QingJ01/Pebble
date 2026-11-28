@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { ArrowDown, ArrowUp, Check, Sun } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpRight, Check, Sun } from "lucide-react";
 import IconButton from "@/components/ui/IconButton";
-import { formatDate, formatTime } from "@/lib/formatDate";
+import { formatDate, formatDateTime, formatTime } from "@/lib/formatDate";
 import iconUrl from "@/assets/app-icon.png";
 import {
   useAgentEvents,
@@ -12,7 +12,7 @@ import {
   type AgentEvent,
   type AgentResolution,
 } from "./api";
-import { useOpenMessage } from "./useOpenMessage";
+import { useOpenMessage, useReplyToMessage } from "./useOpenMessage";
 
 // ---------------------------------------------------------------- helpers
 
@@ -144,32 +144,101 @@ function resolutionText(t: TFunction, resolution: AgentResolution): string {
   }
 }
 
-function MailCard({ event }: { event: AgentEvent }) {
+interface MailRef {
+  accountId?: string | null;
+  messageId?: string | null;
+  from: string;
+  fromAddress?: string;
+  subject: string;
+  snippet?: string;
+}
+
+/** A clickable mail inside a message: opens it in the inbox. */
+function MailCard({
+  mail,
+  meta,
+  why,
+  unread,
+  settled,
+  children,
+}: {
+  mail: MailRef;
+  meta?: ReactNode;
+  why?: string | null;
+  unread?: boolean;
+  settled?: boolean;
+  children?: ReactNode;
+}) {
   const { t } = useTranslation();
   const open = useOpenMessage();
-  const { resolve } = useAgentMutations();
+  const canOpen = !!mail.messageId;
+  const body = (
+    <>
+      <span className="agent-mail__avatar" style={{ ["--avatar-hue" as string]: hue(mail.fromAddress || mail.from) }} aria-hidden="true">
+        {initials(mail.from)}
+      </span>
+      <span className="agent-mail__text">
+        <span className="agent-mail__top">
+          {unread && <span className="agent-mail__unread" aria-label={t("agent.unread", "New")} />}
+          <span className="agent-mail__from">{mail.from}</span>
+          {meta && <span className="agent-mail__time">{meta}</span>}
+        </span>
+        <span className="agent-mail__subject">
+          {mail.subject || t("inbox.noSubject", "(no subject)")}
+          {canOpen && <ArrowUpRight size={13} className="agent-mail__open-icon" aria-hidden="true" />}
+        </span>
+        {mail.snippet && <span className="agent-mail__snippet">{mail.snippet}</span>}
+        {why && <span className="agent-mail__why agent-ai-text">{why}</span>}
+      </span>
+    </>
+  );
+  return (
+    <article className={`agent-mail${settled ? " is-settled" : ""}`}>
+      {canOpen ? (
+        <button
+          type="button"
+          className="agent-mail__main"
+          onClick={() => open(mail.accountId, mail.messageId)}
+          title={t("agent.openInInbox", "Open in the inbox")}
+        >
+          {body}
+        </button>
+      ) : (
+        <div className="agent-mail__main is-static">{body}</div>
+      )}
+      {children}
+    </article>
+  );
+}
+
+function mailOf(event: AgentEvent): MailRef {
   const p = event.payload;
-  const from = str(p.from) || str(p.fromAddress);
+  return {
+    accountId: event.accountId,
+    messageId: event.messageId,
+    from: str(p.from) || str(p.fromAddress),
+    fromAddress: str(p.fromAddress),
+    subject: str(p.subject),
+    snippet: str(p.snippet),
+  };
+}
+
+/** A "waiting for your reply" mail with its quick replies or outcome. */
+function AwaitingCard({ event }: { event: AgentEvent }) {
+  const { t } = useTranslation();
+  const reply = useReplyToMessage();
+  const open = useOpenMessage();
+  const { resolve } = useAgentMutations();
   const resolution = event.resolution;
   const act = (action: AgentAction, days?: number) => resolve.mutate({ id: event.id, action, days });
   return (
-    <article className={`agent-mail${resolution ? " is-settled" : ""}`}>
-      <button type="button" className="agent-mail__main" onClick={() => open(event.accountId, event.messageId)}>
-        <span className="agent-mail__avatar" style={{ ["--avatar-hue" as string]: hue(str(p.fromAddress) || from) }} aria-hidden="true">
-          {initials(from)}
-        </span>
-        <span className="agent-mail__text">
-          <span className="agent-mail__top">
-            <span className="agent-mail__from">{from}</span>
-            <span className="agent-mail__time">
-              {t("agent.waitingFor", "waiting {{time}}", { time: waitedLabel(t, nowSeconds() - num(p.receivedAt)) })}
-            </span>
-          </span>
-          <span className="agent-mail__subject">{str(p.subject) || t("inbox.noSubject", "(no subject)")}</span>
-          {str(p.snippet) && <span className="agent-mail__snippet">{str(p.snippet)}</span>}
-          {typeof p.why === "string" && <span className="agent-mail__why agent-ai-text">{p.why}</span>}
-        </span>
-      </button>
+    <MailCard
+      mail={mailOf(event)}
+      meta={t("agent.waitingFor", "waiting {{time}}", { time: waitedLabel(t, nowSeconds() - num(event.payload.receivedAt)) })}
+      why={typeof event.payload.why === "string" ? event.payload.why : null}
+      unread={!event.readAt && !resolution}
+      settled={!!resolution}
+    >
       {resolution ? (
         <div className="agent-mail__status">
           <Check size={13} aria-hidden="true" />
@@ -177,12 +246,41 @@ function MailCard({ event }: { event: AgentEvent }) {
         </div>
       ) : (
         <Chips label={t("agent.quickReplies", "Quick replies")}>
-          <Chip primary onClick={() => open(event.accountId, event.messageId)}>{t("agent.reply", "Reply")}</Chip>
+          <Chip
+            primary
+            onClick={() => {
+              void reply(event.accountId, event.messageId).then((ok) => {
+                if (!ok) open(event.accountId, event.messageId);
+              });
+            }}
+          >
+            {t("agent.reply", "Reply")}
+          </Chip>
           <Chip onClick={() => act("later", 1)}>{t("agent.replyLater", "Remind me tomorrow")}</Chip>
           <Chip onClick={() => act("no_reply")}>{t("agent.replyNoReply", "No reply needed")}</Chip>
         </Chips>
       )}
-    </article>
+    </MailCard>
+  );
+}
+
+/** A compact clickable mail line (briefing lists). */
+function MailRow({ item }: { item: Record<string, unknown> }) {
+  const { t, i18n } = useTranslation();
+  const open = useOpenMessage();
+  const from = str(item.from) || str(item.fromAddress);
+  return (
+    <li>
+      <button type="button" className="agent-row" onClick={() => open(str(item.accountId), str(item.messageId))}>
+        <span className="agent-mail__avatar is-small" style={{ ["--avatar-hue" as string]: hue(str(item.fromAddress) || from) }} aria-hidden="true">
+          {initials(from)}
+        </span>
+        <span className="agent-row__from">{from}</span>
+        <span className="agent-row__subject">{str(item.subject) || t("inbox.noSubject", "(no subject)")}</span>
+        {num(item.receivedAt) > 0 && <span className="agent-row__time">{formatTime(num(item.receivedAt), undefined, i18n.language)}</span>}
+        <ArrowUpRight size={13} className="agent-row__icon" aria-hidden="true" />
+      </button>
+    </li>
   );
 }
 
@@ -201,7 +299,7 @@ function AwaitingBlock({ events, compact }: { events: AgentEvent[]; compact: boo
         </p>
       </Bubble>
       <div className="agent-mail-list">
-        {events.map((event) => <MailCard key={event.id} event={event} />)}
+        {events.map((event) => <AwaitingCard key={event.id} event={event} />)}
       </div>
       {open.length === 0 && events.length > 1 && (
         <p className="agent-msg__note">{t("agent.allHandled", "All handled.")}</p>
@@ -217,7 +315,7 @@ function AgainBlock({ event, compact }: { event: AgentEvent; compact: boolean })
       <Bubble>
         <p>{t("agent.againLead", "As you asked, a reminder: “{{subject}}” still has no reply.", { subject: str(event.payload.subject) })}</p>
       </Bubble>
-      <div className="agent-mail-list"><MailCard event={event} /></div>
+      <div className="agent-mail-list"><AwaitingCard event={event} /></div>
     </AgentMessage>
   );
 }
@@ -228,6 +326,7 @@ function Briefing({ event, compact }: { event: AgentEvent; compact: boolean }) {
   const p = event.payload;
   const awaiting = Array.isArray(p.awaitingReply) ? (p.awaitingReply as Array<Record<string, unknown>>) : [];
   const deadlines = Array.isArray(p.deadlines) ? (p.deadlines as Array<Record<string, unknown>>) : [];
+  const important = Array.isArray(p.important) ? (p.important as Array<Record<string, unknown>>) : [];
   const stats: Array<{ key: string; value: number; label: string; alert?: boolean }> = [
     { key: "important", value: num(p.importantUnread), label: t("agent.statImportant", "Important unread") },
     { key: "awaiting", value: awaiting.length, label: t("agent.statAwaiting", "Waiting on you") },
@@ -262,29 +361,37 @@ function Briefing({ event, compact }: { event: AgentEvent; compact: boolean }) {
           </p>
         )}
         {summary && <p className="agent-ai-text">{summary}</p>}
+        {important.length > 0 && (
+          <div className="agent-brief__section">
+            <div className="agent-brief__section-title">{t("agent.statImportant", "Important unread")}</div>
+            <ul className="agent-brief__list">
+              {important.map((item) => <MailRow key={str(item.messageId)} item={item} />)}
+            </ul>
+          </div>
+        )}
         {awaiting.length > 0 && (
-          <ul className="agent-brief__list" aria-label={t("agent.statAwaiting", "Waiting on you")}>
-            {awaiting.map((item) => (
-              <li key={str(item.messageId)}>
-                <button type="button" onClick={() => open(str(item.accountId), str(item.messageId))}>
-                  <span className="agent-brief__from">{str(item.from)}</span>
-                  <span className="agent-brief__subject">{str(item.subject) || t("inbox.noSubject", "(no subject)")}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <div className="agent-brief__section">
+            <div className="agent-brief__section-title">{t("agent.statAwaiting", "Waiting on you")}</div>
+            <ul className="agent-brief__list">
+              {awaiting.map((item) => <MailRow key={str(item.messageId)} item={item} />)}
+            </ul>
+          </div>
         )}
         {deadlines.length > 0 && (
-          <ul className="agent-brief__list">
-            {deadlines.map((item) => (
-              <li key={`${str(item.messageId)}:${str(item.at)}`}>
-                <button type="button" onClick={() => open(str(item.accountId), str(item.messageId))}>
-                  <span className="agent-brief__from">{formatDate(num(item.at), { month: "short", day: "numeric" }, i18n.language)}</span>
-                  <span className="agent-brief__subject">{str(item.what)}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <div className="agent-brief__section">
+            <div className="agent-brief__section-title">{t("agent.statDeadlines", "Coming up")}</div>
+            <ul className="agent-brief__list">
+              {deadlines.map((item) => (
+                <li key={`${str(item.messageId)}:${str(item.at)}`}>
+                  <button type="button" className="agent-row" onClick={() => open(str(item.accountId), str(item.messageId))}>
+                    <span className="agent-row__from">{formatDate(num(item.at), { month: "short", day: "numeric" }, i18n.language)}</span>
+                    <span className="agent-row__subject">{str(item.what)}</span>
+                    <ArrowUpRight size={13} className="agent-row__icon" aria-hidden="true" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </Bubble>
     </AgentMessage>
@@ -294,19 +401,43 @@ function Briefing({ event, compact }: { event: AgentEvent; compact: boolean }) {
 function OverdueBlock({ event, compact }: { event: AgentEvent; compact: boolean }) {
   const { t, i18n } = useTranslation();
   const { resolve } = useAgentMutations();
+  const reply = useReplyToMessage();
+  const participants = Array.isArray(event.payload.participants) ? (event.payload.participants as string[]) : [];
+  const sentAt = num(event.payload.sentAt) || num(event.payload.createdAt);
   const title = str(event.payload.title);
   const resolution = event.resolution;
   const act = (action: AgentAction, days?: number) => resolve.mutate({ id: event.id, action, days });
   return (
     <>
-      <AgentMessage compact={compact}>
+      <AgentMessage compact={compact} wide={!!event.messageId}>
         <Bubble>
           <p>{t("agent.watchOverdueMsg", "Still no reply to “{{title}}”. Wait a little longer, or stop following it?", { title })}</p>
         </Bubble>
+        {event.messageId && (
+          <div className="agent-mail-list">
+            <MailCard
+              mail={{
+                accountId: event.accountId,
+                messageId: event.messageId,
+                from: participants.length
+                  ? t("agent.sentTo", "To {{who}}", { who: participants.slice(0, 2).join(", ") + (participants.length > 2 ? "…" : "") })
+                  : t("agent.yourMail", "Your mail"),
+                fromAddress: participants[0],
+                subject: str(event.payload.subject) || title,
+                snippet: str(event.payload.snippet),
+              }}
+              meta={sentAt ? t("agent.sentAgo", "sent {{time}} ago", { time: waitedLabel(t, nowSeconds() - sentAt) }) : undefined}
+              settled={!!resolution}
+            />
+          </div>
+        )}
         {!resolution && event.watchId && (
           <Chips label={t("agent.quickReplies", "Quick replies")}>
             <Chip primary onClick={() => act("wait", 2)}>{t("agent.replyWaitDays", "Wait {{n}} more days", { n: 2 })}</Chip>
             <Chip onClick={() => act("wait", 7)}>{t("agent.replyWaitWeek", "Wait another week")}</Chip>
+            {event.messageId && (
+              <Chip onClick={() => void reply(event.accountId, event.messageId)}>{t("agent.writeNudge", "Write a follow-up")}</Chip>
+            )}
             <Chip onClick={() => act("stop")}>{t("agent.replyStop", "Stop following")}</Chip>
           </Chips>
         )}
@@ -332,16 +463,25 @@ function OverdueBlock({ event, compact }: { event: AgentEvent; compact: boolean 
 }
 
 function ReplyBlock({ event, compact }: { event: AgentEvent; compact: boolean }) {
-  const { t } = useTranslation();
-  const open = useOpenMessage();
+  const { t, i18n } = useTranslation();
+  const reply = useReplyToMessage();
+  const received = num(event.payload.receivedAt);
   return (
-    <AgentMessage compact={compact}>
+    <AgentMessage compact={compact} wide>
       <Bubble>
         <p>{t("agent.watchReplyMsg", "{{from}} replied to “{{title}}”, the thread you're following.", { from: str(event.payload.from), title: str(event.payload.title) })}</p>
       </Bubble>
-      <Chips label={t("agent.quickReplies", "Quick replies")}>
-        <Chip primary onClick={() => open(event.accountId, event.messageId)}>{t("agent.openMail", "Open mail")}</Chip>
-      </Chips>
+      <div className="agent-mail-list">
+        <MailCard
+          mail={{ ...mailOf(event), subject: str(event.payload.subject) || str(event.payload.title) }}
+          meta={received ? formatTime(received, undefined, i18n.language) : undefined}
+          unread={!event.readAt}
+        >
+          <Chips label={t("agent.quickReplies", "Quick replies")}>
+            <Chip primary onClick={() => void reply(event.accountId, event.messageId)}>{t("agent.reply", "Reply")}</Chip>
+          </Chips>
+        </MailCard>
+      </div>
     </AgentMessage>
   );
 }
@@ -472,7 +612,7 @@ export default function AgentThread() {
             previous = block.kind === "awaiting" ? block.events[block.events.length - 1].createdAt : block.at;
             const key = block.kind === "awaiting" ? block.events[0].id : block.event.id;
             return (
-              <div key={key} className="agent-thread__item">
+              <div key={key} className="agent-thread__item" title={formatDateTime(block.at, undefined, i18n.language)}>
                 {divider && <div className="agent-thread__divider" role="separator">{t("agent.newMessages", "New")}</div>}
                 {separator && !divider && <div className="agent-thread__separator">{dayLabel(t, block.at, i18n.language)}</div>}
                 <BlockView block={block} compact={compact && !divider} />

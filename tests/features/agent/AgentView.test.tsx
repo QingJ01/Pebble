@@ -6,6 +6,8 @@ import FollowUpButton from "../../../src/features/agent/FollowUpButton";
 import AgentView from "../../../src/features/agent/AgentView";
 import { deadlineInDays, type AgentEvent } from "../../../src/features/agent/api";
 import { buildBlocks } from "../../../src/features/agent/AgentThread";
+import { useUIStore } from "../../../src/stores/ui.store";
+import { useComposeStore } from "../../../src/stores/compose.store";
 
 vi.mock("react-i18next", () => ({
   initReactI18next: { type: "3rdParty", init: vi.fn() },
@@ -44,6 +46,7 @@ describe("AgentView", () => {
     events = [
       event({ id: "b", kind: "briefing", messageId: null, createdAt: NOW - 4000, readAt: NOW, payload: {
         importantUnread: 2, awaitingReply: [{ messageId: "m1", accountId: "a1", from: "Ann", subject: "Dinner?" }],
+        important: [{ messageId: "m9", accountId: "a1", from: "Boss", fromAddress: "boss@corp.example", subject: "Board deck", receivedAt: NOW - 600 }],
         followUpCount: 1, overdueCount: 1, digestCount: 4,
       } }),
       event({ id: "o-old", kind: "watch_overdue", watchId: "w0", messageId: null, createdAt: NOW - 3000, readAt: NOW,
@@ -53,7 +56,8 @@ describe("AgentView", () => {
         payload: { from: "Ann", subject: "Dinner?", snippet: "Are you free at 7?", receivedAt: NOW - 30 * 3600 } }),
       event({ id: "w2", kind: "awaiting_reply", messageId: "m2", createdAt: NOW - 290, resolution: { action: "answered" },
         payload: { from: "Bo", subject: "Lunch?", receivedAt: NOW - 52 * 3600 } }),
-      event({ id: "o", kind: "watch_overdue", watchId: "w1", messageId: null, createdAt: NOW - 100, payload: { title: "Proposal" } }),
+      event({ id: "o", kind: "watch_overdue", watchId: "w1", messageId: "sent-1", createdAt: NOW - 100,
+        payload: { title: "Proposal", subject: "Proposal", participants: ["dana@partner.example"], sentAt: NOW - 4 * 86400 } }),
     ];
     mockInvoke.mockReset();
     mockInvoke.mockImplementation((command) => {
@@ -73,10 +77,34 @@ describe("AgentView", () => {
           }, accounts: {} });
         case "list_digest":
           return Promise.resolve([]);
+        case "get_message":
+          return Promise.resolve({ id: "m1", account_id: "a1", subject: "Dinner?" });
         default:
           return Promise.resolve(null);
       }
     });
+  });
+
+  it("links every item to its mail and opens replies", async () => {
+    const openMessageInInbox = vi.fn();
+    useUIStore.setState({ openMessageInInbox });
+    const openCompose = vi.fn();
+    useComposeStore.setState({ openCompose });
+    wrap(<AgentView />);
+    const log = await screen.findByRole("log");
+    await within(log).findByText("Daily briefing");
+
+    fireEvent.click(within(log).getByRole("button", { name: /Boss.*Board deck/ }));
+    expect(openMessageInInbox).toHaveBeenCalledWith("m9");
+
+    fireEvent.click(within(log).getByRole("button", { name: /To dana@partner.example/ }));
+    expect(openMessageInInbox).toHaveBeenCalledWith("sent-1");
+
+    fireEvent.click(within(log).getAllByRole("button", { name: "Reply" })[0]);
+    await waitFor(() => expect(openCompose).toHaveBeenCalledWith("reply", expect.objectContaining({ id: "m1" })));
+
+    fireEvent.click(within(log).getByRole("button", { name: "Write a follow-up" }));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("get_message", { messageId: "sent-1" }));
   });
 
   it("tells the story oldest first, merging reminders from one scan", async () => {

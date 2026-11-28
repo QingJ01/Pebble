@@ -316,6 +316,10 @@ pub fn complete_watch(
         payload: serde_json::json!({
             "title": watch.title,
             "from": if reply.from_name.trim().is_empty() { reply.from_address.clone() } else { reply.from_name.clone() },
+            "fromAddress": reply.from_address,
+            "subject": reply.subject,
+            "snippet": reply.snippet.chars().take(140).collect::<String>(),
+            "receivedAt": reply.date,
             "waitedSeconds": (now - watch.created_at).max(0),
         }),
         // The reply itself already notified (reason "watch"); the

@@ -21,6 +21,8 @@ export interface ThreadWatch {
   matchedMessageId: string | null;
   matchedAt: number | null;
   updatedAt: number;
+  /** The message to open for this follow-up (reply, original, or sent copy). */
+  linkMessageId?: string | null;
 }
 
 export type AgentEventKind = "watch_reply" | "watch_overdue" | "awaiting_reply" | "briefing" | "deadline" | string;

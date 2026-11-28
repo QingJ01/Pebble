@@ -26,6 +26,10 @@ pub struct ThreadWatch {
     pub matched_message_id: Option<String>,
     pub matched_at: Option<i64>,
     pub updated_at: i64,
+    /// The message to open for this follow-up (filled by
+    /// [`Store::watch_link_message`]; not stored).
+    #[serde(default)]
+    pub link_message_id: Option<String>,
 }
 
 /// What a new follow-up waits for.
@@ -107,6 +111,7 @@ fn row_to_watch(row: &rusqlite::Row) -> rusqlite::Result<ThreadWatch> {
         matched_message_id: row.get(13)?,
         matched_at: row.get(14)?,
         updated_at: row.get(15)?,
+        link_message_id: None,
     })
 }
 
@@ -192,6 +197,7 @@ impl Store {
             matched_message_id: None,
             matched_at: None,
             updated_at: now,
+            link_message_id: None,
         };
         self.with_write(|conn| {
             // Re-sending the same outgoing mail replaces its follow-up.
@@ -543,6 +549,90 @@ impl Store {
                        AND is_draft = 0 AND date > ?3 LIMIT 1",
                 )?
                 .exists(params![thread_id, message_id, date])?)
+        })
+    }
+
+    /// The message to open for a follow-up: the reply that answered it, the
+    /// message it was created from, the newest message of its thread, or
+    /// (for mail followed while sending) the account's sent copy with the
+    /// same subject to the same people.
+    pub fn watch_link_message(&self, watch: &ThreadWatch) -> Result<Option<String>> {
+        if let Some(reply) = &watch.matched_message_id {
+            return Ok(Some(reply.clone()));
+        }
+        if let Some(anchor) = watch
+            .anchor_message_id
+            .as_deref()
+            .filter(|a| !a.starts_with("send:"))
+        {
+            if self.get_message(anchor)?.is_some_and(|m| !m.is_deleted) {
+                return Ok(Some(anchor.to_string()));
+            }
+        }
+        self.with_read(|conn| {
+            if let Some(thread_id) = &watch.thread_id {
+                let newest: Option<String> = conn
+                    .query_row(
+                        "SELECT id FROM messages WHERE thread_id = ?1 AND account_id = ?2
+                           AND is_deleted = 0 AND is_draft = 0 ORDER BY date DESC LIMIT 1",
+                        params![thread_id, watch.account_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if newest.is_some() {
+                    return Ok(newest);
+                }
+            }
+            let mut stmt = conn.prepare_cached(
+                "SELECT m.id, m.subject, m.to_list, m.cc_list FROM messages m
+                 JOIN accounts a ON a.id = m.account_id
+                 WHERE m.account_id = ?1 AND m.is_deleted = 0 AND m.is_draft = 0
+                   AND lower(trim(m.from_address)) = lower(trim(a.email))
+                   AND m.date >= ?2
+                 ORDER BY m.date DESC LIMIT 200",
+            )?;
+            let rows = stmt.query_map(
+                params![watch.account_id, watch.created_at - 24 * 60 * 60],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                },
+            )?;
+            for row in rows {
+                let (id, subject, to, cc) = row?;
+                if subject_key(&subject) != watch.subject_key {
+                    continue;
+                }
+                let recipients = format!("{to}{cc}").to_lowercase();
+                if watch.participants.is_empty()
+                    || watch
+                        .participants
+                        .iter()
+                        .any(|p| recipients.contains(p.as_str()))
+                {
+                    return Ok(Some(id));
+                }
+            }
+            Ok(None)
+        })
+    }
+
+    /// Unread messages that notified (tier interrupt) since `since`, newest first.
+    pub fn list_unread_interrupts(&self, since: i64, limit: u32) -> Result<Vec<String>> {
+        self.with_read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT l.message_id FROM notification_log l JOIN messages m ON m.id = l.message_id
+                 WHERE l.tier = 'interrupt' AND l.created_at >= ?1 AND m.is_read = 0 AND m.is_deleted = 0
+                 ORDER BY m.date DESC LIMIT ?2",
+            )?;
+            let ids = stmt
+                .query_map(params![since, limit.min(50)], |row| row.get(0))?
+                .collect::<rusqlite::Result<Vec<String>>>()?;
+            Ok(ids)
         })
     }
 

@@ -197,6 +197,10 @@ pub fn record_overdue_follow_ups(store: &Store, now: i64) -> usize {
     let overdue = store.overdue_thread_watches(now).unwrap_or_default();
     let mut recorded = 0;
     for watch in overdue {
+        let link = store.watch_link_message(&watch).ok().flatten();
+        let sent = link
+            .as_deref()
+            .and_then(|id| store.get_message(id).ok().flatten());
         let event = NewAgentEvent {
             kind: "watch_overdue".into(),
             dedupe_key: format!(
@@ -205,6 +209,7 @@ pub fn record_overdue_follow_ups(store: &Store, now: i64) -> usize {
                 watch.deadline.unwrap_or_default()
             ),
             account_id: Some(watch.account_id.clone()),
+            message_id: link.clone(),
             thread_id: watch.thread_id.clone(),
             watch_id: Some(watch.id.clone()),
             conversation_id: watch.conversation_id.clone(),
@@ -214,9 +219,11 @@ pub fn record_overdue_follow_ups(store: &Store, now: i64) -> usize {
                 "deadline": watch.deadline,
                 "participants": watch.participants,
                 "anchorMessageId": watch.anchor_message_id,
+                "subject": sent.as_ref().map(|m| m.subject.clone()),
+                "snippet": sent.as_ref().map(|m| m.snippet.chars().take(SNIPPET_CHARS).collect::<String>()),
+                "sentAt": sent.as_ref().map(|m| m.date),
             }),
             push: true,
-            ..Default::default()
         };
         if let Err(e) = store.insert_agent_event(&event, now) {
             warn!("Failed to record overdue follow-up: {e}");
@@ -296,6 +303,24 @@ pub fn settle_answered(store: &Store, now: i64) -> usize {
 pub fn build_briefing(store: &Store, now: i64) -> serde_json::Value {
     let day = 24 * 60 * 60;
     let important_unread = store.count_unread_interrupts(now - day).unwrap_or(0);
+    let important_ids = store
+        .list_unread_interrupts(now - day, 5)
+        .unwrap_or_default();
+    let important: Vec<serde_json::Value> = store
+        .get_messages_batch(&important_ids)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|message| {
+            json!({
+                "messageId": message.id,
+                "accountId": message.account_id,
+                "from": sender_label(&message),
+                "fromAddress": message.from_address,
+                "subject": message.subject,
+                "receivedAt": message.date,
+            })
+        })
+        .collect();
     let awaiting: Vec<serde_json::Value> = store
         .list_agent_events(200, None)
         .unwrap_or_default()
@@ -314,6 +339,7 @@ pub fn build_briefing(store: &Store, now: i64) -> serde_json::Value {
                 "messageId": event.message_id,
                 "accountId": event.account_id,
                 "from": event.payload.get("from"),
+                "fromAddress": event.payload.get("fromAddress"),
                 "subject": event.payload.get("subject"),
                 "receivedAt": event.payload.get("receivedAt"),
             })
@@ -332,6 +358,7 @@ pub fn build_briefing(store: &Store, now: i64) -> serde_json::Value {
         .unwrap_or(0);
     json!({
         "importantUnread": important_unread,
+        "important": important,
         "awaitingReply": awaiting,
         "followUpCount": watches.len(),
         "overdueCount": overdue,
