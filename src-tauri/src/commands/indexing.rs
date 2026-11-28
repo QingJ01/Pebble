@@ -728,14 +728,35 @@ fn process_flush_window(
             }
         }
 
-        if !stored.notify {
-            // First sync, backfill and repairs are never notified or logged.
-            continue;
-        }
         let from_self = triage
             .account(store, account_id)
             .is_some_and(|account| smart_notify::is_from_account(&stored.message, &account));
         let watch = triage.matching_watch(store, &stored.message, from_self);
+        // A person's reply completes the follow-up whatever happens next: a
+        // list header, a server filter or a rule may keep it from notifying,
+        // and some syncs store new mail without notifying at all (then the
+        // conversation entry notifies instead). Auto-replies and bots don't
+        // count; matching ignores mail older than the follow-up.
+        let machine_reply = stored.signals.auto_submitted
+            || pebble_notify::is_automated_sender(
+                &stored.message.from_address,
+                &stored.message.from_name,
+            );
+        let watch = match (watch, machine_reply) {
+            (Some(watch), false) => {
+                if smart_notify::complete_watch(store, &watch, &stored.message, now, !stored.notify)
+                {
+                    outcome.agent_events_changed = true;
+                }
+                triage.forget_watch(account_id, &watch.id);
+                Some(watch)
+            }
+            (watch, _) => watch,
+        };
+        if !stored.notify {
+            // First sync, backfill and repairs are never notified or logged.
+            continue;
+        }
         let facts = smart_notify::gather_facts(
             store,
             &mut triage,
@@ -755,20 +776,6 @@ fn process_flush_window(
             && matches!(triaged.decision.reason, pebble_notify::Reason::Backfill)
         {
             continue;
-        }
-        // A person's reply completes the follow-up whatever the notification
-        // decision (a list header, a server filter or a rule may keep it
-        // from notifying); auto-replies and bots don't.
-        let machine_reply = stored.signals.auto_submitted
-            || pebble_notify::is_automated_sender(
-                &stored.message.from_address,
-                &stored.message.from_name,
-            );
-        if let (Some(watch), false) = (&watch, machine_reply) {
-            if smart_notify::complete_watch(store, watch, &stored.message, now) {
-                outcome.agent_events_changed = true;
-            }
-            triage.forget_watch(account_id, &watch.id);
         }
         if !smart_notify::record(store, &triaged, now) {
             continue;
@@ -1637,6 +1644,36 @@ mod rule_writeback_tests {
         );
         let events = store.list_agent_events(10, None).unwrap();
         assert_eq!(events[0].kind, "watch_reply");
+    }
+
+    #[test]
+    fn a_reply_synced_without_notifying_completes_the_follow_up_and_notifies_through_it() {
+        let (store, search, account, folder) = triage_setup("important_only");
+        let watch = store
+            .create_thread_watch(
+                &pebble_store::agent::NewThreadWatch {
+                    account_id: account.id.clone(),
+                    thread_id: Some("thread-3".into()),
+                    subject: "Quote".into(),
+                    ..Default::default()
+                },
+                1,
+            )
+            .unwrap();
+        let mut reply = new_inbox_message(&store, &account, &folder, "vendor@supplier.example");
+        reply.message.thread_id = Some("thread-3".into());
+        reply.notify = false;
+        let outcome = process_flush_window(&store, &search, None, vec![reply], &mut Vec::new());
+        assert!(outcome.notifications.is_empty());
+        assert_eq!(
+            store.get_thread_watch(&watch.id).unwrap().unwrap().status,
+            "done"
+        );
+        let event = &store.list_agent_events(10, None).unwrap()[0];
+        assert_eq!(
+            (event.kind.as_str(), event.push_state.as_str()),
+            ("watch_reply", "pending")
+        );
     }
 
     #[test]
