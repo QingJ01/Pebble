@@ -1,14 +1,71 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Bell, CalendarClock, Inbox, MailQuestion, Pause, Play, X } from "lucide-react";
+import { Bell, CalendarClock, Check, Hourglass, Inbox, MailQuestion, Pause, Play, X } from "lucide-react";
 import IconButton from "@/components/ui/IconButton";
 import { formatListDate } from "@/lib/formatDate";
 import { useUIStore } from "@/stores/ui.store";
 import iconUrl from "@/assets/app-icon.png";
 import { markDigestSeen, minutesToTime, useDigest, useNotifySettings } from "@/features/notify/api";
 import { reasonLabel } from "@/features/notify/labels";
-import { useAgentMutations, useThreadWatches, type ThreadWatch } from "./api";
+import { NotifyFeedback } from "@/features/notify/NotifyFeedback";
+import { useAgentEvents, useAgentMutations, useThreadWatches, type AgentEvent, type ThreadWatch } from "./api";
+import { dueLabel } from "./AgentThread";
 import { useOpenMessage } from "./useOpenMessage";
+
+/** Open deadlines from mail, soonest first (the week ahead). */
+export function upcomingDeadlines(events: AgentEvent[], now = Date.now() / 1000): AgentEvent[] {
+  return events
+    .filter((event) => event.kind === "deadline" && !event.resolution && !event.dismissedAt)
+    .filter((event) => {
+      const due = Number(event.payload.due);
+      return Number.isFinite(due) && due >= now - 12 * 3600 && due <= now + 7 * 86_400;
+    })
+    .sort((a, b) => Number(a.payload.due) - Number(b.payload.due));
+}
+
+function Deadlines() {
+  const { t, i18n } = useTranslation();
+  const { data: events = [] } = useAgentEvents();
+  const { resolve } = useAgentMutations();
+  const open = useOpenMessage();
+  const items = upcomingDeadlines(events);
+  if (items.length === 0) return null;
+  return (
+    <section className="agent-side__section" aria-labelledby="agent-deadlines-title">
+      <h3 id="agent-deadlines-title" className="agent-side__title">
+        {t("agent.deadlinesTitle", "Coming up")}
+        <span className="agent-side__count">{items.length}</span>
+      </h3>
+      <ul className="agent-side__list">
+        {items.map((event) => {
+          const due = Number(event.payload.due);
+          const late = due * 1000 <= Date.now();
+          return (
+            <li key={event.id} className={`agent-side__row${late ? " is-overdue" : ""}`}>
+              <Hourglass size={14} className="agent-side__icon" aria-hidden="true" />
+              <div className="agent-side__row-main">
+                <button type="button" className="agent-side__row-title" onClick={() => open(event.accountId, event.messageId)}>
+                  {String(event.payload.subject ?? "") || t("inbox.noSubject", "(no subject)")}
+                </button>
+                <span className={`agent-side__row-meta${late ? " is-overdue" : ""}`}>
+                  {t("agent.dueBy", "{{from}} · due {{when}}", {
+                    from: String(event.payload.from ?? ""),
+                    when: dueLabel(t, due, event.payload.allDay === true, i18n.language),
+                  })}
+                </span>
+              </div>
+              <IconButton
+                label={t("agent.deadlineMarkDone", "It's done")}
+                icon={<Check size={14} />}
+                onClick={() => resolve.mutate({ id: event.id, action: "done" })}
+              />
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
 
 function Following({ watches }: { watches: ThreadWatch[] }) {
   const { t, i18n } = useTranslation();
@@ -148,13 +205,18 @@ function Digest() {
         <ul className="agent-side__list">
           {digest.map((entry) => (
             <li key={`${entry.accountId}:${entry.messageId}`}>
-              <button type="button" className="agent-side__routine" onClick={() => open(entry.accountId, entry.messageId)}>
-                <Inbox size={14} aria-hidden="true" />
-                <span className="agent-side__row-main">
-                  <span className="agent-side__ellipsis">{entry.subject || t("inbox.noSubject", "(no subject)")}</span>
-                  <span className="agent-side__row-meta">{entry.fromName || entry.fromAddress} · {reasonLabel(t, entry.reason)}</span>
-                </span>
-              </button>
+              <div className="agent-side__digest-row">
+                <button type="button" className="agent-side__routine" onClick={() => open(entry.accountId, entry.messageId)}>
+                  <Inbox size={14} aria-hidden="true" />
+                  <span className="agent-side__row-main">
+                    <span className="agent-side__ellipsis">{entry.subject || t("inbox.noSubject", "(no subject)")}</span>
+                    <span className="agent-side__row-meta">
+                      {entry.fromName || entry.fromAddress} · {entry.why ? `✦ ${entry.why}` : reasonLabel(t, entry.reason)}
+                    </span>
+                  </span>
+                </button>
+                <NotifyFeedback entry={entry} />
+              </div>
             </li>
           ))}
         </ul>
@@ -199,6 +261,7 @@ export default function AgentSide() {
             {notificationsEnabled ? t("agent.on", "On") : t("agent.turnOn", "Turn on")}
           </button>
         </div>
+        <Deadlines />
         <Following watches={watches} />
         <Schedules />
         <Digest />

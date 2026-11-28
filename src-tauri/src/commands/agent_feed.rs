@@ -215,6 +215,25 @@ pub async fn resolve_agent_event(
             serde_json::json!({ "action": "later", "days": days, "until": now + i64::from(days) * day, "at": now })
         }
         ("awaiting_reply", "no_reply") => serde_json::json!({ "action": "no_reply", "at": now }),
+        // A deadline handled ("done") or misread ("not_deadline"). Settling
+        // the reminder settles the deadline too, so it isn't raised again.
+        ("deadline" | "deadline_soon", "done") | ("deadline", "not_deadline") => {
+            let resolution = serde_json::json!({ "action": action, "at": now });
+            if let Some(message_id) = &event.message_id {
+                for other in state.store.list_agent_events(500, None)? {
+                    if other.id != event.id
+                        && other.resolution.is_none()
+                        && other.message_id.as_deref() == Some(message_id)
+                        && matches!(other.kind.as_str(), "deadline" | "deadline_soon")
+                    {
+                        state
+                            .store
+                            .resolve_agent_event(&other.id, &resolution, now)?;
+                    }
+                }
+            }
+            resolution
+        }
         (kind, action) => {
             return Err(PebbleError::Validation(format!(
                 "Can't answer {kind} with {action}"

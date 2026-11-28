@@ -8,8 +8,10 @@
 //! means the evaluated logic is exactly the shipped logic.
 
 pub mod awaiting;
+pub mod deadline;
 pub mod delivery;
 pub mod sender;
+pub mod triage_model;
 
 use pebble_core::MailSignals;
 use serde::{Deserialize, Serialize};

@@ -398,10 +398,10 @@ function Briefing({ event, compact }: { event: AgentEvent; compact: boolean }) {
             <div className="agent-brief__section-title">{t("agent.statDeadlines", "Coming up")}</div>
             <ul className="agent-brief__list">
               {deadlines.map((item) => (
-                <li key={`${str(item.messageId)}:${str(item.at)}`}>
+                <li key={`${str(item.messageId)}:${num(item.due)}`}>
                   <button type="button" className="agent-row" onClick={() => open(str(item.accountId), str(item.messageId))}>
-                    <span className="agent-row__from">{formatDate(num(item.at), { month: "short", day: "numeric" }, i18n.language)}</span>
-                    <span className="agent-row__subject">{str(item.what)}</span>
+                    <span className="agent-row__from">{dueLabel(t, num(item.due), item.allDay === true, i18n.language, event.createdAt)}</span>
+                    <span className="agent-row__subject">{str(item.subject) || str(item.from)}</span>
                     <ArrowUpRight size={13} className="agent-row__icon" aria-hidden="true" />
                   </button>
                 </li>
@@ -502,17 +502,78 @@ function ReplyBlock({ event, compact }: { event: AgentEvent; compact: boolean })
   );
 }
 
+/** "today 15:00", "tomorrow", "Fri, Dec 4 18:00". */
+export function dueLabel(t: TFunction, due: number, allDay: boolean, language: string, now = nowSeconds()): string {
+  const day = (ts: number) => {
+    const d = new Date(ts * 1000);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  };
+  const days = Math.round((day(due) - day(now)) / 86_400_000);
+  const time = allDay ? "" : ` ${formatTime(due, undefined, language)}`;
+  if (days === 0) return t("agent.dueToday", "today") + time;
+  if (days === 1) return t("agent.dueTomorrow", "tomorrow") + time;
+  return formatDate(due, { weekday: "short", month: "short", day: "numeric" }, language) + time;
+}
+
+function deadlineStatus(t: TFunction, resolution: AgentResolution): string {
+  switch (resolution.action) {
+    case "answered":
+      return t("agent.deadlineAnswered", "You replied");
+    case "done":
+      return t("agent.deadlineDone", "Done");
+    case "not_deadline":
+      return t("agent.deadlineNot", "Not a deadline");
+    case "expired":
+      return t("agent.deadlinePassed", "The deadline passed");
+    default:
+      return "";
+  }
+}
+
+/** A deadline found in new mail, or the reminder before it is due. */
 function DeadlineBlock({ event, compact }: { event: AgentEvent; compact: boolean }) {
-  const { t } = useTranslation();
-  const open = useOpenMessage();
+  const { t, i18n } = useTranslation();
+  const reply = useReplyToMessage();
+  const { resolve } = useAgentMutations();
+  const p = event.payload;
+  const soon = event.kind === "deadline_soon";
+  const when = dueLabel(t, num(p.due), p.allDay === true, i18n.language);
+  const resolution = event.resolution;
+  const fromModel = p.source === "model";
   return (
-    <AgentMessage compact={compact}>
+    <AgentMessage compact={compact} wide>
       <Bubble>
-        <p>{t("agent.deadlineMsg", "Heads-up: {{what}} ({{subject}}).", { what: str(event.payload.what), subject: str(event.payload.subject) })}</p>
+        <p>
+          {soon
+            ? t("agent.deadlineSoonMsg", "Due {{when}}: {{from}} is waiting on “{{subject}}”, and you haven't replied yet.", { when, from: str(p.from), subject: str(p.subject) })
+            : t("agent.deadlineMsg", "{{from}} needs something from you by {{when}}. I'll remind you before then if you haven't replied.", { from: str(p.from), when })}
+        </p>
       </Bubble>
-      <Chips label={t("agent.quickReplies", "Quick replies")}>
-        <Chip primary onClick={() => open(event.accountId, event.messageId)}>{t("agent.openMail", "Open mail")}</Chip>
-      </Chips>
+      <div className="agent-mail-list">
+        <MailCard
+          mail={mailOf(event)}
+          meta={<span className="agent-due"><BellRing size={12} aria-hidden="true" /> {when}</span>}
+          why={fromModel ? t("agent.deadlineByAi", "Deadline found in the mail") : null}
+          unread={!event.readAt && !resolution}
+          settled={!!resolution}
+        >
+          {typeof p.phrase === "string" && p.phrase && !fromModel && <p className="agent-mail__phrase">“{p.phrase}”</p>}
+          {resolution ? (
+            <div className="agent-mail__status">
+              <Check size={13} aria-hidden="true" />
+              {deadlineStatus(t, resolution)}
+            </div>
+          ) : (
+            <Chips label={t("agent.quickReplies", "Quick replies")}>
+              <Chip primary onClick={() => void reply(event.accountId, event.messageId)}>{t("agent.reply", "Reply")}</Chip>
+              <Chip onClick={() => resolve.mutate({ id: event.id, action: "done" })}>{t("agent.deadlineMarkDone", "It's done")}</Chip>
+              {!soon && (
+                <Chip onClick={() => resolve.mutate({ id: event.id, action: "not_deadline" })}>{t("agent.deadlineNotOne", "Not a deadline")}</Chip>
+              )}
+            </Chips>
+          )}
+        </MailCard>
+      </div>
     </AgentMessage>
   );
 }
@@ -530,6 +591,7 @@ function BlockView({ block, compact }: { block: Block; compact: boolean }) {
     case "awaiting_reply":
       return <AgainBlock event={event} compact={compact} />;
     case "deadline":
+    case "deadline_soon":
       return <DeadlineBlock event={event} compact={compact} />;
     default:
       return null;

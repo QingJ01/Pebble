@@ -157,6 +157,12 @@ pub fn is_from_account(message: &Message, account: &Account) -> bool {
         .eq_ignore_ascii_case(account.email.trim())
 }
 
+/// Model assist can't be turned on for Gmail accounts until Google's
+/// policy for sending mail content to other services is checked (#107 §2.7).
+pub fn model_assist_allowed(account: &Account) -> bool {
+    account.provider != pebble_core::ProviderType::Gmail
+}
+
 /// What the user's rules did, for the decision.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RuleEffect {

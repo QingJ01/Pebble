@@ -1,9 +1,11 @@
 mod account_colors;
 mod agent;
 mod commands;
+mod deadlines;
 mod events;
 #[cfg(test)]
 mod ipc_bindings;
+mod model_triage;
 mod proactive;
 mod profile;
 mod realtime;
@@ -896,6 +898,7 @@ pub fn run() {
             commands::smart_notify::list_notification_log,
             commands::smart_notify::list_digest,
             commands::smart_notify::mark_digest_seen,
+            commands::smart_notify::notify_feedback,
             commands::trusted_senders::trust_sender,
             commands::trusted_senders::list_trusted_senders,
             commands::trusted_senders::remove_trusted_sender,

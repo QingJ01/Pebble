@@ -82,3 +82,51 @@
 .notify-proactive-time {
   width: 120px;
 }
+
+/* AI help (#107 §2.7) */
+.notify-ai__setup {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--color-text-secondary);
+}
+
+.notify-ai__privacy {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.notify-ai__privacy.is-cloud {
+  color: var(--color-warning, var(--color-text-secondary));
+}
+
+.notify-ai__options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.notify-feedback {
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+  font-size: var(--font-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.notify-feedback:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background: var(--color-fill-hover, var(--color-fill-selected));
+}
+
+.notify-feedback__done {
+  font-size: var(--font-xs);
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}

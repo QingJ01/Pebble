@@ -46,6 +46,8 @@ pub struct NotificationLabels {
     pub briefing_body: String,
     /// Several assistant messages in one notification; `{n}`.
     pub agent_many: String,
+    /// A deadline from a mail is coming up; `{subject}`, `{time}`.
+    pub deadline_soon: String,
 }
 
 impl Default for NotificationLabels {
@@ -66,6 +68,7 @@ impl Default for NotificationLabels {
             awaiting_many: "{n} messages are waiting for your reply".to_string(),
             briefing_body: "Today: {important} important, {awaiting} waiting for your reply, {followups} follow-ups".to_string(),
             agent_many: "{n} new messages from Pebble".to_string(),
+            deadline_soon: "Due {time}: {subject}".to_string(),
         }
     }
 }
@@ -113,6 +116,7 @@ impl NotificationLabels {
             (&mut self.awaiting_many, defaults.awaiting_many),
             (&mut self.briefing_body, defaults.briefing_body),
             (&mut self.agent_many, defaults.agent_many),
+            (&mut self.deadline_soon, defaults.deadline_soon),
         ];
         for (field, default) in fields {
             if field.trim().is_empty() {

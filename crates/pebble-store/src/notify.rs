@@ -351,14 +351,92 @@ impl Store {
         tier: &str,
         reason: &str,
         why: Option<&str>,
+        confidence: Option<f32>,
     ) -> Result<()> {
         self.with_write(|conn| {
             conn.execute(
-                "UPDATE notification_log SET tier = ?3, reason = ?4, why = ?5
+                "UPDATE notification_log SET tier = ?3, reason = ?4, why = ?5, confidence = ?6
                  WHERE account_id = ?1 AND message_key = ?2",
-                params![account_id, message_key, tier, reason, why],
+                params![
+                    account_id,
+                    message_key,
+                    tier,
+                    reason,
+                    why,
+                    confidence.map(f64::from)
+                ],
             )?;
             Ok(())
+        })
+    }
+
+    /// Model decisions recorded since `since` (for the daily limit).
+    pub fn count_model_decisions_since(&self, since: i64) -> Result<u32> {
+        self.with_read(|conn| {
+            Ok(conn.query_row(
+                "SELECT COUNT(*) FROM notification_log
+                 WHERE created_at >= ?1 AND reason LIKE 'model:%'",
+                params![since],
+                |row| row.get(0),
+            )?)
+        })
+    }
+
+    /// Store the user's correction for a message (replacing an earlier one).
+    /// Returns how many corrections in the same direction this sender has.
+    pub fn record_notify_feedback(
+        &self,
+        account_id: &str,
+        message_id: &str,
+        sender: &str,
+        subject: &str,
+        important: bool,
+        now: i64,
+    ) -> Result<u32> {
+        let sender = sender.trim().to_lowercase();
+        self.with_write(|conn| {
+            conn.execute(
+                "INSERT INTO notify_feedback (account_id, message_id, sender, subject, important, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(account_id, message_id) DO UPDATE SET
+                     important = excluded.important, created_at = excluded.created_at",
+                params![account_id, message_id, sender, subject, important, now],
+            )?;
+            Ok(conn.query_row(
+                "SELECT COUNT(*) FROM notify_feedback
+                 WHERE account_id = ?1 AND sender = ?2 AND important = ?3",
+                params![account_id, sender, important],
+                |row| row.get(0),
+            )?)
+        })
+    }
+
+    /// The user's correction for a message, if any.
+    pub fn notify_feedback_for(&self, account_id: &str, message_id: &str) -> Result<Option<bool>> {
+        self.with_read(|conn| {
+            Ok(conn
+                .query_row(
+                    "SELECT important FROM notify_feedback WHERE account_id = ?1 AND message_id = ?2",
+                    params![account_id, message_id],
+                    |row| row.get(0),
+                )
+                .optional()?)
+        })
+    }
+
+    /// Recent corrections, newest first: (sender, subject, important).
+    pub fn recent_notify_feedback(&self, limit: u32) -> Result<Vec<(String, String, bool)>> {
+        self.with_read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT sender, subject, important FROM notify_feedback
+                 ORDER BY created_at DESC, id DESC LIMIT ?1",
+            )?;
+            let rows = stmt
+                .query_map(params![limit], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            Ok(rows)
         })
     }
 
@@ -596,8 +674,28 @@ mod tests {
                 "interrupt",
                 "model:needs_action",
                 Some("Asks for a reply"),
+                Some(0.9),
             )
             .unwrap();
+        assert_eq!(store.count_model_decisions_since(0).unwrap(), 1);
+        assert_eq!(
+            store
+                .record_notify_feedback(&me.id, "m1", "Ann@Example.com", "Hi", false, 20)
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            store
+                .record_notify_feedback(&me.id, "m1", "ann@example.com", "Hi", true, 21)
+                .unwrap(),
+            1,
+            "a second correction of the same message replaces the first"
+        );
+        assert_eq!(store.notify_feedback_for(&me.id, "m1").unwrap(), Some(true));
+        assert_eq!(
+            store.recent_notify_feedback(5).unwrap(),
+            vec![("ann@example.com".to_string(), "Hi".to_string(), true)]
+        );
         assert!(store.list_unseen_digest(10).unwrap().is_empty());
         let log = store.list_notification_log(10).unwrap();
         assert_eq!(log[0].reason, "model:needs_action");

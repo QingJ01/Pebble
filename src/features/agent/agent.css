@@ -1068,3 +1068,35 @@
   color: var(--color-text-secondary);
   font-size: var(--font-sm);
 }
+
+/* Deadlines (#107, M3b) */
+.agent-due {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--agent-accent, var(--color-accent-strong));
+  font-weight: 500;
+}
+
+.agent-side__icon {
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--color-text-tertiary);
+}
+
+.agent-side__digest-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.agent-side__digest-row .agent-side__routine {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-mail__phrase {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-xs);
+  color: var(--color-text-tertiary);
+}
