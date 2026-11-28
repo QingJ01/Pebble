@@ -323,12 +323,22 @@ impl Store {
 
     /// Record a decision. Returns `false` when this message was already
     /// decided (dedupe across retries, re-syncs and restarts).
+    ///
+    /// The key is shared by every copy of a message (IMAP keeps one per
+    /// folder). A silent decision for one copy (All Mail, a folder a server
+    /// filter chose) must not block the inbox copy, so a later non-silent
+    /// decision replaces an undelivered silent one.
     pub fn insert_notification_log(&self, entry: &NewNotificationLog<'_>) -> Result<bool> {
         self.with_write(|conn| {
             let inserted = conn.execute(
-                "INSERT OR IGNORE INTO notification_log
+                "INSERT INTO notification_log
                      (account_id, message_key, message_id, tier, reason, why, delivered, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7)
+                 ON CONFLICT(account_id, message_key) DO UPDATE SET
+                     message_id = excluded.message_id, tier = excluded.tier,
+                     reason = excluded.reason, why = excluded.why, created_at = excluded.created_at
+                 WHERE notification_log.tier = 'silent' AND notification_log.delivered = 0
+                   AND excluded.tier <> 'silent'",
                 params![
                     entry.account_id,
                     entry.message_key,
@@ -588,6 +598,15 @@ mod tests {
         };
         assert!(store.insert_notification_log(&entry).unwrap());
         assert!(!store.insert_notification_log(&entry).unwrap());
+        // A silent copy elsewhere doesn't block, and doesn't replace, a
+        // non-silent decision; a non-silent one replaces a silent one.
+        let silent = NewNotificationLog {
+            tier: "silent",
+            reason: "moved",
+            ..entry
+        };
+        assert!(!store.insert_notification_log(&silent).unwrap());
+        assert_eq!(store.list_notification_log(10).unwrap()[0].tier, "digest");
         assert_eq!(store.list_unseen_digest(10).unwrap().len(), 1);
         store
             .update_notification_decision(
