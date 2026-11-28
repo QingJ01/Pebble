@@ -7,7 +7,7 @@ import Input from "@/components/ui/Input";
 import Select from "@/components/ui/Select";
 import { useAccountsQuery } from "@/hooks/queries";
 import { showTestNotification } from "@/lib/api";
-import { useToastStore } from "@/stores/toast.store";
+import { toastError, useToastStore } from "@/stores/toast.store";
 import { useUIStore } from "@/stores/ui.store";
 import {
   OptionCard,
@@ -33,6 +33,8 @@ import {
   type NotifyPrefs,
 } from "./api";
 import { reasonLabel, tierLabel } from "./labels";
+import { NotifyFeedback } from "./NotifyFeedback";
+import { useAgentModel } from "@/features/agent/model-api";
 import "./notify.css";
 
 const MODES: Array<{ mode: NotifyMode; titleKey: string; title: string; descKey: string; desc: string }> = [
@@ -129,7 +131,7 @@ export default function NotificationsTab() {
             />
           ))}
         </OptionCardGroup>
-        {accounts.length > 1 && defaults && (
+        {defaults && (accounts.length > 1 || accounts.some((a) => settings?.accounts[a.id]?.ownMode !== false && !!settings?.accounts[a.id])) && (
           <SettingsList className="notify-account-list">
             {accounts.map((account) => {
               const own = settings?.accounts[account.id];
@@ -142,7 +144,7 @@ export default function NotificationsTab() {
                     <Select
                       size="sm"
                       aria-label={t("notify.accountMode", "Notifications for {{account}}", { account: account.email })}
-                      value={own?.mode ?? "default"}
+                      value={own && own.ownMode !== false ? own.mode : "default"}
                       onChange={(event) => {
                         const value = event.target.value;
                         if (value === "default") {
@@ -150,7 +152,7 @@ export default function NotificationsTab() {
                             queryClient.invalidateQueries({ queryKey: notifyKeys.settings }),
                           );
                         } else {
-                          save.mutate({ accountId: account.id, prefs: { ...(own ?? defaults), mode: value as NotifyMode } });
+                          save.mutate({ accountId: account.id, prefs: { ...(own ?? defaults), mode: value as NotifyMode, ownMode: true } });
                         }
                       }}
                     >
@@ -167,11 +169,106 @@ export default function NotificationsTab() {
         )}
       </SettingsSection>
 
+      {defaults && settings && <ModelAssistSection defaults={defaults} own={settings.accounts} />}
       {defaults && <QuietHoursSection prefs={defaults} onChange={saveDefaults} />}
       {defaults && <ProactiveSection prefs={defaults} onChange={saveDefaults} />}
       <SenderPrefsSection />
       <DecisionLogSection />
     </div>
+  );
+}
+
+/** Let the AI model decide mail the rules can't place (#107 §2.7). */
+function ModelAssistSection({ defaults, own }: { defaults: NotifyPrefs; own: Record<string, NotifyPrefs> }) {
+  const { t } = useTranslation();
+  const { data: model } = useAgentModel();
+  const { data: accounts = [] } = useAccountsQuery();
+  const save = useSaveNotifyPrefs();
+  const setSettingsTab = useUIStore((s) => s.setSettingsTab);
+  // An account without its own row follows the default mode.
+  const prefsOf = (id: string): NotifyPrefs => own[id] ?? { ...defaults, ownMode: false };
+  const assisted = accounts.filter((account) => prefsOf(account.id).modelAssist);
+  const update = (id: string, patch: Partial<NotifyPrefs>) =>
+    save.mutate(
+      { accountId: id, prefs: { ...prefsOf(id), ...patch } },
+      { onError: (error) => toastError(error, "notify.saveFailed") },
+    );
+  const shared = assisted[0] ? prefsOf(assisted[0].id) : defaults;
+  return (
+    <SettingsSection
+      title={t("notify.aiTitle", "AI help")}
+      description={t(
+        "notify.aiDesc",
+        "For mail the rules can't place, the AI model decides whether it's worth a notification and says why. It can only choose between notifying and the digest, never hide mail. If the model is slow or unavailable, the rules decide.",
+      )}
+    >
+      {!model?.configured ? (
+        <div className="notify-ai__setup">
+          <span>{t("notify.aiNeedsModel", "Set up an AI model first.")}</span>
+          <Button size="sm" onClick={() => setSettingsTab("assistant")}>{t("agent.setupAction", "Set up a model")}</Button>
+        </div>
+      ) : (
+        <>
+          <p className={`notify-ai__privacy${model.local ? "" : " is-cloud"}`}>
+            {shared.modelSendBody
+              ? t("notify.aiSendsBody", "New mail from accounts you turn on is sent automatically to {{endpoint}}: sender, subject, whether you're in To, and the start of the text with codes masked.", { endpoint: model.endpoint })
+              : t("notify.aiSendsMeta", "New mail from accounts you turn on is sent automatically to {{endpoint}}: sender, subject and whether you're in To. No message text.", { endpoint: model.endpoint })}
+            {!model.local && " " + t("notify.aiCloud", "This is a cloud service; a local model keeps your mail on this device.")}
+          </p>
+          <SettingsList className="notify-account-list">
+            {accounts.map((account) => {
+              const prefs = prefsOf(account.id);
+              const gmail = account.provider === "gmail";
+              return (
+                <SettingsListRow
+                  key={account.id}
+                  title={account.account_label || account.email}
+                  meta={
+                    gmail
+                      ? t("notify.aiGmail", "Not available for Gmail accounts yet")
+                      : prefs.modelAssist && prefs.mode === "all"
+                        ? t("notify.aiModeAll", "Works with Smart or Important only; this account notifies for all mail")
+                        : account.account_label ? account.email : undefined
+                  }
+                  actions={
+                    <Checkbox
+                      checked={prefs.modelAssist && !gmail}
+                      disabled={gmail || save.isPending}
+                      onChange={() =>
+                        update(
+                          account.id,
+                          prefs.modelAssist
+                            ? { modelAssist: false }
+                            // A newly enabled account follows the choices already made
+                            // (e.g. metadata only), never the defaults.
+                            : { modelAssist: true, modelSendBody: shared.modelSendBody, modelReviewsBulk: shared.modelReviewsBulk },
+                        )
+                      }
+                      label={t("notify.aiUse", "Use AI")}
+                      aria-label={t("notify.aiFor", "AI help for {{account}}", { account: account.email })}
+                    />
+                  }
+                />
+              );
+            })}
+          </SettingsList>
+          {assisted.length > 0 && (
+            <div className="notify-ai__options">
+              <Checkbox
+                checked={shared.modelSendBody}
+                onChange={() => assisted.forEach((account) => update(account.id, { modelSendBody: !shared.modelSendBody }))}
+                label={t("notify.aiBody", "Include the start of the message text (better decisions)")}
+              />
+              <Checkbox
+                checked={shared.modelReviewsBulk}
+                onChange={() => assisted.forEach((account) => update(account.id, { modelReviewsBulk: !shared.modelReviewsBulk }))}
+                label={t("notify.aiBulk", "Also check newsletters and automated mail")}
+              />
+            </div>
+          )}
+        </>
+      )}
+    </SettingsSection>
   );
 }
 
@@ -395,9 +492,10 @@ function DecisionLogSection() {
               meta={
                 <>
                   {entry.fromName || entry.fromAddress} · {reasonLabel(t, entry.reason)}
-                  {entry.why && <span className="notify-why"> · {entry.why}</span>}
+                  {entry.why && <span className="notify-why"> · ✦ {entry.why}</span>}
                 </>
               }
+              actions={<NotifyFeedback entry={entry} />}
             />
           ))}
         </SettingsList>

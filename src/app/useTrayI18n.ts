@@ -42,6 +42,7 @@ export function buildNotificationLabels(t: TFunction): NotificationLabels {
       raw("important", "awaiting", "followups"),
     ),
     agent_many: t("notifications.agentMany", "{{n}} new messages from Pebble", raw("n")),
+    deadline_soon: t("notifications.deadlineSoon", "Due {{time}}: {{subject}}", raw("time", "subject")),
   };
 }
 

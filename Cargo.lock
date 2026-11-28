@@ -4113,7 +4113,9 @@ dependencies = [
 name = "pebble-notify"
 version = "0.2.1"
 dependencies = [
+ "chrono",
  "pebble-core",
+ "regex",
  "serde",
  "serde_json",
 ]

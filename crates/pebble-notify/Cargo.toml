@@ -7,3 +7,5 @@ edition = "2021"
 pebble-core = { path = "../pebble-core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+chrono = { version = "0.4.44", default-features = false, features = ["std"] }
+regex = "1"

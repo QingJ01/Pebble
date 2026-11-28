@@ -25,7 +25,7 @@ export interface ThreadWatch {
   linkMessageId?: string | null;
 }
 
-export type AgentEventKind = "watch_reply" | "watch_overdue" | "awaiting_reply" | "briefing" | "deadline" | string;
+export type AgentEventKind = "watch_reply" | "watch_overdue" | "awaiting_reply" | "briefing" | "deadline" | "deadline_soon" | string;
 
 /** Mirrors `pebble_store::agent::AgentEvent`. */
 export interface AgentEvent {
@@ -48,10 +48,10 @@ export interface AgentEvent {
   resolution: AgentResolution | null;
 }
 
-export type AgentAction = "wait" | "stop" | "later" | "no_reply";
+export type AgentAction = "wait" | "stop" | "later" | "no_reply" | "done" | "not_deadline";
 
 export interface AgentResolution {
-  action: AgentAction | "answered";
+  action: AgentAction | "answered" | "expired";
   days?: number;
   until?: number;
   at?: number;

@@ -616,6 +616,36 @@ impl Store {
         })
     }
 
+    /// Whether `address` wrote in the thread of `message_id` after it, or
+    /// the message is gone (the user handled a deadline by replying).
+    pub fn replied_by_after(&self, message_id: &str, address: &str) -> Result<bool> {
+        self.with_read(|conn| {
+            let row: Option<(Option<String>, i64, i64)> = conn
+                .query_row(
+                    "SELECT thread_id, date, is_deleted FROM messages WHERE id = ?1",
+                    params![message_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .optional()?;
+            let Some((thread_id, date, deleted)) = row else {
+                return Ok(true);
+            };
+            if deleted != 0 {
+                return Ok(true);
+            }
+            let Some(thread_id) = thread_id else {
+                return Ok(false);
+            };
+            Ok(conn
+                .prepare_cached(
+                    "SELECT 1 FROM messages WHERE thread_id = ?1 AND id <> ?2 AND is_deleted = 0
+                       AND is_draft = 0 AND date > ?3 AND lower(trim(from_address)) = lower(trim(?4))
+                     LIMIT 1",
+                )?
+                .exists(params![thread_id, message_id, date, address])?)
+        })
+    }
+
     /// The message to open for a follow-up: the reply that answered it, the
     /// message it was created from, the newest message of its thread, or
     /// (for mail followed while sending) the account's sent copy with the

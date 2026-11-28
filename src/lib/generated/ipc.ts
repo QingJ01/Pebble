@@ -136,7 +136,11 @@ briefing_body: string,
 /**
  * Several assistant messages in one notification; `{n}`.
  */
-agent_many: string, };
+agent_many: string, 
+/**
+ * A deadline from a mail is coming up; `{subject}`, `{time}`.
+ */
+deadline_soon: string, };
 
 export type NotificationStatus = { enabled: boolean, attention_active: boolean, platform: string, app_id: string | null, };
 

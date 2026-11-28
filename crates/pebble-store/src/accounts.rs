@@ -419,6 +419,10 @@ impl Store {
                 "DELETE FROM agent_events WHERE account_id = ?1",
                 rusqlite::params![id],
             )?;
+            tx.execute(
+                "DELETE FROM notify_feedback WHERE account_id = ?1",
+                rusqlite::params![id],
+            )?;
             tx.execute("DELETE FROM accounts WHERE id = ?1", rusqlite::params![id])?;
             tx.commit()?;
             Ok(())

@@ -390,7 +390,9 @@ pub fn build_briefing(store: &Store, now: i64) -> serde_json::Value {
         .list_unseen_digest(500)
         .map(|rows| rows.len())
         .unwrap_or(0);
+    let deadlines = crate::deadlines::upcoming(store, now, crate::deadlines::BRIEFING_AHEAD, 5);
     json!({
+        "deadlines": deadlines,
         "importantUnread": important_unread,
         "important": important,
         "awaitingReply": awaiting,
@@ -444,7 +446,7 @@ pub fn maybe_record_briefing(
 fn push_kind(event: &AgentEvent) -> PushKind {
     match event.kind.as_str() {
         "briefing" => PushKind::Briefing,
-        "deadline" => PushKind::Urgent,
+        "deadline_soon" => PushKind::Urgent,
         _ => PushKind::Normal,
     }
 }
@@ -467,6 +469,13 @@ pub fn notification_text(
                 ],
             ),
             "watch_overdue" => fill(&labels.watch_overdue, &[("title", &str_of(one, "title"))]),
+            "deadline_soon" => fill(
+                &labels.deadline_soon,
+                &[
+                    ("subject", &str_of(one, "subject")),
+                    ("time", &due_text(one.payload["due"].as_i64().unwrap_or(0))),
+                ],
+            ),
             "briefing" => {
                 let count = |key: &str| match &one.payload[key] {
                     serde_json::Value::Array(items) => items.len().to_string(),
@@ -487,6 +496,16 @@ pub fn notification_text(
             fill(&labels.awaiting_many, &[("n", &many.len().to_string())])
         }
         many => fill(&labels.agent_many, &[("n", &many.len().to_string())]),
+    }
+}
+
+/// "18:00" today, otherwise "12/04 18:00" (local).
+fn due_text(due: i64) -> String {
+    let due = crate::deadlines::local_naive(due);
+    if due.date() == chrono::Local::now().date_naive() {
+        due.format("%H:%M").to_string()
+    } else {
+        due.format("%m/%d %H:%M").to_string()
     }
 }
 
@@ -586,6 +605,13 @@ async fn tick(app: &AppHandle, store: &Arc<Store>, scan: bool) {
         let mut changed = record_overdue_follow_ups(&store, now) > 0;
         changed |= record_later_reminders(&store, now) > 0;
         changed |= settle_answered(&store, now) > 0;
+        changed |= crate::deadlines::tick(&store, now);
+        // Held notifications whose model call never finished.
+        if let Ok(settled) = store.settle_stale_model_pending(now - 120) {
+            if settled > 0 {
+                tracing::info!("Settled {settled} notifications left waiting for the model");
+            }
+        }
         if scan {
             changed |= complete_answered_follow_ups(&store, now) > 0;
         }

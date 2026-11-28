@@ -363,14 +363,117 @@ impl Store {
         tier: &str,
         reason: &str,
         why: Option<&str>,
+        confidence: Option<f32>,
     ) -> Result<()> {
         self.with_write(|conn| {
             conn.execute(
-                "UPDATE notification_log SET tier = ?3, reason = ?4, why = ?5
+                "UPDATE notification_log SET tier = ?3, reason = ?4, why = ?5, confidence = ?6
                  WHERE account_id = ?1 AND message_key = ?2",
-                params![account_id, message_key, tier, reason, why],
+                params![
+                    account_id,
+                    message_key,
+                    tier,
+                    reason,
+                    why,
+                    confidence.map(f64::from)
+                ],
             )?;
             Ok(())
+        })
+    }
+
+    /// Messages still waiting for the model since before `before` (the app
+    /// quit, or the call died): settle them by the rules, into the digest
+    /// rather than a late notification. Returns how many.
+    pub fn settle_stale_model_pending(&self, before: i64) -> Result<usize> {
+        self.with_write(|conn| {
+            Ok(conn.execute(
+                "UPDATE notification_log
+                 SET reason = 'model_fallback',
+                     tier = CASE WHEN tier = 'interrupt' AND delivered = 0 THEN 'digest' ELSE tier END
+                 WHERE reason = 'model_pending' AND created_at < ?1",
+                params![before],
+            )?)
+        })
+    }
+
+    /// Model decisions recorded since `since` (for the daily limit).
+    pub fn count_model_decisions_since(&self, since: i64) -> Result<u32> {
+        self.with_read(|conn| {
+            Ok(conn.query_row(
+                "SELECT COUNT(*) FROM notification_log
+                 WHERE created_at >= ?1 AND reason LIKE 'model:%'",
+                params![since],
+                |row| row.get(0),
+            )?)
+        })
+    }
+
+    /// Store the user's correction for a message (replacing an earlier one).
+    /// Returns how many corrections in the same direction this sender has.
+    pub fn record_notify_feedback(
+        &self,
+        account_id: &str,
+        message_id: &str,
+        sender: &str,
+        subject: &str,
+        important: bool,
+        now: i64,
+    ) -> Result<u32> {
+        let sender = sender.trim().to_lowercase();
+        self.with_write(|conn| {
+            conn.execute(
+                "INSERT INTO notify_feedback (account_id, message_id, sender, subject, important, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(account_id, message_id) DO UPDATE SET
+                     important = excluded.important, created_at = excluded.created_at",
+                params![account_id, message_id, sender, subject, important, now],
+            )?;
+            Ok(conn.query_row(
+                "SELECT COUNT(*) FROM notify_feedback
+                 WHERE account_id = ?1 AND sender = ?2 AND important = ?3",
+                params![account_id, sender, important],
+                |row| row.get(0),
+            )?)
+        })
+    }
+
+    /// The user's correction for a message, if any.
+    pub fn notify_feedback_for(&self, account_id: &str, message_id: &str) -> Result<Option<bool>> {
+        self.with_read(|conn| {
+            Ok(conn
+                .query_row(
+                    "SELECT important FROM notify_feedback WHERE account_id = ?1 AND message_id = ?2",
+                    params![account_id, message_id],
+                    |row| row.get(0),
+                )
+                .optional()?)
+        })
+    }
+
+    /// Recent corrections from `account_ids`, newest first:
+    /// (sender, subject, important).
+    pub fn recent_notify_feedback(
+        &self,
+        account_ids: &[String],
+        limit: u32,
+    ) -> Result<Vec<(String, String, bool)>> {
+        if account_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = vec!["?"; account_ids.len()].join(", ");
+        self.with_read(|conn| {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT sender, subject, important FROM notify_feedback
+                 WHERE account_id IN ({placeholders})
+                 ORDER BY created_at DESC, id DESC LIMIT {limit}"
+            ))?;
+            let rows = stmt
+                .query_map(rusqlite::params_from_iter(account_ids.iter()), |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            Ok(rows)
         })
     }
 
@@ -582,6 +685,37 @@ mod tests {
     }
 
     #[test]
+    fn notifications_left_waiting_for_the_model_land_in_the_digest() {
+        let store = Store::open_in_memory().unwrap();
+        let me = account("me@example.com");
+        store.insert_account(&me).unwrap();
+        let m = message("m1", &me, "ann@example.com", &["me@example.com"]);
+        store.insert_message(&m, &[]).unwrap();
+        let held = NewNotificationLog {
+            account_id: &me.id,
+            message_key: "mid:held",
+            message_id: &m.id,
+            tier: "interrupt",
+            reason: "model_pending",
+            why: None,
+            created_at: 30,
+        };
+        store.insert_notification_log(&held).unwrap();
+        assert_eq!(
+            store.settle_stale_model_pending(20).unwrap(),
+            0,
+            "still fresh"
+        );
+        assert_eq!(store.settle_stale_model_pending(100).unwrap(), 1);
+        let row = &store.list_notification_log(10).unwrap()[0];
+        assert_eq!(
+            (row.tier.as_str(), row.reason.as_str()),
+            ("digest", "model_fallback")
+        );
+        assert_eq!(store.list_unseen_digest(10).unwrap().len(), 1);
+    }
+
+    #[test]
     fn notification_log_dedupes_and_tracks_digest() {
         let store = Store::open_in_memory().unwrap();
         let me = account("me@example.com");
@@ -623,7 +757,7 @@ mod tests {
             "digest doesn't undo it"
         );
         store
-            .update_notification_decision(&me.id, &key, "digest", "default", None)
+            .update_notification_decision(&me.id, &key, "digest", "default", None, None)
             .unwrap();
         store
             .update_notification_decision(
@@ -632,8 +766,38 @@ mod tests {
                 "interrupt",
                 "model:needs_action",
                 Some("Asks for a reply"),
+                Some(0.9),
             )
             .unwrap();
+        assert_eq!(store.count_model_decisions_since(0).unwrap(), 1);
+
+        assert_eq!(
+            store
+                .record_notify_feedback(&me.id, "m1", "Ann@Example.com", "Hi", false, 20)
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            store
+                .record_notify_feedback(&me.id, "m1", "ann@example.com", "Hi", true, 21)
+                .unwrap(),
+            1,
+            "a second correction of the same message replaces the first"
+        );
+        assert_eq!(store.notify_feedback_for(&me.id, "m1").unwrap(), Some(true));
+        assert_eq!(
+            store
+                .recent_notify_feedback(std::slice::from_ref(&me.id), 5)
+                .unwrap(),
+            vec![("ann@example.com".to_string(), "Hi".to_string(), true)]
+        );
+        assert!(
+            store
+                .recent_notify_feedback(&["other".to_string()], 5)
+                .unwrap()
+                .is_empty(),
+            "corrections stay with their account"
+        );
         assert!(store.list_unseen_digest(10).unwrap().is_empty());
         let log = store.list_notification_log(10).unwrap();
         assert_eq!(log[0].reason, "model:needs_action");

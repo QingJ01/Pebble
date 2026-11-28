@@ -54,6 +54,19 @@ pub async fn set_notify_prefs(
             ));
         }
     }
+    if prefs.model_assist {
+        if let Some(account) = account_id
+            .as_deref()
+            .filter(|id| !id.is_empty())
+            .and_then(|id| state.store.get_account(id).ok().flatten())
+        {
+            if !crate::smart_notify::model_assist_allowed(&account) {
+                return Err(PebbleError::Validation(
+                    "AI help with notifications isn't available for Gmail accounts yet".into(),
+                ));
+            }
+        }
+    }
     let json = serde_json::to_string(&prefs).map_err(|e| PebbleError::Internal(e.to_string()))?;
     state.store.set_notify_prefs_json(
         account_id.as_deref().unwrap_or(""),
@@ -134,6 +147,8 @@ pub struct NotificationEntry {
     pub from_address: String,
     pub thread_id: Option<String>,
     pub date: i64,
+    /// The user's correction: `true` "should notify", `false` "not important".
+    pub feedback: Option<bool>,
 }
 
 fn with_messages(
@@ -154,6 +169,11 @@ fn with_messages(
             if message.is_deleted {
                 return None;
             }
+            let feedback = state
+                .store
+                .notify_feedback_for(&row.account_id, &row.message_id)
+                .ok()
+                .flatten();
             Some(NotificationEntry {
                 account_id: row.account_id,
                 message_id: row.message_id,
@@ -168,6 +188,7 @@ fn with_messages(
                 from_address: message.from_address.clone(),
                 thread_id: message.thread_id.clone(),
                 date: message.date,
+                feedback,
             })
         })
         .collect())
@@ -198,4 +219,53 @@ pub async fn mark_digest_seen(state: State<'_, AppState>, app: AppHandle) -> Cmd
     let count = state.store.mark_digest_seen(now_timestamp())?;
     let _ = app.emit(events::NOTIFY_CHANGED, ());
     Ok(count)
+}
+
+/// Corrections in one direction after which a sender rule is suggested.
+const SUGGEST_AFTER: u32 = 3;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FeedbackResult {
+    pub sender: String,
+    /// `vip` or `mute` when the user keeps correcting this sender the same
+    /// way and has no rule for them yet.
+    pub suggest: Option<String>,
+}
+
+/// The user says a message was not important (`important = false`) or
+/// should have notified (`true`). Kept on this device; recent corrections
+/// guide model-assisted notifications.
+#[tauri::command]
+pub async fn notify_feedback(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    account_id: String,
+    message_id: String,
+    important: bool,
+) -> CmdResult<FeedbackResult> {
+    let message = state
+        .store
+        .get_message(&message_id)?
+        .filter(|message| message.account_id == account_id)
+        .ok_or_else(|| PebbleError::Validation("Message not found".into()))?;
+    let count = state.store.record_notify_feedback(
+        &account_id,
+        &message_id,
+        &message.from_address,
+        &message.subject,
+        important,
+        now_timestamp(),
+    )?;
+    let has_rule = state
+        .store
+        .sender_pref_for(&account_id, &message.from_address)?
+        .is_some();
+    let suggest = (count >= SUGGEST_AFTER && !has_rule)
+        .then(|| if important { "vip" } else { "mute" }.to_string());
+    let _ = app.emit(events::NOTIFY_CHANGED, ());
+    Ok(FeedbackResult {
+        sender: message.from_address.trim().to_lowercase(),
+        suggest,
+    })
 }

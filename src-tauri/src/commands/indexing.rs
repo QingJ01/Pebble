@@ -419,13 +419,13 @@ const MAX_INDIVIDUAL_NOTIFICATIONS: usize = 3;
 
 /// A notification-eligible message, trimmed to what the toast needs.
 #[derive(Debug, Clone)]
-struct NotifyItem {
-    account_id: String,
-    message_id: String,
+pub(crate) struct NotifyItem {
+    pub(crate) account_id: String,
+    pub(crate) message_id: String,
     /// Decision-log key; marked delivered once shown.
-    message_key: String,
-    body: String,
-    date: i64,
+    pub(crate) message_key: String,
+    pub(crate) body: String,
+    pub(crate) date: i64,
 }
 
 /// Decide which toasts to show for one flush: per account, up to
@@ -465,7 +465,7 @@ fn plan_notifications(
     toasts
 }
 
-fn send_planned_notifications(app: &tauri::AppHandle, items: Vec<NotifyItem>) {
+pub(crate) fn send_planned_notifications(app: &tauri::AppHandle, items: Vec<NotifyItem>) {
     if items.is_empty() {
         return;
     }
@@ -556,8 +556,10 @@ struct FlushOutcome {
     notifications: Vec<NotifyItem>,
     /// Every new message decided in this window (logged once each).
     triaged: Vec<smart_notify::Triaged>,
-    /// A follow-up completed (the activity feed changed).
+    /// A follow-up completed or a deadline was found (the feed changed).
     agent_events_changed: bool,
+    /// Messages held back for model-assisted triage.
+    model_candidates: Vec<crate::model_triage::ModelCandidate>,
 }
 
 /// Receive newly stored messages from the sync worker, apply rules, index
@@ -657,6 +659,12 @@ pub async fn index_new_messages(
                 let _ = app.emit(events::AGENT_EVENTS_CHANGED, ());
             }
             send_planned_notifications(app, outcome.notifications);
+            if !outcome.model_candidates.is_empty() {
+                tauri::async_runtime::spawn(crate::model_triage::refine(
+                    app.clone(),
+                    outcome.model_candidates,
+                ));
+            }
         }
     }
 }
@@ -777,17 +785,54 @@ fn process_flush_window(
         {
             continue;
         }
-        if !smart_notify::record(store, &triaged, now) {
+        let model_assisted = triaged.decision.model_candidate
+            && prefs.model_assist
+            && triage
+                .account(store, account_id)
+                .is_some_and(|account| smart_notify::model_assist_allowed(&account));
+        // Held for the model: logged as pending, so a crash or a quit during
+        // the call can't lose it (stale pending rows go to the digest).
+        let logged = if model_assisted {
+            let mut pending = triaged.clone();
+            pending.decision.reason = pebble_notify::Reason::ModelPending;
+            smart_notify::record(store, &pending, now)
+        } else {
+            smart_notify::record(store, &triaged, now)
+        };
+        if !logged {
             continue;
         }
-        if triaged.decision.tier == pebble_notify::Tier::Interrupt {
-            outcome.notifications.push(NotifyItem {
-                account_id: account_id.clone(),
-                message_id: stored.message.id.clone(),
-                message_key: triaged.message_key.clone(),
-                body: new_mail_notification_body(stored, &labels),
-                date: stored.message.date,
-            });
+        // Deadlines in mail that reaches the user (not bulk: "offer ends
+        // Friday" is not a deadline).
+        let has_deadline = triaged.decision.tier != pebble_notify::Tier::Silent
+            && !matches!(triaged.decision.reason, pebble_notify::Reason::Bulk)
+            && crate::deadlines::detect(store, &stored.message, now);
+        outcome.agent_events_changed |= has_deadline;
+        let notify_item = NotifyItem {
+            account_id: account_id.clone(),
+            message_id: stored.message.id.clone(),
+            message_key: triaged.message_key.clone(),
+            body: new_mail_notification_body(stored, &labels),
+            date: stored.message.date,
+        };
+        if model_assisted {
+            outcome
+                .model_candidates
+                .push(crate::model_triage::ModelCandidate {
+                    triaged: triaged.clone(),
+                    prefs: prefs.clone(),
+                    message: stored.message.clone(),
+                    to_me: facts.to_me,
+                    known_contact: facts.sender_is_favorite || facts.sender_known,
+                    times_user_wrote: store
+                        .sent_count_to(account_id, &stored.message.from_address)
+                        .unwrap_or(0),
+                    automated: pebble_notify::is_automated(&facts),
+                    notify: notify_item,
+                    has_deadline,
+                });
+        } else if triaged.decision.tier == pebble_notify::Tier::Interrupt {
+            outcome.notifications.push(notify_item);
         }
         outcome.triaged.push(triaged);
     }

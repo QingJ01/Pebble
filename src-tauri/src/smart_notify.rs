@@ -16,6 +16,10 @@ use tracing::warn;
 #[serde(default, rename_all = "camelCase")]
 pub struct NotifyPrefsRecord {
     pub mode: Mode,
+    /// On an account row: the account has its own mode. A row created only
+    /// for AI help follows the default mode.
+    #[serde(default = "own_mode_default")]
+    pub own_mode: bool,
     pub quiet_hours: Option<QuietHours>,
     /// Let the configured model decide mail the rules can't (#107 §2.7).
     pub model_assist: bool,
@@ -35,10 +39,15 @@ pub struct NotifyPrefsRecord {
     pub follow_up_days: u32,
 }
 
+fn own_mode_default() -> bool {
+    true
+}
+
 impl Default for NotifyPrefsRecord {
     fn default() -> Self {
         Self {
             mode: Mode::All,
+            own_mode: true,
             quiet_hours: None,
             model_assist: false,
             model_reviews_bulk: false,
@@ -77,7 +86,11 @@ pub fn load_prefs(store: &Store, account_id: &str) -> NotifyPrefsRecord {
     // later change there applies to every account.
     match parse(store.get_notify_prefs_json(account_id).ok().flatten()) {
         Some(own) => NotifyPrefsRecord {
-            mode: own.mode,
+            mode: if own.own_mode {
+                own.mode
+            } else {
+                defaults.mode
+            },
             model_assist: own.model_assist,
             model_reviews_bulk: own.model_reviews_bulk,
             model_send_body: own.model_send_body,
@@ -167,6 +180,12 @@ pub fn is_from_account(message: &Message, account: &Account) -> bool {
         .from_address
         .trim()
         .eq_ignore_ascii_case(account.email.trim())
+}
+
+/// Model assist can't be turned on for Gmail accounts until Google's
+/// policy for sending mail content to other services is checked (#107 §2.7).
+pub fn model_assist_allowed(account: &Account) -> bool {
+    account.provider != pebble_core::ProviderType::Gmail
 }
 
 /// What the user's rules did, for the decision.
@@ -402,6 +421,17 @@ mod tests {
         // Garbage falls back to the defaults row.
         store.set_notify_prefs_json("a2", "not json", 1).unwrap();
         assert_eq!(load_prefs(&store, "a2").mode, Mode::All);
+        // A row made only for AI help follows the default mode.
+        store
+            .set_notify_prefs_json(
+                "a3",
+                r#"{"mode":"smart","ownMode":false,"modelAssist":true}"#,
+                3,
+            )
+            .unwrap();
+        let prefs = load_prefs(&store, "a3");
+        assert_eq!(prefs.mode, Mode::All);
+        assert!(prefs.model_assist);
     }
 
     #[test]

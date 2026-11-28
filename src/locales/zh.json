@@ -14,7 +14,8 @@
     "awaitingOne": "{{from}} 在等你回复：{{subject}}",
     "awaitingMany": "有 {{n}} 封邮件在等你回复",
     "briefingBody": "今天：{{important}} 封重要邮件，{{awaiting}} 封等你回复，{{followups}} 个跟进中",
-    "agentMany": "Pebble 有 {{n}} 条新消息"
+    "agentMany": "Pebble 有 {{n}} 条新消息",
+    "deadlineSoon": "{{time}} 截止：{{subject}}"
   },
   "layout": {
     "resizeList": "调整列表宽度",
@@ -1081,8 +1082,8 @@
     "logTitle": "最近的决策",
     "logDesc": "每封新邮件为什么提醒或没有提醒。只保存决策结果，不保存邮件内容。",
     "logEmpty": "暂时没有记录。收到新邮件后会显示在这里。",
-    "makeVip": "总是提醒（VIP）",
-    "mute": "静音此发件人",
+    "makeVip": "设为 VIP",
+    "mute": "静音",
     "modeAll": "全部新邮件",
     "modeAllDesc": "收件箱里的每封新邮件都提醒，垃圾邮件、已静音的发件人和被规则归档的邮件除外。",
     "modeSmart": "智能",
@@ -1129,7 +1130,8 @@
       "bulk": "订阅或自动邮件",
       "direct": "你写过信的人",
       "default": "提醒方式",
-      "model_fallback": "模型不可用，已按规则处理"
+      "model_fallback": "模型不可用，已按规则处理",
+      "model_pending": "等待 AI 判断"
     },
     "modelLabel": {
       "needs_action": "需要你处理",
@@ -1150,7 +1152,26 @@
     "followUpDefault": "跟进已发出的邮件时，等待",
     "followUpDays": "跟进提醒",
     "hours": "{{n}} 小时",
-    "days": "{{n}} 天"
+    "days": "{{n}} 天",
+    "feedbackImportant": "你标记了：应该提醒",
+    "feedbackNot": "你标记了：不重要",
+    "suggestVip": "你经常想看 {{sender}} 的邮件。以后总是提醒吗？",
+    "suggestMute": "{{sender}} 的邮件对你很少重要。要静音吗？",
+    "feedbackFailed": "没能保存",
+    "shouldNotify": "应该提醒",
+    "notImportant": "不重要",
+    "aiTitle": "AI 辅助判断",
+    "aiDesc": "规则判断不了的邮件，交给 AI 模型决定值不值得提醒，并说明原因。它只能在「提醒」和「进摘要」之间选，不会让邮件消失。模型慢或不可用时，按规则判断。",
+    "aiNeedsModel": "需要先配置 AI 模型。",
+    "aiSendsBody": "开启的账户收到新邮件时，会自动把这些内容发给 {{endpoint}}：发件人、主题、你是否是收件人，以及正文开头（验证码已打码）。",
+    "aiSendsMeta": "开启的账户收到新邮件时，会自动把这些内容发给 {{endpoint}}：发件人、主题、你是否是收件人。不发正文。",
+    "aiCloud": "这是云端服务；用本地模型时邮件不会离开这台设备。",
+    "aiGmail": "Gmail 账户暂不支持",
+    "aiModeAll": "只在「智能」或「仅重要」模式下生效；这个账户现在是全部提醒",
+    "aiUse": "使用 AI",
+    "aiFor": "{{account}} 的 AI 辅助判断",
+    "aiBody": "附带正文开头（判断更准）",
+    "aiBulk": "订阅邮件和自动邮件也交给 AI 判断"
   },
   "agent": {
     "ackStop": "好，不再跟进「{{title}}」了。",
@@ -1168,7 +1189,7 @@
     "composeFollowUp": "{{n}} 天内没收到回复就提醒我",
     "composerPlaceholder": "问问 Pebble 你的邮件…",
     "conversation": "和 Pebble 的对话",
-    "deadlineMsg": "提醒一下：{{what}}（{{subject}}）。",
+    "deadlineMsg": "{{from}} 需要你在 {{when}} 前处理。到时候你还没回复的话，我会提前提醒你。",
     "desktopNotifications": "桌面通知",
     "digestHint": "不需要提醒的邮件会先放在这里。",
     "digestTitle": "摘要 · {{n}}",
@@ -1270,6 +1291,18 @@
     "writeNudge": "写封跟进邮件",
     "yesterday": "昨天 {{time}}",
     "yourMail": "你发出的邮件",
+    "dueToday": "今天",
+    "dueTomorrow": "明天",
+    "deadlineAnswered": "你已回复",
+    "deadlineDone": "已完成",
+    "deadlineNot": "不是截止时间",
+    "deadlinePassed": "已过截止时间",
+    "deadlineSoonMsg": "{{when}}截止：{{from}} 在等「{{subject}}」，你还没回复。",
+    "deadlineByAi": "从邮件里识别出的截止时间",
+    "deadlineMarkDone": "已经处理了",
+    "deadlineNotOne": "不是截止时间",
+    "deadlinesTitle": "即将截止",
+    "dueBy": "{{from}} · {{when}}截止",
     "draftUnverified": "请核对收件人：你没有提到过、也没给 {{who}} 写过信。"
   },
   "assistantSettings": {

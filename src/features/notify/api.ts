@@ -16,6 +16,8 @@ export interface QuietHours {
 /** Mirrors `smart_notify::NotifyPrefsRecord`. */
 export interface NotifyPrefs {
   mode: NotifyMode;
+  /** On an account row: the account has its own mode (else it follows the default). */
+  ownMode?: boolean;
   quietHours: QuietHours | null;
   modelAssist: boolean;
   modelReviewsBulk: boolean;
@@ -57,6 +59,14 @@ export interface NotificationEntry {
   fromAddress: string;
   threadId: string | null;
   date: number;
+  /** The user's correction: true "should notify", false "not important". */
+  feedback: boolean | null;
+}
+
+export interface FeedbackResult {
+  sender: string;
+  /** Suggested sender rule after repeated corrections the same way. */
+  suggest: "vip" | "mute" | null;
 }
 
 export const NOTIFY_CHANGED_EVENT = "notify:changed";
@@ -83,6 +93,8 @@ export const listNotificationLog = (limit = 100) =>
   invoke<NotificationEntry[]>("list_notification_log", { limit });
 export const listDigest = (limit = 200) => invoke<NotificationEntry[]>("list_digest", { limit });
 export const markDigestSeen = () => invoke<number>("mark_digest_seen");
+export const notifyFeedback = (accountId: string, messageId: string, important: boolean) =>
+  invoke<FeedbackResult>("notify_feedback", { accountId, messageId, important });
 
 /** Refetch notify queries whenever the backend reports a change. */
 export function useNotifyChangedInvalidation() {
@@ -142,6 +154,15 @@ export function useSenderPrefMutations() {
       onSettled: refresh,
     }),
   };
+}
+
+export function useNotifyFeedback() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ accountId, messageId, important }: { accountId: string; messageId: string; important: boolean }) =>
+      notifyFeedback(accountId, messageId, important),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: notifyKeys.all }),
+  });
 }
 
 /** "HH:MM" <-> minutes since midnight. */
