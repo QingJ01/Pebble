@@ -3,6 +3,7 @@ mod commands;
 mod events;
 #[cfg(test)]
 mod ipc_bindings;
+mod proactive;
 mod profile;
 mod realtime;
 mod send_controls;
@@ -504,6 +505,8 @@ fn finish_setup(
     tauri::async_runtime::spawn(async move {
         commands::cloud_sync::run_auto_backup_worker(app_for_backup).await;
     });
+    // Follow-up deadlines, mail awaiting a reply, daily briefing (#107).
+    tauri::async_runtime::spawn(proactive::run(app_handle.clone(), state.store.clone()));
 
     // Background integrity check, once the UI and sync are up.
     let store_for_check = state.store.clone();
@@ -863,6 +866,16 @@ pub fn run() {
             send_controls::send_control_exit_pending,
             commands::compose::stage_compose_attachment,
             commands::compose::cleanup_staged_compose_attachment,
+            commands::agent_feed::create_thread_watch,
+            commands::agent_feed::list_thread_watches,
+            commands::agent_feed::get_thread_watch_for,
+            commands::agent_feed::update_thread_watch,
+            commands::agent_feed::cancel_send_follow_up,
+            commands::agent_feed::list_agent_events,
+            commands::agent_feed::count_unread_agent_events,
+            commands::agent_feed::mark_agent_events_read,
+            commands::agent_feed::dismiss_agent_event,
+            commands::agent_feed::resolve_agent_event,
             commands::smart_notify::get_notify_settings,
             commands::smart_notify::set_notify_prefs,
             commands::smart_notify::reset_account_notify_prefs,

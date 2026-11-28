@@ -168,6 +168,7 @@ export default function NotificationsTab() {
       </SettingsSection>
 
       {defaults && <QuietHoursSection prefs={defaults} onChange={saveDefaults} />}
+      {defaults && <ProactiveSection prefs={defaults} onChange={saveDefaults} />}
       <SenderPrefsSection />
       <DecisionLogSection />
     </div>
@@ -228,6 +229,71 @@ function QuietHoursSection({ prefs, onChange }: { prefs: NotifyPrefs; onChange: 
           </div>
         </>
       )}
+    </SettingsSection>
+  );
+}
+
+function ProactiveSection({ prefs, onChange }: { prefs: NotifyPrefs; onChange: (patch: Partial<NotifyPrefs>) => void }) {
+  const { t } = useTranslation();
+  return (
+    <SettingsSection
+      title={t("notify.proactiveTitle", "Pebble keeps an eye out")}
+      description={t(
+        "notify.proactiveDesc",
+        "Pebble can speak up on its own: a morning briefing, mail that's waiting for your reply, and follow-ups that got no answer. Everything shows in the assistant panel; desktop notifications follow the settings above.",
+      )}
+    >
+      <div className="notify-proactive-row">
+        <Checkbox
+          checked={prefs.briefingEnabled}
+          onChange={() => onChange({ briefingEnabled: !prefs.briefingEnabled })}
+          label={t("notify.briefingEnable", "Daily briefing at")}
+        />
+        <Input
+          type="time"
+          className="notify-proactive-time"
+          aria-label={t("notify.briefingTime", "Briefing time")}
+          disabled={!prefs.briefingEnabled}
+          value={minutesToTime(prefs.briefingMinute)}
+          onChange={(e) => {
+            const minutes = timeToMinutes(e.target.value);
+            if (minutes !== null) onChange({ briefingMinute: minutes });
+          }}
+        />
+      </div>
+      <div className="notify-proactive-row">
+        <Checkbox
+          checked={prefs.awaitingReplyEnabled}
+          onChange={() => onChange({ awaitingReplyEnabled: !prefs.awaitingReplyEnabled })}
+          label={t("notify.awaitingEnable", "Remind me about mail waiting for my reply after")}
+        />
+        <Select
+          size="sm"
+          aria-label={t("notify.awaitingAfter", "Remind after")}
+          disabled={!prefs.awaitingReplyEnabled}
+          value={String(prefs.awaitingReplyHours)}
+          onChange={(e) => onChange({ awaitingReplyHours: Number(e.target.value) })}
+        >
+          {[12, 24, 48, 72].map((hours) => (
+            <option key={hours} value={hours}>
+              {hours < 24 ? t("notify.hours", "{{n}} hours", { n: hours }) : t("notify.days", "{{n}} days", { n: hours / 24 })}
+            </option>
+          ))}
+        </Select>
+      </div>
+      <div className="notify-proactive-row">
+        <span>{t("notify.followUpDefault", "When I follow up on sent mail, remind me after")}</span>
+        <Select
+          size="sm"
+          aria-label={t("notify.followUpDays", "Follow-up reminder")}
+          value={String(prefs.followUpDays)}
+          onChange={(e) => onChange({ followUpDays: Number(e.target.value) })}
+        >
+          {[1, 2, 3, 5, 7].map((days) => (
+            <option key={days} value={days}>{t("notify.days", "{{n}} days", { n: days })}</option>
+          ))}
+        </Select>
+      </div>
     </SettingsSection>
   );
 }

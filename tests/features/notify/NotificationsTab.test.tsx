@@ -19,7 +19,10 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
 
 const mockInvoke = vi.mocked(invoke);
-const defaults: NotifyPrefs = { mode: "all", quietHours: null, modelAssist: false, modelReviewsBulk: false, modelSendBody: true };
+const defaults: NotifyPrefs = {
+  mode: "all", quietHours: null, modelAssist: false, modelReviewsBulk: false, modelSendBody: true,
+  briefingEnabled: true, briefingMinute: 540, awaitingReplyEnabled: true, awaitingReplyHours: 24, followUpDays: 3,
+};
 
 function renderTab() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

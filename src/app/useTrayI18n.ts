@@ -9,6 +9,14 @@ import { useUIStore } from "@/stores/ui.store";
  * Localized strings for OS notifications and the tray tooltip. `{n}` and
  * `{latest}` stay literal: the backend fills them per notification.
  */
+/** Keep `{name}` placeholders literal for the backend to fill. */
+function raw(...names: string[]) {
+  return {
+    ...Object.fromEntries(names.map((name) => [name, `{${name}}`])),
+    interpolation: { escapeValue: false },
+  };
+}
+
 export function buildNotificationLabels(t: TFunction): NotificationLabels {
   return {
     new_mail_title: t("notifications.newMailTitle", "Pebble - New mail"),
@@ -23,6 +31,17 @@ export function buildNotificationLabels(t: TFunction): NotificationLabels {
     test_title: t("notifications.testTitle", "Pebble - Test notification"),
     test_body: t("notifications.testBody", "Desktop notifications are working."),
     tray_attention_tooltip: t("notifications.trayAttention", "Pebble - New mail"),
+    agent_title: t("notifications.agentTitle", "Pebble"),
+    watch_reply: t("notifications.watchReply", "{{from}} replied: {{title}}", raw("from", "title")),
+    watch_overdue: t("notifications.watchOverdue", "Still no reply: {{title}}", raw("title")),
+    awaiting_one: t("notifications.awaitingOne", "{{from}} is waiting for your reply: {{subject}}", raw("from", "subject")),
+    awaiting_many: t("notifications.awaitingMany", "{{n}} messages are waiting for your reply", raw("n")),
+    briefing_body: t(
+      "notifications.briefingBody",
+      "Today: {{important}} important, {{awaiting}} waiting for your reply, {{followups}} follow-ups",
+      raw("important", "awaiting", "followups"),
+    ),
+    agent_many: t("notifications.agentMany", "{{n}} new messages from Pebble", raw("n")),
   };
 }
 

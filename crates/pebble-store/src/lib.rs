@@ -1,4 +1,5 @@
 pub mod accounts;
+pub mod agent;
 pub use accounts::SyncState;
 pub mod attachments;
 pub mod auth_data;

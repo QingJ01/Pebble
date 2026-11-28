@@ -14,6 +14,7 @@ import { useComposeStore } from "../stores/compose.store";
 import { useUIStore, applyThemeToDom, resolveTheme } from "../stores/ui.store";
 import { useCommandStore } from "../stores/command.store";
 import { useKanbanCardsQuery } from "@/hooks/queries/useKanbanCardsQuery";
+import { useAgentEventsInvalidation } from "@/features/agent/api";
 import { useKeyboard } from "../hooks/useKeyboard";
 import { useNetworkStatus } from "../hooks/useNetworkStatus";
 import { buildCommands } from "../features/command-palette/commands";
@@ -39,6 +40,7 @@ const loadContactsView = () => import("../features/contacts/ContactsView");
 const loadSearchView = () => import("../features/search/SearchView");
 const loadSnoozedView = () => import("../features/snoozed/SnoozedView");
 const loadStarredView = () => import("../features/starred/StarredView");
+const loadAgentView = () => import("../features/agent/AgentView");
 const preloadLazyViews = createLazyViewPreloader([
   loadSettingsView,
   loadComposeView,
@@ -47,6 +49,7 @@ const preloadLazyViews = createLazyViewPreloader([
   loadSearchView,
   loadSnoozedView,
   loadStarredView,
+  loadAgentView,
 ]);
 
 const SettingsView = lazy(loadSettingsView);
@@ -56,6 +59,7 @@ const ContactsView = lazy(loadContactsView);
 const SearchView = lazy(loadSearchView);
 const SnoozedView = lazy(loadSnoozedView);
 const StarredView = lazy(loadStarredView);
+const AgentView = lazy(loadAgentView);
 import { useTranslation } from "react-i18next";
 import i18next from "i18next";
 import { WifiOff } from "lucide-react";
@@ -78,6 +82,8 @@ export default function Layout() {
 
   // Load kanban cards at startup so MessageItem can show kanban indicators
   useKanbanCardsQuery();
+  // Keep the assistant badge and feed fresh (#107).
+  useAgentEventsInvalidation();
 
   useEffect(() => scheduleLazyViewPreload(preloadLazyViews), []);
 
@@ -153,6 +159,7 @@ export default function Layout() {
               {displayedView === "search" && <SearchView />}
               {displayedView === "snoozed" && <SnoozedView />}
               {displayedView === "starred" && <StarredView />}
+              {displayedView === "agent" && <AgentView />}
               {displayedView === "compose" && <ComposeView key={composeKey} />}
             </Suspense>
           </ViewErrorBoundary>

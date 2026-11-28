@@ -17,9 +17,9 @@ import {
   Layers,
   ChevronDown,
   ChevronRight,
-  FolderCog,
-} from "lucide-react";
+  FolderCog, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useUnreadAgentEvents } from "@/features/agent/api";
 import SidebarButton from "./SidebarButton";
 import SidebarRail, { RailMenuButton } from "./SidebarRail";
 import AccountBadge, { accountShortName } from "./ui/AccountBadge";
@@ -109,6 +109,7 @@ function pruneExpandedFolders(state: ExpandedFolders, trees: Map<string, FolderT
 
 export default function SidebarGrouped({ collapsed: sidebarCollapsed }: { collapsed: boolean }) {
   const { t } = useTranslation();
+  const { data: agentUnread = 0 } = useUnreadAgentEvents();
   const activeView = useUIStore((s) => s.activeView);
   const setActiveView = useUIStore((s) => s.setActiveView);
   const activeFolderId = useMailStore((s) => s.activeFolderId);
@@ -246,6 +247,14 @@ export default function SidebarGrouped({ collapsed: sidebarCollapsed }: { collap
         isActive={activeView === "kanban"}
         collapsed={sidebarCollapsed}
         onClick={() => safeSetActiveView("kanban")}
+      />
+      <SidebarButton
+        icon={<Sparkles size={16} />}
+        label={t("sidebar.assistant", "Assistant")}
+        badge={agentUnread > 0 ? agentUnread : undefined}
+        isActive={activeView === "agent"}
+        collapsed={sidebarCollapsed}
+        onClick={() => safeSetActiveView("agent")}
       />
       <SidebarButton
         icon={<Settings size={16} />}

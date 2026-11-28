@@ -22,6 +22,7 @@ import { useUIStore } from "@/stores/ui.store";
 import SelectionActionPopover from "./SelectionActionPopover";
 import ContactAddressAction from "./ContactAddressAction";
 import SenderNotifyAction from "@/features/notify/SenderNotifyAction";
+import FollowUpButton from "@/features/agent/FollowUpButton";
 import MessageParticipants from "./MessageParticipants";
 import IconButton from "./ui/IconButton";
 import { useDelayedFlag } from "@/hooks/useDelayedFlag";
@@ -285,6 +286,7 @@ export default function MessageDetail({ messageId, onBack, onReopen, folderRole 
           onMessageUpdate={setMessage}
         />
         <div className="reader-toolbar__end">
+          <FollowUpButton accountId={message.account_id} messageId={message.id} threadId={message.thread_id} />
           <IconButton
             ref={snoozeButtonRef}
             size="md"

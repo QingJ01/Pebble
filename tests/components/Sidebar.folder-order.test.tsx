@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   folders: [] as Folder[],
 }));
 
+vi.mock("../../src/features/agent/api", () => ({ useUnreadAgentEvents: () => ({ data: 0 }) }));
 vi.mock("react-i18next", () => ({
   initReactI18next: {
     type: "3rdParty",

@@ -10,8 +10,9 @@ mod v17_v22;
 mod v21;
 mod v23;
 mod v24;
+mod v25;
 
-pub(crate) const CURRENT_VERSION: u32 = 24;
+pub(crate) const CURRENT_VERSION: u32 = 25;
 /// How many pre-migration backups to keep next to the database file.
 const MIGRATION_BACKUPS_TO_KEEP: usize = 2;
 // Keep in sync with src/lib/accountColors.ts and src-tauri/src/account_colors.rs
@@ -480,6 +481,12 @@ fn run_migrations_reporting(
     if version < 24 && target >= 24 {
         v24::apply_v24(conn)?;
         step(24);
+    }
+
+    // V25: follow-ups and the agent activity feed.
+    if version < 25 && target >= 25 {
+        v25::apply_v25(conn)?;
+        step(25);
     }
 
     Ok(())

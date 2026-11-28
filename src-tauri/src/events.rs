@@ -11,3 +11,5 @@ pub const MAIL_PENDING_OPS_CHANGED: &str = "mail:pending-ops-changed";
 pub const APP_OPEN_MAILTO: &str = "app:open-mailto";
 /// Smart-notification decisions or digest changed (#107).
 pub const NOTIFY_CHANGED: &str = "notify:changed";
+/// The agent activity feed (follow-ups, nudges, briefings) changed (#107).
+pub const AGENT_EVENTS_CHANGED: &str = "agent:events-changed";

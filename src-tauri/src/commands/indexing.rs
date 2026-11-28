@@ -217,11 +217,14 @@ fn open_message_from_notification(app: &tauri::AppHandle, account_id: &str, mess
     windows,
     all(not(windows), not(target_os = "linux"), not(target_os = "macos"))
 ))]
-fn show_default_new_mail_notification(app: &tauri::AppHandle, body: &str) -> Result<(), String> {
-    let labels = notifications::notification_labels();
+fn show_default_new_mail_notification(
+    app: &tauri::AppHandle,
+    title: &str,
+    body: &str,
+) -> Result<(), String> {
     app.notification()
         .builder()
-        .title(&labels.new_mail_title)
+        .title(title)
         .body(body)
         .show()
         .map_err(|e| e.to_string())
@@ -230,6 +233,7 @@ fn show_default_new_mail_notification(app: &tauri::AppHandle, body: &str) -> Res
 #[cfg(target_os = "linux")]
 fn show_linux_new_mail_notification(
     app: &tauri::AppHandle,
+    title: &str,
     body: &str,
     account_id: &str,
     message_id: &str,
@@ -239,7 +243,7 @@ fn show_linux_new_mail_notification(
 
     let mut notification = notify_rust::Notification::new();
     notification
-        .summary(&labels.new_mail_title)
+        .summary(title)
         .body(body)
         .appname("Pebble")
         .auto_icon()
@@ -277,6 +281,7 @@ fn is_macos_notification_open_response(
 #[cfg(target_os = "macos")]
 fn show_macos_new_mail_notification(
     app: &tauri::AppHandle,
+    title: &str,
     body: &str,
     account_id: &str,
     message_id: &str,
@@ -287,6 +292,7 @@ fn show_macos_new_mail_notification(
     let account_id = account_id.to_string();
     let message_id = message_id.to_string();
     let body = body.to_string();
+    let title = title.to_string();
     let labels = notifications::notification_labels();
     let app_id = if tauri::is_dev() {
         "com.apple.Terminal".to_string()
@@ -300,7 +306,7 @@ fn show_macos_new_mail_notification(
             let _ = mac_notification_sys::set_application(&app_id);
             let mut notification = mac_notification_sys::Notification::new();
             notification
-                .title(&labels.new_mail_title)
+                .title(&title)
                 .message(&body)
                 .main_button(mac_notification_sys::MainButton::SingleAction(
                     &labels.open_action,
@@ -322,6 +328,7 @@ fn show_macos_new_mail_notification(
 #[cfg(windows)]
 fn show_windows_new_mail_notification(
     app: &tauri::AppHandle,
+    title: &str,
     body: &str,
     account_id: &str,
     message_id: &str,
@@ -332,7 +339,7 @@ fn show_windows_new_mail_notification(
     let account_id = account_id.to_string();
     let message_id = message_id.to_string();
     tauri_winrt_notification::Toast::new(&notifications::windows_notification_app_id(app))
-        .title(&labels.new_mail_title)
+        .title(title)
         .text1(body)
         .duration(tauri_winrt_notification::Duration::Short)
         .add_button(&labels.open_action, NOTIFICATION_OPEN_ACTION)
@@ -356,31 +363,53 @@ fn show_new_mail_notification(
     account_id: &str,
     message_id: &str,
 ) -> Result<(), String> {
+    let labels = notifications::notification_labels();
+    show_titled_notification(app, &labels.new_mail_title, body, account_id, message_id)
+}
+
+/// A notification from the agent (#107) that opens a message when clicked.
+pub(crate) fn show_agent_notification(
+    app: &tauri::AppHandle,
+    title: &str,
+    body: &str,
+    account_id: &str,
+    message_id: &str,
+) -> Result<(), String> {
+    show_titled_notification(app, title, body, account_id, message_id)
+}
+
+fn show_titled_notification(
+    app: &tauri::AppHandle,
+    title: &str,
+    body: &str,
+    account_id: &str,
+    message_id: &str,
+) -> Result<(), String> {
     #[cfg(windows)]
     {
-        match show_windows_new_mail_notification(app, body, account_id, message_id) {
+        match show_windows_new_mail_notification(app, title, body, account_id, message_id) {
             Ok(()) => Ok(()),
             Err(e) => {
                 warn!("Failed to show clickable Windows notification, falling back: {e}");
-                show_default_new_mail_notification(app, body)
+                show_default_new_mail_notification(app, title, body)
             }
         }
     }
 
     #[cfg(target_os = "linux")]
     {
-        show_linux_new_mail_notification(app, body, account_id, message_id)
+        show_linux_new_mail_notification(app, title, body, account_id, message_id)
     }
 
     #[cfg(target_os = "macos")]
     {
-        show_macos_new_mail_notification(app, body, account_id, message_id)
+        show_macos_new_mail_notification(app, title, body, account_id, message_id)
     }
 
     #[cfg(all(not(windows), not(target_os = "linux"), not(target_os = "macos")))]
     {
         let _ = (account_id, message_id);
-        show_default_new_mail_notification(app, body)
+        show_default_new_mail_notification(app, title, body)
     }
 }
 
@@ -527,6 +556,8 @@ struct FlushOutcome {
     notifications: Vec<NotifyItem>,
     /// Every new message decided in this window (logged once each).
     triaged: Vec<smart_notify::Triaged>,
+    /// A follow-up completed (the activity feed changed).
+    agent_events_changed: bool,
 }
 
 /// Receive newly stored messages from the sync worker, apply rules, index
@@ -622,6 +653,9 @@ pub async fn index_new_messages(
             if !outcome.triaged.is_empty() {
                 let _ = app.emit(events::NOTIFY_CHANGED, ());
             }
+            if outcome.agent_events_changed {
+                let _ = app.emit(events::AGENT_EVENTS_CHANGED, ());
+            }
             send_planned_notifications(app, outcome.notifications);
         }
     }
@@ -698,12 +732,16 @@ fn process_flush_window(
             // First sync, backfill and repairs are never notified or logged.
             continue;
         }
+        let from_self = triage
+            .account(store, account_id)
+            .is_some_and(|account| smart_notify::is_from_account(&stored.message, &account));
+        let watch = triage.matching_watch(store, &stored.message, from_self);
         let facts = smart_notify::gather_facts(
             store,
             &mut triage,
             stored,
             smart_notify::RuleEffect::from_actions(&actions),
-            false,
+            watch.is_some(),
         );
         let prefs = triage.prefs(store, account_id);
         let decision = pebble_notify::decide(&facts, &prefs.to_prefs(), minute_of_day);
@@ -717,6 +755,12 @@ fn process_flush_window(
             && matches!(triaged.decision.reason, pebble_notify::Reason::Backfill)
         {
             continue;
+        }
+        if let (Some(watch), pebble_notify::Reason::Watch) = (&watch, &triaged.decision.reason) {
+            if smart_notify::complete_watch(store, watch, &stored.message, now) {
+                outcome.agent_events_changed = true;
+            }
+            triage.forget_watch(account_id, &watch.id);
         }
         if !smart_notify::record(store, &triaged, now) {
             continue;
@@ -1542,5 +1586,48 @@ mod rule_writeback_tests {
             store.sent_count_to(&account.id, "bob@example.com").unwrap(),
             1
         );
+    }
+
+    #[test]
+    fn a_reply_on_a_followed_thread_completes_the_follow_up_and_notifies() {
+        let (store, search, account, folder) = triage_setup("important_only");
+        let watch = store
+            .create_thread_watch(
+                &pebble_store::agent::NewThreadWatch {
+                    account_id: account.id.clone(),
+                    thread_id: Some("thread-1".into()),
+                    subject: "Lease renewal".into(),
+                    ..Default::default()
+                },
+                1,
+            )
+            .unwrap();
+        let mut auto = new_inbox_message(&store, &account, &folder, "landlord@homes.example");
+        auto.message.thread_id = Some("thread-1".into());
+        auto.signals.auto_submitted = true;
+        let mut reply = new_inbox_message(&store, &account, &folder, "landlord@homes.example");
+        reply.message.thread_id = Some("thread-1".into());
+        let reply_id = reply.message.id.clone();
+
+        let outcome = process_flush_window(&store, &search, None, vec![auto], &mut Vec::new());
+        assert!(
+            outcome.notifications.is_empty(),
+            "an out-of-office reply is not the answer"
+        );
+        assert_eq!(
+            store.get_thread_watch(&watch.id).unwrap().unwrap().status,
+            "active"
+        );
+
+        let outcome = process_flush_window(&store, &search, None, vec![reply], &mut Vec::new());
+        assert_eq!(outcome.notifications.len(), 1);
+        assert!(outcome.agent_events_changed);
+        let done = store.get_thread_watch(&watch.id).unwrap().unwrap();
+        assert_eq!(
+            (done.status.as_str(), done.matched_message_id.as_deref()),
+            ("done", Some(reply_id.as_str()))
+        );
+        let events = store.list_agent_events(10, None).unwrap();
+        assert_eq!(events[0].kind, "watch_reply");
     }
 }

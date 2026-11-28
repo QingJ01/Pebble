@@ -17,9 +17,9 @@ import {
   Layers,
   FolderOpen,
   FolderCog,
-  Users,
-} from "lucide-react";
+  Users, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useUnreadAgentEvents } from "@/features/agent/api";
 import SidebarButton from "./SidebarButton";
 import SidebarRail, { RailMenuButton, type RailMenuItem } from "./SidebarRail";
 import AccountBadge, { accountShortName } from "./ui/AccountBadge";
@@ -66,6 +66,7 @@ const DEFAULT_FOLDERS: { role: string; labelKey: string }[] = [
 
 export default function SidebarClassic({ collapsed: sidebarCollapsed }: { collapsed: boolean }) {
   const { t } = useTranslation();
+  const { data: agentUnread = 0 } = useUnreadAgentEvents();
   const activeView = useUIStore((s) => s.activeView);
   const setActiveView = useUIStore((s) => s.setActiveView);
   const activeFolderId = useMailStore((s) => s.activeFolderId);
@@ -172,6 +173,14 @@ export default function SidebarClassic({ collapsed: sidebarCollapsed }: { collap
         isActive={activeView === "kanban"}
         collapsed={sidebarCollapsed}
         onClick={() => safeSetActiveView("kanban")}
+      />
+      <SidebarButton
+        icon={<Sparkles size={16} />}
+        label={t("sidebar.assistant", "Assistant")}
+        badge={agentUnread > 0 ? agentUnread : undefined}
+        isActive={activeView === "agent"}
+        collapsed={sidebarCollapsed}
+        onClick={() => safeSetActiveView("agent")}
       />
       <SidebarButton
         icon={<Settings size={16} />}
