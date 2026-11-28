@@ -3,6 +3,8 @@ mod commands;
 mod events;
 #[cfg(test)]
 mod ipc_bindings;
+#[cfg(target_os = "linux")]
+mod linux_migration;
 mod profile;
 mod realtime;
 mod send_controls;
@@ -562,10 +564,13 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             restore_main_window(app);
         }));
-        builder = builder.plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None::<Vec<&str>>,
-        ));
+        // The builder's macOS default is MacosLauncher::LaunchAgent, as before.
+        let autostart = tauri_plugin_autostart::Builder::new();
+        // Linux packages are named "Pebble Mail" (tauri.linux.conf.json); keep the
+        // autostart entry at its old name so existing registrations are found.
+        #[cfg(target_os = "linux")]
+        let autostart = autostart.app_name("Pebble");
+        builder = builder.plugin(autostart.build());
     }
 
     builder
@@ -658,6 +663,20 @@ pub fn run() {
             tracing::info!("[startup] tauri setup started");
             if let Err(e) = setup_tray(app) {
                 tracing::warn!("Failed to create system tray icon: {e}");
+            }
+            // Re-register an enabled autostart entry so it launches this binary:
+            // it still points at /usr/bin/pebble after the pebble-mail rename.
+            #[cfg(target_os = "linux")]
+            {
+                use tauri_plugin_autostart::ManagerExt;
+                let autolaunch = app.autolaunch();
+                if autolaunch.is_enabled().unwrap_or(false) {
+                    if let Err(e) = autolaunch.enable() {
+                        tracing::warn!("Failed to refresh the autostart entry: {e}");
+                    }
+                }
+                // The launcher file is now "Pebble Mail.desktop"; off the startup path.
+                std::thread::spawn(linux_migration::migrate_mailto_default);
             }
 
             // macOS: the overlay title bar, hidden native title and traffic-light

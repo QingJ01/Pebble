@@ -113,7 +113,7 @@ Pebble 是用 Rust、Tauri 和 React 构建的桌面邮件客户端。邮件、�
 | Windows | `Pebble_<版本>_x64-setup.exe` |
 | macOS（Apple 芯片） | `Pebble_<版本>_aarch64-arm64.dmg` |
 | macOS（Intel） | `Pebble_<版本>_x64-x64.dmg` |
-| Linux | `.AppImage`、`.deb` 或 `.rpm` |
+| Linux | `pebble-mail_<version>_amd64.AppImage`、`pebble-mail_<version>_amd64.deb`、`pebble-mail-<version>-1.x86_64.rpm` |
 
 每个文件都附有对应的 `.sha256` 校验文件。
 
@@ -128,6 +128,15 @@ Arch Linux 用户可以从 AUR 安装 `pebble-bin`：
 ```bash
 yay -S pebble-bin
 ```
+
+在 Fedora 等基于 rpm 的发行版上，旧版本的软件包名为 `pebble`，而 Fedora 的 Let's Encrypt ACME 测试服务器也使用这个名字，因此 `dnf upgrade` 可能会把 Pebble 替换掉（[#114](https://github.com/QingJ01/Pebble/issues/114)）。现在软件包名为 `pebble-mail`。切换时先安装新的 rpm，再卸载旧软件包，邮件和设置都会保留：
+
+```bash
+sudo dnf install ./pebble-mail-<version>-1.x86_64.rpm
+sudo dnf remove pebble
+```
+
+如果之前把 Pebble 固定在了程序坞或任务栏，切换后请重新固定。如果 Pebble 是默认邮件应用，它会在首次启动时自动更新该设置。
 
 ### 添加账户
 

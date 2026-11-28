@@ -113,7 +113,7 @@ Download the latest build from [Releases](https://github.com/QingJ01/Pebble/rele
 | Windows | `Pebble_<version>_x64-setup.exe` |
 | macOS (Apple silicon) | `Pebble_<version>_aarch64-arm64.dmg` |
 | macOS (Intel) | `Pebble_<version>_x64-x64.dmg` |
-| Linux | `.AppImage`, `.deb` or `.rpm` |
+| Linux | `pebble-mail_<version>_amd64.AppImage`, `pebble-mail_<version>_amd64.deb`, `pebble-mail-<version>-1.x86_64.rpm` |
 
 Each file has a matching `.sha256` checksum.
 
@@ -128,6 +128,15 @@ On Arch Linux, Pebble is in the AUR as `pebble-bin`:
 ```bash
 yay -S pebble-bin
 ```
+
+On Fedora and other rpm-based distributions, older releases were packaged as `pebble`, a name Fedora also uses for Let's Encrypt's ACME test server, so `dnf upgrade` could replace Pebble with it ([#114](https://github.com/QingJ01/Pebble/issues/114)). The package is now `pebble-mail`. To switch, install the new rpm, then remove the old package; your mail and settings are kept:
+
+```bash
+sudo dnf install ./pebble-mail-<version>-1.x86_64.rpm
+sudo dnf remove pebble
+```
+
+If Pebble was pinned to your dock or taskbar, pin it again after switching. If it was your default mail app, Pebble updates that setting on its first start.
 
 ### Adding an account
 
