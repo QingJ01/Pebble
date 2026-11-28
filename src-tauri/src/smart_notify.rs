@@ -309,11 +309,14 @@ pub fn record(store: &Store, triaged: &Triaged, now: i64) -> bool {
 
 /// Mark a follow-up as answered and add a feed entry for it. Returns
 /// `true` if this reply completed the watch.
+/// `push` asks for a desktop notification for the conversation entry: when
+/// the reply itself didn't notify (found later, or synced quietly).
 pub fn complete_watch(
     store: &Store,
     watch: &pebble_store::agent::ThreadWatch,
     reply: &Message,
     now: i64,
+    push: bool,
 ) -> bool {
     match store.complete_thread_watch(&watch.id, &reply.id, now) {
         Ok(true) => {}
@@ -340,9 +343,9 @@ pub fn complete_watch(
             "receivedAt": reply.date,
             "waitedSeconds": (now - watch.created_at).max(0),
         }),
-        // The reply itself already notified (reason "watch"); the
+        // When the reply itself notified (reason "watch"), the
         // conversation entry must not notify a second time.
-        push: false,
+        push,
     };
     if let Err(e) = store.insert_agent_event(&event, now) {
         warn!("Failed to record follow-up reply: {e}");

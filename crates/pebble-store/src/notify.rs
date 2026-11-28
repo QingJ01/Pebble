@@ -325,9 +325,10 @@ impl Store {
     /// decided (dedupe across retries, re-syncs and restarts).
     ///
     /// The key is shared by every copy of a message (IMAP keeps one per
-    /// folder). A silent decision for one copy (All Mail, a folder a server
-    /// filter chose) must not block the inbox copy, so a later non-silent
-    /// decision replaces an undelivered silent one.
+    /// folder; a list copy and a direct copy share a Message-ID). A weaker
+    /// decision for one copy must not block a stronger one for another, so
+    /// a later decision of a higher tier (interrupt > digest > silent)
+    /// replaces an undelivered one.
     pub fn insert_notification_log(&self, entry: &NewNotificationLog<'_>) -> Result<bool> {
         self.with_write(|conn| {
             let inserted = conn.execute(
@@ -337,8 +338,9 @@ impl Store {
                  ON CONFLICT(account_id, message_key) DO UPDATE SET
                      message_id = excluded.message_id, tier = excluded.tier,
                      reason = excluded.reason, why = excluded.why, created_at = excluded.created_at
-                 WHERE notification_log.tier = 'silent' AND notification_log.delivered = 0
-                   AND excluded.tier <> 'silent'",
+                 WHERE notification_log.delivered = 0
+                   AND (CASE excluded.tier WHEN 'interrupt' THEN 2 WHEN 'digest' THEN 1 ELSE 0 END)
+                     > (CASE notification_log.tier WHEN 'interrupt' THEN 2 WHEN 'digest' THEN 1 ELSE 0 END)",
                 params![
                     entry.account_id,
                     entry.message_key,
@@ -696,6 +698,21 @@ mod tests {
         assert!(!store.insert_notification_log(&silent).unwrap());
         assert_eq!(store.list_notification_log(10).unwrap()[0].tier, "digest");
         assert_eq!(store.list_unseen_digest(10).unwrap().len(), 1);
+        // The direct copy of a list message: interrupt beats digest, once.
+        let direct = NewNotificationLog {
+            tier: "interrupt",
+            reason: "direct",
+            ..entry
+        };
+        assert!(store.insert_notification_log(&direct).unwrap());
+        assert!(!store.insert_notification_log(&direct).unwrap());
+        assert!(
+            !store.insert_notification_log(&entry).unwrap(),
+            "digest doesn't undo it"
+        );
+        store
+            .update_notification_decision(&me.id, &key, "digest", "default", None)
+            .unwrap();
         store
             .update_notification_decision(
                 &me.id,

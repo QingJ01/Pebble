@@ -14,6 +14,23 @@ pub fn normalize_subject(subject: &str) -> String {
         "fw：",
         "回复：",
         "转发：",
+        // Outlook and other clients in other languages.
+        "答复:",
+        "答复：",
+        "回覆:",
+        "回覆：",
+        "轉寄:",
+        "轉寄：",
+        "转寄:",
+        "转寄：",
+        "aw:",
+        "wg:",
+        "sv:",
+        "vs:",
+        "antw:",
+        "tr:",
+        "rv:",
+        "réf:",
     ];
     loop {
         let lower = s.to_lowercase();
@@ -34,9 +51,42 @@ pub fn normalize_subject(subject: &str) -> String {
                 break;
             }
         }
+        // "Re[2]:", "RE[3]：" and similar counters.
+        if !matched && lower.starts_with("re[") {
+            if let Some(end) = s.find("]:").or_else(|| s.find("]：")) {
+                let close = s[end..].chars().take(2).map(char::len_utf8).sum::<usize>();
+                s = s[end + close..].trim().to_string();
+                matched = true;
+            }
+        }
         if !matched {
             break;
         }
     }
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_subject;
+
+    #[test]
+    fn strips_reply_prefixes_in_many_languages() {
+        for subject in [
+            "Re: 合同",
+            "答复: 合同",
+            "回覆：合同",
+            "AW: 合同",
+            "SV: Re: 合同",
+            "Re[2]: 合同",
+            "RE[3]：合同",
+            "转发: 回复: 合同",
+        ] {
+            assert_eq!(normalize_subject(subject), "合同", "{subject}");
+        }
+        assert_eq!(
+            normalize_subject("Regarding the plan"),
+            "Regarding the plan"
+        );
+    }
 }

@@ -91,7 +91,7 @@ describe("assistant chat", () => {
     const log = await screen.findByRole("log");
     expect(await within(log).findByText("I couldn't answer that: HTTP 401: bad key")).toBeTruthy();
     fireEvent.click(within(log).getByRole("button", { name: "Try again" }));
-    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("agent_chat_send", { text: "And the contract?", accountIds: [] }));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("agent_chat_send", { text: "And the contract?", accountIds: [], fromAccountId: "work" }));
   });
 
   it("sends with Enter in the chosen scope and keeps Shift+Enter for new lines", async () => {
@@ -102,12 +102,12 @@ describe("assistant chat", () => {
     fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
     expect(mockInvoke).not.toHaveBeenCalledWith("agent_chat_send", expect.anything());
     fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("agent_chat_send", { text: "What did Dana say?", accountIds: ["work"] }));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("agent_chat_send", { text: "What did Dana say?", accountIds: ["work"], fromAccountId: "work" }));
 
     fireEvent.change(screen.getByRole("combobox", { name: "Which accounts Pebble may read" }), { target: { value: "all" } });
     fireEvent.change(input, { target: { value: "Anything urgent?" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("agent_chat_send", { text: "Anything urgent?", accountIds: null }));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("agent_chat_send", { text: "Anything urgent?", accountIds: null, fromAccountId: "work" }));
   });
 
   it("shows progress while answering and can stop", async () => {
@@ -125,7 +125,7 @@ describe("assistant chat", () => {
     chat = [];
     wrap();
     fireEvent.click(await screen.findByRole("button", { name: "What's waiting for my reply?" }));
-    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("agent_chat_send", { text: "What's waiting for my reply?", accountIds: ["work"] }));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("agent_chat_send", { text: "What's waiting for my reply?", accountIds: ["work"], fromAccountId: "work" }));
   });
 });
 

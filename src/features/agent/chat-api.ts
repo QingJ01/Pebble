@@ -1,3 +1,4 @@
+import { useMailStore } from "@/stores/mail.store";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
@@ -61,8 +62,9 @@ export const chatKeys = {
   running: ["agent", "chat", "running"] as const,
 };
 
-export const sendChat = (text: string, accountIds: string[] | null) =>
-  invoke<string>("agent_chat_send", { text, accountIds });
+/** `fromAccountId`: the account the user is in; new mail is drafted from it. */
+export const sendChat = (text: string, accountIds: string[] | null, fromAccountId: string | null) =>
+  invoke<string>("agent_chat_send", { text, accountIds, fromAccountId });
 export const listChat = () => invoke<ChatEntry[]>("agent_chat_list", { limit: 200 });
 export const runningChats = () => invoke<string[]>("agent_chat_running");
 export const cancelChat = (runId: string) => invoke<boolean>("agent_chat_cancel", { runId });
@@ -124,7 +126,8 @@ export function useChatMutations() {
   };
   return {
     send: useMutation({
-      mutationFn: ({ text, accountIds }: { text: string; accountIds: string[] | null }) => sendChat(text, accountIds),
+      mutationFn: ({ text, accountIds }: { text: string; accountIds: string[] | null }) =>
+        sendChat(text, accountIds, useMailStore.getState().activeAccountId ?? null),
       onSettled: refresh,
     }),
     cancel: useMutation({ mutationFn: cancelChat, onSettled: refresh }),

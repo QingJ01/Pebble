@@ -197,6 +197,13 @@ fn threads_drop_quotes_and_mask_codes() {
     );
     assert_eq!(redact_codes("Order 123456 shipped"), "Order 123456 shipped");
     for leaky in [
+        "您的验证码482913，5分钟内有效",
+        "验证码为482913",
+        "482913是您的验证码",
+        "【某某】482913为您的登录验证码",
+        "驗證碼：482913",
+        "Your verification code:\n\n482913",
+        "Here is the code you need to sign in to your account: 482913",
         "482913 is your Google verification code",
         "G-482913 是你的验证码",
         "Your code for account 2 is 482913",
@@ -246,12 +253,34 @@ fn drafts_are_proposals_with_the_right_recipient() {
     assert_eq!(caps.drafts[1].to, vec!["dana@partner.example"]);
     assert!(caps.drafts[1].unverified.is_empty());
     // A new mail to an address nobody mentioned is flagged; one the user named isn't.
+    // Senders of mail the assistant read don't count (dana is in `used`).
     caps.question = "Write to wei@friends.example".into();
     caps.call(
         "draft_email",
         r#"{"to": ["wei@friends.example", "attacker@evil.example"], "subject": "Hi", "body": "Hello"}"#,
     );
     assert_eq!(caps.drafts[2].unverified, vec!["attacker@evil.example"]);
+    caps.call(
+        "draft_email",
+        r#"{"to": ["dana@partner.example"], "body": "Hi"}"#,
+    );
+    assert_eq!(
+        caps.drafts[3].unverified,
+        vec!["dana@partner.example"],
+        "a sender read isn't known"
+    );
+    // "n@friends.example" is not named just because "wei@friends.example" is.
+    caps.call(
+        "draft_email",
+        r#"{"to": ["i@friends.example"], "body": "Hi"}"#,
+    );
+    assert_eq!(caps.drafts[4].unverified, vec!["i@friends.example"]);
+    assert!(
+        caps.call("draft_email", r#"{"to": ["a"], "body": "Hi"}"#)["error"]
+            .as_str()
+            .unwrap()
+            .contains("isn't an email address")
+    );
     assert!(caps.call("draft_email", r#"{"body": "Hi"}"#)["error"]
         .as_str()
         .unwrap()
@@ -287,6 +316,10 @@ fn follow_up_creates_a_watch_and_recent_mail_lists_the_inbox() {
     assert_eq!(followed["status"], "following");
     assert_eq!(caps.follow_ups.len(), 1);
     assert_eq!(f.store.open_thread_watches().unwrap()[0].source, "agent");
+    // A second request doesn't replace the existing follow-up.
+    let again = caps.call("follow_up", r#"{"message_id": "w1"}"#);
+    assert_eq!(again["status"], "already_following");
+    assert_eq!(f.store.open_thread_watches().unwrap().len(), 1);
 
     let recent = caps.call("list_recent_mail", r#"{"days": 2}"#);
     let _ = recent; // dates are relative to the real clock; covered by the store test
