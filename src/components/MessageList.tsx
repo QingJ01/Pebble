@@ -269,6 +269,23 @@ export default function MessageList({
     }
   }
 
+  // Hooks must stay above the early returns below: the list renders a
+  // skeleton or an empty state first, and a hook added after those returns
+  // changes the hook count when the messages arrive (React then throws).
+  const handleMoveActionRef = useRef<(kind: "archive" | "trash") => Promise<void>>(async () => {});
+  useEffect(() => {
+    handleMoveActionRef.current = handleMoveAction;
+  });
+  // Vim keys (e / Delete / dd on a bulk selection) run the toolbar's action.
+  useEffect(() => {
+    const onBatchMove = (event: Event) => {
+      const kind = (event as CustomEvent<unknown>).detail;
+      if (kind === "archive" || kind === "trash") void handleMoveActionRef.current(kind);
+    };
+    document.addEventListener(BATCH_MOVE_EVENT, onBatchMove);
+    return () => document.removeEventListener(BATCH_MOVE_EVENT, onBatchMove);
+  }, []);
+
   if (loading) {
     return <MessageListSkeleton />;
   }
@@ -346,19 +363,6 @@ export default function MessageList({
       setBatchLoading(false);
     }
   }
-  const handleMoveActionRef = useRef(handleMoveAction);
-  useEffect(() => {
-    handleMoveActionRef.current = handleMoveAction;
-  });
-  // Vim keys (e / Delete / dd on a bulk selection) run the toolbar's action.
-  useEffect(() => {
-    const onBatchMove = (event: Event) => {
-      const kind = (event as CustomEvent<unknown>).detail;
-      if (kind === "archive" || kind === "trash") void handleMoveActionRef.current(kind);
-    };
-    document.addEventListener(BATCH_MOVE_EVENT, onBatchMove);
-    return () => document.removeEventListener(BATCH_MOVE_EVENT, onBatchMove);
-  }, []);
 
   async function handleFlagAction(action: FlagAction) {
     const ids = selectedMessages().map((m) => m.id);

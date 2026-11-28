@@ -237,6 +237,19 @@ describe("MessageList", () => {
     });
   });
 
+  it("survives going from loading or empty to a list of messages", () => {
+    const { rerender } = render(
+      <MessageList messages={[]} selectedMessageId={null} onSelectMessage={vi.fn()} loading />,
+    );
+    expect(() =>
+      rerender(<MessageList messages={[makeMessage("m-1")]} selectedMessageId={null} onSelectMessage={vi.fn()} loading={false} />),
+    ).not.toThrow();
+    rerender(<MessageList messages={[]} selectedMessageId={null} onSelectMessage={vi.fn()} loading={false} />);
+    expect(() =>
+      rerender(<MessageList messages={[makeMessage("m-2")]} selectedMessageId={null} onSelectMessage={vi.fn()} loading={false} />),
+    ).not.toThrow();
+  });
+
   it("fetches labels per stable page-sized chunk so earlier pages stay cached", () => {
     mocks.labelQueryKeys = [];
     const firstPages = Array.from({ length: 100 }, (_, index) => makeMessage(`m-${index}`));
