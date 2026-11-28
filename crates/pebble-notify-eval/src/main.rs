@@ -25,8 +25,8 @@ use pebble_notify::eval::{
     DeadlineOutcome, DeadlineScore, NotifyCase, TriageScore, EVAL_MINUTE,
 };
 use pebble_notify::triage_model::{
-    parse_response, prepare_body, system_prompt, user_prompt, TriageAnswer, TriageItem,
-    MIN_CONFIDENCE,
+    parse_response, prepare_body, redact_codes, system_prompt, usable_model_deadline, user_prompt,
+    TriageAnswer, TriageItem, MAX_BATCH, MIN_CONFIDENCE,
 };
 use pebble_notify::{apply_model_verdict, is_automated, Decision, Reason, Tier};
 use serde_json::{json, Value};
@@ -48,7 +48,7 @@ fn options() -> Options {
         out: None,
         batch: 10,
         timeout: Duration::from_secs(60),
-        bulk: true,
+        bulk: false,
     };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -66,10 +66,10 @@ fn options() -> Options {
                 options.timeout =
                     Duration::from_secs(args.next().and_then(|v| v.parse().ok()).unwrap_or(60))
             }
-            "--no-bulk" => options.bulk = false,
+            "--bulk" => options.bulk = true,
             "-h" | "--help" => {
                 println!(
-                    "pebble-notify-eval [--model] [--out FILE] [--batch N] [--timeout SECS] [--no-bulk]\n\
+                    "pebble-notify-eval [--model] [--out FILE] [--batch N] [--timeout SECS] [--bulk]\n\
                      --model uses PEBBLE_EVAL_ENDPOINT, PEBBLE_EVAL_MODEL, PEBBLE_EVAL_API_KEY"
                 );
                 std::process::exit(0);
@@ -143,13 +143,19 @@ impl Model {
         let result = async {
             let response = request.send().await.map_err(|e| e.to_string())?;
             let status = response.status();
-            let value: Value = response.json().await.map_err(|e| e.to_string())?;
+            let text = response.text().await.map_err(|e| e.to_string())?;
             if !status.is_success() {
                 return Err(format!(
                     "HTTP {status}: {}",
-                    value.to_string().chars().take(200).collect::<String>()
+                    text.chars().take(200).collect::<String>()
                 ));
             }
+            let value: Value = serde_json::from_str(&text).map_err(|e| {
+                format!(
+                    "not a JSON reply ({e}): {}",
+                    text.chars().take(120).collect::<String>()
+                )
+            })?;
             Ok(value
                 .pointer("/choices/0/message/content")
                 .and_then(Value::as_str)
@@ -231,7 +237,7 @@ fn item_for(case: &NotifyCase) -> TriageItem {
         id: String::new(),
         from: case.mail.from_address.clone(),
         from_name: case.mail.from_name.clone(),
-        subject: case.mail.subject.clone(),
+        subject: redact_codes(&case.mail.subject),
         to_me: case.mail.to_me,
         known_contact: case.facts.favorite || facts.sender_known,
         times_user_wrote: case.facts.times_user_wrote,
@@ -373,18 +379,23 @@ async fn main() {
     let mut model_notes: HashMap<usize, String> = HashMap::new();
     let mut latencies: Vec<Duration> = Vec::new();
     let mut model_errors: Vec<String> = Vec::new();
+    let mut model_answered = false;
     if let Some(model) = &model {
         eprintln!("Triage: {} candidates for the model", candidates.len());
         let items: Vec<TriageItem> = candidates.iter().map(|&i| item_for(&cases[i])).collect();
         let run = run_batches(model, &now_local, items, opts.batch).await;
         latencies.extend(run.batches.iter().copied());
         model_errors.extend(run.errors.iter().map(|e| format!("triage {e}")));
+        model_answered |= run.answers.iter().any(Option::is_some);
         let mut unconstrained = rule_tiers.clone();
         let mut shipped = rule_tiers.clone();
         for (k, &i) in candidates.iter().enumerate() {
             let answer = run.answers[k].as_ref();
             unconstrained[i] = settle(&rule_decisions[i], answer, opts.bulk).tier;
-            let in_time = run.latency[k].is_some_and(|l| l <= SHIPPED_TIMEOUT);
+            // The app answers only batches of at most MAX_BATCH that come
+            // back within its time limit.
+            let in_time =
+                opts.batch <= MAX_BATCH && run.latency[k].is_some_and(|l| l <= SHIPPED_TIMEOUT);
             shipped[i] = settle(&rule_decisions[i], answer.filter(|_| in_time), opts.bulk).tier;
             if let Some(a) = answer {
                 model_notes.insert(
@@ -411,7 +422,7 @@ async fn main() {
         "Expected is what a careful person would want. **Missed** = deserved a notification and didn't get one; **Noisy** = notified although it could wait; **Lost** = mail that should reach you went silent (must be 0). {} of {} messages are ones the rules can't place and would go to the model{}.\n",
         candidates.len(),
         cases.len(),
-        if opts.bulk { ", including bulk mail (\"Also check newsletters\" on)" } else { "" }
+        if opts.bulk { ", including newsletters and automated mail (--bulk: \"Also check newsletters\" on, off by default in the app)" } else { " (app defaults: newsletters and automated mail stay with the rules)" }
     );
     let mut rows: Vec<(&str, TriageScore)> =
         vec![("Rules only (shipped default)", rules_score.clone())];
@@ -516,10 +527,16 @@ async fn main() {
         let run = run_batches(model, &now_local, items, opts.batch).await;
         latencies.extend(run.batches.iter().copied());
         model_errors.extend(run.errors.iter().map(|e| format!("deadlines {e}")));
+        model_answered |= run.answers.iter().any(Option::is_some);
+        // Filtered the way the app filters it (date window, confidence,
+        // not a newsletter or promotion).
         model_due = Some(
             run.answers
                 .iter()
-                .map(|a| a.as_ref().and_then(|a| a.deadline))
+                .map(|a| {
+                    a.as_ref()
+                        .and_then(|a| usable_model_deadline(a, received, false))
+                })
                 .collect(),
         );
     }
@@ -533,7 +550,7 @@ async fn main() {
     let _ = writeln!(out, "\n## Deadlines in mail\n");
     let _ = writeln!(
         out,
-        "Mail received {}. A deadline on the right day counts as found; the app reminds ahead of it. In the app the model's deadline is used only when the rules find none (\"Rules, then model\").\n",
+        "Mail received {}, from a colleague you write to (so it would reach the model with AI help on). A deadline on the right day counts as found; the app reminds ahead of it. The model's deadlines are filtered as in the app, and used only when the rules find none (\"Rules, then model\").\n",
         deadline_set.received
     );
     let _ = writeln!(out, "| | Exact | Same day | Wrong day | Missed | False positive | Correct none | Day recall | Day precision |");
@@ -643,6 +660,13 @@ async fn main() {
             let _ = writeln!(out, "- {e}");
         }
     }
+    let all_failed = model.is_some() && !model_answered;
+    if all_failed {
+        let _ = writeln!(
+            out,
+            "\n> **No model request succeeded**, so the model rows equal the rules. Check the endpoint, model and key; the errors are listed above.\n"
+        );
+    }
 
     match &opts.out {
         Some(path) => match std::fs::write(path, &out) {
@@ -653,6 +677,10 @@ async fn main() {
             }
         },
         None => print!("{out}"),
+    }
+    if all_failed {
+        eprintln!("No model request succeeded; see the errors in the report.");
+        std::process::exit(1);
     }
 }
 

@@ -88,6 +88,20 @@ describe("AI help with notifications", () => {
     await waitFor(() => expect(saved.at(-1)).toEqual({ accountId: "work", prefs: { ...defaults, modelAssist: true } }));
   });
 
+  it("a newly enabled account follows the metadata-only choice", async () => {
+    own = { work: { ...defaults, modelAssist: true, modelSendBody: false } };
+    const third = { id: "home", email: "me@home.example", provider: "imap", account_label: null };
+    accounts.push(third);
+    try {
+      renderTab();
+      const section = await aiSection();
+      fireEvent.click(await within(section).findByLabelText("AI help for me@home.example"));
+      await waitFor(() => expect(saved.at(-1)).toEqual({ accountId: "home", prefs: { ...defaults, modelAssist: true, modelSendBody: false } }));
+    } finally {
+      accounts.pop();
+    }
+  });
+
   it("applies the shared options to every account using AI", async () => {
     own = { work: { ...defaults, modelAssist: true } };
     renderTab();

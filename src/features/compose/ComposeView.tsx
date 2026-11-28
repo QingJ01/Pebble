@@ -535,7 +535,8 @@ function ComposeViewInner({ accounts, accountsLoaded }: { accounts: Account[]; a
         messageId: isReply && composeReplyTo?.account_id === fromAccountId ? composeReplyTo.id : undefined,
         subject: finalSubject,
         participants: [...finalTo, ...finalCc],
-        deadline: deadlineInDays(followUpDays),
+        // Counted from when the mail actually goes out.
+        deadline: deadlineInDays(followUpDays, scheduleAt !== undefined ? scheduleAt * 1000 : Date.now()),
         anchor,
       }).catch((error) => console.warn("Failed to follow up on the sent message", error));
     };

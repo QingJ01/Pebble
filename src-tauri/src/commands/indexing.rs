@@ -764,7 +764,15 @@ fn process_flush_window(
         {
             continue;
         }
-        if let (Some(watch), pebble_notify::Reason::Watch) = (&watch, &triaged.decision.reason) {
+        // A person's reply completes the follow-up whatever the notification
+        // decision (a list header, a server filter or a rule may keep it
+        // from notifying); auto-replies and bots don't.
+        let machine_reply = stored.signals.auto_submitted
+            || pebble_notify::is_automated_sender(
+                &stored.message.from_address,
+                &stored.message.from_name,
+            );
+        if let (Some(watch), false) = (&watch, machine_reply) {
             if smart_notify::complete_watch(store, watch, &stored.message, now) {
                 outcome.agent_events_changed = true;
             }
@@ -1665,5 +1673,29 @@ mod rule_writeback_tests {
         );
         let events = store.list_agent_events(10, None).unwrap();
         assert_eq!(events[0].kind, "watch_reply");
+    }
+
+    #[test]
+    fn a_reply_through_a_mailing_list_or_filed_away_still_completes_the_follow_up() {
+        let (store, search, account, folder) = triage_setup("important_only");
+        let watch = store
+            .create_thread_watch(
+                &pebble_store::agent::NewThreadWatch {
+                    account_id: account.id.clone(),
+                    thread_id: Some("thread-2".into()),
+                    subject: "Team plan".into(),
+                    ..Default::default()
+                },
+                1,
+            )
+            .unwrap();
+        let mut reply = new_inbox_message(&store, &account, &folder, "colleague@corp.example");
+        reply.message.thread_id = Some("thread-2".into());
+        reply.signals.bulk = true;
+        process_flush_window(&store, &search, None, vec![reply], &mut Vec::new());
+        assert_eq!(
+            store.get_thread_watch(&watch.id).unwrap().unwrap().status,
+            "done"
+        );
     }
 }

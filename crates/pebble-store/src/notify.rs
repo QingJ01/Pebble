@@ -323,12 +323,22 @@ impl Store {
 
     /// Record a decision. Returns `false` when this message was already
     /// decided (dedupe across retries, re-syncs and restarts).
+    ///
+    /// The key is shared by every copy of a message (IMAP keeps one per
+    /// folder). A silent decision for one copy (All Mail, a folder a server
+    /// filter chose) must not block the inbox copy, so a later non-silent
+    /// decision replaces an undelivered silent one.
     pub fn insert_notification_log(&self, entry: &NewNotificationLog<'_>) -> Result<bool> {
         self.with_write(|conn| {
             let inserted = conn.execute(
-                "INSERT OR IGNORE INTO notification_log
+                "INSERT INTO notification_log
                      (account_id, message_key, message_id, tier, reason, why, delivered, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7)
+                 ON CONFLICT(account_id, message_key) DO UPDATE SET
+                     message_id = excluded.message_id, tier = excluded.tier,
+                     reason = excluded.reason, why = excluded.why, created_at = excluded.created_at
+                 WHERE notification_log.tier = 'silent' AND notification_log.delivered = 0
+                   AND excluded.tier <> 'silent'",
                 params![
                     entry.account_id,
                     entry.message_key,
@@ -424,15 +434,25 @@ impl Store {
         })
     }
 
-    /// Recent corrections, newest first: (sender, subject, important).
-    pub fn recent_notify_feedback(&self, limit: u32) -> Result<Vec<(String, String, bool)>> {
+    /// Recent corrections from `account_ids`, newest first:
+    /// (sender, subject, important).
+    pub fn recent_notify_feedback(
+        &self,
+        account_ids: &[String],
+        limit: u32,
+    ) -> Result<Vec<(String, String, bool)>> {
+        if account_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = vec!["?"; account_ids.len()].join(", ");
         self.with_read(|conn| {
-            let mut stmt = conn.prepare(
+            let mut stmt = conn.prepare(&format!(
                 "SELECT sender, subject, important FROM notify_feedback
-                 ORDER BY created_at DESC, id DESC LIMIT ?1",
-            )?;
+                 WHERE account_id IN ({placeholders})
+                 ORDER BY created_at DESC, id DESC LIMIT {limit}"
+            ))?;
             let rows = stmt
-                .query_map(params![limit], |row| {
+                .query_map(rusqlite::params_from_iter(account_ids.iter()), |row| {
                     Ok((row.get(0)?, row.get(1)?, row.get(2)?))
                 })?
                 .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -666,6 +686,15 @@ mod tests {
         };
         assert!(store.insert_notification_log(&entry).unwrap());
         assert!(!store.insert_notification_log(&entry).unwrap());
+        // A silent copy elsewhere doesn't block, and doesn't replace, a
+        // non-silent decision; a non-silent one replaces a silent one.
+        let silent = NewNotificationLog {
+            tier: "silent",
+            reason: "moved",
+            ..entry
+        };
+        assert!(!store.insert_notification_log(&silent).unwrap());
+        assert_eq!(store.list_notification_log(10).unwrap()[0].tier, "digest");
         assert_eq!(store.list_unseen_digest(10).unwrap().len(), 1);
         store
             .update_notification_decision(
@@ -693,8 +722,15 @@ mod tests {
         );
         assert_eq!(store.notify_feedback_for(&me.id, "m1").unwrap(), Some(true));
         assert_eq!(
-            store.recent_notify_feedback(5).unwrap(),
+            store.recent_notify_feedback(&[me.id.clone()], 5).unwrap(),
             vec![("ann@example.com".to_string(), "Hi".to_string(), true)]
+        );
+        assert!(
+            store
+                .recent_notify_feedback(&["other".to_string()], 5)
+                .unwrap()
+                .is_empty(),
+            "corrections stay with their account"
         );
         assert!(store.list_unseen_digest(10).unwrap().is_empty());
         let log = store.list_notification_log(10).unwrap();

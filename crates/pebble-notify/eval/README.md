@@ -41,10 +41,14 @@ prompt, body preparation, parsing and decision (`triage_model`,
 - **Rules + model**: every candidate answered, however long it took.
 - **As shipped**: batches slower than the app's 8 s limit use the rules,
   as in the app.
-- Deadlines from the model alone and combined with the rules (the app uses
-  the model's deadline only when the rules found none).
+- Deadlines from the model alone and combined with the rules, filtered as
+  the app filters them (the app uses the model's deadline only when the
+  rules found none).
 - Latency per request and any malformed answers.
 
-Options: `--batch N` (messages per request, default 10), `--timeout SECS`
-(per request, default 60), `--no-bulk` (don't send newsletters and
-automated mail to the model, the app's default).
+Options: `--batch N` (messages per request, default 10; batches over the
+app's limit of 20 count as fallback in the "as shipped" row),
+`--timeout SECS` (per request, default 60), `--bulk` (also send
+newsletters and automated mail to the model, as with "Also check
+newsletters" on; off by default, like the app). The run exits with an
+error when no model request succeeds.

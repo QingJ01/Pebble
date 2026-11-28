@@ -81,6 +81,9 @@ pub struct NewAgentEvent {
     pub push: bool,
 }
 
+/// Seconds a reply may predate its follow-up (server clock skew).
+const WATCH_CLOCK_SKEW: i64 = 5 * 60;
+
 /// Subject key used to match replies: normalised (Re:/Fwd: stripped) and
 /// lower-cased.
 pub fn subject_key(subject: &str) -> String {
@@ -151,14 +154,25 @@ impl ThreadWatch {
         if self.anchor_message_id.as_deref() == Some(message.id.as_str()) {
             return false;
         }
+        // Mail older than the follow-up (a late sync, an earlier message
+        // in the thread) is not its answer. A few minutes of clock skew
+        // between servers are allowed.
+        if message.date < self.created_at - WATCH_CLOCK_SKEW {
+            return false;
+        }
         let from = message.from_address.trim().to_lowercase();
         let from_ok = self.participants.is_empty() || self.participants.contains(&from);
         if let (Some(watched), Some(thread)) = (&self.thread_id, &message.thread_id) {
-            if watched == thread {
-                return from_ok;
-            }
+            // Two known threads that differ are different conversations,
+            // whatever their subjects.
+            return watched == thread && from_ok;
         }
-        !self.subject_key.is_empty() && from_ok && subject_key(&message.subject) == self.subject_key
+        // Subject matching (sent mail not threaded yet) needs the people we
+        // wait for; "Weekly sync" from anyone else is another conversation.
+        !self.participants.is_empty()
+            && !self.subject_key.is_empty()
+            && from_ok
+            && subject_key(&message.subject) == self.subject_key
     }
 }
 
@@ -349,6 +363,50 @@ impl Store {
                 params![id, message_id, now],
             )? == 1)
         })
+    }
+
+    /// A reply to `watch` that is already in the store: a message in its
+    /// thread, newer than the follow-up, from someone other than the
+    /// account (and from a participant when the watch names them), not an
+    /// auto-reply. Catches replies that arrived while the watch was paused,
+    /// were filed away by a server filter, or synced without notifying.
+    pub fn stored_reply_for_watch(&self, watch: &ThreadWatch) -> Result<Option<Message>> {
+        let Some(thread_id) = watch.thread_id.as_deref() else {
+            return Ok(None);
+        };
+        let ids: Vec<String> = self.with_read(|conn| {
+            let mut stmt = conn.prepare_cached(
+                "SELECT m.id FROM messages m
+                 LEFT JOIN message_signals s ON s.message_id = m.id
+                 WHERE m.account_id = ?1 AND m.thread_id = ?2 AND m.date >= ?3
+                   AND m.is_deleted = 0 AND m.is_draft = 0
+                   AND lower(trim(m.from_address)) <>
+                       (SELECT lower(trim(email)) FROM accounts WHERE id = ?1)
+                   AND (s.bits IS NULL OR (s.bits & 1) = 0)
+                 ORDER BY m.date",
+            )?;
+            let rows = stmt
+                .query_map(
+                    params![
+                        watch.account_id,
+                        thread_id,
+                        watch.created_at - WATCH_CLOCK_SKEW
+                    ],
+                    |row| row.get(0),
+                )?
+                .collect::<rusqlite::Result<Vec<String>>>()?;
+            Ok(rows)
+        })?;
+        for message in self.get_messages_batch(&ids)? {
+            if watch.anchor_message_id.as_deref() == Some(message.id.as_str()) {
+                continue;
+            }
+            let from = message.from_address.trim().to_lowercase();
+            if watch.participants.is_empty() || watch.participants.contains(&from) {
+                return Ok(Some(message));
+            }
+        }
+        Ok(None)
     }
 
     /// Active watches past their deadline that have not been nudged yet.
@@ -911,6 +969,33 @@ mod tests {
         assert!(by_subject.matches(&message("a", "dana@partner.example", "RE: Proposal", None)));
         assert!(!by_subject.matches(&message("a", "other@partner.example", "Re: Proposal", None)));
         assert!(!by_subject.matches(&message("a", "dana@partner.example", "Unrelated", None)));
+        // A different known thread with the same subject is another conversation.
+        assert!(!by_thread.matches(&message("a", "bob@x.example", "Lease renewal", Some("t2"))));
+        // Subject matching needs participants.
+        let anyone = store
+            .create_thread_watch(
+                &NewThreadWatch {
+                    account_id: "a".into(),
+                    subject: "Weekly sync".into(),
+                    ..Default::default()
+                },
+                10,
+            )
+            .unwrap();
+        assert!(!anyone.matches(&message("a", "bob@x.example", "Re: Weekly sync", None)));
+        // Mail from before the follow-up started doesn't answer it.
+        let later = store
+            .create_thread_watch(
+                &NewThreadWatch {
+                    account_id: "a".into(),
+                    thread_id: Some("t9".into()),
+                    subject: "Later".into(),
+                    ..Default::default()
+                },
+                10_000,
+            )
+            .unwrap();
+        assert!(!later.matches(&message("a", "bob@x.example", "Later", Some("t9"))));
         assert!(store
             .create_thread_watch(
                 &NewThreadWatch {

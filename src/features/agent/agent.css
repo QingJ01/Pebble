@@ -1100,3 +1100,9 @@
   font-size: var(--font-xs);
   color: var(--color-text-tertiary);
 }
+
+.agent-draft__warn {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-xs);
+  color: var(--color-warning, #b45309);
+}

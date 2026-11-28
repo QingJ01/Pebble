@@ -4,11 +4,11 @@ Synthetic data: 78 triage cases, 38 deadline cases, 24 awaiting-reply cases (zh 
 
 ## Notification triage
 
-Expected is what a careful person would want. **Missed** = deserved a notification and didn't get one; **Noisy** = notified although it could wait; **Lost** = mail that should reach you went silent (must be 0). 62 of 78 messages are ones the rules can't place and would go to the model, including bulk mail ("Also check newsletters" on).
+Expected is what a careful person would want. **Missed** = deserved a notification and didn't get one; **Noisy** = notified although it could wait; **Lost** = mail that should reach you went silent (must be 0). 41 of 78 messages are ones the rules can't place and would go to the model (app defaults: newsletters and automated mail stay with the rules).
 
 | | Accuracy | Notify precision | Notify recall | F1 | Missed | Noisy | Lost |
 |---|---|---|---|---|---|---|---|
-| Rules only (shipped default) | 64% (50/78) | 67% | 44% | 0.53 | 20 | 8 | 0 |
+| Rules only (shipped default) | 65% (51/78) | 67% | 46% | 0.54 | 19 | 8 | 0 |
 
 ### By category
 
@@ -22,8 +22,8 @@ Expected is what a careful person would want. **Missed** = deserved a notificati
 | known_fyi | 8 | 0/8 |
 | rule_interrupt | 8 | 8/8 |
 | rule_silent | 8 | 8/8 |
-| unknown_ask | 10 | 0/10 |
-| unknown_cold | 8 | 8/8 |
+| unknown_ask | 9 | 0/9 |
+| unknown_cold | 9 | 9/9 |
 
 ### Disagreements with the expected tier
 
@@ -53,14 +53,13 @@ Expected is what a careful person would want. **Missed** = deserved a notificati
 | n058 | unknown_ask | 班主任: 孩子发烧了 | interrupt | digest |
 | n059 | unknown_ask | Rita, Acme Ops: Production issue with your integration | interrupt | digest |
 | n060 | unknown_ask | 合作方法务: 合同今天截止签署 | interrupt | digest |
-| n061 | unknown_ask | DHL Customer Service: Customs payment needed to release your parcel | interrupt | digest |
 | n062 | unknown_ask | 会议组委会: 您的演讲时间调整 | interrupt | digest |
 | n073 | cc | Kai: Release plan | interrupt | digest |
 | n074 | cc | 赵敏: 上线安排 | interrupt | digest |
 
 ## Deadlines in mail
 
-Mail received 2026-12-02 10:00. A deadline on the right day counts as found; the app reminds ahead of it. In the app the model's deadline is used only when the rules find none ("Rules, then model").
+Mail received 2026-12-02 10:00, from a colleague you write to (so it would reach the model with AI help on). A deadline on the right day counts as found; the app reminds ahead of it. The model's deadlines are filtered as in the app, and used only when the rules find none ("Rules, then model").
 
 | | Exact | Same day | Wrong day | Missed | False positive | Correct none | Day recall | Day precision |
 |---|---|---|---|---|---|---|---|---|

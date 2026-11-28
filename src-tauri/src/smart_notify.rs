@@ -68,11 +68,23 @@ pub fn load_prefs(store: &Store, account_id: &str) -> NotifyPrefsRecord {
     let parse = |json: Option<String>| {
         json.and_then(|j| serde_json::from_str::<NotifyPrefsRecord>(&j).ok())
     };
-    let own = store.get_notify_prefs_json(account_id).ok().flatten();
-    if let Some(prefs) = parse(own) {
-        return prefs;
+    let defaults = parse(store.get_notify_prefs_json("").ok().flatten()).unwrap_or_default();
+    if account_id.is_empty() {
+        return defaults;
     }
-    parse(store.get_notify_prefs_json("").ok().flatten()).unwrap_or_default()
+    // An account row overrides only what is set per account (the mode and
+    // AI help); quiet hours and the rest always follow the defaults, so a
+    // later change there applies to every account.
+    match parse(store.get_notify_prefs_json(account_id).ok().flatten()) {
+        Some(own) => NotifyPrefsRecord {
+            mode: own.mode,
+            model_assist: own.model_assist,
+            model_reviews_bulk: own.model_reviews_bulk,
+            model_send_body: own.model_send_body,
+            ..defaults
+        },
+        None => defaults,
+    }
 }
 
 /// Minutes since local midnight.
@@ -372,11 +384,27 @@ mod tests {
             .unwrap();
         let prefs = load_prefs(&store, "a1");
         assert_eq!(prefs.mode, Mode::ImportantOnly);
-        assert!(prefs.quiet_hours.unwrap().contains(23 * 60));
+        assert!(
+            prefs.quiet_hours.is_none(),
+            "quiet hours come from the defaults"
+        );
         assert!(prefs.model_send_body);
+        store
+            .set_notify_prefs_json(
+                "",
+                r#"{"mode":"all","quietHours":{"startMinute":1320,"endMinute":420}}"#,
+                2,
+            )
+            .unwrap();
+        let prefs = load_prefs(&store, "a1");
+        assert_eq!(prefs.mode, Mode::ImportantOnly, "the account's mode wins");
+        assert!(
+            prefs.quiet_hours.unwrap().contains(23 * 60),
+            "later default quiet hours apply"
+        );
         // Garbage falls back to the defaults row.
         store.set_notify_prefs_json("a2", "not json", 1).unwrap();
-        assert_eq!(load_prefs(&store, "a2").mode, Mode::Smart);
+        assert_eq!(load_prefs(&store, "a2").mode, Mode::All);
     }
 
     #[test]

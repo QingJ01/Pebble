@@ -188,12 +188,25 @@ pub async fn agent_chat_send(
         ));
     }
 
-    // Context: the conversation so far (before this question).
-    let history: Vec<ChatMessage> = state
-        .store
-        .list_agent_chat(HISTORY_MESSAGES)?
+    // Context: the conversation so far (before this question), only
+    // questions that got an answer, so the model never sees two questions
+    // in a row.
+    let recent = state.store.list_agent_chat(HISTORY_MESSAGES)?;
+    let answered: std::collections::HashSet<&str> = recent
+        .iter()
+        .filter(|row| row.role == "assistant" && row.status == "done")
+        .filter_map(|row| row.run_id.as_deref())
+        .collect();
+    let history: Vec<ChatMessage> = recent
         .iter()
         .filter(|row| row.status == "done")
+        .filter(|row| {
+            row.role == "assistant"
+                || row
+                    .run_id
+                    .as_deref()
+                    .is_some_and(|id| answered.contains(id))
+        })
         .filter_map(|row| {
             let payload = decrypt(&state, row)?;
             Some(if row.role == "user" {
@@ -203,6 +216,17 @@ pub async fn agent_chat_send(
             })
         })
         .collect();
+
+    // Everything that can fail happens before the run exists, so a failed
+    // send never leaves a run without an answer.
+    let proxy = get_global_proxy_raw(&state.crypto, &state.store)?;
+    let client = TranslateService::http_client_with_proxy(proxy.as_ref())?;
+    let llm = OpenAiCompatible {
+        client,
+        url,
+        model: config.model,
+        api_key: config.api_key,
+    };
 
     let run_id = new_id();
     save(
@@ -222,19 +246,18 @@ pub async fn agent_chat_send(
     }
     let _ = app.emit(CHAT_CHANGED_EVENT, ());
 
-    let proxy = get_global_proxy_raw(&state.crypto, &state.store)?;
-    let client = TranslateService::http_client_with_proxy(proxy.as_ref())?;
-    let llm = OpenAiCompatible {
-        client,
-        url,
-        model: config.model,
-        api_key: config.api_key,
-    };
     let task_run_id = run_id.clone();
     let task_app = app.clone();
     tauri::async_runtime::spawn(async move {
         let app = task_app;
         let run_id = task_run_id;
+        // Ends the run however the task ends (a panic included): stores an
+        // error answer if none was stored, and forgets the run.
+        let mut guard = RunGuard {
+            app: app.clone(),
+            run_id: run_id.clone(),
+            answered: false,
+        };
         let Some(state) = app.try_state::<AppState>() else {
             return;
         };
@@ -266,10 +289,14 @@ pub async fn agent_chat_send(
                     ..Default::default()
                 },
             ),
+            // What was already done (follow-ups exist, drafts were made)
+            // stays visible even when the run stops early.
             Err(ChatError::Cancelled) => (
                 "cancelled",
                 ChatPayload {
                     used: caps.used.clone(),
+                    drafts: caps.drafts.clone(),
+                    follow_ups: caps.follow_ups.clone(),
                     ..Default::default()
                 },
             ),
@@ -280,22 +307,49 @@ pub async fn agent_chat_send(
                     ChatPayload {
                         error: Some(message),
                         used: caps.used.clone(),
+                        drafts: caps.drafts.clone(),
+                        follow_ups: caps.follow_ups.clone(),
                         ..Default::default()
                     },
                 )
             }
         };
-        let started_follow_ups = !payload.follow_ups.is_empty();
+        let started_follow_ups = !caps.follow_ups.is_empty();
         if let Err(e) = save(&state, "assistant", Some(&run_id), status, &payload) {
             warn!("Failed to store the assistant's answer: {e}");
         }
-        if let Ok(mut runs) = runs().lock() {
-            runs.remove(&run_id);
-        }
-        let _ = app.emit(CHAT_CHANGED_EVENT, ());
+        guard.answered = true;
+        drop(guard);
         if started_follow_ups {
             let _ = app.emit(events::AGENT_EVENTS_CHANGED, ());
         }
     });
     Ok(run_id)
+}
+
+/// Ends a chat run when its task finishes, whatever the reason.
+struct RunGuard {
+    app: AppHandle,
+    run_id: String,
+    answered: bool,
+}
+
+impl Drop for RunGuard {
+    fn drop(&mut self) {
+        if !self.answered {
+            if let Some(state) = self.app.try_state::<AppState>() {
+                let payload = ChatPayload {
+                    error: Some("The assistant stopped unexpectedly".into()),
+                    ..Default::default()
+                };
+                if let Err(e) = save(&state, "assistant", Some(&self.run_id), "error", &payload) {
+                    warn!("Failed to store the assistant's error: {e}");
+                }
+            }
+        }
+        if let Ok(mut runs) = runs().lock() {
+            runs.remove(&self.run_id);
+        }
+        let _ = self.app.emit(CHAT_CHANGED_EVENT, ());
+    }
 }

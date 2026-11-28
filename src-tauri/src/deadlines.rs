@@ -161,6 +161,27 @@ pub fn remind_at(due: i64, created_at: i64) -> i64 {
     due - lead
 }
 
+/// Resolve a deadline and its reminder, so the reminder card doesn't keep
+/// saying "you haven't replied yet".
+fn settle(store: &Store, deadline: &AgentEvent, resolution: &Value, now: i64) -> bool {
+    let mut changed = store
+        .resolve_agent_event(&deadline.id, resolution, now)
+        .is_ok();
+    if let Some(message_id) = deadline.message_id.as_deref() {
+        for event in store.list_agent_events(500, None).unwrap_or_default() {
+            if event.kind == "deadline_soon"
+                && event.resolution.is_none()
+                && event.message_id.as_deref() == Some(message_id)
+            {
+                changed |= store
+                    .resolve_agent_event(&event.id, resolution, now)
+                    .is_ok();
+            }
+        }
+    }
+    changed
+}
+
 /// Settle handled and long-past deadlines, and remind once about the ones
 /// coming up. Returns `true` when the conversation changed.
 pub fn tick(store: &Store, now: i64) -> bool {
@@ -174,15 +195,21 @@ pub fn tick(store: &Store, now: i64) -> bool {
             continue;
         };
         if handled(store, &event, &accounts) {
-            changed |= store
-                .resolve_agent_event(&event.id, &json!({ "action": "answered", "at": now }), now)
-                .is_ok();
+            changed |= settle(
+                store,
+                &event,
+                &json!({ "action": "answered", "at": now }),
+                now,
+            );
             continue;
         }
         if now > due + EXPIRE_AFTER {
-            changed |= store
-                .resolve_agent_event(&event.id, &json!({ "action": "expired", "at": now }), now)
-                .is_ok();
+            changed |= settle(
+                store,
+                &event,
+                &json!({ "action": "expired", "at": now }),
+                now,
+            );
             continue;
         }
         if now < remind_at(due, event.created_at) || now > due {
@@ -356,6 +383,14 @@ mod tests {
             .unwrap();
         assert!(tick(&store, due - 30));
         assert!(upcoming(&store, sent, BRIEFING_AHEAD, 5).is_empty());
+        assert!(
+            store
+                .list_agent_events(10, None)
+                .unwrap()
+                .iter()
+                .all(|e| e.resolution.is_some() || !e.kind.starts_with("deadline")),
+            "the reminder settles with its deadline"
+        );
     }
 
     #[test]

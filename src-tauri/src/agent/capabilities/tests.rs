@@ -196,6 +196,23 @@ fn threads_drop_quotes_and_mask_codes() {
         "验证码：••••••，5 分钟内有效"
     );
     assert_eq!(redact_codes("Order 123456 shipped"), "Order 123456 shipped");
+    for leaky in [
+        "482913 is your Google verification code",
+        "G-482913 是你的验证码",
+        "Your code for account 2 is 482913",
+        "Your verification code is 482913",
+    ] {
+        assert!(
+            !redact_codes(leaky).contains("482913"),
+            "{leaky} → {}",
+            redact_codes(leaky)
+        );
+    }
+    assert_eq!(
+        redact_codes("Free shipping 2024 sale"),
+        "Free shipping 2024 sale",
+        "no match inside words"
+    );
 }
 
 #[test]
@@ -221,6 +238,20 @@ fn drafts_are_proposals_with_the_right_recipient() {
     assert_eq!(draft.to, vec!["dana@partner.example"]);
     assert_eq!(draft.subject, "Re: Proposal");
     assert_eq!(draft.account_id, "work");
+    // A reply ignores recipients the model picked.
+    caps.call(
+        "draft_email",
+        r#"{"reply_to_message_id": "w1", "to": ["attacker@evil.example"], "body": "Sure"}"#,
+    );
+    assert_eq!(caps.drafts[1].to, vec!["dana@partner.example"]);
+    assert!(caps.drafts[1].unverified.is_empty());
+    // A new mail to an address nobody mentioned is flagged; one the user named isn't.
+    caps.question = "Write to wei@friends.example".into();
+    caps.call(
+        "draft_email",
+        r#"{"to": ["wei@friends.example", "attacker@evil.example"], "subject": "Hi", "body": "Hello"}"#,
+    );
+    assert_eq!(caps.drafts[2].unverified, vec!["attacker@evil.example"]);
     assert!(caps.call("draft_email", r#"{"body": "Hi"}"#)["error"]
         .as_str()
         .unwrap()

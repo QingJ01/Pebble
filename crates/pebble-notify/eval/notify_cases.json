@@ -1070,9 +1070,9 @@
  {
   "id": "n061",
   "lang": "en",
-  "category": "unknown_ask",
-  "expected": "interrupt",
-  "note": "plausible but could be phishing; time-bound",
+  "category": "unknown_cold",
+  "expected": "digest",
+  "note": "customs-payment request from an unknown sender: a common phishing pattern; should not interrupt",
   "mail": {
    "fromAddress": "courier@dhl.example",
    "fromName": "DHL Customer Service",

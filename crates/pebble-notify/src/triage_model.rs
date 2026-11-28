@@ -17,32 +17,45 @@ use crate::{ModelLabel, ModelVerdict};
 /// Characters of body sent per message.
 pub const BODY_CHARS: usize = 600;
 
-/// Mask one-time codes so they never reach a model.
+/// Mask one-time codes so they never reach a model: "code: 482913",
+/// "code for account 2 is 482913", "482913 is your code", "验证码 482913",
+/// "482913 是你的验证码". Apply before truncating, so a cut-off code can't
+/// slip through.
 pub fn redact_codes(text: &str) -> String {
-    static CODE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let pattern = CODE.get_or_init(|| {
+    static AFTER: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    static BEFORE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let after = AFTER.get_or_init(|| {
         regex::Regex::new(
-            r"(?i)(验证码|校验码|动态码|code|passcode|otp|pin|verification)([^0-9\n]{0,24})(\d[\d\s-]{3,9}\d)",
+            r"(?i)(验证码|校验码|动态码|动态密码|\b(?:code|passcode|otp|pin|verification)\b)([^\n]{0,30}?)(\b[A-Za-z]{0,2}-?\d[\d \-]{2,8}\d\b)",
         )
         .expect("valid regex")
     });
-    pattern
-        .replace_all(text, |caps: &regex::Captures| {
-            format!("{}{}••••••", &caps[1], &caps[2])
+    let before = BEFORE.get_or_init(|| {
+        regex::Regex::new(
+            r"(?i)\b(\d{4,8})\b(\s*(?:is your|is the|是你的|是您的|为你的|为您的|为)[^\n]{0,30}?(?:code|passcode|otp|pin|验证码|校验码|动态码))",
+        )
+        .expect("valid regex")
+    });
+    let once = after.replace_all(text, |caps: &regex::Captures| {
+        format!("{}{}••••••", &caps[1], &caps[2])
+    });
+    before
+        .replace_all(&once, |caps: &regex::Captures| {
+            format!("••••••{}", &caps[2])
         })
         .into_owned()
 }
 
-/// The part of a body sent to the model: quotes stripped, the first
-/// [`BODY_CHARS`] characters, codes masked.
+/// The part of a body sent to the model: quotes stripped, codes masked,
+/// the first [`BODY_CHARS`] characters.
 pub fn prepare_body(text: &str) -> String {
-    let stripped = crate::awaiting::strip_quoted(text);
-    let trimmed = stripped.trim();
-    let mut out: String = trimmed.chars().take(BODY_CHARS).collect();
-    if trimmed.chars().count() > BODY_CHARS {
+    // Mask before cutting, so a code split by the cut can't slip through.
+    let masked = redact_codes(crate::awaiting::strip_quoted(text).trim());
+    let mut out: String = masked.chars().take(BODY_CHARS).collect();
+    if masked.chars().count() > BODY_CHARS {
         out.push('…');
     }
-    redact_codes(&out)
+    out
 }
 
 /// Longest "why" line kept, in characters.
@@ -131,6 +144,28 @@ pub fn user_prompt(items: &[TriageItem], corrections: &[Correction]) -> String {
 pub struct TriageAnswer {
     pub verdict: ModelVerdict,
     pub deadline: Option<NaiveDateTime>,
+}
+
+/// The model's deadline for a message, when the app uses it: not for bulk
+/// mail ("offer ends Friday" is no deadline), only when the model was sure
+/// and didn't call it a newsletter or promotion, and only for a date from
+/// the day it arrived up to 120 days ahead.
+pub fn usable_model_deadline(
+    answer: &TriageAnswer,
+    received: NaiveDateTime,
+    bulk: bool,
+) -> Option<NaiveDateTime> {
+    if bulk
+        || answer.verdict.confidence < MIN_CONFIDENCE
+        || matches!(
+            answer.verdict.label,
+            ModelLabel::Newsletter | ModelLabel::Promotion
+        )
+    {
+        return None;
+    }
+    let due = answer.deadline?;
+    (due.date() >= received.date() && due - received <= chrono::Duration::days(120)).then_some(due)
 }
 
 /// The JSON object in a reply (tolerates code fences and prose around it).

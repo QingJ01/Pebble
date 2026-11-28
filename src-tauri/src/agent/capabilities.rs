@@ -43,6 +43,11 @@ pub struct DraftProposal {
     pub cc: Vec<String>,
     pub subject: String,
     pub body: String,
+    /// Recipients the user never mentioned, never wrote to and that aren't
+    /// in the mail the assistant read: shown as a warning on the draft
+    /// (mail content could have put them there).
+    #[serde(default)]
+    pub unverified: Vec<String>,
 }
 
 /// A follow-up the assistant started.
@@ -64,6 +69,8 @@ pub struct Capabilities<'a> {
     pub used: Vec<MailRef>,
     pub drafts: Vec<DraftProposal>,
     pub follow_ups: Vec<FollowUpStarted>,
+    /// The user's question (addresses in it count as known).
+    pub question: String,
     seen: HashSet<String>,
 }
 
@@ -91,10 +98,10 @@ fn clean_body(message: &Message) -> String {
     } else {
         message.body_text.clone()
     };
-    redact_codes(&truncate(
-        pebble_notify::awaiting::strip_quoted(&text).trim(),
+    truncate(
+        &redact_codes(pebble_notify::awaiting::strip_quoted(&text).trim()),
         BODY_CHARS,
-    ))
+    )
 }
 
 /// "YYYY-MM-DD" → Unix time of local midnight.
@@ -163,6 +170,7 @@ impl<'a> Capabilities<'a> {
             used: Vec::new(),
             drafts: Vec::new(),
             follow_ups: Vec::new(),
+            question: String::new(),
             seen: HashSet::new(),
         }
     }
@@ -207,10 +215,10 @@ impl<'a> Capabilities<'a> {
             "account": self.scope.get(&message.account_id),
             "from": format!("{} <{}>", sender(message), message.from_address),
             "to": message.to_list.iter().map(|a| a.address.clone()).collect::<Vec<_>>(),
-            "subject": message.subject,
+            "subject": redact_codes(&message.subject),
             "date": local_day(message.date),
             "unread": !message.is_read,
-            "snippet": redact_codes(&truncate(&message.snippet, SNIPPET_CHARS)),
+            "snippet": truncate(&redact_codes(&message.snippet), SNIPPET_CHARS),
             "thread_id": message.thread_id,
         })
     }
@@ -336,7 +344,7 @@ impl<'a> Capabilities<'a> {
                 "to": message.to_list.iter().map(|a| a.address.clone()).collect::<Vec<_>>(),
                 "cc": message.cc_list.iter().map(|a| a.address.clone()).collect::<Vec<_>>(),
                 "date": local_day(message.date),
-                "subject": message.subject,
+                "subject": redact_codes(&message.subject),
                 "body": clean_body(&message),
             }));
         }
@@ -369,11 +377,9 @@ impl<'a> Capabilities<'a> {
                 } else {
                     format!("Re: {}", original.subject)
                 };
-                (
-                    original.account_id.clone(),
-                    args.to.clone().unwrap_or(reply_to),
-                    args.subject.clone().unwrap_or(subject),
-                )
+                // A reply goes to the original's people, never to addresses
+                // the model picked (mail content could have suggested them).
+                (original.account_id.clone(), reply_to, subject)
             }
             None => {
                 let to = args.to.clone().unwrap_or_default();
@@ -389,13 +395,29 @@ impl<'a> Capabilities<'a> {
                 (account, to, args.subject.clone().unwrap_or_default())
             }
         };
+        let reply = args.reply_to_message_id.is_some();
+        let cc = if reply {
+            Vec::new()
+        } else {
+            args.cc.clone().unwrap_or_default()
+        };
+        let unverified = if reply {
+            Vec::new()
+        } else {
+            to.iter()
+                .chain(cc.iter())
+                .filter(|address| !self.known_address(&account_id, address))
+                .cloned()
+                .collect()
+        };
         let draft = DraftProposal {
             account_id,
             reply_to_message_id: args.reply_to_message_id.clone(),
             to,
-            cc: args.cc.clone().unwrap_or_default(),
+            cc,
             subject,
             body: args.body.trim().to_string(),
+            unverified,
         };
         self.drafts.push(draft.clone());
         Ok(json!({
@@ -404,6 +426,28 @@ impl<'a> Capabilities<'a> {
             "to": draft.to,
             "subject": draft.subject,
         }))
+    }
+
+    /// The user named the address, has written to it, saved it as a
+    /// contact, or it is a sender of mail the assistant read.
+    fn known_address(&self, account_id: &str, address: &str) -> bool {
+        let address = address.trim().to_lowercase();
+        if address.is_empty() {
+            return false;
+        }
+        self.question.to_lowercase().contains(&address)
+            || self
+                .used
+                .iter()
+                .any(|m| m.from_address.trim().eq_ignore_ascii_case(&address))
+            || self
+                .store
+                .sent_count_to(account_id, &address)
+                .is_ok_and(|n| n > 0)
+            || self
+                .store
+                .get_contact_by_email(&address)
+                .is_ok_and(|c| c.is_some())
     }
 
     pub fn follow_up(&mut self, args: FollowArgs) -> Result<Value, String> {
@@ -487,7 +531,7 @@ impl<'a> Capabilities<'a> {
                 json!({
                     "message_id": e.message_id,
                     "from": e.payload.get("from"),
-                    "subject": e.payload.get("subject"),
+                    "subject": e.payload.get("subject").and_then(Value::as_str).map(redact_codes),
                 })
             })
             .collect();
