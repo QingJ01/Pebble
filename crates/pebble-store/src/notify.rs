@@ -434,15 +434,25 @@ impl Store {
         })
     }
 
-    /// Recent corrections, newest first: (sender, subject, important).
-    pub fn recent_notify_feedback(&self, limit: u32) -> Result<Vec<(String, String, bool)>> {
+    /// Recent corrections from `account_ids`, newest first:
+    /// (sender, subject, important).
+    pub fn recent_notify_feedback(
+        &self,
+        account_ids: &[String],
+        limit: u32,
+    ) -> Result<Vec<(String, String, bool)>> {
+        if account_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = vec!["?"; account_ids.len()].join(", ");
         self.with_read(|conn| {
-            let mut stmt = conn.prepare(
+            let mut stmt = conn.prepare(&format!(
                 "SELECT sender, subject, important FROM notify_feedback
-                 ORDER BY created_at DESC, id DESC LIMIT ?1",
-            )?;
+                 WHERE account_id IN ({placeholders})
+                 ORDER BY created_at DESC, id DESC LIMIT {limit}"
+            ))?;
             let rows = stmt
-                .query_map(params![limit], |row| {
+                .query_map(rusqlite::params_from_iter(account_ids.iter()), |row| {
                     Ok((row.get(0)?, row.get(1)?, row.get(2)?))
                 })?
                 .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -712,8 +722,15 @@ mod tests {
         );
         assert_eq!(store.notify_feedback_for(&me.id, "m1").unwrap(), Some(true));
         assert_eq!(
-            store.recent_notify_feedback(5).unwrap(),
+            store.recent_notify_feedback(&[me.id.clone()], 5).unwrap(),
             vec![("ann@example.com".to_string(), "Hi".to_string(), true)]
+        );
+        assert!(
+            store
+                .recent_notify_feedback(&["other".to_string()], 5)
+                .unwrap()
+                .is_empty(),
+            "corrections stay with their account"
         );
         assert!(store.list_unseen_digest(10).unwrap().is_empty());
         let log = store.list_notification_log(10).unwrap();

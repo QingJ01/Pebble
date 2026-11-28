@@ -20,7 +20,7 @@ use pebble_notify::triage_model::{
     parse_response, system_prompt, user_prompt, Correction, TriageAnswer, TriageItem, MAX_BATCH,
     MIN_CONFIDENCE,
 };
-use pebble_notify::{apply_model_verdict, Decision, Reason, Tier};
+use pebble_notify::{apply_model_verdict, Decision, ModelLabel, Reason, Tier};
 use pebble_store::Store;
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{info, warn};
@@ -83,7 +83,7 @@ pub fn triage_items(candidates: &[ModelCandidate]) -> Vec<TriageItem> {
             id: (i + 1).to_string(),
             from: c.message.from_address.clone(),
             from_name: c.message.from_name.clone(),
-            subject: c.message.subject.clone(),
+            subject: redact_codes(&c.message.subject),
             to_me: c.to_me,
             known_contact: c.known_contact,
             times_user_wrote: c.times_user_wrote,
@@ -119,14 +119,23 @@ fn local_midnight_ts() -> i64 {
     crate::deadlines::local_ts(midnight).unwrap_or_else(|| now_timestamp() - 86_400)
 }
 
-fn corrections(store: &Store) -> Vec<Correction> {
+/// Recent corrections from the accounts in this batch only (all of them
+/// have AI help on and allowed), so mail from other accounts, Gmail
+/// included, never reaches the model this way.
+fn corrections(store: &Store, candidates: &[ModelCandidate]) -> Vec<Correction> {
+    let mut accounts: Vec<String> = candidates
+        .iter()
+        .map(|c| c.triaged.account_id.clone())
+        .collect();
+    accounts.sort();
+    accounts.dedup();
     store
-        .recent_notify_feedback(EXAMPLES)
+        .recent_notify_feedback(&accounts, EXAMPLES)
         .unwrap_or_default()
         .into_iter()
         .map(|(sender, subject, important)| Correction {
             sender,
-            subject: subject.chars().take(80).collect(),
+            subject: redact_codes(&subject).chars().take(80).collect(),
             important,
         })
         .collect()
@@ -168,7 +177,7 @@ async fn ask_model(
         .to_string();
     let messages = vec![
         ChatMessage::system(system_prompt(&now_local)),
-        ChatMessage::user(user_prompt(&items, &corrections(&state.store))),
+        ChatMessage::user(user_prompt(&items, &corrections(&state.store, candidates))),
     ];
     let reply = tokio::time::timeout(MODEL_TIMEOUT, llm.complete(&messages, None))
         .await
@@ -223,7 +232,20 @@ pub async fn refine(app: AppHandle, candidates: Vec<ModelCandidate>) {
                 }
                 notify.push(item);
             }
-            if let (false, Some(due)) = (candidate.has_deadline, answer.and_then(|a| a.deadline)) {
+            // A deadline from the model only for mail that is about the
+            // user (not bulk: "offer ends Friday" is no deadline), when the
+            // model was sure and didn't call it a newsletter or promotion.
+            let model_deadline = answer
+                .filter(|a| {
+                    a.verdict.confidence >= MIN_CONFIDENCE
+                        && !matches!(
+                            a.verdict.label,
+                            ModelLabel::Newsletter | ModelLabel::Promotion
+                        )
+                })
+                .and_then(|a| a.deadline)
+                .filter(|_| !matches!(candidate.triaged.decision.reason, Reason::Bulk));
+            if let (false, Some(due)) = (candidate.has_deadline, model_deadline) {
                 let received = crate::deadlines::local_naive(candidate.message.date);
                 let sane =
                     due.date() >= received.date() && due - received <= chrono::Duration::days(120);

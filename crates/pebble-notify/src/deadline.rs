@@ -44,9 +44,9 @@ fn en_pattern() -> &'static Regex {
             (?:the\s+)?(?:end\s+of\s+)?
             (?P<when>
                 (?P<iso>\d{{4}}-\d{{1,2}}-\d{{1,2}})
-              | (?P<eod>today|tonight|eod|end\s+of\s+(?:the\s+)?day|cob|close\s+of\s+business)
-              | (?P<tomorrow>tomorrow)
-              | (?P<eow>(?:this\s+|the\s+)?week)
+              | (?P<eod>(?:today|tonight|eod|end\s+of\s+(?:the\s+)?day|cob|close\s+of\s+business)\b)
+              | (?P<tomorrow>tomorrow\b)
+              | (?P<eow>(?:this\s+|the\s+)?week\b)
               | (?:(?P<next>next|this)\s+)?(?P<weekday>{days})\b\.?
               | (?P<month1>{months})\.?\s+(?P<day1>\d{{1,2}})(?:st|nd|rd|th)?\b
               | (?P<day2>\d{{1,2}})(?:st|nd|rd|th)?\s+(?:of\s+)?(?P<month2>{months})\b\.?
@@ -78,7 +78,8 @@ fn zh_pattern() -> &'static Regex {
         )
         (?:\s*(?P<part>上午|中午|下午|晚上|傍晚|下班|早上))?
         (?:\s*(?P<hour>\d{1,2})\s*(?:[点时:：])\s*(?P<minute>\d{1,2}|半)?\s*(?:分)?)?
-        (?P<after>\s*(?:之前|以前|前|为止|截止|截至))?",
+        (?P<after>\s*(?:之前|以前|前|为止|截止|截至))?
+        (?P<follow>\S)?",
     )
 }
 
@@ -309,25 +310,82 @@ fn plausible(due: NaiveDateTime, received: NaiveDateTime) -> bool {
     due.date() >= received.date() && due - received <= Duration::days(MAX_AHEAD_DAYS)
 }
 
+/// After a bare 前 these make a word (前往, 前来, 前面…), not "before".
+const NOT_BEFORE: &str = "往来面台后天进去景列排夕";
+
+/// "by Friday last week": the date is in the past.
+fn en_refers_to_past(after: &str) -> bool {
+    let after = after.trim_start().to_lowercase();
+    ["last week", "last month", "last year"].iter().any(|p| {
+        after.starts_with(p)
+            && !after[p.len()..].starts_with("'s")
+            && !after[p.len()..].starts_with("’s")
+    })
+}
+
+/// "上周五前", "去年12月10日前", "已于周五前": the date is in the past.
+/// "线上周三前" (online, by Wednesday) is not.
+fn zh_refers_to_past(before: &str, caps: &Captures) -> bool {
+    let tail: String = {
+        let chars: Vec<char> = before.chars().collect();
+        chars[chars.len().saturating_sub(3)..].iter().collect()
+    };
+    let unqualified_week = caps.name("wk").is_some() && caps.name("wkp").is_none();
+    if unqualified_week || caps.name("eom").is_some() {
+        let last_week = tail.ends_with("上个") || tail.ends_with('上');
+        // 上 ending another word: 线上, 网上, 早上, 晚上, 马上…
+        let word = tail
+            .trim_end_matches('个')
+            .trim_end_matches('上')
+            .chars()
+            .last()
+            .is_some_and(|c| "线网早晚马路班会楼身手面台".contains(c));
+        if last_week && !word {
+            return true;
+        }
+    }
+    if caps.name("md").is_some() && tail.ends_with("去年") {
+        return true;
+    }
+    tail.ends_with('已') || tail.ends_with("已经") || tail.ends_with("已于")
+}
+
 /// The earliest deadline mentioned in a message, if any.
 pub fn find_deadline(subject: &str, body: &str, received: NaiveDateTime) -> Option<Deadline> {
     let text = scan_text(subject, body);
     let mut found: Vec<Deadline> = Vec::new();
     for caps in en_pattern().captures_iter(&text) {
+        let whole = caps.get(0).expect("match");
+        if en_refers_to_past(&text[whole.end()..]) {
+            continue;
+        }
         if let Some((due, all_day)) = en_match(&caps, received) {
             found.push(Deadline {
                 due,
                 all_day,
-                phrase: caps[0].trim().to_string(),
+                phrase: whole.as_str().trim().to_string(),
             });
         }
     }
     for caps in zh_pattern().captures_iter(&text) {
+        let whole = caps.get(0).expect("match");
+        // The character after a bare 前 tells "明天前往" (go tomorrow) from
+        // "明天前" (by tomorrow).
+        let follow = caps.name("follow");
+        if group(&caps, "after").map(str::trim) == Some("前")
+            && follow.is_some_and(|f| NOT_BEFORE.contains(f.as_str()))
+        {
+            continue;
+        }
+        if zh_refers_to_past(&text[..whole.start()], &caps) {
+            continue;
+        }
         if let Some((due, all_day)) = zh_match(&caps, received) {
+            let end = follow.map_or(whole.end(), |f| f.start());
             found.push(Deadline {
                 due,
                 all_day,
-                phrase: caps[0].trim().to_string(),
+                phrase: text[whole.start()..end].trim().to_string(),
             });
         }
     }
@@ -438,6 +496,22 @@ mod tests {
         assert_eq!(due("", "by Nov 3"), None, "a month ago");
         assert_eq!(due("", "by the way, thanks"), None);
         assert_eq!(due("", "截止2027-09-01"), None, "too far ahead");
+        assert_eq!(due("", "Thanks for sending it by Friday last week."), None);
+        assert_eq!(due("", "我上周五前已提交"), None);
+        assert_eq!(due("", "已于周五前提交"), None);
+        assert_eq!(due("", "明天前往会场"), None);
+        assert_eq!(due("", "请大家后天前来"), None);
+        assert_eq!(due("", "Photo by Cobb"), None);
+        assert_eq!(due("", "generated by weekly job"), None);
+        assert_eq!(due("", "before weekend plans"), None);
+        assert_eq!(
+            due("", "请在线上周三前完成培训").as_deref(),
+            Some("2026-12-02 18:00")
+        );
+        assert_eq!(
+            due("", "Please send by Monday last month's invoices").as_deref(),
+            Some("2026-12-07 18:00")
+        );
         // Quoted history doesn't count.
         assert_eq!(
             due("Re: x", "Sounds good.\n\n> Please reply by Friday"),

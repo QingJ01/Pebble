@@ -233,7 +233,16 @@ function ModelAssistSection({ defaults, own }: { defaults: NotifyPrefs; own: Rec
                     <Checkbox
                       checked={prefs.modelAssist && !gmail}
                       disabled={gmail || save.isPending}
-                      onChange={() => update(account.id, { modelAssist: !prefs.modelAssist })}
+                      onChange={() =>
+                        update(
+                          account.id,
+                          prefs.modelAssist
+                            ? { modelAssist: false }
+                            // A newly enabled account follows the choices already made
+                            // (e.g. metadata only), never the defaults.
+                            : { modelAssist: true, modelSendBody: shared.modelSendBody, modelReviewsBulk: shared.modelReviewsBulk },
+                        )
+                      }
                       label={t("notify.aiUse", "Use AI")}
                       aria-label={t("notify.aiFor", "AI help for {{account}}", { account: account.email })}
                     />
