@@ -7,6 +7,7 @@ import { RichText } from "../../../src/features/agent/AgentThread";
 import { useComposeStore } from "../../../src/stores/compose.store";
 import { useMailStore } from "../../../src/stores/mail.store";
 import type { ChatEntry } from "../../../src/features/agent/chat-api";
+import { useAskContext } from "../../../src/features/agent/askContext";
 
 vi.mock("react-i18next", () => ({
   initReactI18next: { type: "3rdParty", init: vi.fn() },
@@ -91,7 +92,7 @@ describe("assistant chat", () => {
     const log = await screen.findByRole("log");
     expect(await within(log).findByText("I couldn't answer that: HTTP 401: bad key")).toBeTruthy();
     fireEvent.click(within(log).getByRole("button", { name: "Try again" }));
-    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("agent_chat_send", { text: "And the contract?", accountIds: [], fromAccountId: "work" }));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("agent_chat_send", { text: "And the contract?", accountIds: [], fromAccountId: "work", contextMessageId: null }));
   });
 
   it("sends with Enter in the chosen scope and keeps Shift+Enter for new lines", async () => {
@@ -102,12 +103,12 @@ describe("assistant chat", () => {
     fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
     expect(mockInvoke).not.toHaveBeenCalledWith("agent_chat_send", expect.anything());
     fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("agent_chat_send", { text: "What did Dana say?", accountIds: ["work"], fromAccountId: "work" }));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("agent_chat_send", { text: "What did Dana say?", accountIds: ["work"], fromAccountId: "work", contextMessageId: null }));
 
     fireEvent.change(screen.getByRole("combobox", { name: "Which accounts Pebble may read" }), { target: { value: "all" } });
     fireEvent.change(input, { target: { value: "Anything urgent?" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("agent_chat_send", { text: "Anything urgent?", accountIds: null, fromAccountId: "work" }));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("agent_chat_send", { text: "Anything urgent?", accountIds: null, fromAccountId: "work", contextMessageId: null }));
   });
 
   it("shows progress while answering and can stop", async () => {
@@ -125,7 +126,46 @@ describe("assistant chat", () => {
     chat = [];
     wrap();
     fireEvent.click(await screen.findByRole("button", { name: "What's waiting for my reply?" }));
-    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("agent_chat_send", { text: "What's waiting for my reply?", accountIds: ["work"], fromAccountId: "work" }));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("agent_chat_send", { text: "What's waiting for my reply?", accountIds: ["work"], fromAccountId: "work", contextMessageId: null }));
+  });
+});
+
+describe("asking about a mail", () => {
+  beforeEach(() => {
+    useMailStore.setState({ activeAccountId: "work" });
+    mockInvoke.mockReset();
+    mockInvoke.mockImplementation((command) => {
+      switch (command) {
+        case "agent_chat_list":
+        case "agent_chat_running":
+          return Promise.resolve([]);
+        case "agent_chat_send": return Promise.resolve("r1");
+        case "get_agent_model":
+          return Promise.resolve({ configured: true, endpoint: "http://localhost:11434", model: "qwen", hasApiKey: false, local: true });
+        case "list_accounts": return Promise.resolve([{ id: "work", email: "me@work.example" }]);
+        default: return Promise.resolve(command.startsWith("list") ? [] : null);
+      }
+    });
+  });
+
+  it("shows what the question is about and sends it along", async () => {
+    useAskContext.setState({ context: { messageId: "m7", accountId: "work", subject: "Venue deposit", from: "Wei" } });
+    wrap();
+    expect(await screen.findByText("Venue deposit")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Summarise this thread" }));
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith("agent_chat_send", {
+        text: "Summarise this thread", accountIds: ["work"], fromAccountId: "work", contextMessageId: "m7",
+      }),
+    );
+    expect(useAskContext.getState().context).toBeNull();
+  });
+
+  it("can drop the mail and ask in general", async () => {
+    useAskContext.setState({ context: { messageId: "m7", accountId: "work", subject: "Venue deposit", from: "Wei" } });
+    wrap();
+    fireEvent.click(await screen.findByRole("button", { name: "Don't ask about this mail" }));
+    expect(useAskContext.getState().context).toBeNull();
   });
 });
 

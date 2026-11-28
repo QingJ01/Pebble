@@ -132,7 +132,10 @@ fn search_stays_inside_the_scope_and_records_sources() {
         .map(|r| r["message_id"].as_str().unwrap())
         .collect();
     assert_eq!(ids, vec!["w1"]);
-    assert_eq!(result["searched_accounts"][0], "me@work.example");
+    assert_eq!(
+        result["coverage"]["accounts"][0]["account"],
+        "me@work.example"
+    );
     assert_eq!(caps.used.len(), 1);
     assert_eq!(caps.used[0].message_id, "w1");
 }

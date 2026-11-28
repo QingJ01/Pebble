@@ -46,6 +46,8 @@ export interface ChatEntry {
   followUps: ChatFollowUp[];
   error: string | null;
   fallback: boolean;
+  /** The mail the user was reading when they asked. */
+  context?: { messageId: string; accountId: string; from: string; subject: string } | null;
 }
 
 export interface ChatProgress {
@@ -62,9 +64,14 @@ export const chatKeys = {
   running: ["agent", "chat", "running"] as const,
 };
 
-/** `fromAccountId`: the account the user is in; new mail is drafted from it. */
-export const sendChat = (text: string, accountIds: string[] | null, fromAccountId: string | null) =>
-  invoke<string>("agent_chat_send", { text, accountIds, fromAccountId });
+/** `fromAccountId`: the account the user is in; new mail is drafted from it.
+ *  `contextMessageId`: the mail the user is reading ("Ask Pebble about this"). */
+export const sendChat = (
+  text: string,
+  accountIds: string[] | null,
+  fromAccountId: string | null,
+  contextMessageId: string | null = null,
+) => invoke<string>("agent_chat_send", { text, accountIds, fromAccountId, contextMessageId });
 export const listChat = () => invoke<ChatEntry[]>("agent_chat_list", { limit: 200 });
 export const runningChats = () => invoke<string[]>("agent_chat_running");
 export const cancelChat = (runId: string) => invoke<boolean>("agent_chat_cancel", { runId });
@@ -126,8 +133,8 @@ export function useChatMutations() {
   };
   return {
     send: useMutation({
-      mutationFn: ({ text, accountIds }: { text: string; accountIds: string[] | null }) =>
-        sendChat(text, accountIds, useMailStore.getState().activeAccountId ?? null),
+      mutationFn: ({ text, accountIds, contextMessageId }: { text: string; accountIds: string[] | null; contextMessageId?: string | null }) =>
+        sendChat(text, accountIds, useMailStore.getState().activeAccountId ?? null, contextMessageId ?? null),
       onSettled: refresh,
     }),
     cancel: useMutation({ mutationFn: cancelChat, onSettled: refresh }),

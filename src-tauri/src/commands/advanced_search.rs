@@ -39,6 +39,7 @@ pub async fn advanced_search(
             date_to: query.date_to,
             has_attachment: query.has_attachment,
             folder_id: query.folder_id.as_deref(),
+            account_ids: &[],
             limit,
         })?;
         super::search::attach_account_ids(&store, hits)

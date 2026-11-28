@@ -100,13 +100,21 @@ async fn pairs_on_initialize_then_forwards_calls_with_the_token() {
         .iter()
         .map(|t| t["name"].as_str().unwrap())
         .collect();
-    assert_eq!(
-        names,
-        vec!["mail_search", "mail_get_thread", "mail_propose_draft"]
+    assert_eq!(names.len(), 9);
+    assert!(names.contains(&"mail_list_accounts") && names.contains(&"mail_proposal_status"));
+    assert!(
+        !names
+            .iter()
+            .any(|n| n.contains("send") || n.contains("delete")),
+        "no tool sends or deletes"
     );
 
     let result = handle(&b, call("mail_search")).await.unwrap();
     assert_eq!(result["result"]["isError"], false);
+    assert_eq!(
+        result["result"]["structuredContent"]["tool"], "mail_search",
+        "structured content too"
+    );
     assert!(
         text(&result).contains("tok-Claude Desktop"),
         "{}",
@@ -276,4 +284,37 @@ async fn pairs_and_calls_over_a_real_socket() {
     let r = handle(&gone, call("mail_search")).await.unwrap();
     assert!(text(&r).contains("Open Pebble"));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A call the client cancels gets no answer; others still do.
+#[tokio::test]
+async fn cancelled_calls_get_no_answer() {
+    struct Slow;
+    impl Connector for Slow {
+        fn send<'a>(&'a self, request: &'a BridgeRequest, _wait: Duration) -> ConnectFuture<'a> {
+            Box::pin(async move {
+                if let BridgeRequest::Call { .. } = request {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+                Ok(BridgeResponse::token("t".into()))
+            })
+        }
+    }
+    let tokens = MemoryTokens::default();
+    tokens.set("MCP client", "t");
+    let b = Bridge::new(Slow, tokens);
+    let input = format!(
+        "{}\n{}\n{}\n",
+        call("mail_search"),
+        json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 7}}),
+        json!({"jsonrpc": "2.0", "id": 8, "method": "ping"})
+    );
+    let (client, server) = tokio::io::duplex(64 * 1024);
+    run_stdio(b, input.as_bytes(), server).await.unwrap();
+    let mut lines = BufReader::new(client).lines();
+    let mut ids = Vec::new();
+    while let Some(line) = lines.next_line().await.unwrap() {
+        ids.push(serde_json::from_str::<Value>(&line).unwrap()["id"].clone());
+    }
+    assert_eq!(ids, vec![json!(8)], "only the ping is answered");
 }

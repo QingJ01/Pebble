@@ -171,7 +171,7 @@ export default function ConnectionsTab() {
 
       <SettingsSection
         title={t("connections.auditTitle", "Recent activity")}
-        description={t("connections.auditDesc", "What connected apps asked for. Only the request type and outcome are kept, never mail content.")}
+        description={t("connections.auditDesc", "What connected apps and Pebble's own assistant asked for. Only the request type and outcome are kept, never mail content.")}
       >
         {audit.length === 0 ? (
           <SettingsEmpty>{t("connections.auditEmpty", "Nothing yet.")}</SettingsEmpty>
@@ -180,7 +180,7 @@ export default function ConnectionsTab() {
             {audit.map((row) => (
               <SettingsListRow
                 key={row.id}
-                title={`${names.get(row.clientId) ?? "?"} · ${toolLabel(t, row.tool)}`}
+                title={`${row.clientId === "assistant" ? t("connections.assistant", "Pebble assistant") : (names.get(row.clientId) ?? "?")} · ${toolLabel(t, row.tool)}`}
                 meta={`${formatDateTime(row.createdAt, undefined, i18n.language)} · ${
                   row.outcome === "ok"
                     ? t("connections.results", { count: row.results, defaultValue: "{{count}} results" })

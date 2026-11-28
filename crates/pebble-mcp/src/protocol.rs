@@ -103,6 +103,12 @@ impl BridgeResponse {
 pub const TOOL_SEARCH: &str = "mail_search";
 pub const TOOL_GET_THREAD: &str = "mail_get_thread";
 pub const TOOL_PROPOSE_DRAFT: &str = "mail_propose_draft";
+pub const TOOL_LIST_ACCOUNTS: &str = "mail_list_accounts";
+pub const TOOL_LIST_RECENT: &str = "mail_list_recent";
+pub const TOOL_GET_MESSAGE: &str = "mail_get_message";
+pub const TOOL_LIST_OPEN_ITEMS: &str = "mail_list_open_items";
+pub const TOOL_FOLLOW_UP: &str = "mail_follow_up";
+pub const TOOL_PROPOSAL_STATUS: &str = "mail_proposal_status";
 
 /// Access levels, lowest first. Each includes the ones before it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -132,9 +138,11 @@ impl Level {
     /// The level a tool needs.
     pub fn required_for(tool: &str) -> Option<Self> {
         Some(match tool {
-            TOOL_SEARCH => Level::Metadata,
-            TOOL_GET_THREAD => Level::Body,
-            TOOL_PROPOSE_DRAFT => Level::Drafts,
+            TOOL_SEARCH | TOOL_LIST_ACCOUNTS | TOOL_LIST_RECENT | TOOL_LIST_OPEN_ITEMS => {
+                Level::Metadata
+            }
+            TOOL_GET_THREAD | TOOL_GET_MESSAGE => Level::Body,
+            TOOL_PROPOSE_DRAFT | TOOL_FOLLOW_UP | TOOL_PROPOSAL_STATUS => Level::Drafts,
             _ => return None,
         })
     }

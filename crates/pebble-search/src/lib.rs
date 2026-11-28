@@ -74,6 +74,8 @@ pub struct AdvancedSearchParams<'a> {
     pub date_to: Option<i64>,
     pub has_attachment: Option<bool>,
     pub folder_id: Option<&'a str>,
+    /// Only these accounts (all when empty).
+    pub account_ids: &'a [String],
     pub limit: usize,
 }
 
@@ -391,6 +393,7 @@ impl TantivySearch {
             date_to,
             has_attachment,
             folder_id,
+            account_ids,
             limit,
         } = params;
         let ss = &self.schema;
@@ -476,6 +479,24 @@ impl TantivySearch {
         // If no sub-queries, return empty
         if sub_queries.is_empty() {
             return Ok(Vec::new());
+        }
+
+        // Account filter (narrows a query; never a query on its own).
+        if !account_ids.is_empty() {
+            let accounts: Vec<(Occur, Box<dyn Query>)> = account_ids
+                .iter()
+                .map(|id| {
+                    let term = Term::from_field_text(ss.account_id, id);
+                    (
+                        Occur::Should,
+                        Box::new(TermQuery::new(
+                            term,
+                            tantivy::schema::IndexRecordOption::Basic,
+                        )) as Box<dyn Query>,
+                    )
+                })
+                .collect();
+            sub_queries.push((Occur::Must, Box::new(BooleanQuery::new(accounts))));
         }
 
         let bool_query = BooleanQuery::new(sub_queries);
@@ -671,6 +692,7 @@ mod tests {
                 date_to: None,
                 has_attachment: None,
                 folder_id: None,
+                account_ids: &[],
                 limit: 10,
             })
             .unwrap();
@@ -845,6 +867,7 @@ mod tests {
                 date_to: None,
                 has_attachment: None,
                 folder_id: Some("inbox"),
+                account_ids: &[],
                 limit: 10,
             })
             .unwrap();
@@ -993,6 +1016,7 @@ mod tests {
                 date_to: None,
                 has_attachment: None,
                 folder_id: None,
+                account_ids: &[],
                 limit: 10,
             })
             .unwrap();

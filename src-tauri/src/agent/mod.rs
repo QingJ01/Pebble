@@ -4,3 +4,4 @@
 pub mod capabilities;
 pub mod chat;
 pub mod llm;
+pub mod mail_search;

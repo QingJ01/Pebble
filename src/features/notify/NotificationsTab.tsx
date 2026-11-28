@@ -332,6 +332,7 @@ function QuietHoursSection({ prefs, onChange }: { prefs: NotifyPrefs; onChange: 
 
 function ProactiveSection({ prefs, onChange }: { prefs: NotifyPrefs; onChange: (patch: Partial<NotifyPrefs>) => void }) {
   const { t } = useTranslation();
+  const { data: model } = useAgentModel();
   return (
     <SettingsSection
       title={t("notify.proactiveTitle", "Pebble keeps an eye out")}
@@ -357,6 +358,23 @@ function ProactiveSection({ prefs, onChange }: { prefs: NotifyPrefs; onChange: (
             if (minutes !== null) onChange({ briefingMinute: minutes });
           }}
         />
+      </div>
+      <div className="notify-proactive-sub">
+        <Checkbox
+          checked={!!prefs.briefingSummary && !!model?.configured}
+          disabled={!prefs.briefingEnabled || !model?.configured}
+          onChange={() => onChange({ briefingSummary: !prefs.briefingSummary })}
+          label={t("notify.briefingSummary", "Start the briefing with a short AI summary")}
+        />
+        <p className="notify-proactive-note">
+          {model?.configured
+            ? t(
+                "notify.briefingSummaryNote",
+                "Sends the senders and subjects in the briefing (codes masked, Gmail left out) to {{endpoint}} once a day.",
+                { endpoint: model.endpoint },
+              )
+            : t("notify.briefingSummaryNeedsModel", "Needs an AI model (Settings → AI assistant).")}
+        </p>
       </div>
       <div className="notify-proactive-row">
         <Checkbox

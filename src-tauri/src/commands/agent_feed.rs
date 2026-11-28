@@ -215,6 +215,11 @@ pub async fn resolve_agent_event(
             serde_json::json!({ "action": "later", "days": days, "until": now + i64::from(days) * day, "at": now })
         }
         ("awaiting_reply", "no_reply") => serde_json::json!({ "action": "no_reply", "at": now }),
+        // What the user did with a draft an MCP client proposed (the client
+        // can ask with mail_proposal_status).
+        ("draft_proposal", "opened" | "dismissed") => {
+            serde_json::json!({ "action": action, "at": now })
+        }
         // A deadline handled ("done") or misread ("not_deadline"). Settling
         // the reminder settles the deadline too, so it isn't raised again.
         ("deadline" | "deadline_soon", "done") | ("deadline", "not_deadline") => {

@@ -1,5 +1,6 @@
 mod account_colors;
 mod agent;
+mod briefing_summary;
 mod commands;
 mod deadlines;
 mod events;

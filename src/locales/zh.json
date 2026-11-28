@@ -1174,7 +1174,10 @@
     "aiUse": "使用 AI",
     "aiFor": "{{account}} 的 AI 辅助判断",
     "aiBody": "附带正文开头（判断更准）",
-    "aiBulk": "订阅邮件和自动邮件也交给 AI 判断"
+    "aiBulk": "订阅邮件和自动邮件也交给 AI 判断",
+    "briefingSummary": "在简报开头加一段 AI 总结",
+    "briefingSummaryNote": "每天一次，把简报里的发件人和主题（验证码已打码，不含 Gmail）发给 {{endpoint}}。",
+    "briefingSummaryNeedsModel": "需要先配置 AI 模型（设置 → AI 助手）。"
   },
   "agent": {
     "ackStop": "好，不再跟进「{{title}}」了。",
@@ -1307,7 +1310,17 @@
     "deadlinesTitle": "即将截止",
     "dueBy": "{{from}} · {{when}}截止",
     "draftUnverified": "请核对收件人：你没有提到过、也没给 {{who}} 写过信。",
-    "proposalMsg": "{{client}} 提出了一份草稿。发送前请先检查；还没有发送任何内容。"
+    "proposalMsg": "{{client}} 提出了一份草稿。发送前请先检查；还没有发送任何内容。",
+    "askAboutThis": "问 Pebble 这封邮件",
+    "aboutLabel": "关于",
+    "aboutClear": "不再针对这封邮件",
+    "aboutLine": "关于：{{subject}}",
+    "suggestSummarize": "总结这个会话",
+    "suggestWant": "对方想让我做什么？",
+    "suggestReply": "起草回复",
+    "proposalDismissed": "已忽略",
+    "proposalOpened": "已在编辑器中打开",
+    "proposalDismiss": "忽略"
   },
   "assistantSettings": {
     "description": "Pebble 回答你的问题时使用的 AI 模型。",
@@ -1380,9 +1393,16 @@
     "clientsTitle": "已连接的应用",
     "clientsEmpty": "还没有应用连接。",
     "auditTitle": "最近活动",
-    "auditDesc": "连接的应用请求了什么。只保留请求类型和结果，从不保存邮件内容。",
+    "auditDesc": "连接的应用和 Pebble 自己的助手请求了什么。只保留请求类型和结果，从不保存邮件内容。",
     "auditEmpty": "还没有记录。",
     "results": "{{count}} 条结果",
-    "moreWaiting": "还有 {{count}} 个请求在等待。"
+    "moreWaiting": "还有 {{count}} 个请求在等待。",
+    "assistant": "Pebble 助手",
+    "toolAccounts": "列出账户",
+    "toolRecent": "最近邮件",
+    "toolMessage": "读取邮件",
+    "toolOpenItems": "待办事项",
+    "toolFollowUp": "跟进",
+    "toolProposalStatus": "草稿状态"
   }
 }

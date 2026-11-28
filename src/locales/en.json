@@ -1199,7 +1199,10 @@
     "aiUse": "Use AI",
     "aiFor": "AI help for {{account}}",
     "aiBody": "Include the start of the message text (better decisions)",
-    "aiBulk": "Also check newsletters and automated mail"
+    "aiBulk": "Also check newsletters and automated mail",
+    "briefingSummary": "Start the briefing with a short AI summary",
+    "briefingSummaryNote": "Sends the senders and subjects in the briefing (codes masked, Gmail left out) to {{endpoint}} once a day.",
+    "briefingSummaryNeedsModel": "Needs an AI model (Settings → AI assistant)."
   },
   "agent": {
     "ackStop": "OK, I've stopped following “{{title}}”.",
@@ -1335,7 +1338,17 @@
     "deadlinesTitle": "Coming up",
     "dueBy": "{{from}} · due {{when}}",
     "draftUnverified": "Check the recipients: you haven't mentioned or written to {{who}}.",
-    "proposalMsg": "{{client}} proposed a draft. Review it before sending; nothing has been sent."
+    "proposalMsg": "{{client}} proposed a draft. Review it before sending; nothing has been sent.",
+    "askAboutThis": "Ask Pebble about this",
+    "aboutLabel": "About",
+    "aboutClear": "Don't ask about this mail",
+    "aboutLine": "About: {{subject}}",
+    "suggestSummarize": "Summarise this thread",
+    "suggestWant": "What do they want from me?",
+    "suggestReply": "Draft a reply",
+    "proposalDismissed": "Dismissed",
+    "proposalOpened": "Opened in the composer",
+    "proposalDismiss": "Dismiss"
   },
   "assistantSettings": {
     "description": "The AI model Pebble uses to answer your questions.",
@@ -1408,11 +1421,18 @@
     "clientsTitle": "Connected apps",
     "clientsEmpty": "No app has connected yet.",
     "auditTitle": "Recent activity",
-    "auditDesc": "What connected apps asked for. Only the request type and outcome are kept, never mail content.",
+    "auditDesc": "What connected apps and Pebble's own assistant asked for. Only the request type and outcome are kept, never mail content.",
     "auditEmpty": "Nothing yet.",
     "results_one": "{{count}} result",
     "results_other": "{{count}} results",
     "moreWaiting_one": "{{count}} more request is waiting.",
-    "moreWaiting_other": "{{count}} more requests are waiting."
+    "moreWaiting_other": "{{count}} more requests are waiting.",
+    "assistant": "Pebble assistant",
+    "toolAccounts": "List accounts",
+    "toolRecent": "Recent mail",
+    "toolMessage": "Read message",
+    "toolOpenItems": "Open items",
+    "toolFollowUp": "Follow up",
+    "toolProposalStatus": "Draft status"
   }
 }
