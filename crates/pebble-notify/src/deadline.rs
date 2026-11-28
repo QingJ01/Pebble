@@ -32,7 +32,9 @@ fn re(cell: &'static OnceLock<Regex>, pattern: &str) -> &'static Regex {
 }
 
 const EN_MONTHS: &str = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
-const EN_DAYS: &str = "mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:r(?:s(?:day)?)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?";
+// "Mon", "Sat" and "Sun" alone are too often names or words ("Sun Wei").
+const EN_DAYS: &str =
+    "monday|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:r(?:s(?:day)?)?)?|fri(?:day)?|saturday|sunday";
 
 fn en_pattern() -> &'static Regex {
     static CELL: OnceLock<Regex> = OnceLock::new();
@@ -191,6 +193,11 @@ fn en_time(caps: &Captures) -> Option<(u32, u32)> {
     }
     let h = group(caps, "h24")?.parse::<u32>().ok()?;
     let m = group(caps, "m24")?.parse::<u32>().ok()?;
+    if h == 24 && m == 0 {
+        return Some((23, 59));
+    }
+    // "by Friday 5:00": nobody means 5 a.m.
+    let h = if (1..=7).contains(&h) { h + 12 } else { h };
     (h < 24 && m < 60).then_some((h, m))
 }
 
@@ -245,6 +252,12 @@ fn zh_time(caps: &Captures) -> Option<(u32, u32)> {
         Some(m) => m.parse().ok()?,
         None => 0,
     };
+    // "今晚8点" is 20:00.
+    let part = part.or_else(|| (group(caps, "rel") == Some("今晚")).then_some("晚上"));
+    // 晚上12点 and 24点 are the end of the day, not noon or invalid.
+    if hour == 24 || (hour == 12 && matches!(part, Some("晚上"))) {
+        return Some((23, 59));
+    }
     let hour = match part {
         Some("下午" | "晚上" | "傍晚") if hour < 12 => hour + 12,
         Some("中午") if hour < 6 => hour + 12,
@@ -310,6 +323,9 @@ fn plausible(due: NaiveDateTime, received: NaiveDateTime) -> bool {
     due.date() >= received.date() && due - received <= Duration::days(MAX_AHEAD_DAYS)
 }
 
+/// After "截至…" / "…为止" these mean a status report, not a deadline.
+const AS_OF_FOLLOW: &str = "，,、已共我累计目总";
+
 /// After a bare 前 these make a word (前往, 前来, 前面…), not "before".
 const NOT_BEFORE: &str = "往来面台后天进去景列排夕";
 
@@ -356,7 +372,9 @@ pub fn find_deadline(subject: &str, body: &str, received: NaiveDateTime) -> Opti
     let mut found: Vec<Deadline> = Vec::new();
     for caps in en_pattern().captures_iter(&text) {
         let whole = caps.get(0).expect("match");
-        if en_refers_to_past(&text[whole.end()..]) {
+        let rest = &text[whole.end()..];
+        // "by today's standards" is no deadline.
+        if en_refers_to_past(rest) || rest.starts_with("'s") || rest.starts_with("’s") {
             continue;
         }
         if let Some((due, all_day)) = en_match(&caps, received) {
@@ -378,6 +396,13 @@ pub fn find_deadline(subject: &str, body: &str, received: NaiveDateTime) -> Opti
             continue;
         }
         if zh_refers_to_past(&text[..whole.start()], &caps) {
+            continue;
+        }
+        // "截至今天，已完成80%", "到今天为止我们收到…": a status line ("as of"),
+        // not something to do by then.
+        let as_of = group(&caps, "before").is_some_and(|b| b.contains("截至"))
+            || group(&caps, "after").is_some_and(|a| a.contains("为止") || a.contains("截至"));
+        if as_of && follow.is_some_and(|f| AS_OF_FOLLOW.contains(f.as_str())) {
             continue;
         }
         if let Some((due, all_day)) = zh_match(&caps, received) {
@@ -507,6 +532,32 @@ mod tests {
         assert_eq!(
             due("", "请在线上周三前完成培训").as_deref(),
             Some("2026-12-02 18:00")
+        );
+        assert_eq!(
+            due("", "今晚8点前提交").as_deref(),
+            Some("2026-12-02 20:00")
+        );
+        assert_eq!(due("", "今晚12点前").as_deref(), Some("2026-12-02 23:59"));
+        assert_eq!(due("", "明天24点前").as_deref(), Some("2026-12-03 23:59"));
+        assert_eq!(
+            due("", "by Friday 5:00").as_deref(),
+            Some("2026-12-04 17:00")
+        );
+        assert_eq!(
+            due("", "by Friday 09:30").as_deref(),
+            Some("2026-12-04 09:30")
+        );
+        assert_eq!(due("", "截至今天，已完成80%"), None);
+        assert_eq!(due("", "到今天为止我们收到了30份"), None);
+        assert_eq!(
+            due("", "报名截至12月10日").as_deref(),
+            Some("2026-12-10 18:00")
+        );
+        assert_eq!(due("", "Reviewed by Sun Wei"), None);
+        assert_eq!(due("", "even by today's standards"), None);
+        assert_eq!(
+            due("", "by Sunday please").as_deref(),
+            Some("2026-12-06 18:00")
         );
         assert_eq!(
             due("", "Please send by Monday last month's invoices").as_deref(),

@@ -16,6 +16,8 @@ export interface QuietHours {
 /** Mirrors `smart_notify::NotifyPrefsRecord`. */
 export interface NotifyPrefs {
   mode: NotifyMode;
+  /** On an account row: the account has its own mode (else it follows the default). */
+  ownMode?: boolean;
   quietHours: QuietHours | null;
   modelAssist: boolean;
   modelReviewsBulk: boolean;

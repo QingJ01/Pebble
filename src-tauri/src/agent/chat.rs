@@ -12,6 +12,8 @@ use super::llm::{ChatMessage, Llm};
 
 /// Model calls per question, tool rounds included.
 pub const MAX_STEPS: usize = 6;
+/// Tool calls run per model reply; extra ones are refused.
+pub const MAX_CALLS_PER_ROUND: usize = 8;
 /// Characters of one tool result sent back to the model.
 const TOOL_RESULT_CHARS: usize = 12_000;
 
@@ -144,9 +146,18 @@ pub async fn run_chat(
             return Ok(outcome(caps, reply.content.unwrap_or_default(), false));
         }
         messages.push(reply);
-        for call in calls {
+        for (index, call) in calls.into_iter().enumerate() {
             if cancel.load(Ordering::SeqCst) {
                 return Err(ChatError::Cancelled);
+            }
+            // Every call needs an answer; past the limit it's a refusal.
+            if index >= MAX_CALLS_PER_ROUND {
+                messages.push(ChatMessage::tool(
+                    call.id,
+                    json!({"error": format!("Only {MAX_CALLS_PER_ROUND} tool calls run per step")})
+                        .to_string(),
+                ));
+                continue;
             }
             progress(progress_for(&call.function.name, &call.function.arguments));
             let result = caps.call(&call.function.name, &call.function.arguments);

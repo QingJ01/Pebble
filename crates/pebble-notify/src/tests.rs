@@ -317,6 +317,23 @@ fn model_can_promote_or_demote_but_never_silence() {
         apply_model_verdict(&d, &unsure, &p, NOON, 0.6).tier,
         Tier::Digest
     );
+    // An unsure "digest" can't demote what the rules would notify.
+    let direct = decide(
+        &MessageFacts {
+            sender_known: true,
+            ..person()
+        },
+        &p,
+        NOON,
+    );
+    assert_eq!(direct.tier, Tier::Interrupt);
+    let unsure_no = ModelVerdict {
+        interrupt: false,
+        confidence: 0.2,
+        ..yes.clone()
+    };
+    let kept = apply_model_verdict(&direct, &unsure_no, &p, NOON, 0.6);
+    assert_eq!((kept.tier, kept.reason), (Tier::Interrupt, Reason::Direct));
 
     let no = ModelVerdict {
         interrupt: false,

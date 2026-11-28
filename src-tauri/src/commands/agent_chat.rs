@@ -161,6 +161,7 @@ pub async fn agent_chat_send(
     app: AppHandle,
     text: String,
     account_ids: Option<Vec<String>>,
+    from_account_id: Option<String>,
 ) -> CmdResult<String> {
     let question = text.trim().to_string();
     if question.is_empty() {
@@ -264,6 +265,7 @@ pub async fn agent_chat_send(
         let store = Arc::clone(&state.store);
         let search = Arc::clone(&state.search);
         let mut caps = Capabilities::new(&store, &search, scope);
+        caps.preferred_account = from_account_id;
         let system = system_prompt(&today(), &caps.scope_emails());
         let progress_app = app.clone();
         let progress_run = run_id.clone();

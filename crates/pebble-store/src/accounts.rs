@@ -409,6 +409,20 @@ impl Store {
                 "DELETE FROM pending_mail_ops WHERE account_id = ?1",
                 rusqlite::params![id],
             )?;
+            // The assistant's follow-ups and messages have no foreign key to
+            // the account; without this they would keep notifying.
+            tx.execute(
+                "DELETE FROM thread_watches WHERE account_id = ?1",
+                rusqlite::params![id],
+            )?;
+            tx.execute(
+                "DELETE FROM agent_events WHERE account_id = ?1",
+                rusqlite::params![id],
+            )?;
+            tx.execute(
+                "DELETE FROM notify_feedback WHERE account_id = ?1",
+                rusqlite::params![id],
+            )?;
             tx.execute("DELETE FROM accounts WHERE id = ?1", rusqlite::params![id])?;
             tx.commit()?;
             Ok(())

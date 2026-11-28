@@ -18,21 +18,22 @@ use crate::{ModelLabel, ModelVerdict};
 pub const BODY_CHARS: usize = 600;
 
 /// Mask one-time codes so they never reach a model: "code: 482913",
-/// "code for account 2 is 482913", "482913 is your code", "验证码 482913",
-/// "482913 是你的验证码". Apply before truncating, so a cut-off code can't
-/// slip through.
+/// "code for account 2 is 482913", "Your code:\n482913", "482913 is your
+/// code", "验证码482913", "482913是您的验证码". Boundaries are ASCII-only so a
+/// code right next to Chinese text still counts as a separate word. Apply
+/// before truncating, so a cut-off code can't slip through.
 pub fn redact_codes(text: &str) -> String {
     static AFTER: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     static BEFORE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     let after = AFTER.get_or_init(|| {
         regex::Regex::new(
-            r"(?i)(验证码|校验码|动态码|动态密码|\b(?:code|passcode|otp|pin|verification)\b)([^\n]{0,30}?)(\b[A-Za-z]{0,2}-?\d[\d \-]{2,8}\d\b)",
+            r"(?i)(验证码|驗證碼|校验码|校驗碼|动态码|動態碼|动态密码|認證碼|认证码|確認碼|确认码|認証コード|確認コード|(?-u:\b)(?:code|passcode|otp|pin|verification)(?-u:\b))([\s\S]{0,40}?)((?-u:\b)[A-Za-z]{0,2}-?\d[\d \-]{2,8}\d(?-u:\b))",
         )
         .expect("valid regex")
     });
     let before = BEFORE.get_or_init(|| {
         regex::Regex::new(
-            r"(?i)\b(\d{4,8})\b(\s*(?:is your|is the|是你的|是您的|为你的|为您的|为)[^\n]{0,30}?(?:code|passcode|otp|pin|验证码|校验码|动态码))",
+            r"(?i)(?-u:\b)(\d{4,8})(?-u:\b)(\s*(?:is your|is the|是你的|是您的|为你的|为您的|為您的|是|为|為)[^\n]{0,30}?(?:code|passcode|otp|pin|验证码|驗證碼|校验码|校驗碼|动态码|動態碼|认证码|認證碼|認証コード))",
         )
         .expect("valid regex")
     });
@@ -123,7 +124,7 @@ pub fn user_prompt(items: &[TriageItem], corrections: &[Correction]) -> String {
         for c in corrections {
             text.push_str(&format!(
                 "- from {} \"{}\": {}\n",
-                c.sender,
+                c.sender.split_whitespace().collect::<Vec<_>>().join(" "),
                 c.subject,
                 if c.important {
                     "should notify"
