@@ -13,6 +13,8 @@ import {
   type AgentResolution,
 } from "./api";
 import { useOpenMessage, useReplyToMessage } from "./useOpenMessage";
+import { useAgentModel } from "./model-api";
+import { useUIStore } from "@/stores/ui.store";
 
 // ---------------------------------------------------------------- helpers
 
@@ -520,25 +522,49 @@ function BlockView({ block, compact }: { block: Block; compact: boolean }) {
   }
 }
 
-/** Composer. Chat needs a configured model (#107, M3). */
+/** Bottom of the conversation: the composer once a model is set up,
+ *  otherwise a prompt to set one up. */
 function Composer() {
   const { t } = useTranslation();
+  const { data: model, isLoading } = useAgentModel();
+  const setActiveView = useUIStore((s) => s.setActiveView);
+  const setSettingsTab = useUIStore((s) => s.setSettingsTab);
+  if (isLoading) return <div className="agent-composer" />;
+  if (!model?.configured) {
+    return (
+      <div className="agent-composer">
+        <div className="agent-setup">
+          <div className="agent-setup__text">
+            <span className="agent-setup__title">{t("agent.setupTitle", "Ask Pebble about your mail")}</span>
+            <span className="agent-setup__desc">
+              {t("agent.setupDesc", "Set up an AI model to search, summarise and draft replies here. Local models keep your mail on this computer.")}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="agent-chip is-primary"
+            onClick={() => {
+              setSettingsTab("assistant");
+              setActiveView("settings");
+            }}
+          >
+            {t("agent.setupAction", "Set up a model")}
+          </button>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="agent-composer">
-      <div className="agent-composer__box is-disabled">
+      <div className="agent-composer__box">
         <textarea
           className="agent-composer__input"
           rows={1}
-          disabled
           placeholder={t("agent.composerPlaceholder", "Ask Pebble about your mail…")}
           aria-label={t("agent.composerPlaceholder", "Ask Pebble about your mail…")}
-          aria-describedby="agent-composer-hint"
         />
         <IconButton label={t("agent.send", "Send")} icon={<ArrowUp size={16} />} variant="secondary" disabled />
       </div>
-      <p id="agent-composer-hint" className="agent-composer__hint">
-        {t("agent.composerNeedsModel", "Chat becomes available once an AI model is set up. Pebble's reminders work without one.")}
-      </p>
     </div>
   );
 }

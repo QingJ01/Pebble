@@ -360,7 +360,8 @@
     "htmlMailDarkAuto": "简单邮件转暗色",
     "htmlMailDarkAutoDesc": "没有设计背景的邮件转为暗色，其余仍用浅色卡片",
     "htmlMailDarkForce": "全部转暗色",
-    "htmlMailDarkForceDesc": "所有 HTML 邮件反色显示，品牌色可能失真"
+    "htmlMailDarkForceDesc": "所有 HTML 邮件反色显示，品牌色可能失真",
+    "assistant": "AI 助手"
   },
   "cloudSync": {
     "title": "设置备份",
@@ -1164,7 +1165,6 @@
     "briefingQuiet": "今天邮箱里没有需要你处理的事。",
     "briefingTitle": "每日简报",
     "composeFollowUp": "{{n}} 天内没收到回复就提醒我",
-    "composerNeedsModel": "配置 AI 模型后就可以在这里直接问 Pebble。提醒功能不需要模型也能用。",
     "composerPlaceholder": "问问 Pebble 你的邮件…",
     "conversation": "和 Pebble 的对话",
     "deadlineMsg": "提醒一下：{{what}}（{{subject}}）。",
@@ -1218,6 +1218,9 @@
     "sentAgo": "{{time}}前发出",
     "sentTo": "发给 {{who}}",
     "settledAnswered": "你已经回复了",
+    "setupAction": "去配置模型",
+    "setupDesc": "配置一个 AI 模型后，就能在这里搜索邮件、总结线程、起草回复。本地模型可以让邮件不离开这台电脑。",
+    "setupTitle": "直接问 Pebble 你的邮件",
     "show": "展开",
     "sideLabel": "Pebble 正在帮你盯的事",
     "sinceDate": "自 {{date}}",
@@ -1242,5 +1245,28 @@
     "writeNudge": "写封跟进邮件",
     "yesterday": "昨天 {{time}}",
     "yourMail": "你发出的邮件"
+  },
+  "assistantSettings": {
+    "description": "Pebble 回答你的问题时使用的 AI 模型。",
+    "modelTitle": "模型",
+    "modelDesc": "支持任何兼容 OpenAI 接口的服务，云端或本机都可以（如 Ollama、LM Studio）。提醒和简报不需要模型；想直接问 Pebble 问题时才需要。",
+    "presets": "预设",
+    "imported": "已从翻译设置复制模型",
+    "nothingToImport": "翻译功能没有使用 AI 模型",
+    "importTranslate": "使用翻译的模型",
+    "endpoint": "接口地址",
+    "model": "模型名称",
+    "apiKey": "API 密钥",
+    "apiKeySaved": "已保存，留空则保持不变",
+    "apiKeyOptional": "本地模型不需要",
+    "save": "保存",
+    "saved": "助手模型已保存",
+    "test": "测试连接",
+    "remove": "移除",
+    "testOk": "连接成功 · {{ms}} 毫秒内回复",
+    "testFailed": "无法连接模型：{{message}}",
+    "privacyTitle": "模型能看到什么",
+    "privacyLocal": "这个模型在你的电脑上运行，邮件不会离开这台设备。",
+    "privacyCloud": "你向 Pebble 提问时，回答所需的邮件内容会发送给这个服务。你不提问就不会发送，每条回答都会标明用到了哪些邮件。"
   }
 }

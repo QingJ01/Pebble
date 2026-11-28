@@ -42,7 +42,9 @@ function wrap(ui: React.ReactNode) {
 
 describe("AgentView", () => {
   let events: AgentEvent[];
+  let model: { configured: boolean; endpoint: string; model: string; hasApiKey: boolean; local: boolean };
   beforeEach(() => {
+    model = { configured: false, endpoint: "", model: "", hasApiKey: false, local: false };
     events = [
       event({ id: "b", kind: "briefing", messageId: null, createdAt: NOW - 4000, readAt: NOW, payload: {
         importantUnread: 2, awaitingReply: [{ messageId: "m1", accountId: "a1", from: "Ann", subject: "Dinner?" }],
@@ -79,6 +81,8 @@ describe("AgentView", () => {
           return Promise.resolve([]);
         case "get_message":
           return Promise.resolve({ id: "m1", account_id: "a1", subject: "Dinner?" });
+        case "get_agent_model":
+          return Promise.resolve(model);
         default:
           return Promise.resolve(null);
       }
@@ -142,11 +146,22 @@ describe("AgentView", () => {
     await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("resolve_agent_event", { id: "o", action: "stop", days: null }));
   });
 
-  it("keeps the composer off until a model is set up", async () => {
+  it("asks to set up a model instead of showing a composer", async () => {
+    const setActiveView = vi.fn();
+    const setSettingsTab = vi.fn();
+    useUIStore.setState({ setActiveView, setSettingsTab });
     wrap(<AgentView />);
-    const input = await screen.findByRole("textbox", { name: "Ask Pebble about your mail…" });
-    expect((input as HTMLTextAreaElement).disabled).toBe(true);
-    expect(screen.getByText(/once an AI model is set up/)).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Set up a model" }));
+    expect(setSettingsTab).toHaveBeenCalledWith("assistant");
+    expect(setActiveView).toHaveBeenCalledWith("settings");
+    expect(screen.queryByRole("textbox", { name: "Ask Pebble about your mail…" })).toBeNull();
+  });
+
+  it("shows the composer once a model is set up", async () => {
+    model = { configured: true, endpoint: "http://localhost:11434", model: "qwen2.5", hasApiKey: false, local: true };
+    wrap(<AgentView />);
+    expect(await screen.findByRole("textbox", { name: "Ask Pebble about your mail…" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Set up a model" })).toBeNull();
   });
 
   it("lists follow-ups and routines in the side column", async () => {

@@ -362,7 +362,8 @@
     "htmlMailDarkAuto": "Darken simple mail",
     "htmlMailDarkAutoDesc": "Darken mail without designed backgrounds; keep the rest on a light card",
     "htmlMailDarkForce": "Always dark",
-    "htmlMailDarkForceDesc": "Invert every HTML mail; brand colors may shift"
+    "htmlMailDarkForceDesc": "Invert every HTML mail; brand colors may shift",
+    "assistant": "AI assistant"
   },
   "cloudSync": {
     "title": "Settings backup",
@@ -1190,7 +1191,6 @@
     "briefingQuiet": "Nothing in your mail needs you today.",
     "briefingTitle": "Daily briefing",
     "composeFollowUp": "Remind me if there's no reply in {{n}} days",
-    "composerNeedsModel": "Chat becomes available once an AI model is set up. Pebble's reminders work without one.",
     "composerPlaceholder": "Ask Pebble about your mail…",
     "conversation": "Conversation with Pebble",
     "deadlineMsg": "Heads-up: {{what}} ({{subject}}).",
@@ -1245,6 +1245,9 @@
     "sentAgo": "sent {{time}} ago",
     "sentTo": "To {{who}}",
     "settledAnswered": "You replied",
+    "setupAction": "Set up a model",
+    "setupDesc": "Set up an AI model to search, summarise and draft replies here. Local models keep your mail on this computer.",
+    "setupTitle": "Ask Pebble about your mail",
     "show": "Show",
     "sideLabel": "What Pebble is keeping track of",
     "sinceDate": "since {{date}}",
@@ -1269,5 +1272,28 @@
     "writeNudge": "Write a follow-up",
     "yesterday": "Yesterday {{time}}",
     "yourMail": "Your mail"
+  },
+  "assistantSettings": {
+    "description": "The AI model Pebble uses to answer your questions.",
+    "modelTitle": "Model",
+    "modelDesc": "Any OpenAI-compatible service works, in the cloud or on this computer (Ollama, LM Studio). Pebble's reminders and briefings work without a model; it's needed to ask Pebble questions.",
+    "presets": "Presets",
+    "imported": "Copied the model from Translation settings",
+    "nothingToImport": "Translation doesn't use an AI model",
+    "importTranslate": "Use the translation model",
+    "endpoint": "Endpoint",
+    "model": "Model name",
+    "apiKey": "API key",
+    "apiKeySaved": "Saved — leave empty to keep it",
+    "apiKeyOptional": "Not needed for local models",
+    "save": "Save",
+    "saved": "Assistant model saved",
+    "test": "Test connection",
+    "remove": "Remove",
+    "testOk": "Connected · answered in {{ms}} ms",
+    "testFailed": "Couldn't reach the model: {{message}}",
+    "privacyTitle": "What the model sees",
+    "privacyLocal": "This model runs on your computer: your mail stays on this device.",
+    "privacyCloud": "When you ask Pebble something, the mail it needs to answer is sent to this service. Nothing is sent until you ask, and each answer shows which messages were used."
   }
 }
