@@ -309,11 +309,34 @@ fn plausible(due: NaiveDateTime, received: NaiveDateTime) -> bool {
     due.date() >= received.date() && due - received <= Duration::days(MAX_AHEAD_DAYS)
 }
 
+/// "by Friday last week", "上周五之前": a date in the past, not a deadline.
+fn refers_to_past(text: &str, caps: &Captures) -> bool {
+    let whole = caps.get(0).expect("match");
+    let before: String = text[..whole.start()]
+        .chars()
+        .rev()
+        .take(3)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    let after = text[whole.end()..].trim_start().to_lowercase();
+    before.ends_with('上')
+        || before.ends_with("上个")
+        || before.ends_with("去年")
+        || after.starts_with("last week")
+        || after.starts_with("last month")
+        || after.starts_with("last year")
+}
+
 /// The earliest deadline mentioned in a message, if any.
 pub fn find_deadline(subject: &str, body: &str, received: NaiveDateTime) -> Option<Deadline> {
     let text = scan_text(subject, body);
     let mut found: Vec<Deadline> = Vec::new();
     for caps in en_pattern().captures_iter(&text) {
+        if refers_to_past(&text, &caps) {
+            continue;
+        }
         if let Some((due, all_day)) = en_match(&caps, received) {
             found.push(Deadline {
                 due,
@@ -323,6 +346,9 @@ pub fn find_deadline(subject: &str, body: &str, received: NaiveDateTime) -> Opti
         }
     }
     for caps in zh_pattern().captures_iter(&text) {
+        if refers_to_past(&text, &caps) {
+            continue;
+        }
         if let Some((due, all_day)) = zh_match(&caps, received) {
             found.push(Deadline {
                 due,
@@ -438,6 +464,8 @@ mod tests {
         assert_eq!(due("", "by Nov 3"), None, "a month ago");
         assert_eq!(due("", "by the way, thanks"), None);
         assert_eq!(due("", "截止2027-09-01"), None, "too far ahead");
+        assert_eq!(due("", "Thanks for sending it by Friday last week."), None);
+        assert_eq!(due("", "上周五之前已经交过了"), None);
         // Quoted history doesn't count.
         assert_eq!(
             due("Re: x", "Sounds good.\n\n> Please reply by Friday"),

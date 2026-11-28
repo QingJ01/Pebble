@@ -12,7 +12,6 @@ use pebble_core::{now_timestamp, Message};
 use pebble_search::{AdvancedSearchParams, TantivySearch};
 use pebble_store::agent::NewThreadWatch;
 use pebble_store::Store;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -84,21 +83,7 @@ fn truncate(text: &str, max: usize) -> String {
     out
 }
 
-/// Mask one-time codes so they never reach a model.
-pub fn redact_codes(text: &str) -> String {
-    static CODE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-    let pattern = CODE.get_or_init(|| {
-        Regex::new(
-            r"(?i)(验证码|校验码|动态码|code|passcode|otp|pin|verification)([^0-9\n]{0,24})(\d[\d\s-]{3,9}\d)",
-        )
-        .expect("valid regex")
-    });
-    pattern
-        .replace_all(text, |caps: &regex::Captures| {
-            format!("{}{}••••••", &caps[1], &caps[2])
-        })
-        .into_owned()
-}
+pub use pebble_notify::triage_model::redact_codes;
 
 fn clean_body(message: &Message) -> String {
     let text = if message.body_text.trim().is_empty() {

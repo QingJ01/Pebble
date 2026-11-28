@@ -14,6 +14,37 @@ use serde_json::Value;
 
 use crate::{ModelLabel, ModelVerdict};
 
+/// Characters of body sent per message.
+pub const BODY_CHARS: usize = 600;
+
+/// Mask one-time codes so they never reach a model.
+pub fn redact_codes(text: &str) -> String {
+    static CODE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let pattern = CODE.get_or_init(|| {
+        regex::Regex::new(
+            r"(?i)(验证码|校验码|动态码|code|passcode|otp|pin|verification)([^0-9\n]{0,24})(\d[\d\s-]{3,9}\d)",
+        )
+        .expect("valid regex")
+    });
+    pattern
+        .replace_all(text, |caps: &regex::Captures| {
+            format!("{}{}••••••", &caps[1], &caps[2])
+        })
+        .into_owned()
+}
+
+/// The part of a body sent to the model: quotes stripped, the first
+/// [`BODY_CHARS`] characters, codes masked.
+pub fn prepare_body(text: &str) -> String {
+    let stripped = crate::awaiting::strip_quoted(text);
+    let trimmed = stripped.trim();
+    let mut out: String = trimmed.chars().take(BODY_CHARS).collect();
+    if trimmed.chars().count() > BODY_CHARS {
+        out.push('…');
+    }
+    redact_codes(&out)
+}
+
 /// Longest "why" line kept, in characters.
 pub const WHY_CHARS: usize = 40;
 /// Below this the model's "interrupt" goes to the digest.

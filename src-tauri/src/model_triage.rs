@@ -25,7 +25,6 @@ use pebble_store::Store;
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{info, warn};
 
-use crate::agent::capabilities::redact_codes;
 use crate::agent::llm::{ChatMessage, Llm, OpenAiCompatible};
 use crate::commands::agent_model::{chat_completions_url, load_config};
 use crate::commands::indexing::{send_planned_notifications, NotifyItem};
@@ -39,8 +38,6 @@ use pebble_translate::TranslateService;
 const MODEL_TIMEOUT: Duration = Duration::from_secs(8);
 /// Model decisions per day; beyond it the rules decide until midnight.
 const DAILY_LIMIT: u32 = 300;
-/// Characters of body sent per message.
-const BODY_CHARS: usize = 600;
 /// Corrections included as examples.
 const EXAMPLES: u32 = 8;
 
@@ -67,12 +64,7 @@ fn body_for_model(message: &Message) -> String {
     } else {
         message.body_text.clone()
     };
-    let stripped = pebble_notify::awaiting::strip_quoted(&text);
-    let mut out: String = stripped.trim().chars().take(BODY_CHARS).collect();
-    if stripped.trim().chars().count() > BODY_CHARS {
-        out.push('…');
-    }
-    redact_codes(&out)
+    pebble_notify::triage_model::prepare_body(&text)
 }
 
 pub fn triage_items(candidates: &[ModelCandidate]) -> Vec<TriageItem> {
