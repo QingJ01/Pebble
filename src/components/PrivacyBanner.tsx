@@ -37,22 +37,22 @@ export default function PrivacyBanner({ rendered, onLoadImages, onTrustSender }:
         <Shield size={14} aria-hidden="true" className="privacy-banner__icon" />
         <span>{t("privacy.blocked", { items: parts.join(` ${t("privacy.and")} `) })}</span>
       </div>
-      {/* Hierarchy: one secondary (show images once) + ghost trust options, all 28px. */}
-      <div className="privacy-banner__actions">
-        {rendered.images_blocked > 0 && (
-          <>
-            <Button size="sm" variant="secondary" onClick={onLoadImages}>
-              {t("privacy.loadImages")}
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => onTrustSender("images")}>
-              {t("privacy.trustImages", "Trust images")}
-            </Button>
-          </>
-        )}
-        <Button size="sm" variant="ghost" onClick={() => onTrustSender("all")}>
-          {t("privacy.trustSender", "Trust sender")}
-        </Button>
-      </div>
+      {/* Hierarchy: one secondary (show images once) + ghost trust options, all 28px.
+          Trust only unblocks images; trackers stay blocked even for trusted senders,
+          so a tracker-only banner has no actions. */}
+      {rendered.images_blocked > 0 && (
+        <div className="privacy-banner__actions">
+          <Button size="sm" variant="secondary" onClick={onLoadImages}>
+            {t("privacy.loadImages")}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => onTrustSender("images")}>
+            {t("privacy.trustImages", "Trust images")}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => onTrustSender("all")}>
+            {t("privacy.trustSender", "Trust sender")}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
