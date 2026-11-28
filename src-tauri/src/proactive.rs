@@ -197,6 +197,13 @@ pub fn record_overdue_follow_ups(store: &Store, now: i64) -> usize {
     let overdue = store.overdue_thread_watches(now).unwrap_or_default();
     let mut recorded = 0;
     for watch in overdue {
+        // The answer may already be here (it came while the follow-up was
+        // paused, or was filed away): complete it instead of nudging.
+        if let Ok(Some(reply)) = store.stored_reply_for_watch(&watch) {
+            crate::smart_notify::complete_watch(store, &watch, &reply, now);
+            recorded += 1;
+            continue;
+        }
         let link = store.watch_link_message(&watch).ok().flatten();
         let sent = link
             .as_deref()
