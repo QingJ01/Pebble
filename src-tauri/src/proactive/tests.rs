@@ -305,6 +305,61 @@ fn overdue_follow_ups_are_recorded_once_and_ask_to_be_pushed() {
 }
 
 #[test]
+fn a_reply_already_in_the_store_completes_instead_of_nudging() {
+    let (store, _) = setup();
+    let watch = store
+        .create_thread_watch(
+            &NewThreadWatch {
+                account_id: "acct".into(),
+                thread_id: Some("t8".into()),
+                subject: "Lease".into(),
+                deadline: Some(NOW - 10),
+                ..Default::default()
+            },
+            NOW - 5 * 3600,
+        )
+        .unwrap();
+    // Older than the follow-up: not the answer. The user's own mail: not either.
+    put(
+        &store,
+        "landlord@homes.example",
+        "Lease",
+        "Earlier note",
+        10,
+        "t8",
+    );
+    put(
+        &store,
+        "me@pebble.example",
+        "Re: Lease",
+        "Any news?",
+        2,
+        "t8",
+    );
+    let reply = put(
+        &store,
+        "landlord@homes.example",
+        "Re: Lease",
+        "Signed.",
+        1,
+        "t8",
+    );
+    record_overdue_follow_ups(&store, NOW);
+    let done = store.get_thread_watch(&watch.id).unwrap().unwrap();
+    assert_eq!(
+        (done.status.as_str(), done.matched_message_id.as_deref()),
+        ("done", Some(reply.id.as_str()))
+    );
+    let kinds: Vec<String> = store
+        .list_agent_events(10, None)
+        .unwrap()
+        .into_iter()
+        .map(|e| e.kind)
+        .collect();
+    assert_eq!(kinds, vec!["watch_reply".to_string()]);
+}
+
+#[test]
 fn briefing_is_made_once_in_its_window_and_only_pushed_with_news() {
     let (store, account) = setup();
     let prefs = NotifyPrefsRecord::default();
